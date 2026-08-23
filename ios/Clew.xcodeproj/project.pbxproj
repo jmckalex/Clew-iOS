@@ -1,0 +1,291 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		C1E0000000000000000000A1 /* ClewApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F0000000000000000000A1 /* ClewApp.swift */; };
+		C1E0000000000000000000A2 /* WebHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F0000000000000000000A2 /* WebHost.swift */; };
+		C1E0000000000000000000A3 /* VaultStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F0000000000000000000A3 /* VaultStore.swift */; };
+		C1E0000000000000000000A4 /* FSBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F0000000000000000000A4 /* FSBridge.swift */; };
+		C1E0000000000000000000A5 /* SchemeHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F0000000000000000000A5 /* SchemeHandler.swift */; };
+		C1E0000000000000000000A6 /* HEICConverter.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F0000000000000000000A6 /* HEICConverter.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		C1F0000000000000000000A0 /* Clew.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Clew.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		C1F0000000000000000000A1 /* ClewApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClewApp.swift; sourceTree = "<group>"; };
+		C1F0000000000000000000A2 /* WebHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebHost.swift; sourceTree = "<group>"; };
+		C1F0000000000000000000A3 /* VaultStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultStore.swift; sourceTree = "<group>"; };
+		C1F0000000000000000000A4 /* FSBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FSBridge.swift; sourceTree = "<group>"; };
+		C1F0000000000000000000A5 /* SchemeHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SchemeHandler.swift; sourceTree = "<group>"; };
+		C1F0000000000000000000A6 /* HEICConverter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HEICConverter.swift; sourceTree = "<group>"; };
+		C1F0000000000000000000A7 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		C1B0000000000000000000B2 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		C1A0000000000000000000C0 = {
+			isa = PBXGroup;
+			children = (
+				C1A0000000000000000000C1 /* Clew */,
+				C1A0000000000000000000C2 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		C1A0000000000000000000C1 /* Clew */ = {
+			isa = PBXGroup;
+			children = (
+				C1A0000000000000000000C3 /* Sources */,
+				C1F0000000000000000000A7 /* Info.plist */,
+			);
+			path = Clew;
+			sourceTree = "<group>";
+		};
+		C1A0000000000000000000C2 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				C1F0000000000000000000A0 /* Clew.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		C1A0000000000000000000C3 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				C1F0000000000000000000A1 /* ClewApp.swift */,
+				C1F0000000000000000000A2 /* WebHost.swift */,
+				C1F0000000000000000000A3 /* VaultStore.swift */,
+				C1F0000000000000000000A4 /* FSBridge.swift */,
+				C1F0000000000000000000A5 /* SchemeHandler.swift */,
+				C1F0000000000000000000A6 /* HEICConverter.swift */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		C1D0000000000000000000D0 /* Clew */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C1C0000000000000000000E2 /* Build configuration list for PBXNativeTarget "Clew" */;
+			buildPhases = (
+				C1B0000000000000000000B1 /* Sources */,
+				C1B0000000000000000000B2 /* Frameworks */,
+				C1B0000000000000000000B3 /* Resources */,
+				C1B0000000000000000000B4 /* Stage WebRoot and SeedVault */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Clew;
+			productName = Clew;
+			productReference = C1F0000000000000000000A0 /* Clew.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		C1D0000000000000000000D1 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					C1D0000000000000000000D0 = {
+						CreatedOnToolsVersion = 16.0;
+					};
+				};
+			};
+			buildConfigurationList = C1C0000000000000000000E0 /* Build configuration list for PBXProject "Clew" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = C1A0000000000000000000C0;
+			productRefGroup = C1A0000000000000000000C2 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				C1D0000000000000000000D0 /* Clew */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		C1B0000000000000000000B3 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		C1B0000000000000000000B4 /* Stage WebRoot and SeedVault */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Stage WebRoot and SeedVault";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -e\nAPP=\"$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH\"\nif [ ! -d \"$SRCROOT/../dist/webroot\" ]; then\n  echo \"error: dist/webroot missing — run 'npm run build' in the repo root first\" >&2\n  exit 1\nfi\nrsync -a --delete \"$SRCROOT/../dist/webroot/\" \"$APP/WebRoot/\"\nrsync -a --delete --exclude .clew --exclude .DS_Store \"$SRCROOT/../seed-vault/\" \"$APP/SeedVault/\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		C1B0000000000000000000B1 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C1E0000000000000000000A1 /* ClewApp.swift in Sources */,
+				C1E0000000000000000000A2 /* WebHost.swift in Sources */,
+				C1E0000000000000000000A3 /* VaultStore.swift in Sources */,
+				C1E0000000000000000000A4 /* FSBridge.swift in Sources */,
+				C1E0000000000000000000A5 /* SchemeHandler.swift in Sources */,
+				C1E0000000000000000000A6 /* HEICConverter.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		C1C0000000000000000000F0 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		C1C0000000000000000000F1 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		C1C0000000000000000000F2 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Clew/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = org.jmckalex.clew.ios;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		C1C0000000000000000000F3 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Clew/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = org.jmckalex.clew.ios;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		C1C0000000000000000000E0 /* Build configuration list for PBXProject "Clew" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C1C0000000000000000000F0 /* Debug */,
+				C1C0000000000000000000F1 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		C1C0000000000000000000E2 /* Build configuration list for PBXNativeTarget "Clew" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C1C0000000000000000000F2 /* Debug */,
+				C1C0000000000000000000F3 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = C1D0000000000000000000D1 /* Project object */;
+}

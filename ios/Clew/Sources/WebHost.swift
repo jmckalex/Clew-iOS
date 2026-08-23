@@ -1,0 +1,146 @@
+// The WKWebView owner: configuration, delegates, and lifecycle entry
+// points. One web view = the whole app (single vault session, id "s1" —
+// the session-id URL shape is kept so preview URLs match the desktop
+// protocol exactly).
+import SwiftUI
+import WebKit
+
+final class WebHost: NSObject, ObservableObject {
+	let vaults = VaultStore()
+	private(set) var webView: WKWebView!
+	private var schemeHandler: SchemeHandler!
+
+	override init() {
+		super.init()
+
+		let config = WKWebViewConfiguration()
+		schemeHandler = SchemeHandler(vaults: vaults)
+		config.setURLSchemeHandler(schemeHandler, forURLScheme: "clew-app")
+		config.setURLSchemeHandler(schemeHandler, forURLScheme: "clew-preview")
+
+		let bridge = FSBridge(vaults: vaults)
+		config.userContentController.addScriptMessageHandler(bridge, contentWorld: .page, name: "clew")
+
+		#if DEBUG
+		// JS console/error forwarding into the system log (all frames, so
+		// preview iframes report too):  log stream --predicate 'eventMessage
+		// CONTAINS "CLEWJS"'.
+		config.userContentController.add(ConsoleSink(), name: "clewlog")
+		let consoleForwarder = """
+		(function () {
+			const post = (level, args) => {
+				try {
+					window.webkit.messageHandlers.clewlog.postMessage(level + ' [' + location.pathname + '] ' + args.map((a) => {
+						try { return typeof a === 'string' ? a : (a && a.stack) ? a.stack : JSON.stringify(a); }
+						catch { return String(a); }
+					}).join(' '));
+				} catch {}
+			};
+			for (const level of ['error', 'warn']) {
+				const orig = console[level];
+				console[level] = (...args) => { post(level, args); orig.apply(console, args); };
+			}
+			window.addEventListener('error', (e) => post('uncaught', [e.message, (e.filename || '') + ':' + e.lineno]));
+			window.addEventListener('unhandledrejection', (e) =>
+				post('unhandledrejection', [String((e.reason && e.reason.message) || e.reason), String((e.reason && e.reason.stack) || '')]));
+		})();
+		"""
+		config.userContentController.addUserScript(WKUserScript(
+			source: consoleForwarder, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+		#endif
+
+		config.allowsInlineMediaPlayback = true
+		config.mediaTypesRequiringUserActionForPlayback = []
+		config.preferences.isElementFullscreenEnabled = true
+
+		let webView = WKWebView(frame: .zero, configuration: config)
+		webView.isInspectable = true
+		webView.scrollView.isScrollEnabled = false // the app manages its own scrolling
+		webView.scrollView.contentInsetAdjustmentBehavior = .never
+		webView.uiDelegate = self
+		webView.navigationDelegate = self
+		webView.isOpaque = false
+		webView.backgroundColor = UIColor(red: 0.08, green: 0.09, blue: 0.11, alpha: 1)
+		self.webView = webView
+		schemeHandler.webView = webView
+
+		webView.load(URLRequest(url: URL(string: "clew-app://app/index.html")!))
+	}
+
+	func flushEditors() {
+		webView.evaluateJavaScript(
+			"window.dispatchEvent(new Event('blur')); window.__clewNative?.flush?.();",
+			completionHandler: nil)
+	}
+
+	func rescanVault() {
+		vaults.rescan { [weak self] diff in
+			guard let diff, let data = try? JSONSerialization.data(withJSONObject: diff),
+				let json = String(data: data, encoding: .utf8) else { return }
+			self?.webView.evaluateJavaScript(
+				"window.__clewNative?.externalDiff?.(\(json));",
+				completionHandler: nil)
+		}
+	}
+}
+
+// MARK: - Navigation and popup guards (Electron's setWindowOpenHandler /
+// will-navigate equivalents; the unsandboxed preview iframe depends on them)
+
+#if DEBUG
+/// Receives the console forwarder's messages; NSLog makes them visible via
+/// `xcrun simctl spawn booted log stream`.
+final class ConsoleSink: NSObject, WKScriptMessageHandler {
+	func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+		NSLog("CLEWJS %@", String(describing: message.body))
+	}
+}
+#endif
+
+extension WebHost: WKUIDelegate, WKNavigationDelegate {
+	func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+		#if DEBUG
+		// Smoke hook (the iOS cousin of desktop's CLEW_SMOKE): launch with
+		//   xcrun simctl launch booted org.jmckalex.clew.ios -ClewSmokeJS '<js>'
+		// and the script runs in the app page once it has settled.
+		if let smoke = UserDefaults.standard.string(forKey: "ClewSmokeJS") {
+			DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+				webView.callAsyncJavaScript(smoke, arguments: [:], in: nil, in: .page) { result in
+					if case .failure(let error) = result { NSLog("CLEWJS smoke error: %@", String(describing: error)) }
+					if case .success(let value) = result { NSLog("CLEWJS smoke ok: %@", String(describing: value)) }
+				}
+			}
+		}
+		#endif
+	}
+
+	func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,
+		for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
+		if let url = navigationAction.request.url, ["http", "https", "mailto"].contains(url.scheme ?? "") {
+			UIApplication.shared.open(url)
+		}
+		return nil // all popups denied
+	}
+
+	func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
+		decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+		guard let url = navigationAction.request.url else { return decisionHandler(.cancel) }
+		let scheme = url.scheme ?? ""
+		if navigationAction.targetFrame?.isMainFrame ?? true {
+			// The app frame is pinned to its own origin.
+			decisionHandler(scheme == "clew-app" ? .allow : .cancel)
+			if ["http", "https", "mailto"].contains(scheme) { UIApplication.shared.open(url) }
+			return
+		}
+		// Iframes: previews and canvas web nodes may load clew-preview and
+		// (sandboxed canvas web nodes) http(s).
+		decisionHandler(["clew-preview", "clew-app", "http", "https", "about", "blob"].contains(scheme) ? .allow : .cancel)
+	}
+}
+
+struct WebContainerView: UIViewRepresentable {
+	let host: WebHost
+
+	func makeUIView(context: Context) -> WKWebView { host.webView }
+	func updateUIView(_ uiView: WKWebView, context: Context) {}
+}
