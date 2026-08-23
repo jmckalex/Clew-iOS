@@ -48,3 +48,25 @@ copyDir(path.join(upstream, 'demo-vault'), path.join(root, 'seed-vault'),
 	(src) => !src.includes(`${path.sep}.clew`));
 
 console.log('Synced vendor/jmarkdown, vendor/clew, and seed-vault from', upstream);
+
+// The iOS app icon derives from upstream's macOS icon (a squircle floating
+// on transparency): flatten over the squircle's own gradient and crop
+// full-bleed — iOS masks its own corners and rejects icons with alpha.
+// Regenerated only when ImageMagick is available; the committed asset is
+// the fallback.
+import { execFileSync } from 'node:child_process';
+const upstreamIcon = path.join(upstream, 'build-resources', 'icon.png');
+const iosIcon = path.join(root, 'ios', 'Clew', 'Assets.xcassets', 'AppIcon.appiconset', 'AppIcon.png');
+if (fs.existsSync(upstreamIcon) && fs.existsSync(path.dirname(iosIcon))) {
+	try {
+		execFileSync('magick', [
+			'-size', '2048x2048', 'gradient:#2b2440-#171321',
+			upstreamIcon, '-composite',
+			'-gravity', 'center', '-crop', '1500x1500+0+0', '+repage',
+			'-resize', '1024x1024', '-alpha', 'off', iosIcon,
+		]);
+		console.log('Regenerated the iOS app icon from', upstreamIcon);
+	} catch {
+		console.log('ImageMagick not available — keeping the committed AppIcon.png.');
+	}
+}
