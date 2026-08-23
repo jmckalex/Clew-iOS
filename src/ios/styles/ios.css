@@ -23,16 +23,21 @@ body.is-ios .mention-row .mention-link-button {
 	opacity: 1;
 }
 
-/* Pointer drags must beat native scroll on their surfaces. */
-body.is-ios .tab-strip .tab {
-	touch-action: none;
-}
+/* Pointer drags must beat native scroll on their surfaces (touch drags
+   are gated off in JS for the explorer and tab bar, so those scroll). */
 body.is-ios .graph-host,
 body.is-ios .graph-host canvas {
 	touch-action: none;
 }
 body.is-ios .tree-item {
 	touch-action: pan-y;
+}
+/* Slow touch scrolls must never start text selection in chrome surfaces. */
+body.is-ios .file-tree,
+body.is-ios .tab-strip,
+body.is-ios .tool-tabs {
+	-webkit-user-select: none;
+	user-select: none;
 }
 
 /* Split/sidebar resize handles are 1–3px on desktop. */

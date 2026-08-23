@@ -103,6 +103,26 @@ const rendererPatches = {
 				"if (!matchMedia('(pointer: coarse)').matches) entry.view.focus();"),
 			loader: 'js',
 		}));
+		// Touch drags must scroll, not drag: the explorer's file-move drag and
+		// the tab-bar drag arm on ANY pointerdown, so a slow touch drag fed
+		// them instead of scrolling (the tree lit up as a drop target — the
+		// only working scroll was a flick fast enough for WebKit's scroll
+		// recognizer to pointercancel the row first). Gate both drags to
+		// non-touch pointers; touch keeps tap-to-open, long-press menus, and
+		// native scrolling, and moves stay available via drag with a
+		// trackpad/mouse or on desktop.
+		builder.onLoad({ filter: /vendor\/clew\/renderer\/components\/panels\/clew-file-explorer\.js$/ }, (args) => ({
+			contents: fs.readFileSync(args.path, 'utf8').replace(
+				"row.addEventListener('pointerdown', (e) => this.#maybeStartDrag(e, entry, row));",
+				"row.addEventListener('pointerdown', (e) => { if (e.pointerType !== 'touch') this.#maybeStartDrag(e, entry, row); });"),
+			loader: 'js',
+		}));
+		builder.onLoad({ filter: /vendor\/clew\/renderer\/workspace\/tab-drag\.js$/ }, (args) => ({
+			contents: fs.readFileSync(args.path, 'utf8').replace(
+				'if (e.button !== 0) return;',
+				"if (e.button !== 0 || e.pointerType === 'touch') return;"),
+			loader: 'js',
+		}));
 		// Canvas web nodes use Electron's <webview> (an unknown element in
 		// WKWebView — the spinner never clears). Swap in the sandboxed
 		// <iframe> shape the preview client already uses for canvas embeds,
