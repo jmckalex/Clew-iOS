@@ -57,8 +57,17 @@ async function init({ files, env, cwd }) {
 	self.postMessage({ type: 'ready' });
 }
 
-async function build({ file, options, files }) {
+async function build({ file, options, files, replaceVault }) {
 	try {
+		if (replaceVault) {
+			// The build carries the authoritative current vault: drop the
+			// warmup snapshot's vault entries first so deletions since this
+			// worker spawned don't linger in wikilink/query resolution.
+			const root = process.env.CLEW_VAULT_ROOT ?? '/vault';
+			for (const abs of [...vfs.files.keys()]) {
+				if (abs.startsWith(root + '/')) vfs.files.delete(abs);
+			}
+		}
 		if (files) vfs.install(files);
 		const { processFile } = await enginePromise;
 		const { outFile } = await processFile(file, options);

@@ -183,7 +183,18 @@ export class RenderService {
 					if (msg?.type === 'done' || msg?.type === 'error') resolve(msg);
 				};
 				worker.onerror = (err) => resolve({ type: 'error', message: String(err.message ?? err) });
-				worker.postMessage({ type: 'build', file, options, ...(extraFiles ? { files: extraFiles } : {}) });
+				// The standby's init snapshot is only for engine warmup — it is
+				// as old as the standby itself. Every build re-sends the CURRENT
+				// vault (replaceVault drops entries deleted since spawn), so a
+				// note edited after the standby spawned renders fresh, and
+				// query fences scan up-to-date content.
+				worker.postMessage({
+					type: 'build',
+					file,
+					options,
+					files: { ...this.#snapshot(), ...(extraFiles ?? {}) },
+					replaceVault: true,
+				});
 			});
 		} finally {
 			worker.terminate(); // one-shot, like the desktop fork

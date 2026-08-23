@@ -65,11 +65,14 @@ const fakeBridge = {
 };
 
 // A worker that answers ready + fake html (real rendering is M1-tested).
+// Build messages are recorded so tests can assert on their payloads.
+const workerBuilds = [];
 const fakeWorkerFactory = () => {
 	const worker = {
 		onmessage: null,
 		onerror: null,
 		postMessage(msg) {
+			if (msg.type === 'build') workerBuilds.push(msg);
 			queueMicrotask(() => {
 				if (msg.type === 'init') worker.onmessage?.({ data: { type: 'ready' } });
 				if (msg.type === 'build') worker.onmessage?.({ data: { type: 'done', output: msg.options.output, html: '<html>fake</html>' } });
@@ -196,4 +199,18 @@ test('rendered html comes back through the render service', async () => {
 	const html = await native.renderNote('Welcome.md');
 	assert.equal(html, '<html>fake</html>');
 	void services;
+});
+
+test('builds carry the CURRENT vault, not the standby snapshot', async () => {
+	// Regression: standbys spawn with a warmup snapshot that predates recent
+	// edits; the build message itself must resend fresh content (type in the
+	// editor → toggle reading → the new text must render).
+	await native.renderNote('Welcome.md'); // ensure at least one standby cycle
+	await clew.invoke(CH.NOTE_WRITE, { path: 'Welcome.md', content: '# Freshness marker\n' });
+	workerBuilds.length = 0;
+	await native.renderNote('Welcome.md');
+	const build = workerBuilds.find((b) => b.file.endsWith('Welcome.md'));
+	assert.ok(build, 'a build ran for the edited note');
+	assert.equal(build.replaceVault, true);
+	assert.match(String(build.files['/vault/Welcome.md']?.data ?? ''), /Freshness marker/);
 });
