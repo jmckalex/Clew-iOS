@@ -103,6 +103,27 @@ const rendererPatches = {
 				"if (!matchMedia('(pointer: coarse)').matches) entry.view.focus();"),
 			loader: 'js',
 		}));
+		// WebKit + custom schemes: when the workspace reconciler moves a
+		// freshly inserted preview iframe, the reinserted frame's window
+		// proxy goes stale — its document loads and runs, but postMessage is
+		// silently dropped in BOTH directions, so the host↔preview bridge
+		// (re-renders, theme, scroll sync, checkboxes) never comes up. If the
+		// client hasn't said 'ready' shortly after render(), rebuild the
+		// iframe once the DOM has settled — a never-moved frame works.
+		builder.onLoad({ filter: /vendor\/clew\/renderer\/components\/workspace\/clew-preview-view\.js$/ }, (args) => ({
+			contents: fs.readFileSync(args.path, 'utf8')
+				.replace(
+					'ipc.invoke(CH.RENDER_SUBSCRIBE, { path: this.path }).catch(() => {});',
+					'if (!this.__iosSubscribed) { this.__iosSubscribed = true; ipc.invoke(CH.RENDER_SUBSCRIBE, { path: this.path }).catch(() => {}); }')
+				.replace(
+					'this.replaceChildren(this.#iframe);',
+					'this.replaceChildren(this.#iframe);\n'
+					+ '\t\tclearTimeout(this.__iosReadyTimer);\n'
+					+ '\t\tthis.__iosReadyTimer = setTimeout(() => {\n'
+					+ '\t\t\tif (!this.#clientReady && this.isConnected) this.render();\n'
+					+ '\t\t}, 2500);'),
+			loader: 'js',
+		}));
 	},
 };
 
@@ -126,6 +147,22 @@ export async function buildAppBundle({ minify = true } = {}) {
 	});
 }
 
+// WebKit can move/restore a preview iframe during workspace reconciliation
+// without re-running its scripts — the client's one-shot 'ready' is lost and
+// the host↔preview bridge never opens. Re-announce on pageshow (fires on
+// WebKit document restores) so the handshake always completes.
+const previewClientPatches = {
+	name: 'clew-preview-client-patches',
+	setup(builder) {
+		builder.onLoad({ filter: /vendor\/clew\/preview-client\/client\.js$/ }, (args) => ({
+			contents: fs.readFileSync(args.path, 'utf8').replace(
+				"post({ type: 'ready' });",
+				"post({ type: 'ready' });\nwindow.addEventListener('pageshow', () => post({ type: 'ready' }));"),
+			loader: 'js',
+		}));
+	},
+};
+
 export async function buildPreviewClients({ minify = true } = {}) {
 	// Classic <script> injections into rendered-note documents — same three
 	// bundles the desktop build produces.
@@ -137,6 +174,7 @@ export async function buildPreviewClients({ minify = true } = {}) {
 			format: 'iife',
 			target: 'safari16',
 			outfile: path.join(webroot, 'preview-client', name),
+			plugins: [previewClientPatches],
 			minify,
 			logLevel: 'warning',
 			metafile: true,

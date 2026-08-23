@@ -1,8 +1,10 @@
 // iOS touch adaptations layered over the unmodified renderer. Kept small
 // and additive: anything structural belongs upstream behind a capability
 // check, not here.
+import { EditorView } from '@codemirror/view';
 import { runCommand } from '../../vendor/clew/renderer/commands/registry.js';
 import { workspaceStore } from '../../vendor/clew/renderer/state/workspace-store.js';
+import * as actions from '../../vendor/clew/renderer/commands/actions.js';
 
 // ---- long-press → contextmenu ---------------------------------------------
 // Five surfaces put rename/delete/pin/canvas-styling exclusively behind
@@ -42,6 +44,62 @@ document.addEventListener('click', (e) => {
 		e.stopPropagation();
 		e.preventDefault();
 	}
+}, true);
+
+// ---- wikilinks in the editor on touch -------------------------------------
+// Desktop follows [[links]] with Cmd-click. Touch: the first tap places the
+// cursor (normal editing); a second tap on the same link — or a long-press
+// (which lands here as the synthesized contextmenu) — follows it.
+const LINK_RE = /(!?)\[\[([^\[\]|#\n]*)(?:#([^\[\]|\n]+))?(?:\|([^\[\]\n]+))?\]\]/g;
+
+function editorLinkAt(clientX, clientY, target) {
+	const content = target.closest?.('.cm-content');
+	if (!content) return null;
+	const view = EditorView.findFromDOM(content);
+	if (!view) return null;
+	const pos = view.posAtCoords({ x: clientX, y: clientY });
+	if (pos === null) return null;
+	const line = view.state.doc.lineAt(pos);
+	const column = pos - line.from;
+	LINK_RE.lastIndex = 0;
+	let match;
+	while ((match = LINK_RE.exec(line.text)) !== null) {
+		if (column >= match.index && column <= match.index + match[0].length) {
+			return {
+				view,
+				from: line.from + match.index,
+				to: line.from + match.index + match[0].length,
+				target: match[2].trim() + (match[3] ? `#${match[3].trim()}` : ''),
+			};
+		}
+	}
+	return null;
+}
+
+let preTapHead = null;
+let lastPointerType = 'mouse';
+document.addEventListener('pointerdown', (e) => {
+	lastPointerType = e.pointerType;
+	const content = e.target.closest?.('.cm-content');
+	preTapHead = content ? EditorView.findFromDOM(content)?.state.selection.main.head ?? null : null;
+}, true);
+
+document.addEventListener('click', (e) => {
+	if (lastPointerType !== 'touch') return;
+	const link = editorLinkAt(e.clientX, e.clientY, e.target);
+	if (!link || !link.target) return;
+	if (preTapHead === null || preTapHead < link.from || preTapHead > link.to) return;
+	e.preventDefault();
+	e.stopPropagation();
+	actions.openWikilink(link.target, {});
+});
+
+document.addEventListener('contextmenu', (e) => {
+	const link = editorLinkAt(e.clientX, e.clientY, e.target);
+	if (!link || !link.target) return;
+	e.preventDefault();
+	e.stopPropagation();
+	actions.openWikilink(link.target, {});
 }, true);
 
 // ---- device classes -------------------------------------------------------
