@@ -102,6 +102,27 @@ document.addEventListener('contextmenu', (e) => {
 	actions.openWikilink(link.target, {});
 }, true);
 
+// ---- Pencil-aware canvas input --------------------------------------------
+// Once an Apple Pencil has been used, fingers stop inking: while an ink-ish
+// tool is active, a single finger PANS the canvas instead of drawing, and a
+// resting palm can neither draw nor long-press its way into the context
+// menu (which was silently selecting nodes under the writing hand). The
+// select/pan tools keep full finger behavior — switching tools is the
+// escape hatch — and the Pencil always applies the active tool.
+let pencilSeen = false;
+document.addEventListener('pointerdown', (e) => {
+	if (e.pointerType === 'pen') pencilSeen = true;
+}, true);
+
+const INKY_TOOLS = new Set(['draw', 'erase', 'rectangle', 'ellipse', 'diamond', 'arrow', 'line']);
+
+const fingerShouldPan = (viewport) => {
+	if (!pencilSeen) return false;
+	const view = viewport.closest('clew-canvas-view');
+	const active = view?.querySelector('.canvas-toolbar .canvas-tool.is-active:not(.canvas-width)');
+	return INKY_TOOLS.has((active?.title ?? '').split(' (')[0].toLowerCase());
+};
+
 // ---- canvas touch navigation ----------------------------------------------
 // Desktop pans/zooms the canvas with the wheel (plain = pan, ctrl = zoom at
 // cursor). Touch: one finger keeps its tool meaning (Pencil draws, finger
@@ -128,16 +149,27 @@ const syntheticWheel = (viewport, { dx = 0, dy = 0, zoom = null, cx, cy }) => {
 	}));
 };
 
+let singlePan = null; // {viewport, pointerId, x, y} — finger-pan while inking
+
 document.addEventListener('pointerdown', (e) => {
 	if (e.pointerType !== 'touch') return;
 	const viewport = viewportOf(e.target);
 	if (!viewport) return;
 	canvasTouches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+	if (canvasTouches.size === 1 && fingerShouldPan(viewport)) {
+		// Swallow before the canvas can start a stroke; moves become pans.
+		singlePan = { viewport, pointerId: e.pointerId, x: e.clientX, y: e.clientY };
+		cancelPress();
+		e.stopPropagation();
+		e.preventDefault();
+		return;
+	}
 	if (canvasTouches.size === 2) {
 		// Take over: cancel the first finger's tool interaction, swallow the
 		// second finger before the canvas sees it.
 		gestureViewport = viewport;
 		gestureLast = null;
+		singlePan = null;
 		cancelPress();
 		e.stopPropagation();
 		e.preventDefault();
@@ -152,6 +184,17 @@ document.addEventListener('pointerdown', (e) => {
 }, true);
 
 document.addEventListener('pointermove', (e) => {
+	if (singlePan && e.pointerId === singlePan.pointerId && !gestureViewport) {
+		canvasTouches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+		e.stopPropagation();
+		e.preventDefault();
+		const dx = singlePan.x - e.clientX;
+		const dy = singlePan.y - e.clientY;
+		if (dx || dy) syntheticWheel(singlePan.viewport, { dx, dy, cx: e.clientX, cy: e.clientY });
+		singlePan.x = e.clientX;
+		singlePan.y = e.clientY;
+		return;
+	}
 	if (!gestureViewport || !canvasTouches.has(e.pointerId)) return;
 	canvasTouches.set(e.pointerId, { x: e.clientX, y: e.clientY });
 	e.stopPropagation();
@@ -173,6 +216,13 @@ document.addEventListener('pointermove', (e) => {
 
 const endCanvasTouch = (e) => {
 	if (e.pointerType !== 'touch') return;
+	if (singlePan && e.pointerId === singlePan.pointerId) {
+		singlePan = null;
+		canvasTouches.delete(e.pointerId);
+		e.stopPropagation();
+		e.preventDefault();
+		return;
+	}
 	const wasGesture = gestureViewport && canvasTouches.has(e.pointerId);
 	canvasTouches.delete(e.pointerId);
 	if (wasGesture) {
