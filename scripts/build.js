@@ -90,6 +90,22 @@ export async function buildEngineWorker({ minify = true } = {}) {
 
 const webroot = path.join(dist, 'webroot');
 
+// Renderer patches for touch devices — build-time transforms of vendored
+// files (vendor stays untouched on disk; upstream candidates).
+const rendererPatches = {
+	name: 'clew-renderer-patches',
+	setup(builder) {
+		// Auto-focusing the editor pops the on-screen keyboard on every note
+		// open; on coarse-pointer devices a tap focuses deliberately instead.
+		builder.onLoad({ filter: /vendor\/clew\/renderer\/components\/workspace\/clew-editor-view\.js$/ }, (args) => ({
+			contents: fs.readFileSync(args.path, 'utf8').replace(
+				'entry.view.focus();',
+				"if (!matchMedia('(pointer: coarse)').matches) entry.view.focus();"),
+			loader: 'js',
+		}));
+	},
+};
+
 export async function buildAppBundle({ minify = true } = {}) {
 	// The renderer runs unmodified; the entry evaluates the shim first. The
 	// vendored main-process services (indexer, search, kv-store, …) resolve
@@ -102,6 +118,7 @@ export async function buildAppBundle({ minify = true } = {}) {
 		target: 'safari16',
 		outfile: path.join(webroot, 'bundle.js'),
 		alias: builtinAlias,
+		plugins: [rendererPatches],
 		minify,
 		sourcemap: false,
 		logLevel: 'warning',

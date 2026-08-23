@@ -8,7 +8,7 @@ body.is-ios .titlebar {
 	-webkit-app-region: initial;
 }
 
-body.is-ios .statusbar {
+body.is-ios clew-status-bar {
 	padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
@@ -36,10 +36,54 @@ body.is-ios .tree-item {
 }
 
 /* Split/sidebar resize handles are 1–3px on desktop. */
-body.is-ios .split-handle,
-body.is-ios .sidebar-handle {
-	min-width: 12px;
-	min-height: 12px;
+body.is-ios .sidebar-resizer {
+	width: 12px;
+	margin: 0 -4px;
+	z-index: 10;
+}
+body.is-ios .dir-row > .clew-resizer {
+	width: 9px;
+	padding: 0 4px;
+}
+body.is-ios .dir-col > .clew-resizer {
+	height: 9px;
+	padding: 4px 0;
+}
+
+/* ---- toolbar ---- */
+
+body.is-ios clew-app {
+	height: calc(100% - 44px - env(safe-area-inset-bottom, 0px));
+}
+
+.ios-toolbar {
+	position: fixed;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	height: calc(44px + env(safe-area-inset-bottom, 0px));
+	padding-bottom: env(safe-area-inset-bottom, 0px);
+	display: flex;
+	align-items: stretch;
+	justify-content: space-around;
+	background: var(--clew-bg-secondary, #1c1e24);
+	border-top: 1px solid var(--clew-border, #333);
+	z-index: 60;
+}
+
+.ios-toolbar-button {
+	flex: 1;
+	max-width: 88px;
+	border: none;
+	background: none;
+	color: var(--clew-text-muted, #aaa);
+	font-size: 20px;
+	-webkit-user-select: none;
+	user-select: none;
+}
+
+.ios-toolbar-button:active {
+	color: var(--clew-accent, #7c7cf0);
 }
 
 /* Compact (phone) layout: sidebars overlay instead of squeezing the
