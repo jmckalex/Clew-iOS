@@ -126,15 +126,40 @@ Ranked; items 1–5 are in scope for the first working build, 6–10 tracked:
 
 ## Milestones
 
-- **M1 — engine renders under Node**: worker bundle renders demo-vault
-  notes via the vfs in `node --test`. ✅ proves the riskiest layer.
-- **M2 — services layer green under Node**: MirrorFS + channel registry
-  pass ported upstream tests (note-metadata, frontmatter, search, indexer).
-- **M3 — app boots in simulator**: WebRoot served over `clew-app://`,
-  vault opens, tree renders, editor edits, preview renders (M1 worker).
-- **M4 — touch usability pass**: items 1–5 above; iPhone + iPad layouts.
-- **M5 — QA against demo/study vaults**: wikilinks, embeds, queries,
-  kanban (tap), tasks, search, diary, canvas read-only; ship TestFlight.
+- **M1 — engine renders under Node** ✅ worker bundle renders demo-vault
+  notes via the vfs in `node --test` (wikilinks, dialect, queries, embeds,
+  fragments).
+- **M2 — services layer green under Node** ✅ vault mirror + channel
+  registry against a real on-disk vault (tree, index, search, writes,
+  rename propagation, kv, workspace state).
+- **M3 — app boots in simulator** ✅ iPad + iPhone: vault auto-open,
+  explorer, CodeMirror editing with dialect overlay, engine-rendered
+  reading mode, live edit→preview morphs, queries table, MathJax +
+  theorems, mermaid, media embeds, backlinks/unlinked mentions, canvas
+  view, external-change rescan, desktop-cached MetaPost SVG display.
+- **M4 — touch usability pass** ✅ (first pass) viewport/safe areas, iOS
+  toolbar, compact overlay sidebars, long-press context menus, no editor
+  autofocus, second-tap/long-press wikilink follow in the editor.
+- **M5 — QA + TestFlight**: study-vault walkthrough, kanban touch drag,
+  canvas gestures (pinch zoom/two-finger pan), PDF embeds, Files-app
+  vault picker, device testing, signing. ⬜ next.
+
+### WebKit findings worth keeping
+
+- Moved custom-scheme iframes get a stale window proxy: the document
+  loads and runs but postMessage drops silently both ways. Fixed by
+  rebuilding the preview iframe when the client never reports ready
+  (build-time patch to clew-preview-view; upstream candidate).
+- Upstream bug found: `workspaceStore.restore()` replaces sidebar state
+  but emits only `layout-changed`, which `clew-app` never re-applies to
+  the sidebar DOM — desktop reload with a closed-sidebar workspace shows
+  open sidebars with closed state.
+- `message` listeners registered from `callAsyncJavaScript` closures do
+  not fire in WKWebView — instrument via real page code, not smoke
+  closures.
+- TikZ cache keys hash the LaTeX preamble config: cross-device SVG reuse
+  works only when desktop and iOS resolve the same preamble (MetaPost
+  hashes source only and reuses cleanly).
 
 ## Risks
 
