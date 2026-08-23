@@ -26,6 +26,16 @@ for (const [mod, file] of Object.entries({
 	builtinAlias[`node:${mod}`] = path.join(shims, file);
 }
 
+// Vendored files are patched by exact-string replacement; upstream syncs can
+// change those lines. A patch that no longer matches must FAIL the build
+// (silent no-ops resurrect the bugs the patches fix).
+const patched = (file, source, find, replacement) => {
+	if (!source.includes(find)) {
+		throw new Error(`[build] patch no longer matches ${file}:\n  expected to find: ${find.slice(0, 90)}…\n  Upstream changed this line — update the patch in scripts/build.js.`);
+	}
+	return source.replace(find, replacement);
+};
+
 // Engine patch: the config's "Extensions"/"Directives"/"Environments"
 // entries load via runtime `await import(<absolute path>)` — impossible in
 // a bundle. Redirect every dynamic import in metadata-header.js through a
@@ -38,6 +48,9 @@ const enginePatches = {
 		const vendorSrc = path.join(root, 'vendor', 'jmarkdown', 'src');
 		builder.onLoad({ filter: /vendor\/jmarkdown\/src\/metadata-header\.js$/ }, (args) => {
 			let source = fs.readFileSync(args.path, 'utf8');
+			if (!source.includes('await import(')) {
+				throw new Error('[build] patch no longer matches metadata-header.js: no `await import(` sites found');
+			}
 			source = source.replaceAll('await import(', 'await __jmdImport(');
 			const helper = 'const __jmdImport = (p) => {\n'
 				+ '\tconst hit = globalThis.__jmdExtensionRegistry?.[p];\n'
@@ -98,7 +111,7 @@ const rendererPatches = {
 		// Auto-focusing the editor pops the on-screen keyboard on every note
 		// open; on coarse-pointer devices a tap focuses deliberately instead.
 		builder.onLoad({ filter: /vendor\/clew\/renderer\/components\/workspace\/clew-editor-view\.js$/ }, (args) => ({
-			contents: fs.readFileSync(args.path, 'utf8').replace(
+			contents: patched('clew-editor-view.js', fs.readFileSync(args.path, 'utf8'),
 				'entry.view.focus();',
 				"if (!matchMedia('(pointer: coarse)').matches) entry.view.focus();"),
 			loader: 'js',
@@ -112,13 +125,13 @@ const rendererPatches = {
 		// native scrolling, and moves stay available via drag with a
 		// trackpad/mouse or on desktop.
 		builder.onLoad({ filter: /vendor\/clew\/renderer\/components\/panels\/clew-file-explorer\.js$/ }, (args) => ({
-			contents: fs.readFileSync(args.path, 'utf8').replace(
+			contents: patched('clew-file-explorer.js', fs.readFileSync(args.path, 'utf8'),
 				"row.addEventListener('pointerdown', (e) => this.#maybeStartDrag(e, entry, row));",
 				"row.addEventListener('pointerdown', (e) => { if (e.pointerType !== 'touch') this.#maybeStartDrag(e, entry, row); });"),
 			loader: 'js',
 		}));
 		builder.onLoad({ filter: /vendor\/clew\/renderer\/workspace\/tab-drag\.js$/ }, (args) => ({
-			contents: fs.readFileSync(args.path, 'utf8').replace(
+			contents: patched('tab-drag.js', fs.readFileSync(args.path, 'utf8'),
 				'if (e.button !== 0) return;',
 				"if (e.button !== 0 || e.pointerType === 'touch') return;"),
 			loader: 'js',
@@ -131,7 +144,7 @@ const rendererPatches = {
 		// reset. Sites that refuse framing (X-Frame-Options) show blank —
 		// same limitation as embedded canvases in previews.
 		builder.onLoad({ filter: /vendor\/clew\/renderer\/canvas\/node-content\.js$/ }, (args) => ({
-			contents: fs.readFileSync(args.path, 'utf8').replace(
+			contents: patched('node-content.js', fs.readFileSync(args.path, 'utf8'),
 				"const webview = document.createElement('webview');\n"
 				+ "\t\twebview.className = 'canvas-webview';\n"
 				+ "\t\twebview.setAttribute('partition', 'persist:clew-canvas');\n"
@@ -153,11 +166,10 @@ const rendererPatches = {
 		// client hasn't said 'ready' shortly after render(), rebuild the
 		// iframe once the DOM has settled — a never-moved frame works.
 		builder.onLoad({ filter: /vendor\/clew\/renderer\/components\/workspace\/clew-preview-view\.js$/ }, (args) => ({
-			contents: fs.readFileSync(args.path, 'utf8')
-				.replace(
+			contents: patched('clew-preview-view.js',
+				patched('clew-preview-view.js', fs.readFileSync(args.path, 'utf8'),
 					'ipc.invoke(CH.RENDER_SUBSCRIBE, { path: this.path }).catch(() => {});',
-					'if (!this.__iosSubscribed) { this.__iosSubscribed = true; ipc.invoke(CH.RENDER_SUBSCRIBE, { path: this.path }).catch(() => {}); }')
-				.replace(
+					'if (!this.__iosSubscribed) { this.__iosSubscribed = true; ipc.invoke(CH.RENDER_SUBSCRIBE, { path: this.path }).catch(() => {}); }'),
 					'this.replaceChildren(this.#iframe);',
 					'this.replaceChildren(this.#iframe);\n'
 					+ '\t\tclearTimeout(this.__iosReadyTimer);\n'
@@ -197,7 +209,7 @@ const previewClientPatches = {
 	name: 'clew-preview-client-patches',
 	setup(builder) {
 		builder.onLoad({ filter: /vendor\/clew\/preview-client\/client\.js$/ }, (args) => ({
-			contents: fs.readFileSync(args.path, 'utf8').replace(
+			contents: patched('preview-client/client.js', fs.readFileSync(args.path, 'utf8'),
 				"post({ type: 'ready' });",
 				"post({ type: 'ready' });\nwindow.addEventListener('pageshow', () => post({ type: 'ready' }));"),
 			loader: 'js',

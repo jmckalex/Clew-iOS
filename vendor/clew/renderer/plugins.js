@@ -1,3 +1,13 @@
+// Clew — an Obsidian-style note app built on the jmarkdown engine.
+// Copyright © 2026 J. McKenzie Alexander <jmckalex@gmail.com> · https://jmckalex.org
+//
+// This file is part of Clew, free software released under the GNU General
+// Public License, version 3 or later. Clew is distributed in the hope that it
+// will be useful, but WITHOUT ANY WARRANTY. See LICENSE at the repository
+// root, or <https://www.gnu.org/licenses/>.
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // App-surface plugin loader. Enabled vault plugins with an "app" surface run
 // in the renderer against a SMALL, versioned API object — never the app's
 // internals. Everything a plugin registers is tracked and unwound when the

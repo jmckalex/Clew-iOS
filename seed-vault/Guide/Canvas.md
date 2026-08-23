@@ -40,12 +40,22 @@ open in Obsidian too — Clew's drawing and shape layers travel in a
   real thing.
 - **Connections** — hover a node and drag from a side dot to another
   node. Double-click a connection to label it; right-click to color it.
-- **Groups** — select several nodes, right-click, *Group selection*.
-  Dragging a group carries its members.
+- **Groups** — select any two or more objects (cards, shapes, ink — they
+  can be mixed) and press **⌘G**, or right-click → *Group*. Afterwards
+  clicking any member selects the whole group, and dragging one moves
+  them all as a unit. **⇧⌘G** ungroups. A group is a membership set, not
+  a region: its members stay grouped however far apart you drag them.
+- **Frames** — select several *cards* and right-click → *Enclose in
+  frame* for a labelled box that carries whatever nodes sit inside it.
+  This is Obsidian's own group node, so frames open there too; ink and
+  shapes can't belong to one, which is what groups are for.
 
 ## Drawing and shapes
 
 The pen (**P**) draws freehand ink; the eraser (**E**) removes strokes.
+With the select tool, ink behaves like everything else: click a stroke
+to select it (it picks up a glow), drag to move it, shift-click or
+marquee to take several, and right-click for color, z-order, or delete.
 Rectangle (**R**), ellipse (**O**), diamond (**D**), arrow (**A**), and
 line (**L**) drag out shapes; **T** places standalone text (four font
 families, any size — double-click to edit). The style bar under the

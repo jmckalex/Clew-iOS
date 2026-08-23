@@ -1,3 +1,13 @@
+// Clew — an Obsidian-style note app built on the jmarkdown engine.
+// Copyright © 2026 J. McKenzie Alexander <jmckalex@gmail.com> · https://jmckalex.org
+//
+// This file is part of Clew, free software released under the GNU General
+// Public License, version 3 or later. Clew is distributed in the hope that it
+// will be useful, but WITHOUT ANY WARRANTY. See LICENSE at the repository
+// root, or <https://www.gnu.org/licenses/>.
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // The canvas document model: pure data + geometry, no DOM. Files are JSON
 // Canvas 1.0 (Obsidian-compatible .canvas: nodes + edges); Clew's drawing
 // layer (freehand strokes) and shape layer (Excalidraw-style rect/ellipse/
@@ -17,10 +27,19 @@ export const SIDES = ['top', 'right', 'bottom', 'left'];
 // ---- document --------------------------------------------------------------
 
 export function createCanvas() {
-	return { nodes: [], edges: [], strokes: [], shapes: [], nodeStyles: {}, edgeStyles: {} };
+	return { nodes: [], edges: [], strokes: [], shapes: [], groups: [], nodeStyles: {}, edgeStyles: {} };
 }
 
 export const SHAPE_KINDS = ['rect', 'ellipse', 'diamond', 'arrow', 'line', 'text'];
+/**
+ * What a group can contain. NOT the JSON Canvas `group` NODE, which is a
+ * different and complementary thing: that is a spatial frame Obsidian
+ * understands, carrying whatever nodes happen to sit inside it. A group here
+ * is an explicit membership set — it survives moving members apart, and it can
+ * hold strokes and shapes, which Obsidian has no concept of at all. Groups
+ * therefore live under the "clew" key with the rest of the drawing layer.
+ */
+export const MEMBER_KINDS = ['node', 'shape', 'stroke'];
 export const NODE_SHAPE_STYLES = ['pill', 'circle', 'diamond', 'parallelogram', 'predefined'];
 export const TEXT_FONTS = ['hand', 'sans', 'serif', 'mono'];
 
@@ -106,6 +125,38 @@ export function parseCanvas(text) {
 		}
 		doc.shapes.push(shape);
 	}
+	// Groups: explicit membership over nodes/shapes/strokes. Three invariants
+	// are enforced here rather than trusted from the file, because a .canvas
+	// may have been edited by Obsidian (which deletes nodes without knowing
+	// groups exist) or by hand:
+	//   1. members must resolve to live objects — dead ids are dropped;
+	//   2. an object belongs to at most one group — first group wins;
+	//   3. a group needs two members to be a group — smaller ones dissolve.
+	const liveIds = {
+		node: new Set(doc.nodes.map((n) => n.id)),
+		shape: new Set(doc.shapes.map((s) => s.id)),
+		stroke: new Set(doc.strokes.map((s) => s.id)),
+	};
+	const claimed = new Set();
+	for (const g of Array.isArray(clew.groups) ? clew.groups : []) {
+		if (!g || typeof g !== 'object') continue;
+		const members = [];
+		for (const m of Array.isArray(g.members) ? g.members : []) {
+			if (!m || typeof m !== 'object' || !MEMBER_KINDS.includes(m.kind)) continue;
+			const id = String(m.id ?? '');
+			if (!liveIds[m.kind].has(id)) continue;
+			const key = `${m.kind}:${id}`;
+			if (claimed.has(key)) continue;
+			claimed.add(key);
+			members.push({ kind: m.kind, id });
+		}
+		if (members.length < 2) {
+			// Release the claims so a later, still-valid group can take them.
+			for (const m of members) claimed.delete(`${m.kind}:${m.id}`);
+			continue;
+		}
+		doc.groups.push({ id: String(g.id ?? newId()), members });
+	}
 	// Per-node / per-edge style extras (Advanced-Canvas-style flowchart looks),
 	// keyed by id under the clew key so spec fields stay untouched.
 	const nodeIds = new Set(doc.nodes.map((n) => n.id));
@@ -144,11 +195,20 @@ export function serializeCanvas(doc) {
 		Object.entries(doc.nodeStyles ?? {}).filter(([id]) => nodeIds.has(id)));
 	const edgeStyles = Object.fromEntries(
 		Object.entries(doc.edgeStyles ?? {}).filter(([id]) => edgeIds.has(id)));
-	if (doc.strokes.length || doc.shapes.length
+	const live = {
+		node: nodeIds,
+		shape: new Set(doc.shapes.map((s) => s.id)),
+		stroke: new Set(doc.strokes.map((s) => s.id)),
+	};
+	const groups = (doc.groups ?? [])
+		.map((g) => ({ id: g.id, members: g.members.filter((m) => live[m.kind]?.has(m.id)) }))
+		.filter((g) => g.members.length >= 2);
+	if (doc.strokes.length || doc.shapes.length || groups.length
 		|| Object.keys(nodeStyles).length || Object.keys(edgeStyles).length) {
 		out.clew = {};
 		if (doc.strokes.length) out.clew.strokes = doc.strokes;
 		if (doc.shapes.length) out.clew.shapes = doc.shapes;
+		if (groups.length) out.clew.groups = groups;
 		if (Object.keys(nodeStyles).length) out.clew.nodeStyles = nodeStyles;
 		if (Object.keys(edgeStyles).length) out.clew.edgeStyles = edgeStyles;
 	}
@@ -442,6 +502,151 @@ export function strokeHit(stroke, x, y, threshold) {
 		if (segmentDistance(x, y, pts[i], pts[i + 1], pts[i + 2], pts[i + 3]) <= pad) return true;
 	}
 	return false;
+}
+
+/** Topmost stroke under a point, or null. Paint order is array order, so the
+ *  search runs backwards — the stroke drawn last wins, as it does visually. */
+export function strokeAt(doc, x, y, slop = 6) {
+	for (let i = doc.strokes.length - 1; i >= 0; i--) {
+		if (strokeHit(doc.strokes[i], x, y, slop)) return doc.strokes[i];
+	}
+	return null;
+}
+
+/** Bounding rect of a stroke, grown by half its nib width so the box encloses
+ *  the ink as drawn rather than the mathematical centreline. */
+export function strokeBounds(stroke) {
+	const pts = stroke.points;
+	let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+	for (let i = 0; i + 1 < pts.length; i += 2) {
+		if (pts[i] < minX) minX = pts[i];
+		if (pts[i] > maxX) maxX = pts[i];
+		if (pts[i + 1] < minY) minY = pts[i + 1];
+		if (pts[i + 1] > maxY) maxY = pts[i + 1];
+	}
+	if (minX === Infinity) return { x: 0, y: 0, width: 0, height: 0 };
+	const pad = (stroke.width ?? 0) / 2;
+	return {
+		x: minX - pad, y: minY - pad,
+		width: (maxX - minX) + 2 * pad, height: (maxY - minY) + 2 * pad,
+	};
+}
+
+/** Move a stroke by translating every point. `from` is the untranslated point
+ *  array captured at drag start, so repeated moves never accumulate rounding. */
+export function translateStroke(stroke, from, dx, dy) {
+	const next = new Array(from.length);
+	for (let i = 0; i + 1 < from.length; i += 2) {
+		next[i] = Math.round((from[i] + dx) * 100) / 100;
+		next[i + 1] = Math.round((from[i + 1] + dy) * 100) / 100;
+	}
+	stroke.points = next;
+}
+
+// ---- groups ----------------------------------------------------------------
+
+/** The group containing an item, or null. Groups are flat and disjoint. */
+export function groupOf(doc, kind, id) {
+	for (const g of doc.groups ?? []) {
+		if (g.members.some((m) => m.kind === kind && m.id === id)) return g;
+	}
+	return null;
+}
+
+/** Resolve a member to its live object, or null if it has been deleted. */
+export function memberObject(doc, member) {
+	const list = member.kind === 'node' ? doc.nodes
+		: member.kind === 'shape' ? doc.shapes : doc.strokes;
+	return list.find((o) => o.id === member.id) ?? null;
+}
+
+/** Bounding rect of a member, in the same world space as nodeRect/shapeRect. */
+export function memberRect(doc, member) {
+	const obj = memberObject(doc, member);
+	if (!obj) return null;
+	if (member.kind === 'node') return nodeRect(obj);
+	if (member.kind === 'shape') return shapeRect(obj);
+	return strokeBounds(obj);
+}
+
+/** Union of a group's member rects; null when nothing resolves. */
+export function groupBounds(doc, group) {
+	let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+	for (const m of group.members) {
+		const r = memberRect(doc, m);
+		if (!r) continue;
+		minX = Math.min(minX, r.x); minY = Math.min(minY, r.y);
+		maxX = Math.max(maxX, r.x + r.width); maxY = Math.max(maxY, r.y + r.height);
+	}
+	if (minX === Infinity) return null;
+	return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+}
+
+/**
+ * Grow a selection so that touching any group member selects the whole group —
+ * this is what makes a group move as a unit. Takes and returns plain Sets;
+ * edges are not groupable and are left to the caller.
+ */
+export function expandSelection(doc, sel) {
+	const out = {
+		nodes: new Set(sel.nodes ?? []),
+		shapes: new Set(sel.shapes ?? []),
+		strokes: new Set(sel.strokes ?? []),
+	};
+	const bucket = { node: out.nodes, shape: out.shapes, stroke: out.strokes };
+	// One pass is enough: groups are disjoint, so pulling in a group's members
+	// can never make a *different* group newly touched.
+	for (const g of doc.groups ?? []) {
+		if (!g.members.some((m) => bucket[m.kind].has(m.id))) continue;
+		for (const m of g.members) bucket[m.kind].add(m.id);
+	}
+	return out;
+}
+
+/**
+ * Group everything in `sel` into one new group, absorbing any groups the
+ * selection already touches (so grouping stays flat — no nesting) and removing
+ * the groups thus consumed. Returns the new group, or null when there is not
+ * enough to group.
+ */
+export function groupSelection(doc, sel) {
+	const wanted = expandSelection(doc, sel);
+	const members = [
+		...[...wanted.nodes].map((id) => ({ kind: 'node', id })),
+		...[...wanted.shapes].map((id) => ({ kind: 'shape', id })),
+		...[...wanted.strokes].map((id) => ({ kind: 'stroke', id })),
+	].filter((m) => memberObject(doc, m));
+	if (members.length < 2) return null;
+	const consumed = new Set();
+	for (const m of members) {
+		const g = groupOf(doc, m.kind, m.id);
+		if (g) consumed.add(g.id);
+	}
+	doc.groups = (doc.groups ?? []).filter((g) => !consumed.has(g.id));
+	const group = { id: newId(), members };
+	doc.groups.push(group);
+	return group;
+}
+
+/** Dissolve every group the selection touches. Returns true if any went. */
+export function ungroupSelection(doc, sel) {
+	const bucket = { node: sel.nodes ?? new Set(), shape: sel.shapes ?? new Set(), stroke: sel.strokes ?? new Set() };
+	const before = (doc.groups ?? []).length;
+	doc.groups = (doc.groups ?? []).filter((g) => !g.members.some((m) => bucket[m.kind].has(m.id)));
+	return doc.groups.length !== before;
+}
+
+/** Drop dead members and dissolve groups that fall below two. Call after any
+ *  deletion; parse/serialize enforce the same invariants at the file boundary. */
+export function pruneGroups(doc) {
+	const live = {
+		node: new Set(doc.nodes.map((n) => n.id)),
+		shape: new Set(doc.shapes.map((s) => s.id)),
+		stroke: new Set(doc.strokes.map((s) => s.id)),
+	};
+	doc.groups = (doc.groups ?? [])
+		.map((g) => ({ id: g.id, members: g.members.filter((m) => live[m.kind].has(m.id)) }))
+		.filter((g) => g.members.length >= 2);
 }
 
 /** SVG path for a stroke's polyline. */

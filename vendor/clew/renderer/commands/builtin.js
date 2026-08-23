@@ -1,3 +1,13 @@
+// Clew — an Obsidian-style note app built on the jmarkdown engine.
+// Copyright © 2026 J. McKenzie Alexander <jmckalex@gmail.com> · https://jmckalex.org
+//
+// This file is part of Clew, free software released under the GNU General
+// Public License, version 3 or later. Clew is distributed in the hope that it
+// will be useful, but WITHOUT ANY WARRANTY. See LICENSE at the repository
+// root, or <https://www.gnu.org/licenses/>.
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Built-in commands: everything the palette and hotkeys can do. Registered
 // once at boot. Chord notation is CodeMirror's ('Mod-Shift-p').
 import { registerCommand, buildContext, allCommands, isEnabled, effectiveKeymap } from './registry.js';
@@ -84,7 +94,13 @@ export function registerBuiltinCommands() {
 			run: () => actions.historyBack() },
 		{ id: 'nav:forward', name: 'Navigate forward', hotkeys: ['Mod-Alt-ArrowRight'], when: needsVault,
 			run: () => actions.historyForward() },
-		{ id: 'nav:graph', name: 'Open graph view', hotkeys: ['Mod-g'], when: needsVault,
+		// Disabled on a canvas so Mod-g reaches the canvas view, where it means
+		// Group — the binding every drawing app uses, and the one users reach
+		// for first. The global dispatcher runs in the capture phase and stops
+		// propagation, so without this guard the canvas would never see the
+		// chord at all. The graph stays reachable from the palette and menu.
+		{ id: 'nav:graph', name: 'Open graph view', hotkeys: ['Mod-g'],
+			when: (ctx) => needsVault(ctx) && ctx.activeTabKind !== 'canvas',
 			run: () => actions.openGraph() },
 		{ id: 'nav:search', name: 'Search in all files', hotkeys: ['Mod-Shift-f'], when: needsVault,
 			run: () => document.querySelector('clew-app')?.openSearch?.() },

@@ -1,3 +1,13 @@
+// Clew — an Obsidian-style note app built on the jmarkdown engine.
+// Copyright © 2026 J. McKenzie Alexander <jmckalex@gmail.com> · https://jmckalex.org
+//
+// This file is part of Clew, free software released under the GNU General
+// Public License, version 3 or later. Clew is distributed in the hope that it
+// will be useful, but WITHOUT ANY WARRANTY. See LICENSE at the repository
+// root, or <https://www.gnu.org/licenses/>.
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // <clew-canvas-view>: an infinite pan/zoom canvas tab for .canvas files
 // (JSON Canvas / Obsidian-compatible). Cards, embedded notes (live jmarkdown
 // previews), images, PDFs, media, web pages (webview), connections with
@@ -53,7 +63,7 @@ class ClewCanvasView extends ClewElement {
 	#doc = model.createCanvas();
 	#camera = { x: 0, y: 0, zoom: 1 };
 	#tool = 'select';
-	#sel = { nodes: new Set(), shapes: new Set(), edges: new Set() };
+	#sel = { nodes: new Set(), shapes: new Set(), strokes: new Set(), edges: new Set() };
 	#hoverId = null;
 	#engagedId = null;
 	#editingId = null;
@@ -303,9 +313,11 @@ class ClewCanvasView extends ClewElement {
 	#pruneSelection() {
 		const nodeIds = new Set(this.#doc.nodes.map((n) => n.id));
 		const shapeIds = new Set(this.#doc.shapes.map((s) => s.id));
+		const strokeIds = new Set(this.#doc.strokes.map((s) => s.id));
 		const edgeIds = new Set(this.#doc.edges.map((e) => e.id));
 		this.#sel.nodes = new Set([...this.#sel.nodes].filter((id) => nodeIds.has(id)));
 		this.#sel.shapes = new Set([...this.#sel.shapes].filter((id) => shapeIds.has(id)));
+		this.#sel.strokes = new Set([...this.#sel.strokes].filter((id) => strokeIds.has(id)));
 		this.#sel.edges = new Set([...this.#sel.edges].filter((id) => edgeIds.has(id)));
 	}
 
@@ -622,6 +634,10 @@ class ClewCanvasView extends ClewElement {
 		return this.#doc.shapes.find((s) => s.id === id) ?? null;
 	}
 
+	#strokeById(id) {
+		return this.#doc.strokes.find((s) => s.id === id) ?? null;
+	}
+
 	#syncEdges() {
 		const svg = this.#els.edges;
 		const parts = [];
@@ -636,7 +652,8 @@ class ClewCanvasView extends ClewElement {
 
 	#syncStrokes() {
 		const svg = this.#els.strokes;
-		svg.innerHTML = this.#doc.strokes.map((stroke) => strokeSvg(stroke)).join('');
+		svg.innerHTML = this.#doc.strokes.map((stroke) =>
+			strokeSvg(stroke, this.#sel.strokes.has(stroke.id))).join('');
 	}
 
 	#syncShapes() {
@@ -672,16 +689,49 @@ class ClewCanvasView extends ClewElement {
 			parts.push(shapeSvg(this.#drag.shape, false, true));
 		}
 
+		// Groups with anything selected get ONE dotted box, and their members
+		// lose their individual outlines — a group should read as a single
+		// object, not as a crowd of separately-outlined ones.
+		const selectedGroups = (this.#doc.groups ?? []).filter((g) =>
+			g.members.some((m) => this.#sel[MEMBER_TO_SEL[m.kind]].has(m.id)));
+		const grouped = new Set();
+		for (const g of selectedGroups) {
+			for (const m of g.members) grouped.add(`${m.kind}:${m.id}`);
+		}
+
 		// Selected shapes: outline + handles when solo.
 		const soloNode = this.#sel.nodes.size === 1 && this.#sel.shapes.size === 0
+			&& this.#sel.strokes.size === 0
 			? this.#nodeById([...this.#sel.nodes][0]) : null;
 		const soloShape = this.#sel.shapes.size === 1 && this.#sel.nodes.size === 0
+			&& this.#sel.strokes.size === 0
 			? this.#shapeById([...this.#sel.shapes][0]) : null;
 		for (const id of this.#sel.shapes) {
 			const shape = this.#shapeById(id);
-			if (!shape || shape === soloShape) continue;
+			if (!shape || shape === soloShape || grouped.has(`shape:${id}`)) continue;
 			const r = model.shapeRect(shape);
 			parts.push(`<rect class="canvas-sel-outline" x="${r.x}" y="${r.y}" width="${r.width}" height="${r.height}"`
+				+ ` style="stroke-width:${1.5 / z}"/>`);
+		}
+
+		// Selected ink. The halo on the path shows WHICH stroke; this box gives
+		// it a grab target with the same visual language as everything else.
+		for (const id of this.#sel.strokes) {
+			const stroke = this.#strokeById(id);
+			if (!stroke || grouped.has(`stroke:${id}`)) continue;
+			const r = model.strokeBounds(stroke);
+			const pad = 3 / z;
+			parts.push(`<rect class="canvas-sel-outline" x="${r.x - pad}" y="${r.y - pad}"`
+				+ ` width="${r.width + 2 * pad}" height="${r.height + 2 * pad}"`
+				+ ` style="stroke-width:${1.5 / z}"/>`);
+		}
+
+		for (const g of selectedGroups) {
+			const b = model.groupBounds(this.#doc, g);
+			if (!b) continue;
+			const pad = 7 / z;
+			parts.push(`<rect class="canvas-group-outline" x="${b.x - pad}" y="${b.y - pad}"`
+				+ ` width="${b.width + 2 * pad}" height="${b.height + 2 * pad}"`
 				+ ` style="stroke-width:${1.5 / z}"/>`);
 		}
 
@@ -784,7 +834,22 @@ class ClewCanvasView extends ClewElement {
 				return;
 			}
 
-			// 4. Shapes.
+			// 4. Ink strokes — tested BEFORE shapes because the strokes layer
+			// is painted after the shapes layer (DOM order, no z-index), so
+			// ink sits visually on top. Testing shapes first would make ink
+			// drawn over a filled shape unselectable, since a filled shape
+			// hits anywhere inside its rect. Nodes still win over ink: they
+			// are interactive content, and a card must stay clickable even
+			// with a stroke crossing it.
+			const stroke = model.strokeAt(this.#doc, p.x, p.y, 8 / z);
+			if (stroke) {
+				if (e.shiftKey) this.#toggleSelect('strokes', stroke.id);
+				else if (!this.#sel.strokes.has(stroke.id)) this.#select('strokes', stroke.id);
+				this.#beginMove(e, p, null);
+				return;
+			}
+
+			// 5. Shapes.
 			const shape = model.shapeAt(this.#doc, p.x, p.y, 8 / z);
 			if (shape) {
 				if (e.shiftKey) this.#toggleSelect('shapes', shape.id);
@@ -793,7 +858,7 @@ class ClewCanvasView extends ClewElement {
 				return;
 			}
 
-			// 5. Edges.
+			// 6. Edges.
 			const edge = this.#edgeAt(p, 8 / z);
 			if (edge) {
 				if (e.shiftKey) this.#toggleSelect('edges', edge.id);
@@ -803,7 +868,7 @@ class ClewCanvasView extends ClewElement {
 				return;
 			}
 
-			// 6. Empty: marquee.
+			// 7. Empty: marquee.
 			this.#startDrag(e, {
 				type: 'marquee', start: p, current: p,
 				base: e.shiftKey ? snapshotSel(this.#sel) : null,
@@ -904,7 +969,16 @@ class ClewCanvasView extends ClewElement {
 			const s = this.#shapeById(id);
 			if (s) targets.push({ obj: s, x: s.x, y: s.y });
 		}
-		this.#startDrag(e, { type: 'move', start: p, targets, moved: false });
+		// Strokes have no origin to offset — they carry a point array — so each
+		// one moves from a snapshot taken here. Translating from the snapshot
+		// rather than the live points keeps a long drag from accumulating
+		// rounding error across hundreds of pointermove events.
+		const strokeTargets = [];
+		for (const id of this.#sel.strokes) {
+			const s = this.#strokeById(id);
+			if (s) strokeTargets.push({ obj: s, from: s.points.slice() });
+		}
+		this.#startDrag(e, { type: 'move', start: p, targets, strokeTargets, moved: false });
 	}
 
 	#onPointerMove = (e) => {
@@ -943,9 +1017,13 @@ class ClewCanvasView extends ClewElement {
 				t.obj.x = round2(t.x + dx);
 				t.obj.y = round2(t.y + dy);
 			}
+			for (const t of drag.strokeTargets ?? []) {
+				model.translateStroke(t.obj, t.from, dx, dy);
+			}
 			this.#syncNodes();
 			this.#syncEdges();
 			this.#syncShapes();
+			this.#syncStrokes();
 			this.#syncOverlay();
 			return;
 		}
@@ -1006,14 +1084,20 @@ class ClewCanvasView extends ClewElement {
 			const rect = normRect(drag.start, drag.current);
 			this.#sel.nodes = new Set(drag.base?.nodes ?? []);
 			this.#sel.shapes = new Set(drag.base?.shapes ?? []);
+			this.#sel.strokes = new Set(drag.base?.strokes ?? []);
 			for (const n of this.#doc.nodes) {
 				if (model.rectsIntersect(rect, model.nodeRect(n))) this.#sel.nodes.add(n.id);
 			}
 			for (const s of this.#doc.shapes) {
 				if (model.rectsIntersect(rect, model.shapeRect(s))) this.#sel.shapes.add(s.id);
 			}
+			for (const s of this.#doc.strokes) {
+				if (model.rectsIntersect(rect, model.strokeBounds(s))) this.#sel.strokes.add(s.id);
+			}
+			this.#expandToGroups();
 			this.#syncNodes();
 			this.#syncShapes();
+			this.#syncStrokes();
 			this.#syncOverlay();
 			return;
 		}
@@ -1025,7 +1109,7 @@ class ClewCanvasView extends ClewElement {
 			pts.push(round2(p.x), round2(p.y));
 			// Live preview: append to the strokes layer without a full sync.
 			this.#els.strokes.innerHTML = this.#doc.strokes.map((s) =>
-				strokeSvg(s)).join('') + strokeSvg(drag.stroke);
+				strokeSvg(s, this.#sel.strokes.has(s.id))).join('') + strokeSvg(drag.stroke);
 			return;
 		}
 
@@ -1121,6 +1205,7 @@ class ClewCanvasView extends ClewElement {
 				if (this.#drag) this.#drag.erased = true;
 			}
 			this.#doc.strokes = survivors;
+			model.pruneGroups(this.#doc);
 			this.#syncStrokes();
 			this.#save();
 		}
@@ -1128,8 +1213,13 @@ class ClewCanvasView extends ClewElement {
 
 	// ---- hit helpers -------------------------------------------------------
 
-	/** The solo selected node or shape, wrapped with handle semantics. */
+	/** The solo selected node or shape, wrapped with handle semantics. Strokes
+	 *  are deliberately absent: ink is a point array with no resize semantics,
+	 *  so a selected stroke gets an outline but never handles. A stroke in the
+	 *  selection also suppresses handles on anything else, since the drag
+	 *  would then mean two different things at once. */
 	#soloTarget() {
+		if (this.#sel.strokes.size) return null;
 		if (this.#sel.nodes.size === 1 && this.#sel.shapes.size === 0) {
 			const node = this.#nodeById([...this.#sel.nodes][0]);
 			return node ? { obj: node, kind: null } : null;
@@ -1193,41 +1283,78 @@ class ClewCanvasView extends ClewElement {
 
 	// ---- selection ---------------------------------------------------------
 
+	/** Every layer that can show selection state. */
+	#syncSelectionViews() {
+		this.#syncNodes();
+		this.#syncShapes();
+		this.#syncStrokes();
+		this.#syncEdges();
+		this.#syncOverlay();
+	}
+
+	/** How many groupable things are selected (edges are not groupable). */
+	#selCount() {
+		return this.#sel.nodes.size + this.#sel.shapes.size + this.#sel.strokes.size;
+	}
+
+	/** Grow the selection so that touching any group member takes the whole
+	 *  group — the mechanism behind "moves as a unit". Every selection path
+	 *  funnels through here, so a group can never be half-selected. */
+	#expandToGroups() {
+		if (!this.#doc.groups?.length) return;
+		const next = model.expandSelection(this.#doc, this.#sel);
+		this.#sel.nodes = next.nodes;
+		this.#sel.shapes = next.shapes;
+		this.#sel.strokes = next.strokes;
+	}
+
 	#select(kind, id) {
 		this.#clearSelection(false);
 		this.#sel[kind].add(id);
-		this.#syncNodes();
-		this.#syncShapes();
-		this.#syncEdges();
-		this.#syncOverlay();
+		this.#expandToGroups();
+		this.#syncSelectionViews();
 		this.#renderStylebar();
 	}
 
 	#toggleSelect(kind, id) {
-		if (this.#sel[kind].has(id)) this.#sel[kind].delete(id);
-		else this.#sel[kind].add(id);
-		this.#syncNodes();
-		this.#syncShapes();
-		this.#syncEdges();
-		this.#syncOverlay();
+		const memberKind = SEL_TO_MEMBER[kind];
+		const group = memberKind ? model.groupOf(this.#doc, memberKind, id) : null;
+		if (group) {
+			// Shift-clicking one member toggles the whole group, so a group
+			// never ends up partly selected and therefore partly moved.
+			const on = this.#sel[kind].has(id);
+			for (const m of group.members) {
+				const set = this.#sel[MEMBER_TO_SEL[m.kind]];
+				if (on) set.delete(m.id);
+				else set.add(m.id);
+			}
+		} else if (this.#sel[kind].has(id)) {
+			this.#sel[kind].delete(id);
+		} else {
+			this.#sel[kind].add(id);
+		}
+		this.#syncSelectionViews();
 	}
 
 	#clearSelection(sync = true) {
 		this.#sel.nodes.clear();
 		this.#sel.shapes.clear();
+		this.#sel.strokes.clear();
 		this.#sel.edges.clear();
-		if (sync) {
-			this.#syncNodes();
-			this.#syncShapes();
-			this.#syncEdges();
-			this.#syncOverlay();
-		}
+		if (sync) this.#syncSelectionViews();
+	}
+
+	#selectAll() {
+		this.#sel.nodes = new Set(this.#doc.nodes.map((n) => n.id));
+		this.#sel.shapes = new Set(this.#doc.shapes.map((s) => s.id));
+		this.#sel.strokes = new Set(this.#doc.strokes.map((s) => s.id));
+		this.#syncAll();
 	}
 
 	/** Clone the selection (nodes, shapes, and edges between selected nodes),
 	 *  offset a little, and select the clones. */
 	#duplicateSelection() {
-		if (this.#sel.nodes.size + this.#sel.shapes.size === 0) return;
+		if (this.#selCount() === 0) return;
 		this.#checkpoint();
 		const offset = 28;
 		const idMap = new Map();
@@ -1252,23 +1379,52 @@ class ClewCanvasView extends ClewElement {
 		for (const id of this.#sel.shapes) {
 			const shape = this.#shapeById(id);
 			if (!shape) continue;
-			newShapes.push({ ...shape, id: model.newId(), x: shape.x + offset, y: shape.y + offset });
+			const clone = { ...shape, id: model.newId(), x: shape.x + offset, y: shape.y + offset };
+			idMap.set(id, clone.id);
+			newShapes.push(clone);
 		}
 		this.#doc.shapes.push(...newShapes);
+		const newStrokes = [];
+		for (const id of this.#sel.strokes) {
+			const stroke = this.#strokeById(id);
+			if (!stroke) continue;
+			const clone = {
+				// Both coordinates shift by the same offset, so one map does.
+				...stroke, id: model.newId(),
+				points: stroke.points.map((v) => round2(v + offset)),
+			};
+			idMap.set(id, clone.id);
+			newStrokes.push(clone);
+		}
+		this.#doc.strokes.push(...newStrokes);
+		// Duplicating a whole group should yield a group, not loose parts.
+		// Only groups entirely within the selection are reproduced; a partly
+		// copied group would be a different grouping than the user sees.
+		// Snapshotted: the loop pushes into the same array it reads.
+		for (const g of [...(this.#doc.groups ?? [])]) {
+			if (!g.members.every((m) => idMap.has(m.id))) continue;
+			this.#doc.groups.push({
+				id: model.newId(),
+				members: g.members.map((m) => ({ kind: m.kind, id: idMap.get(m.id) })),
+			});
+		}
 		this.#sel.nodes = new Set(newNodes.map((n) => n.id));
 		this.#sel.shapes = new Set(newShapes.map((s) => s.id));
+		this.#sel.strokes = new Set(newStrokes.map((s) => s.id));
 		this.#sel.edges.clear();
 		this.#mutated();
 	}
 
 	#deleteSelection() {
-		if (this.#sel.nodes.size + this.#sel.shapes.size + this.#sel.edges.size === 0) return;
+		if (this.#selCount() + this.#sel.edges.size === 0) return;
 		this.#checkpoint();
 		const gone = this.#sel.nodes;
 		this.#doc.nodes = this.#doc.nodes.filter((n) => !gone.has(n.id));
 		this.#doc.edges = this.#doc.edges.filter((e) =>
 			!gone.has(e.fromNode) && !gone.has(e.toNode) && !this.#sel.edges.has(e.id));
 		this.#doc.shapes = this.#doc.shapes.filter((s) => !this.#sel.shapes.has(s.id));
+		this.#doc.strokes = this.#doc.strokes.filter((s) => !this.#sel.strokes.has(s.id));
+		model.pruneGroups(this.#doc);
 		const liveEdges = new Set(this.#doc.edges.map((e) => e.id));
 		for (const id of Object.keys(this.#doc.nodeStyles)) {
 			if (gone.has(id)) delete this.#doc.nodeStyles[id];
@@ -1347,7 +1503,10 @@ class ClewCanvasView extends ClewElement {
 		});
 	}
 
-	#groupSelection() {
+	/** Wrap the selected NODES in a JSON Canvas group node — a labelled frame
+	 *  Obsidian also understands. Spatial: it carries whatever nodes sit inside
+	 *  it. For grouping arbitrary objects (ink included) see #groupObjects. */
+	#frameSelection() {
 		const rects = [...this.#sel.nodes].map((id) => this.#nodeById(id)).filter(Boolean).map(model.nodeRect);
 		if (rects.length === 0) return;
 		const pad = 24;
@@ -1359,6 +1518,36 @@ class ClewCanvasView extends ClewElement {
 		const group = { id: model.newId(), type: 'group', label: 'Group', x: round2(minX), y: round2(minY), width: round2(maxX - minX), height: round2(maxY - minY) };
 		this.#doc.nodes.unshift(group); // groups paint first
 		this.#select('nodes', group.id);
+		this.#mutated();
+	}
+
+	// ---- object groups -----------------------------------------------------
+	// Distinct from #frameSelection above. That creates a JSON Canvas group
+	// NODE: a spatial frame Obsidian understands, which carries whatever nodes
+	// happen to sit inside it. These are explicit membership sets that survive
+	// members being moved apart and can hold ink and shapes — which the spec
+	// has no concept of — so they live under the file's "clew" key.
+
+	/** True when the selection touches any group (drives menu entries). */
+	#selectionHasGroup() {
+		return (this.#doc.groups ?? []).some((g) =>
+			g.members.some((m) => this.#sel[MEMBER_TO_SEL[m.kind]].has(m.id)));
+	}
+
+	#groupObjects() {
+		// Selection is pruned against the doc on every load and undo, so two
+		// selected ids are two live objects.
+		if (this.#selCount() < 2) return;
+		this.#checkpoint();
+		model.groupSelection(this.#doc, this.#sel);
+		this.#expandToGroups();
+		this.#mutated();
+	}
+
+	#ungroupObjects() {
+		if (!this.#selectionHasGroup()) return;
+		this.#checkpoint();
+		model.ungroupSelection(this.#doc, this.#sel);
 		this.#mutated();
 	}
 
@@ -1603,9 +1792,14 @@ class ClewCanvasView extends ClewElement {
 		}
 		if (mod && e.key.toLowerCase() === 'a') {
 			e.preventDefault();
-			this.#sel.nodes = new Set(this.#doc.nodes.map((n) => n.id));
-			this.#sel.shapes = new Set(this.#doc.shapes.map((s) => s.id));
-			this.#syncAll();
+			this.#selectAll();
+			return;
+		}
+		if (mod && e.key.toLowerCase() === 'g') {
+			e.preventDefault();
+			e.stopPropagation();
+			if (e.shiftKey) this.#ungroupObjects();
+			else this.#groupObjects();
 			return;
 		}
 		if (mod && e.key.toLowerCase() === 'd') {
@@ -1620,7 +1814,7 @@ class ClewCanvasView extends ClewElement {
 		}
 		if (e.key === 'Escape') {
 			if (this.#engagedId) this.#disengage();
-			else if (this.#sel.nodes.size + this.#sel.shapes.size + this.#sel.edges.size) this.#clearSelection();
+			else if (this.#selCount() + this.#sel.edges.size) this.#clearSelection();
 			else this.#setTool('select');
 			return;
 		}
@@ -1694,6 +1888,13 @@ class ClewCanvasView extends ClewElement {
 			this.#nodeMenu(node, e.clientX, e.clientY);
 			return;
 		}
+		// Ink before shapes, matching both the paint order and #onPointerDown.
+		const stroke = model.strokeAt(this.#doc, p.x, p.y, 8 / z);
+		if (stroke) {
+			if (!this.#sel.strokes.has(stroke.id)) this.#select('strokes', stroke.id);
+			this.#strokeMenu(stroke, e.clientX, e.clientY);
+			return;
+		}
 		const shape = model.shapeAt(this.#doc, p.x, p.y, 8 / z);
 		if (shape) {
 			if (!this.#sel.shapes.has(shape.id)) this.#select('shapes', shape.id);
@@ -1709,6 +1910,40 @@ class ClewCanvasView extends ClewElement {
 		}
 		this.#emptyMenu(p, e.clientX, e.clientY);
 	};
+
+	/** Group/Ungroup entries, shared by the node, shape and stroke menus.
+	 *  Returns [] when neither applies, so callers can spread unconditionally. */
+	#groupMenuItems() {
+		const items = [];
+		if (this.#selCount() > 1) items.push({ label: 'Group', click: () => this.#groupObjects() });
+		if (this.#selectionHasGroup()) items.push({ label: 'Ungroup', click: () => this.#ungroupObjects() });
+		if (items.length) items.push({ separator: true });
+		return items;
+	}
+
+	#strokeMenu(stroke, x, y) {
+		showCanvasMenu(x, y, [
+			{ swatches: true, current: stroke.color ?? 'ink', onPick: (color) => {
+				this.#checkpoint();
+				for (const id of this.#sel.strokes) {
+					const s = this.#strokeById(id);
+					if (s) s.color = color;
+				}
+				this.#mutated();
+			} },
+			{ separator: true },
+			...this.#groupMenuItems(),
+			{ label: 'Bring to front', click: () => this.#reorderStrokes('front') },
+			{ label: 'Send to back', click: () => this.#reorderStrokes('back') },
+			{ separator: true },
+			{ label: 'Delete', danger: true, click: () => this.#deleteSelection() },
+		]);
+	}
+
+	#reorderStrokes(dir) {
+		this.#checkpoint();
+		if (model.reorder(this.#doc.strokes, this.#sel.strokes, dir)) this.#mutated();
+	}
 
 	#nodeMenu(node, x, y) {
 		const items = [
@@ -1743,8 +1978,14 @@ class ClewCanvasView extends ClewElement {
 		if (node.type === 'group') {
 			items.push({ label: 'Rename group', click: () => this.#renameGroup(node) });
 		}
+		if (this.#selCount() > 1) {
+			items.push({ label: 'Group', click: () => this.#groupObjects() });
+		}
+		if (this.#selectionHasGroup()) {
+			items.push({ label: 'Ungroup', click: () => this.#ungroupObjects() });
+		}
 		if (this.#sel.nodes.size > 1) {
-			items.push({ label: 'Group selection', click: () => this.#groupSelection() });
+			items.push({ label: 'Enclose in frame', click: () => this.#frameSelection() });
 		}
 		const nstyle = this.#doc.nodeStyles[node.id] ?? {};
 		if (node.type !== 'group') {
@@ -1841,6 +2082,7 @@ class ClewCanvasView extends ClewElement {
 				this.#mutated();
 			} },
 			{ separator: true },
+			...this.#groupMenuItems(),
 			...(boxy ? [{ choices: true, label: 'Fill', current: shape.fill ? (shape.fillStyle ?? 'solid') : 'none', options: [
 				{ value: 'none', label: '□' },
 				{ value: 'solid', label: '■' },
@@ -1937,11 +2179,11 @@ class ClewCanvasView extends ClewElement {
 			{ label: 'Add note or file…', click: () => this.#addFilePicker() },
 			{ label: 'Add web page…', click: () => this.#addWebPrompt() },
 			{ separator: true },
-			...(this.#sel.nodes.size > 1 ? [{ label: 'Group selection', click: () => this.#groupSelection() }] : []),
+			...(this.#selCount() > 1 ? [{ label: 'Group', click: () => this.#groupObjects() }] : []),
+			...(this.#selectionHasGroup() ? [{ label: 'Ungroup', click: () => this.#ungroupObjects() }] : []),
+			...(this.#sel.nodes.size > 1 ? [{ label: 'Enclose in frame', click: () => this.#frameSelection() }] : []),
 			{ label: 'Select all', click: () => {
-				this.#sel.nodes = new Set(this.#doc.nodes.map((n) => n.id));
-				this.#sel.shapes = new Set(this.#doc.shapes.map((s) => s.id));
-				this.#syncAll();
+				this.#selectAll();
 			} },
 			{ label: 'Zoom to fit', click: () => this.#zoomFit() },
 			{ separator: true },
@@ -2153,8 +2395,13 @@ function normRect(a, b) {
 	};
 }
 
+/** Selection-set names <-> group member kinds. Edges appear in neither: they
+ *  follow their endpoints and are not independently groupable. */
+const MEMBER_TO_SEL = { node: 'nodes', shape: 'shapes', stroke: 'strokes' };
+const SEL_TO_MEMBER = { nodes: 'node', shapes: 'shape', strokes: 'stroke' };
+
 function snapshotSel(sel) {
-	return { nodes: [...sel.nodes], shapes: [...sel.shapes] };
+	return { nodes: [...sel.nodes], shapes: [...sel.shapes], strokes: [...sel.strokes] };
 }
 
 function round2(n) {

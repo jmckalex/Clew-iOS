@@ -1,3 +1,15 @@
+/*
+ * Clew — an Obsidian-style note app built on the jmarkdown engine.
+ * Copyright © 2026 J. McKenzie Alexander <jmckalex@gmail.com> · https://jmckalex.org
+ *
+ * This file is part of Clew, free software released under the GNU General
+ * Public License, version 3 or later. Clew is distributed in the hope that it
+ * will be useful, but WITHOUT ANY WARRANTY. See LICENSE at the repository
+ * root, or <https://www.gnu.org/licenses/>.
+ *
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+
 /* ---- canvas view ---------------------------------------------------------- */
 
 .canvas-view {
@@ -181,6 +193,11 @@
 	stroke-linecap: round;
 	stroke-linejoin: round;
 }
+/* Selected ink keeps its own colour — recolouring it would misrepresent the
+   drawing — so the accent reads as a halo around the nib instead. */
+.canvas-stroke.is-selected {
+	filter: drop-shadow(0 0 1.5px var(--clew-accent)) drop-shadow(0 0 3px var(--clew-accent));
+}
 .canvas-shape line, .canvas-shape rect, .canvas-shape ellipse, .canvas-shape polygon {
 	stroke-width: 2.5;
 }
@@ -196,6 +213,14 @@
 	fill: none;
 	stroke: var(--clew-accent);
 	stroke-dasharray: 4 3;
+}
+/* The box around a whole group: dotted, so it never reads as one more
+   selected object sitting alongside its members. */
+.canvas-group-outline {
+	fill: none;
+	stroke: var(--clew-accent);
+	stroke-dasharray: 1 4;
+	stroke-linecap: round;
 }
 .canvas-handle {
 	fill: var(--clew-bg-primary);

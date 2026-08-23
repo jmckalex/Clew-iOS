@@ -1,3 +1,13 @@
+// Clew — an Obsidian-style note app built on the jmarkdown engine.
+// Copyright © 2026 J. McKenzie Alexander <jmckalex@gmail.com> · https://jmckalex.org
+//
+// This file is part of Clew, free software released under the GNU General
+// Public License, version 3 or later. Clew is distributed in the hope that it
+// will be useful, but WITHOUT ANY WARRANTY. See LICENSE at the repository
+// root, or <https://www.gnu.org/licenses/>.
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Shared SVG builders for canvas shapes — used by the editable canvas view
 // and by read-only canvas embeds in note previews (preview-client). Colors
 // are emitted as var(--clew-canvas-*) references; the surrounding document
@@ -136,8 +146,9 @@ export function shapeSvg(shape, selected, temp = false) {
 }
 
 /** One ink stroke as an SVG fragment (color, width, optional opacity). */
-export function strokeSvg(stroke) {
-	return `<path class="canvas-stroke" d="${model.strokePath(stroke)}"`
+export function strokeSvg(stroke, selected = false) {
+	return `<path class="canvas-stroke${selected ? ' is-selected' : ''}" data-id="${stroke.id}"`
+		+ ` d="${model.strokePath(stroke)}"`
 		+ ` style="stroke:${inkColor(stroke.color)};stroke-width:${stroke.width}`
 		+ (stroke.opacity ? `;opacity:${stroke.opacity}` : '') + `"/>`;
 }
