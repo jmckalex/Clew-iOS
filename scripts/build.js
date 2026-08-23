@@ -86,11 +86,113 @@ export async function buildEngineWorker({ minify = true } = {}) {
 	return result;
 }
 
+// ---- the app bundle + webroot ---------------------------------------------
+
+const webroot = path.join(dist, 'webroot');
+
+export async function buildAppBundle({ minify = true } = {}) {
+	// The renderer runs unmodified; the entry evaluates the shim first. The
+	// vendored main-process services (indexer, search, kv-store, …) resolve
+	// node:fs/node:path onto the same vfs the shim's VaultManager fills.
+	return build({
+		entryPoints: [path.join(root, 'src', 'shim', 'entry.js')],
+		bundle: true,
+		platform: 'browser',
+		format: 'esm',
+		target: 'safari16',
+		outfile: path.join(webroot, 'bundle.js'),
+		alias: builtinAlias,
+		minify,
+		sourcemap: false,
+		logLevel: 'warning',
+		metafile: true,
+	});
+}
+
+export async function buildPreviewClients({ minify = true } = {}) {
+	// Classic <script> injections into rendered-note documents — same three
+	// bundles the desktop build produces.
+	const results = [];
+	for (const name of ['client.js', 'api.js', 'site-client.js']) {
+		results.push(await build({
+			entryPoints: [path.join(root, 'vendor', 'clew', 'preview-client', name)],
+			bundle: true,
+			format: 'iife',
+			target: 'safari16',
+			outfile: path.join(webroot, 'preview-client', name),
+			minify,
+			logLevel: 'warning',
+			metafile: true,
+		}));
+	}
+	return results;
+}
+
+export function stageStatic() {
+	const copy = (from, to) => {
+		fs.rmSync(to, { recursive: true, force: true });
+		fs.mkdirSync(path.dirname(to), { recursive: true });
+		fs.cpSync(from, to, { recursive: true });
+	};
+	copy(path.join(root, 'src', 'ios', 'index.html'), path.join(webroot, 'index.html'));
+	copy(path.join(root, 'vendor', 'clew', 'renderer', 'styles'), path.join(webroot, 'styles'));
+	copy(path.join(root, 'src', 'ios', 'styles', 'ios.css'), path.join(webroot, 'styles', 'ios.css'));
+	// Engine template assets the render service snapshots into each worker.
+	for (const [name, source] of Object.entries({
+		'default-template.html.mustache': 'vendor/jmarkdown/src/default-template.html.mustache',
+		'default-template.tex.mustache': 'vendor/jmarkdown/src/default-template.tex.mustache',
+		'Biblify.js.mustache': 'vendor/jmarkdown/src/Biblify.js.mustache',
+		'jmarkdown.css': 'vendor/jmarkdown/src/jmarkdown.css',
+		'clew-template.html': 'vendor/clew/engine/clew-template.html',
+	})) {
+		copy(path.join(root, source), path.join(webroot, 'engine', name));
+	}
+	copy(path.join(dist, 'engine-worker.js'), path.join(webroot, 'engine-worker.js'));
+	// Preview iframe assets, laid out like the desktop packaged app
+	// (protocol.js assetRoots → Swift scheme handler).
+	copy(path.join(root, 'vendor', 'clew', 'engine'), path.join(webroot, 'engine-assets'));
+	const assets = {
+		'mathjax/es5': 'node_modules/mathjax/es5',
+		'mermaid/dist/mermaid.min.js': 'node_modules/mermaid/dist/mermaid.min.js',
+		'highlight.js/styles': 'node_modules/highlight.js/styles',
+		'@fortawesome/fontawesome-free/js/all.min.js': 'node_modules/@fortawesome/fontawesome-free/js/all.min.js',
+		'jquery/dist/jquery.min.js': 'node_modules/jquery/dist/jquery.min.js',
+		'leaflet/dist': 'node_modules/leaflet/dist',
+	};
+	for (const [to, from] of Object.entries(assets)) {
+		copy(path.join(root, from), path.join(webroot, 'preview-assets', to));
+	}
+}
+
+export async function buildServicesTestBundle() {
+	// The services layer with node builtins aliased to the shims, importable
+	// from node --test (which otherwise would resolve node:fs to the real fs).
+	return build({
+		entryPoints: [path.join(root, 'src', 'shim', 'ipc.js')],
+		bundle: true,
+		platform: 'neutral',
+		mainFields: ['module', 'main'],
+		format: 'esm',
+		outfile: path.join(dist, 'test', 'services.js'),
+		alias: builtinAlias,
+		logLevel: 'warning',
+		metafile: true,
+	});
+}
+
 const isMain = process.argv[1] === fileURLToPath(import.meta.url);
 if (isMain) {
+	const minify = !process.argv.includes('--dev');
 	fs.mkdirSync(dist, { recursive: true });
-	const { metafile } = await buildEngineWorker({ minify: !process.argv.includes('--dev') });
-	for (const [file, out] of Object.entries(metafile.outputs)) {
-		console.log(`${file}  ${(out.bytes / 1024 / 1024).toFixed(2)} MB`);
+	const outputs = [];
+	outputs.push(await buildEngineWorker({ minify }));
+	stageStatic();
+	outputs.push(await buildAppBundle({ minify }));
+	outputs.push(...await buildPreviewClients({ minify }));
+	outputs.push(await buildServicesTestBundle());
+	for (const result of outputs) {
+		for (const [file, out] of Object.entries(result.metafile.outputs)) {
+			if (out.bytes > 1024) console.log(`${file}  ${(out.bytes / 1024 / 1024).toFixed(2)} MB`);
+		}
 	}
 }

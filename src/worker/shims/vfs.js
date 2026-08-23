@@ -25,6 +25,13 @@ class Vfs {
 	dirs = new Set(['/']);
 	writes = new Map(); // absPath -> string|Uint8Array (everything written this session)
 
+	// Write-through hooks. Unused in the render worker (its writes are
+	// captured render output); the app bundle sets them so mirror writes
+	// persist to the real vault through the native bridge.
+	onWrite = null; // (absPath, data) => void
+	onRemove = null; // (absPath, wasDir) => void
+	onMkdir = null; // (absPath) => void
+
 	reset() {
 		this.files.clear();
 		this.dirs.clear();
@@ -73,6 +80,21 @@ class Vfs {
 		this.files.set(abs, { data, mtimeMs: Date.now() });
 		this.#addParents(abs);
 		this.writes.set(abs, data);
+		this.onWrite?.(abs, data);
+	}
+
+	/** Install/refresh one entry from outside (native rescan) without
+	 *  triggering write-through. */
+	patch(p, data, mtimeMs) {
+		const abs = norm(p);
+		this.files.set(abs, { data, mtimeMs: mtimeMs ?? Date.now() });
+		this.#addParents(abs);
+	}
+
+	remove(p) {
+		const abs = norm(p);
+		this.files.delete(abs);
+		this.dirs.delete(abs);
 	}
 
 	append(p, data) {
@@ -85,18 +107,21 @@ class Vfs {
 		const abs = norm(p);
 		this.dirs.add(abs);
 		this.#addParents(abs + '/x');
+		this.onMkdir?.(abs);
 	}
 
 	rm(p) {
 		const abs = norm(p);
+		const wasDir = this.dirs.has(abs);
 		this.files.delete(abs);
 		this.writes.delete(abs);
-		if (this.dirs.has(abs)) {
+		if (wasDir) {
 			this.dirs.delete(abs);
 			for (const f of [...this.files.keys()]) {
 				if (f.startsWith(abs + '/')) this.files.delete(f);
 			}
 		}
+		this.onRemove?.(abs, wasDir);
 	}
 
 	stat(p) {

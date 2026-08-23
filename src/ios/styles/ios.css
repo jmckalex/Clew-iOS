@@ -1,0 +1,59 @@
+/* iOS adaptations layered over the desktop stylesheets. */
+
+/* The 38px titlebar exists for macOS traffic lights; on iOS it collapses
+   into the status-bar safe area. */
+body.is-ios .titlebar {
+	height: env(safe-area-inset-top, 0px);
+	min-height: env(safe-area-inset-top, 0px);
+	-webkit-app-region: initial;
+}
+
+body.is-ios .statusbar {
+	padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Touch targets: tabs and tree rows get comfortable heights; the tab close
+   button is always visible (no hover on touch). */
+body.is-ios .tab-close {
+	visibility: visible;
+}
+body.is-ios .props-row .props-delete,
+body.is-ios .mention-row .mention-link-button {
+	visibility: visible;
+	opacity: 1;
+}
+
+/* Pointer drags must beat native scroll on their surfaces. */
+body.is-ios .tab-strip .tab {
+	touch-action: none;
+}
+body.is-ios .graph-host,
+body.is-ios .graph-host canvas {
+	touch-action: none;
+}
+body.is-ios .tree-item {
+	touch-action: pan-y;
+}
+
+/* Split/sidebar resize handles are 1–3px on desktop. */
+body.is-ios .split-handle,
+body.is-ios .sidebar-handle {
+	min-width: 12px;
+	min-height: 12px;
+}
+
+/* Compact (phone) layout: sidebars overlay instead of squeezing the
+   workspace; the sidebar floor of 170px comes from JS, the overlay makes
+   it moot. */
+@media (max-width: 700px) {
+	body.is-ios .sidebar {
+		position: absolute;
+		top: env(safe-area-inset-top, 0px);
+		bottom: 0;
+		z-index: 40;
+		max-width: 85vw;
+		box-shadow: 0 0 24px rgba(0, 0, 0, 0.35);
+	}
+	body.is-ios .sidebar.sidebar-left { left: 0; }
+	body.is-ios .sidebar.sidebar-right { right: 0; }
+}

@@ -38,7 +38,7 @@ fs.copyFileSync(
 	path.join(upstream, 'vendor', 'jmarkdown', 'package.json'),
 	path.join(root, 'vendor', 'jmarkdown', 'package.json'));
 
-for (const dir of ['renderer', 'shared', 'preview-client', 'engine']) {
+for (const dir of ['renderer', 'shared', 'preview-client', 'engine', 'main']) {
 	copyDir(path.join(upstream, 'src', dir), path.join(root, 'vendor', 'clew', dir));
 }
 

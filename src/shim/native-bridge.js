@@ -1,0 +1,38 @@
+// The JS↔native RPC. On iOS, calls go to the Swift FSBridge through
+// WKScriptMessageHandlerWithReply (window.webkit.messageHandlers.clew
+// returns a real promise). Under Node tests and the dev server, a plain JS
+// implementation is injected as globalThis.__clewBridgeImpl instead.
+//
+// Methods the native side implements (all params/results JSON-safe):
+//   vaultBootstrap()                 -> { path } of the vault to auto-open
+//   vaultOpen({path})                -> { name, path, files } where files
+//                                       maps rel path -> {text?, size, mtimeMs}
+//                                       (text present for text files only)
+//   pickFolder()                     -> { path } | null (document picker)
+//   write({vault, rel, text})        -> null
+//   writeBinary({vault, rel, base64})-> null (attachments)
+//   mkdir({vault, rel})              -> null
+//   rename({vault, rel, newRel})     -> null
+//   trash({vault, rel})              -> null
+//   openExternal({url})              -> null
+//   shareText({name, text})         -> null (share sheet)
+//   shareBase64({name, base64})     -> null
+//   rescan({vault})                  -> { changed: {rel: {text?, size, mtimeMs}},
+//                                        removed: [rel] }
+
+export async function bridgeCall(method, params = {}) {
+	const impl = globalThis.__clewBridgeImpl;
+	if (impl) return impl.call(method, params);
+	const handler = globalThis.webkit?.messageHandlers?.clew;
+	if (!handler) throw new Error(`[clew-ios] no native bridge for ${method}`);
+	return handler.postMessage({ method, params });
+}
+
+/** Uint8Array → base64 (chunked; String.fromCharCode has an argv limit). */
+export function toBase64(bytes) {
+	let binary = '';
+	for (let i = 0; i < bytes.length; i += 0x8000) {
+		binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+	}
+	return btoa(binary);
+}

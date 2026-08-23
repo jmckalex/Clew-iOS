@@ -1,0 +1,182 @@
+// Vault → static website (File → Export Vault as Website): every note
+// renders through the engine with CLEW_SITE_EXPORT set (wikilinks become
+// real relative hrefs; media URLs come out under the /@@SITE@@/ marker via
+// the usual session mechanism) and lands as <out>/<note path>.html, with
+// attachments copied alongside and the handful of runtime assets (MathJax,
+// mermaid, leaflet, highlight css, preview.css, site-client) under assets/.
+// Queries and tasks bake to their render-time results — a published
+// dashboard is a snapshot, which is exactly right for a website.
+//
+// Workers: same one-shot fork discipline as the render service, with the
+// next worker warming while the current note builds, so an N-note vault
+// costs ~one warm-up total, not N.
+import { fork } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import { paths } from './paths.js';
+import { toolchainPath } from './render-service.js';
+import { direntKind, shouldRecurse, walkGuard } from './fs-utils.js';
+
+const SITE_MARK = '@@SITE@@';
+const NOTE_EXT = /\.(md|jmd)$/i;
+const IGNORED = new Set(['.obsidian', '.clew', '.git', 'node_modules', '.trash']);
+
+export async function exportSite({ vaultRoot, engineDir, outDir, distDir, vaultOptions = {}, onProgress = () => {} }) {
+	fs.mkdirSync(outDir, { recursive: true });
+
+	// Collect notes + other files with the standard symlink-safe walk.
+	const notes = [];
+	const files = [];
+	const seen = walkGuard(vaultRoot);
+	const walk = (dir, rel) => {
+		for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+			if (entry.name.startsWith('.') || IGNORED.has(entry.name)) continue;
+			const childRel = rel ? `${rel}/${entry.name}` : entry.name;
+			const kind = direntKind(dir, entry);
+			if (kind === 'dir') {
+				const abs = path.join(dir, entry.name);
+				if (shouldRecurse(abs, seen)) walk(abs, childRel);
+			} else if (kind === 'file') {
+				(NOTE_EXT.test(entry.name) ? notes : files).push(childRel);
+			}
+		}
+	};
+	walk(vaultRoot, '');
+
+	// One-shot workers with overlap: spawn the next while this one builds.
+	const spawnWorker = () => {
+		const child = fork(paths.engineWorker, [], {
+			cwd: engineDir,
+			stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+			env: {
+				...process.env,
+				PATH: toolchainPath(),
+				CLEW_VAULT_ROOT: vaultRoot,
+				CLEW_SESSION_ID: SITE_MARK,
+				CLEW_SITE_EXPORT: '1',
+			},
+		});
+		child.stdout.on('data', () => {});
+		child.stderr.on('data', () => {});
+		const ready = new Promise((resolve, reject) => {
+			child.on('message', (msg) => { if (msg?.type === 'ready') resolve(child); });
+			child.once('exit', () => reject(new Error('site worker died during warm-up')));
+			child.once('error', reject);
+		});
+		ready.catch(() => {});
+		return { child, ready };
+	};
+
+	let standby = spawnWorker();
+	const tmp = path.join(outDir, '.clew-site-tmp.html');
+	const failures = [];
+	for (let i = 0; i < notes.length; i++) {
+		const rel = notes[i];
+		onProgress({ done: i, total: notes.length, note: rel });
+		const worker = standby;
+		standby = spawnWorker();
+		try {
+			const child = await worker.ready;
+			const result = await new Promise((resolve) => {
+				child.on('message', (msg) => {
+					if (msg?.type === 'done' || msg?.type === 'error') resolve(msg);
+				});
+				child.once('exit', (code) => resolve({ type: 'error', message: `worker exited (${code})` }));
+				child.send({
+					type: 'build',
+					file: path.join(vaultRoot, rel),
+					options: {
+						to: 'html',
+						output: tmp,
+						normalSyntax: vaultOptions.normalSyntax === true,
+					},
+				});
+			});
+			if (result.type !== 'done') throw new Error(result.message);
+			const html = fs.readFileSync(tmp, 'utf8');
+			const outFile = path.join(outDir, rel.replace(NOTE_EXT, '.html'));
+			fs.mkdirSync(path.dirname(outFile), { recursive: true });
+			fs.writeFileSync(outFile, finishPage(html, rel, vaultRoot));
+		} catch (err) {
+			failures.push({ note: rel, message: String(err.message ?? err) });
+		}
+	}
+	standby.child.kill();
+	fs.rmSync(tmp, { force: true });
+
+	// Attachments and other plain files, structure preserved.
+	for (const rel of files) {
+		const target = path.join(outDir, rel);
+		fs.mkdirSync(path.dirname(target), { recursive: true });
+		fs.copyFileSync(path.join(vaultRoot, rel), target);
+	}
+
+	copyAssets(outDir, vaultRoot, distDir);
+
+	// index.html: the vault's home note, already exported at depth 0.
+	for (const home of ['Welcome.md', 'Start Here.md', 'Home.md', 'index.md', notes[0]]) {
+		if (home && notes.includes(home) && !home.includes('/')) {
+			const page = path.join(outDir, home.replace(NOTE_EXT, '.html'));
+			if (fs.existsSync(page)) fs.copyFileSync(page, path.join(outDir, 'index.html'));
+			break;
+		}
+	}
+
+	onProgress({ done: notes.length, total: notes.length, note: null });
+	return { notes: notes.length, files: files.length, failures };
+}
+
+/** Relativize marker URLs and wire in the static runtime. */
+function finishPage(html, rel, vaultRoot) {
+	const depth = rel.split('/').length - 1;
+	const prefix = depth === 0 ? '' : '../'.repeat(depth);
+	let out = html
+		.split(`/${SITE_MARK}/`).join(prefix || './')
+		// sitePath percent-encodes the marker (@ → %40) in URLs it builds.
+		.split(`/${encodeURIComponent(SITE_MARK)}/`).join(prefix || './')
+		.split('/__clew_assets__/').join(`${prefix || './'}assets/`);
+	// Vault scripts (.clew/scripts/*.js) ship with the site too.
+	let vaultScripts = '';
+	try {
+		vaultScripts = fs.readdirSync(path.join(vaultRoot, '.clew', 'scripts'))
+			.filter((f) => f.endsWith('.js')).sort()
+			.map((f) => `<script src="${prefix || './'}assets/vault-scripts/${encodeURIComponent(f)}"></script>`)
+			.join('');
+	} catch { /* none */ }
+	const runtime = `<script>window.__clewAssetBase=${JSON.stringify((prefix || './') + 'assets')}</script>`
+		+ vaultScripts
+		+ `<script src="${prefix || './'}assets/site-client.js"></script>`;
+	return out.replace(/<\/body>/i, `${runtime}</body>`);
+}
+
+function copyAssets(outDir, vaultRoot, distDir) {
+	const assets = path.join(outDir, 'assets');
+	const nm = paths.previewAssets;
+	const engineAssets = paths.engineAssets;
+	const jobs = [
+		[path.join(engineAssets, 'preview.css'), 'preview/preview.css'],
+		[path.join(nm, 'mathjax', 'es5', 'tex-svg.js'), 'mathjax/tex-svg.js'],
+		[path.join(nm, 'mermaid', 'dist', 'mermaid.min.js'), 'mermaid/mermaid.min.js'],
+		[path.join(nm, 'highlight.js', 'styles', 'atom-one-dark.min.css'), 'highlight/atom-one-dark.min.css'],
+		[path.join(nm, '@fortawesome', 'fontawesome-free', 'js', 'all.min.js'), 'fontawesome/all.min.js'],
+		[path.join(nm, 'jquery', 'dist', 'jquery.min.js'), 'jquery/jquery.min.js'],
+		[path.join(nm, 'leaflet', 'dist', 'leaflet.js'), 'leaflet/leaflet.js'],
+		[path.join(nm, 'leaflet', 'dist', 'leaflet.css'), 'leaflet/leaflet.css'],
+		[path.join(nm, 'leaflet', 'dist', 'images'), 'leaflet/images'],
+	];
+	for (const [from, to] of jobs) {
+		if (!from || !fs.existsSync(from)) continue;
+		const target = path.join(assets, to);
+		fs.mkdirSync(path.dirname(target), { recursive: true });
+		fs.cpSync(from, target, { recursive: true });
+	}
+	// The static runtime bundle (built to dist/preview-client; readable from
+	// the asar in packaged apps because this runs in the main process).
+	const siteClient = path.join(distDir, 'preview-client', 'site-client.js');
+	if (fs.existsSync(siteClient)) fs.copyFileSync(siteClient, path.join(assets, 'site-client.js'));
+	// Vault scripts.
+	const scriptsDir = path.join(vaultRoot, '.clew', 'scripts');
+	if (fs.existsSync(scriptsDir)) {
+		fs.cpSync(scriptsDir, path.join(assets, 'vault-scripts'), { recursive: true });
+	}
+}
