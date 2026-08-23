@@ -1,11 +1,21 @@
 // Vault registry and filesystem state on the Swift side.
 //
-// Vaults live in the app's Documents directory (visible in the Files app —
-// UIFileSharingEnabled + LSSupportsOpeningDocumentsInPlace) with the demo
-// vault seeded on first launch. The JS layer mirrors the open vault's text
-// files in memory; this class does the real IO: the bulk snapshot at open,
-// write-through persistence, and mtime-diff rescans for external changes
-// (Files app, iCloud sync) that replace the desktop's chokidar watcher.
+// Vaults come from three places, all funneling into the same open/mirror/
+// rescan machinery:
+//   1. The app's Documents directory (seeded demo vault; folders dropped in
+//      via the Files app / Finder sharing — UIFileSharingEnabled).
+//   2. Folders picked with the document picker anywhere Files can reach —
+//      iCloud Drive, Working Copy repos, other providers — held onto with
+//      security-scoped bookmarks and opened in place.
+//   3. (Same as 2 at this layer) whatever the JS recents list re-opens.
+//
+// The JS layer mirrors the open vault's text files in memory; this class
+// does the real IO: the bulk snapshot at open, coordinated write-through
+// persistence, and mtime-diff rescans for external changes (Files app,
+// iCloud sync, git pulls) that replace the desktop's chokidar watcher.
+// iCloud content that isn't local yet ("evicted", shown as .name.icloud
+// placeholders) is requested and awaited for text files at snapshot time,
+// and materialized on demand when the scheme handler serves binaries.
 import Foundation
 
 final class VaultStore {
@@ -13,25 +23,78 @@ final class VaultStore {
 	private(set) var currentVaultPath: String?
 	/// rel path -> mtimeMs at last snapshot/rescan, text files only.
 	private var knownMtimes: [String: Double] = [:]
+	/// The security-scoped URL whose access we currently hold, if any.
+	private var activeScopedURL: URL?
 
-	private let ioQueue = DispatchQueue(label: "org.jmckalex.clew.vault-io", qos: .userInitiated)
+	let ioQueue = DispatchQueue(label: "org.jmckalex.clew.vault-io", qos: .userInitiated)
 
 	static let textExtensions: Set<String> = [
 		"md", "jmd", "bib", "canvas", "json", "css", "js", "mjs", "txt", "csl",
 		"xml", "yaml", "yml", "svg", "html", "gpx", "geojson", "tex", "org", "csv",
 	]
 
-	static let ignoredNames: Set<String> = [".DS_Store", ".git", "node_modules"]
+	static let ignoredNames: Set<String> = [".DS_Store", "node_modules"]
+	private static let bookmarksKey = "vaultBookmarks"
 
 	var documentsURL: URL {
 		FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
 	}
 
+	// MARK: - External-vault bookmarks
+
+	private var bookmarks: [String: Data] {
+		get { (UserDefaults.standard.dictionary(forKey: Self.bookmarksKey) as? [String: Data]) ?? [:] }
+		set { UserDefaults.standard.set(newValue, forKey: Self.bookmarksKey) }
+	}
+
+	/// A folder just picked in the document picker: begin security-scoped
+	/// access and persist a bookmark so relaunches can reopen it in place.
+	/// Folders inside our own Documents need neither.
+	func registerExternalVault(_ url: URL) -> String {
+		guard !url.path.hasPrefix(documentsURL.path) else { return url.path }
+		_ = url.startAccessingSecurityScopedResource()
+		activeScopedURL?.stopAccessingSecurityScopedResource()
+		activeScopedURL = url
+		if let data = try? url.bookmarkData() {
+			var all = bookmarks
+			all[url.path] = data
+			bookmarks = all
+		}
+		return url.path
+	}
+
+	/// Make the vault at `path` reachable (resolving + re-arming the
+	/// security-scoped bookmark for external folders). Returns the real
+	/// current path — bookmarks follow moved/renamed folders — or nil.
+	func resolveAccess(_ path: String) -> String? {
+		let fm = FileManager.default
+		if path.hasPrefix(documentsURL.path) {
+			return fm.fileExists(atPath: path) ? path : nil
+		}
+		if activeScopedURL?.path == path, fm.fileExists(atPath: path) { return path }
+		guard let data = bookmarks[path] else {
+			// No bookmark (debug/simulator paths): plain reachability.
+			return fm.fileExists(atPath: path) ? path : nil
+		}
+		var stale = false
+		guard let url = try? URL(resolvingBookmarkData: data, bookmarkDataIsStale: &stale) else { return nil }
+		activeScopedURL?.stopAccessingSecurityScopedResource()
+		_ = url.startAccessingSecurityScopedResource()
+		activeScopedURL = url
+		var all = bookmarks
+		if stale || url.path != path {
+			all.removeValue(forKey: path)
+			all[url.path] = (try? url.bookmarkData()) ?? data
+			bookmarks = all
+		}
+		return fm.fileExists(atPath: url.path) ? url.path : nil
+	}
+
 	// MARK: - Bootstrap
 
-	/// The vault to auto-open at launch: the last-open one if it still
-	/// exists, else the seeded demo vault (copied from the bundle on first
-	/// run).
+	/// The vault to auto-open at launch: the last-open one if it is still
+	/// reachable, else the seeded demo vault (copied from the bundle on
+	/// first run).
 	func bootstrapVaultPath() -> String {
 		let fm = FileManager.default
 		let demo = documentsURL.appendingPathComponent("Demo Vault", isDirectory: true)
@@ -40,21 +103,28 @@ final class VaultStore {
 			try? fm.copyItem(at: seed, to: demo)
 		}
 		if let last = UserDefaults.standard.string(forKey: "lastVaultPath"),
-			fm.fileExists(atPath: last) {
-			return last
+			let resolved = resolveAccess(last) {
+			return resolved
 		}
 		return demo.path
 	}
 
 	// MARK: - Snapshot
 
-	func openVault(path: String) -> [String: Any] {
-		currentVaultPath = path
-		UserDefaults.standard.set(path, forKey: "lastVaultPath")
+	func openVault(path: String) throws -> [String: Any] {
+		guard let real = resolveAccess(path) else {
+			throw ClewError.vaultUnreachable(path)
+		}
+		currentVaultPath = real
+		UserDefaults.standard.set(real, forKey: "lastVaultPath")
 		knownMtimes = [:]
 		var files: [String: Any] = [:]
-		let root = URL(fileURLWithPath: path, isDirectory: true)
-		walk(root, rel: "") { rel, url, mtimeMs, size in
+		let root = URL(fileURLWithPath: real, isDirectory: true)
+		// Evicted iCloud text files must land before the mirror snapshot;
+		// spend at most this long waiting across the whole walk (whatever
+		// misses the deadline arrives via a later rescan).
+		let downloadDeadline = Date().addingTimeInterval(20)
+		walk(root, rel: "", downloadDeadline: downloadDeadline) { rel, url, mtimeMs, size in
 			if Self.isText(rel) {
 				let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
 				files[rel] = ["text": text, "size": size, "mtimeMs": mtimeMs]
@@ -65,7 +135,7 @@ final class VaultStore {
 		}
 		return [
 			"name": root.lastPathComponent,
-			"path": path,
+			"path": real,
 			"files": files,
 		]
 	}
@@ -74,23 +144,72 @@ final class VaultStore {
 		textExtensions.contains((rel as NSString).pathExtension.lowercased())
 	}
 
-	private func walk(_ dir: URL, rel: String, visit: (String, URL, Double, Int) -> Void) {
+	/// Walk one directory level. Skips dot-entries (except `.clew`, whose
+	/// settings/caches the mirror needs) so a Working Copy vault's .git or
+	/// an Obsidian vault's .obsidian never enters the snapshot. iCloud
+	/// placeholders (.name.icloud) are mapped to their real names; text
+	/// placeholders are downloaded and awaited within the shared deadline.
+	private func walk(_ dir: URL, rel: String, downloadDeadline: Date?,
+		visit: (String, URL, Double, Int) -> Void) {
 		let fm = FileManager.default
 		guard let entries = try? fm.contentsOfDirectory(
 			at: dir, includingPropertiesForKeys: [.isDirectoryKey, .contentModificationDateKey, .fileSizeKey],
 			options: []) else { return }
-		for url in entries {
-			let name = url.lastPathComponent
+		for entry in entries {
+			var url = entry
+			var name = url.lastPathComponent
 			if Self.ignoredNames.contains(name) { continue }
+			if name.hasPrefix(".") {
+				if name.hasSuffix(".icloud"), name.count > ".icloud".count + 1 {
+					// Evicted iCloud item: ".Note.md.icloud" stands in for "Note.md".
+					let realName = String(name.dropFirst().dropLast(".icloud".count))
+					let realURL = dir.appendingPathComponent(realName)
+					try? fm.startDownloadingUbiquitousItem(at: realURL)
+					let realRel = rel.isEmpty ? realName : "\(rel)/\(realName)"
+					if Self.isText(realRel), let deadline = downloadDeadline,
+						Self.waitUntil(deadline: deadline, existing: realURL) {
+						url = realURL
+						name = realName
+					} else {
+						// Not local yet: report a stub so wikilinks resolve; a
+						// rescan delivers the content once iCloud lands it.
+						visit(realRel, realURL, 0, 0)
+						continue
+					}
+				} else if name != ".clew" {
+					continue
+				}
+			}
 			let childRel = rel.isEmpty ? name : "\(rel)/\(name)"
 			let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .contentModificationDateKey, .fileSizeKey])
 			if values?.isDirectory == true {
-				walk(url, rel: childRel, visit: visit)
+				walk(url, rel: childRel, downloadDeadline: downloadDeadline, visit: visit)
 			} else {
 				let mtimeMs = (values?.contentModificationDate?.timeIntervalSince1970 ?? 0) * 1000
 				visit(childRel, url, mtimeMs, values?.fileSize ?? 0)
 			}
 		}
+	}
+
+	private static func waitUntil(deadline: Date, existing url: URL) -> Bool {
+		while Date() < deadline {
+			if FileManager.default.fileExists(atPath: url.path) { return true }
+			Thread.sleep(forTimeInterval: 0.1)
+		}
+		return FileManager.default.fileExists(atPath: url.path)
+	}
+
+	/// Ensure a vault file is local (downloading an evicted iCloud item if
+	/// needed) — used by the scheme handler before serving media/binaries.
+	func materialize(rel: String, timeout: TimeInterval) -> URL? {
+		guard let url = try? resolve(rel) else { return nil }
+		let fm = FileManager.default
+		if fm.fileExists(atPath: url.path) { return url }
+		let placeholder = url.deletingLastPathComponent()
+			.appendingPathComponent("." + url.lastPathComponent + ".icloud")
+		guard fm.fileExists(atPath: placeholder.path) else { return nil }
+		try? fm.startDownloadingUbiquitousItem(at: url)
+		return Self.waitUntil(deadline: Date().addingTimeInterval(timeout), existing: url) ? url : nil
 	}
 
 	// MARK: - File operations (bridge write-through)
@@ -105,11 +224,24 @@ final class VaultStore {
 		return target
 	}
 
-	func write(rel: String, text: String) throws {
-		let url = try resolve(rel)
+	/// Coordinated write — iCloud/file-provider folders need file
+	/// coordination for other participants to see changes promptly.
+	private func coordinatedWrite(to url: URL, _ body: (URL) throws -> Void) throws {
 		try FileManager.default.createDirectory(
 			at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-		try text.write(to: url, atomically: true, encoding: .utf8)
+		var coordinationError: NSError?
+		var writeError: Error?
+		NSFileCoordinator().coordinate(writingItemAt: url, options: .forReplacing,
+			error: &coordinationError) { destination in
+			do { try body(destination) } catch { writeError = error }
+		}
+		if let error = coordinationError { throw error }
+		if let error = writeError { throw error }
+	}
+
+	func write(rel: String, text: String) throws {
+		let url = try resolve(rel)
+		try coordinatedWrite(to: url) { try text.write(to: $0, atomically: true, encoding: .utf8) }
 		knownMtimes[rel] = currentMtimeMs(url)
 	}
 
@@ -134,7 +266,8 @@ final class VaultStore {
 			candidate = dir.appendingPathComponent("\(base) \(counter).\(finalExt)")
 			counter += 1
 		}
-		try data.write(to: candidate)
+		let payload = data
+		try coordinatedWrite(to: candidate) { try payload.write(to: $0) }
 		let vaultBase = URL(fileURLWithPath: currentVaultPath!, isDirectory: true).standardizedFileURL.path
 		let outRel = String(candidate.standardizedFileURL.path.dropFirst(vaultBase.count + 1))
 		return ["rel": outRel, "size": data.count]
@@ -176,7 +309,10 @@ final class VaultStore {
 			var seen = Set<String>()
 			var next: [String: Double] = [:]
 			let root = URL(fileURLWithPath: vault, isDirectory: true)
-			self.walk(root, rel: "") { rel, url, mtimeMs, size in
+			// Rescans stay cheap: newly appearing evicted text gets a short
+			// shared download budget, the rest lands on a later pass.
+			let deadline = Date().addingTimeInterval(5)
+			self.walk(root, rel: "", downloadDeadline: deadline) { rel, url, mtimeMs, size in
 				guard Self.isText(rel) else { return }
 				seen.insert(rel)
 				next[rel] = mtimeMs
@@ -200,6 +336,7 @@ enum ClewError: Error, LocalizedError {
 	case pathEscape(String)
 	case badPayload
 	case unknownMethod(String)
+	case vaultUnreachable(String)
 
 	var errorDescription: String? {
 		switch self {
@@ -207,6 +344,7 @@ enum ClewError: Error, LocalizedError {
 		case .pathEscape(let rel): return "Path escapes vault: \(rel)"
 		case .badPayload: return "Bad payload"
 		case .unknownMethod(let name): return "Unknown bridge method: \(name)"
+		case .vaultUnreachable(let path): return "Cannot access vault at \(path) — re-pick the folder to renew access"
 		}
 	}
 }

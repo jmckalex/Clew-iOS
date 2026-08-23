@@ -65,6 +65,13 @@ final class WebHost: NSObject, ObservableObject {
 		schemeHandler.webView = webView
 
 		webView.load(URLRequest(url: URL(string: "clew-app://app/index.html")!))
+
+		// External writers (iCloud sync landing, Working Copy pulls, Files
+		// app edits) surface mid-session, not just on foregrounding. The
+		// rescan is a cheap mtime walk; timers stop while suspended.
+		Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { [weak self] _ in
+			self?.rescanVault()
+		}
 	}
 
 	func flushEditors() {

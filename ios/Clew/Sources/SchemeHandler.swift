@@ -129,12 +129,18 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 			return renderNote(task, noteRel: noteRel, sid: String(rel[..<slash]))
 		}
 
-		// A raw vault file (images, media, canvas JSON, PDFs …).
-		do {
-			let file = try vaults.resolve(vaultRel)
-			respondFile(task, fileURL: file, rangeHeader: task.request.value(forHTTPHeaderField: "Range"))
-		} catch {
-			fail(task, error.localizedDescription, status: 404)
+		// A raw vault file (images, media, canvas JSON, PDFs …). Evicted
+		// iCloud items are downloaded on demand before serving.
+		let rangeHeader = task.request.value(forHTTPHeaderField: "Range")
+		vaults.ioQueue.async { [weak self] in
+			guard let self else { return }
+			if let file = self.vaults.materialize(rel: vaultRel, timeout: 15) {
+				DispatchQueue.main.async {
+					self.respondFile(task, fileURL: file, rangeHeader: rangeHeader)
+				}
+			} else {
+				DispatchQueue.main.async { self.fail(task, "Not found", status: 404) }
+			}
 		}
 	}
 

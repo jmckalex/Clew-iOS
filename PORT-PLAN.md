@@ -141,7 +141,22 @@ Ranked; items 1–5 are in scope for the first working build, 6–10 tracked:
   toolbar, compact overlay sidebars, long-press context menus, no editor
   autofocus, second-tap/long-press wikilink follow in the editor.
 - **M5 — QA + TestFlight**: study-vault walkthrough, kanban touch drag,
-  PDF embeds, Files-app vault picker, device testing, signing. ⬜ next.
+  PDF embeds, device testing, signing. ⬜ next.
+- **Sync Phase 1 — vault ingestion** ✅ three routes into the app, one
+  machinery: (1) Documents vaults (Files app / Finder sharing, seeded
+  demo); (2) folders picked anywhere Files reaches — iCloud Drive,
+  Working Copy, other providers — opened in place under security-scoped
+  bookmarks that survive relaunches and follow moved folders; (3) recents
+  re-opens. iCloud eviction handled: text placeholders download within a
+  deadline at snapshot (stragglers arrive by rescan), media materializes
+  on demand in the scheme handler. Writes are NSFileCoordinator-
+  coordinated; a 20s foreground rescan surfaces external writers
+  mid-session. The Swift walk now skips dot-directories except `.clew`
+  (a Working Copy vault's .git never enters the snapshot). Verified in
+  simulator: external vault opened in place, dot-dirs excluded, links
+  resolve + render, write-back, external-edit rescan, mid-session vault
+  switching, bootstrap to last vault. The picker UI and real iCloud
+  placeholder flows need device testing.
   Landed early from device feedback: canvas two-finger pan + pinch zoom
   (translated onto the existing wheel handler), canvas web nodes as
   sandboxed iframes (Electron's <webview> was a dead element on iOS),

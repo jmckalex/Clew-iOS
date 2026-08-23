@@ -7,6 +7,7 @@ import UniformTypeIdentifiers
 
 final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 	private let vaults: VaultStore
+	private let folderPicker = FolderPicker()
 
 	init(vaults: VaultStore) {
 		self.vaults = vaults
@@ -26,49 +27,55 @@ final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 		}
 	}
 
+	/// Run a file operation off the main thread (coordinated writes can
+	/// block on file providers) and reply on main with its result or error.
+	private func performIO(_ reply: @escaping (Any?, String?) -> Void, _ work: @escaping () throws -> Any?) {
+		vaults.ioQueue.async {
+			do {
+				let result = try work()
+				DispatchQueue.main.async { reply(result, nil) }
+			} catch {
+				DispatchQueue.main.async { reply(nil, error.localizedDescription) }
+			}
+		}
+	}
+
 	private func handle(method: String, params: [String: Any], webView: WKWebView?,
 		reply: @escaping (Any?, String?) -> Void) throws {
 		switch method {
 		case "vaultBootstrap":
-			reply(["path": vaults.bootstrapVaultPath()], nil)
+			performIO(reply) { ["path": self.vaults.bootstrapVaultPath()] }
 
 		case "vaultOpen":
 			guard let path = params["path"] as? String else { throw ClewError.badPayload }
 			// The snapshot reads every text file — off the main thread.
-			DispatchQueue.global(qos: .userInitiated).async {
-				let result = self.vaults.openVault(path: path)
-				DispatchQueue.main.async { reply(result, nil) }
-			}
+			performIO(reply) { try self.vaults.openVault(path: path) }
 
 		case "write":
 			guard let rel = params["rel"] as? String, let text = params["text"] as? String else {
 				throw ClewError.badPayload
 			}
-			try vaults.write(rel: rel, text: text)
-			reply(nil, nil)
+			performIO(reply) { try self.vaults.write(rel: rel, text: text); return nil }
 
 		case "writeBinary":
 			guard let rel = params["rel"] as? String, let base64 = params["base64"] as? String else {
 				throw ClewError.badPayload
 			}
-			reply(try vaults.writeBinary(rel: rel, base64: base64), nil)
+			performIO(reply) { try self.vaults.writeBinary(rel: rel, base64: base64) }
 
 		case "mkdir":
 			guard let rel = params["rel"] as? String else { throw ClewError.badPayload }
-			try vaults.mkdir(rel: rel)
-			reply(nil, nil)
+			performIO(reply) { try self.vaults.mkdir(rel: rel); return nil }
 
 		case "rename":
 			guard let rel = params["rel"] as? String, let newRel = params["newRel"] as? String else {
 				throw ClewError.badPayload
 			}
-			try vaults.rename(rel: rel, newRel: newRel)
-			reply(nil, nil)
+			performIO(reply) { try self.vaults.rename(rel: rel, newRel: newRel); return nil }
 
 		case "trash":
 			guard let rel = params["rel"] as? String else { throw ClewError.badPayload }
-			try vaults.trash(rel: rel)
-			reply(nil, nil)
+			performIO(reply) { try self.vaults.trash(rel: rel); return nil }
 
 		case "rescan":
 			vaults.rescan { diff in reply(diff ?? [:], nil) }
@@ -94,10 +101,16 @@ final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 			reply(nil, nil)
 
 		case "pickFolder":
-			// External vault folders (Files app / iCloud) — follow-up work:
-			// UIDocumentPicker + security-scoped bookmarks. Until then the
-			// picker reports "not available" and vaults live in Documents.
-			reply(nil, nil)
+			// Anywhere Files can reach: iCloud Drive, Working Copy, other
+			// providers, or the app's own Documents. External folders get a
+			// security-scoped bookmark so relaunches reopen them in place.
+			guard let root = webView?.window?.rootViewController else {
+				return reply(nil, "no view controller to present from")
+			}
+			folderPicker.present(from: root) { url in
+				guard let url else { return reply(nil, nil) }
+				reply(["path": self.vaults.registerExternalVault(url)], nil)
+			}
 
 		default:
 			throw ClewError.unknownMethod(method)
@@ -112,5 +125,31 @@ final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 		guard let root = webView?.window?.rootViewController else { return }
 		controller.popoverPresentationController?.sourceView = webView
 		root.present(controller, animated: true)
+	}
+}
+
+/// Presents the system folder picker and hands back the chosen URL.
+/// Retained by FSBridge; the delegate must outlive the presentation.
+final class FolderPicker: NSObject, UIDocumentPickerDelegate {
+	private var completion: ((URL?) -> Void)?
+
+	func present(from controller: UIViewController, completion: @escaping (URL?) -> Void) {
+		// A second pick while one is open cancels the first cleanly.
+		self.completion?(nil)
+		self.completion = completion
+		let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.folder])
+		picker.delegate = self
+		picker.allowsMultipleSelection = false
+		controller.present(picker, animated: true)
+	}
+
+	func documentPicker(_ picker: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+		completion?(urls.first)
+		completion = nil
+	}
+
+	func documentPickerWasCancelled(_ picker: UIDocumentPickerViewController) {
+		completion?(nil)
+		completion = nil
 	}
 }
