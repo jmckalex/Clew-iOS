@@ -11,6 +11,10 @@ TikZ/MetaPost/Mathematica shell-outs), and the milestone log.
 
 ## Building
 
+Prerequisites: Node 20+, Xcode 16+ (iOS 17 SDK). Everything else is in the
+repo — `vendor/` and `seed-vault/` are committed mirrors, so `../Clew-app`
+is only needed when re-syncing from upstream.
+
 ```sh
 npm install                 # legacy-peer-deps is set in .npmrc
 npm run sync-upstream       # refresh vendor/ + seed-vault from ../Clew-app (optional)
