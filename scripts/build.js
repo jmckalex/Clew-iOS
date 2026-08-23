@@ -103,6 +103,28 @@ const rendererPatches = {
 				"if (!matchMedia('(pointer: coarse)').matches) entry.view.focus();"),
 			loader: 'js',
 		}));
+		// Canvas web nodes use Electron's <webview> (an unknown element in
+		// WKWebView — the spinner never clears). Swap in the sandboxed
+		// <iframe> shape the preview client already uses for canvas embeds,
+		// adapting Electron's did-*-loading events onto load/error. reload()
+		// is absent on iframes, so the existing try/catch falls back to a src
+		// reset. Sites that refuse framing (X-Frame-Options) show blank —
+		// same limitation as embedded canvases in previews.
+		builder.onLoad({ filter: /vendor\/clew\/renderer\/canvas\/node-content\.js$/ }, (args) => ({
+			contents: fs.readFileSync(args.path, 'utf8').replace(
+				"const webview = document.createElement('webview');\n"
+				+ "\t\twebview.className = 'canvas-webview';\n"
+				+ "\t\twebview.setAttribute('partition', 'persist:clew-canvas');\n"
+				+ "\t\twebview.setAttribute('src', node.url);",
+				"const webview = document.createElement('iframe');\n"
+				+ "\t\twebview.className = 'canvas-webview';\n"
+				+ "\t\twebview.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms');\n"
+				+ "\t\twebview.setAttribute('referrerpolicy', 'no-referrer');\n"
+				+ "\t\twebview.setAttribute('src', node.url);\n"
+				+ "\t\twebview.addEventListener('load', () => webview.dispatchEvent(new Event('did-stop-loading')));\n"
+				+ "\t\twebview.addEventListener('error', () => webview.dispatchEvent(new Event('did-fail-load')));"),
+			loader: 'js',
+		}));
 		// WebKit + custom schemes: when the workspace reconciler moves a
 		// freshly inserted preview iframe, the reinserted frame's window
 		// proxy goes stale — its document loads and runs, but postMessage is

@@ -102,6 +102,91 @@ document.addEventListener('contextmenu', (e) => {
 	actions.openWikilink(link.target, {});
 }, true);
 
+// ---- canvas touch navigation ----------------------------------------------
+// Desktop pans/zooms the canvas with the wheel (plain = pan, ctrl = zoom at
+// cursor). Touch: one finger keeps its tool meaning (Pencil draws, finger
+// marquees/drags); TWO fingers navigate — pan with the centroid, pinch to
+// zoom — translated into the synthetic wheel events the canvas's existing
+// #onWheel already understands. When the second finger lands, the
+// in-progress single-finger interaction is cancelled with a synthesized
+// pointercancel so a marquee or stray stroke never commits.
+const canvasTouches = new Map(); // pointerId -> {x, y}
+let gestureViewport = null;
+let gestureLast = null; // {cx, cy, dist}
+
+const viewportOf = (target) => target.closest?.('.canvas-viewport') ?? null;
+
+const syntheticWheel = (viewport, { dx = 0, dy = 0, zoom = null, cx, cy }) => {
+	viewport.dispatchEvent(new WheelEvent('wheel', {
+		bubbles: true,
+		cancelable: true,
+		clientX: cx,
+		clientY: cy,
+		deltaX: dx,
+		deltaY: zoom !== null ? -Math.log(zoom) / 0.01 : dy,
+		ctrlKey: zoom !== null,
+	}));
+};
+
+document.addEventListener('pointerdown', (e) => {
+	if (e.pointerType !== 'touch') return;
+	const viewport = viewportOf(e.target);
+	if (!viewport) return;
+	canvasTouches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+	if (canvasTouches.size === 2) {
+		// Take over: cancel the first finger's tool interaction, swallow the
+		// second finger before the canvas sees it.
+		gestureViewport = viewport;
+		gestureLast = null;
+		cancelPress();
+		e.stopPropagation();
+		e.preventDefault();
+		for (const id of canvasTouches.keys()) {
+			if (id !== e.pointerId) {
+				viewport.dispatchEvent(new PointerEvent('pointercancel', {
+					bubbles: true, pointerId: id, pointerType: 'touch',
+				}));
+			}
+		}
+	}
+}, true);
+
+document.addEventListener('pointermove', (e) => {
+	if (!gestureViewport || !canvasTouches.has(e.pointerId)) return;
+	canvasTouches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+	e.stopPropagation();
+	e.preventDefault();
+	const points = [...canvasTouches.values()];
+	if (points.length < 2) return;
+	const cx = (points[0].x + points[1].x) / 2;
+	const cy = (points[0].y + points[1].y) / 2;
+	const dist = Math.hypot(points[0].x - points[1].x, points[0].y - points[1].y);
+	if (gestureLast) {
+		const dx = gestureLast.cx - cx;
+		const dy = gestureLast.cy - cy;
+		if (dx || dy) syntheticWheel(gestureViewport, { dx, dy, cx, cy });
+		const scale = dist / gestureLast.dist;
+		if (Math.abs(scale - 1) > 0.004) syntheticWheel(gestureViewport, { zoom: scale, cx, cy });
+	}
+	gestureLast = { cx, cy, dist };
+}, true);
+
+const endCanvasTouch = (e) => {
+	if (e.pointerType !== 'touch') return;
+	const wasGesture = gestureViewport && canvasTouches.has(e.pointerId);
+	canvasTouches.delete(e.pointerId);
+	if (wasGesture) {
+		e.stopPropagation();
+		e.preventDefault();
+		gestureLast = null;
+		if (canvasTouches.size < 2) gestureViewport = null;
+	}
+};
+document.addEventListener('pointerup', endCanvasTouch, true);
+document.addEventListener('pointercancel', (e) => {
+	if (e.isTrusted) endCanvasTouch(e);
+}, true);
+
 // ---- device classes -------------------------------------------------------
 document.body.classList.add('is-ios');
 const compact = matchMedia('(max-width: 700px)');
@@ -120,12 +205,13 @@ const BUTTONS = [
 	['＋', 'New note', 'file:new-note'],
 	['⌕', 'Find note', 'nav:quick-switcher'],
 	['⌘', 'Commands', 'app:command-palette'],
-	['¶', 'Read/Edit', 'workspace:toggle-mode'],
+	['👁', 'Read/Edit', 'workspace:toggle-mode'],
 	['ⓘ', 'Panels', 'workspace:toggle-right-sidebar'],
 ];
 
 const toolbar = document.createElement('div');
 toolbar.className = 'ios-toolbar';
+let modeButton = null;
 for (const [glyph, label, command] of BUTTONS) {
 	const button = document.createElement('button');
 	button.className = 'ios-toolbar-button';
@@ -138,9 +224,24 @@ for (const [glyph, label, command] of BUTTONS) {
 		e.preventDefault();
 		runCommand(command);
 	});
+	if (command === 'workspace:toggle-mode') modeButton = button;
 	toolbar.append(button);
 }
 document.body.append(toolbar);
+
+// The mode button mirrors the active note tab: 👁 = "switch to reading",
+// ✎ = "switch to editing"; dimmed when the active tab is not a note.
+const syncModeButton = () => {
+	const tab = workspaceStore.activeTab();
+	const isNote = tab?.kind === 'note';
+	modeButton.style.opacity = isNote ? '' : '0.35';
+	modeButton.textContent = isNote && tab.view?.mode === 'reading' ? '✎' : '👁';
+	modeButton.title = isNote && tab.view?.mode === 'reading' ? 'Edit' : 'Read';
+};
+for (const event of ['layout-changed', 'active-changed']) {
+	workspaceStore.on(event, syncModeButton);
+}
+syncModeButton();
 
 // ---- compact-mode sidebar behavior ---------------------------------------
 // Sidebars overlay the workspace on phones (ios.css); tapping the workspace

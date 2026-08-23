@@ -141,8 +141,12 @@ Ranked; items 1–5 are in scope for the first working build, 6–10 tracked:
   toolbar, compact overlay sidebars, long-press context menus, no editor
   autofocus, second-tap/long-press wikilink follow in the editor.
 - **M5 — QA + TestFlight**: study-vault walkthrough, kanban touch drag,
-  canvas gestures (pinch zoom/two-finger pan), PDF embeds, Files-app
-  vault picker, device testing, signing. ⬜ next.
+  PDF embeds, Files-app vault picker, device testing, signing. ⬜ next.
+  Landed early from device feedback: canvas two-finger pan + pinch zoom
+  (translated onto the existing wheel handler), canvas web nodes as
+  sandboxed iframes (Electron's <webview> was a dead element on iOS),
+  state-aware read/edit toggle in the toolbar (👁/✎). Apple Pencil drawing
+  confirmed working on a real iPad.
 
 ### WebKit findings worth keeping
 

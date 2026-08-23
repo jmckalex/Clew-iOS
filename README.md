@@ -53,5 +53,4 @@ xcrun simctl spawn booted log stream --predicate 'eventMessage CONTAINS "CLEWJS"
 TikZ/MetaPost/Mathematica compile (cached SVGs from desktop display when
 the hash inputs match — MetaPost verified), LaTeX/PDF export, site export,
 vault plugins (engine/app surfaces), external vault folders via the Files
-picker, kanban drag on touch, canvas web nodes (`<webview>` → iframe swap
-pending), PDF embeds inside previews.
+picker, kanban drag on touch, PDF embeds inside previews.
