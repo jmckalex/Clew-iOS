@@ -1,0 +1,10 @@
+{
+	"id": "header",
+	"name": "Note Headers",
+	"version": "1.0.0",
+	"description": "Banner headers for notes: set header-image, header-title, and header-subtitle in a note's frontmatter and reading mode opens with a full-width image banner.",
+	"apiVersion": 1,
+	"surfaces": {
+		"preview": "preview.js"
+	}
+}

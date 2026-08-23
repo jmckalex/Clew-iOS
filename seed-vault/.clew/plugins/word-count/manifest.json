@@ -1,0 +1,8 @@
+{
+	"id": "word-count",
+	"name": "Word Count",
+	"version": "1.0.0",
+	"description": "⌥⌘W (or the palette) shows the active note's word, character, and line counts — ten lines of app-surface plugin, meant to be copied.",
+	"apiVersion": 1,
+	"surfaces": { "app": "app.js" }
+}

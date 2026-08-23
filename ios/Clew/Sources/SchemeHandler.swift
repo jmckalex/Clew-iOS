@@ -110,8 +110,25 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 		}
 
 		if rel.hasPrefix("__clew_plugin_app__/") {
-			// Plugin app surfaces are not yet enabled on iOS.
-			return fail(task, "plugins not available", status: 404)
+			// App-surface plugin code, wrapped so the body receives its API
+			// object as `clew` (port of protocol.js — the app CSP has no
+			// unsafe-eval, so plugin code must load as a real script). Served
+			// only for plugins currently enabled in vault-settings.json.
+			let parts = rel.split(separator: "/").map(String.init)
+			guard parts.count == 3, parts[2].hasSuffix(".js") else {
+				return fail(task, "bad plugin path", status: 404)
+			}
+			let id = String(parts[2].dropLast(3))
+			guard let plugin = enabledPlugins().first(where: { $0.id == id }),
+				let appFile = plugin.surfaces["app"],
+				let vault = vaults.currentVaultPath,
+				let code = try? String(contentsOf: URL(fileURLWithPath: vault)
+					.appendingPathComponent(".clew/plugins/\(id)/\(appFile)"), encoding: .utf8) else {
+				return fail(task, "not an enabled plugin", status: 403)
+			}
+			let idJson = String(data: try! JSONEncoder().encode(id), encoding: .utf8)!
+			let wrapped = "(function (clew) {\n'use strict';\n\(code)\n})(window.__clewPluginApi?.[\(idJson)]);"
+			return respondData(task, data: Data(wrapped.utf8), mime: "text/javascript")
 		}
 
 		// Everything else: /<sid>/<vault path>.
@@ -191,8 +208,26 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 		}
 	}
 
+	/// Enabled plugins (vault-settings.json `plugins` array) with their
+	/// manifest surfaces — the Swift twin of main/plugins.js.
+	private func enabledPlugins() -> [(id: String, surfaces: [String: String])] {
+		guard let vault = vaults.currentVaultPath else { return [] }
+		let base = URL(fileURLWithPath: vault)
+		guard let settingsData = try? Data(contentsOf: base.appendingPathComponent(".clew/vault-settings.json")),
+			let settings = try? JSONSerialization.jsonObject(with: settingsData) as? [String: Any],
+			let enabled = settings["plugins"] as? [String] else { return [] }
+		return enabled.compactMap { id in
+			guard id.range(of: #"^[a-z0-9][a-z0-9-]{0,63}$"#, options: .regularExpression) != nil,
+				let manifestData = try? Data(contentsOf: base.appendingPathComponent(".clew/plugins/\(id)/manifest.json")),
+				let manifest = try? JSONSerialization.jsonObject(with: manifestData) as? [String: Any],
+				let surfaces = manifest["surfaces"] as? [String: String] else { return nil }
+			return (id: id, surfaces: surfaces)
+		}
+	}
+
 	/// Port of protocol.js script injection: the note API into <head>, the
-	/// client bridge + vault scripts before </body>.
+	/// client bridge + vault scripts + enabled preview-surface plugin
+	/// scripts before </body>.
 	private func injectClientScripts(into html: String, sid: String) -> String {
 		var out = html
 		if let headRange = out.range(of: "<head[^>]*>", options: [.regularExpression, .caseInsensitive]) {
@@ -206,6 +241,11 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 					let encoded = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
 					tags += "<script src=\"/\(sid)/.clew/scripts/\(encoded)\"></script>"
 				}
+			}
+		}
+		for plugin in enabledPlugins() {
+			if let previewFile = plugin.surfaces["preview"] {
+				tags += "<script src=\"/\(sid)/.clew/plugins/\(plugin.id)/\(previewFile)\"></script>"
 			}
 		}
 		if let bodyRange = out.range(of: "</body>", options: [.caseInsensitive, .backwards]) {

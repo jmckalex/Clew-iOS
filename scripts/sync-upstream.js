@@ -42,10 +42,19 @@ for (const dir of ['renderer', 'shared', 'preview-client', 'engine', 'main']) {
 	copyDir(path.join(upstream, 'src', dir), path.join(root, 'vendor', 'clew', dir));
 }
 
-// The starter vault seeded into Documents on first launch. .clew caches and
-// state stay behind — the app regenerates them.
-copyDir(path.join(upstream, 'demo-vault'), path.join(root, 'seed-vault'),
-	(src) => !src.includes(`${path.sep}.clew`));
+// The starter vault seeded into Documents on first launch. The demo vault's
+// DURABLE .clew state ships with it — vault-settings.json (the noteApi gate
+// and enabled plugins) and the sample plugins/scripts/snippets are part of
+// what the vault documents. Device-local state (caches, engine dir,
+// workspace layout) stays behind — the app regenerates those.
+const CLEW_STATE_EXCLUDED = new Set(['cache', 'cache.json', 'engine', 'workspace.json']);
+copyDir(path.join(upstream, 'demo-vault'), path.join(root, 'seed-vault'), (src) => {
+	const marker = `${path.sep}.clew${path.sep}`;
+	const at = src.indexOf(marker);
+	if (at === -1) return true;
+	const inside = src.slice(at + marker.length).split(path.sep)[0];
+	return !CLEW_STATE_EXCLUDED.has(inside);
+});
 
 console.log('Synced vendor/jmarkdown, vendor/clew, and seed-vault from', upstream);
 
