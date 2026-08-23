@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang='{{Lang}}'>
+<head>
+	<meta charset="utf-8">
+	<title>{{Title}}</title>
+	{{#MathJax.configuration}}
+	<script>
+		{{{MathJax.configuration}}};
+	</script>
+	{{/MathJax.configuration}}
+	{{#Fontawesome}}
+	<script src="{{{Fontawesome}}}" crossorigin="anonymous"></script>
+	{{/Fontawesome}}
+	<style>
+	{{{Jmarkdown_css}}}
+	</style>
+	{{#CSS}}
+	<link rel="stylesheet" href="{{{.}}}">
+	{{/CSS}}
+	{{#MathJax.src}}
+	<script src="{{{MathJax.src}}}"></script>
+	{{/MathJax.src}}
+	{{#Highlight_src}}
+	<link rel="stylesheet" href="{{{Highlight_src}}}">
+	{{/Highlight_src}}
+	{{#Mermaid}}
+	<script src="{{{Mermaid}}}"></script>
+	{{/Mermaid}}
+	{{#Script}}
+	<script src="{{{.}}}"></script>
+	{{/Script}}
+	<script src="https://code.jquery.com/jquery-3.7.1.min.js"
+		integrity="sha256-/JqT3SQfawRcv/BIHPThkBvs0OEvtFFmqPF/lYI/Cxo="
+		crossorigin="anonymous"></script>
+	{{^Biblify.resolve}}
+	<script src="https://jmckalex.org/prez/libs/original2/js/citation.min.js"></script>
+	<script src="https://jmckalex.org/prez/libs/original2/js/biblify.js"></script>
+	{{/Biblify.resolve}}
+	{{#Custom_elements}}
+	{{{.}}}
+	{{/Custom_elements}}
+	{{#HTML_header}}
+	{{{.}}}
+	{{/HTML_header}}
+</head>
+<body class='{{Body_classes}}'>
+{{{Content}}}
+{{#HTML_footer}}
+{{{.}}}
+{{/HTML_footer}}
+{{#Biblify_configuration}}
+<script>
+{{{.}}}
+</script>
+{{/Biblify_configuration}}
+</body>
+</html>

@@ -1,0 +1,48 @@
+/* Light theme. Same token set as dark.css. */
+body[data-theme='light'] {
+	--clew-bg-primary: #ffffff;
+	--clew-bg-secondary: #f2f3f5;
+	--clew-bg-tertiary: #e9eaee;
+	--clew-border: #d4d5d9;
+	--clew-text-normal: #222222;
+	--clew-text-muted: #6a6a6a;
+	--clew-text-faint: #9a9a9a;
+	--clew-text-on-accent: #ffffff;
+	--clew-accent: #6c5fb0;
+	--clew-accent-hover: #5747a5;
+	--clew-selection: rgba(108, 95, 176, 0.22);
+	--clew-active-line: rgba(0, 0, 0, 0.03);
+	--clew-hover: rgba(0, 0, 0, 0.05);
+	--clew-active-item: rgba(108, 95, 176, 0.16);
+	--clew-scrollbar: rgba(0, 0, 0, 0.22);
+	--clew-danger: #c0392b;
+	--clew-search-match: rgba(240, 200, 70, 0.45);
+	--clew-search-match-selected: rgba(240, 180, 40, 0.75);
+	--clew-shadow: rgba(0, 0, 0, 0.18);
+
+	--clew-heading: #3a3268;
+	--clew-formatting: #b0b0b0;
+	--clew-link: #5b4fb8;
+	--clew-code: #9a6a2e;
+	--clew-quote: #4e7a4e;
+
+	/* canvas */
+	--clew-canvas-bg: #f4f2ef;
+	--clew-canvas-dot: #dfdcd7;
+	--clew-canvas-node-bg: #fdfcfa;
+	--clew-canvas-node-border: #c9c5be;
+	--clew-canvas-edge: #8a867f;
+	--clew-canvas-ink: #3b3935;
+	--clew-canvas-1: #e93147;
+	--clew-canvas-2: #ec7500;
+	--clew-canvas-3: #e0ac00;
+	--clew-canvas-4: #08b94e;
+	--clew-canvas-5: #00bfbc;
+	--clew-canvas-6: #7852ee;
+
+	--clew-ui-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+	--clew-editor-font: 'iA Writer Quattro', 'Avenir Next', -apple-system, BlinkMacSystemFont, sans-serif;
+	--clew-mono-font: 'SF Mono', Menlo, Consolas, monospace;
+	--clew-editor-font-size: 16px;
+	--clew-editor-line-width: 44em;
+}

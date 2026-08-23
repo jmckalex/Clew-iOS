@@ -1,0 +1,49 @@
+/* Dark theme (default). Every color in the app resolves to these tokens. */
+body[data-theme='dark'] {
+	--clew-bg-primary: #1e1e1e;
+	--clew-bg-secondary: #262626;
+	--clew-bg-tertiary: #2e2e2e;
+	--clew-border: #3f3f3f;
+	--clew-text-normal: #dadada;
+	--clew-text-muted: #9a9a9a;
+	--clew-text-faint: #6f6f6f;
+	--clew-text-on-accent: #ffffff;
+	--clew-accent: #8b7ec8;
+	--clew-accent-hover: #a598db;
+	--clew-selection: rgba(139, 126, 200, 0.30);
+	--clew-active-line: rgba(255, 255, 255, 0.035);
+	--clew-hover: rgba(255, 255, 255, 0.055);
+	--clew-active-item: rgba(139, 126, 200, 0.22);
+	--clew-scrollbar: rgba(255, 255, 255, 0.18);
+	--clew-danger: #e06c75;
+	--clew-search-match: rgba(230, 190, 80, 0.35);
+	--clew-search-match-selected: rgba(230, 190, 80, 0.65);
+	--clew-shadow: rgba(0, 0, 0, 0.5);
+
+	/* editor content tokens */
+	--clew-heading: #e6e0ff;
+	--clew-formatting: #7a7a7a;
+	--clew-link: #9d8fe0;
+	--clew-code: #c8a06c;
+	--clew-quote: #a0b8a0;
+
+	/* canvas */
+	--clew-canvas-bg: #191919;
+	--clew-canvas-dot: #2a2a2a;
+	--clew-canvas-node-bg: #212121;
+	--clew-canvas-node-border: #3f3f3f;
+	--clew-canvas-edge: #8a8a8a;
+	--clew-canvas-ink: #d8d8d8;
+	--clew-canvas-1: #fb464c;
+	--clew-canvas-2: #e9973f;
+	--clew-canvas-3: #e0de71;
+	--clew-canvas-4: #44cf6e;
+	--clew-canvas-5: #53dfdd;
+	--clew-canvas-6: #a882ff;
+
+	--clew-ui-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+	--clew-editor-font: 'iA Writer Quattro', 'Avenir Next', -apple-system, BlinkMacSystemFont, sans-serif;
+	--clew-mono-font: 'SF Mono', Menlo, Consolas, monospace;
+	--clew-editor-font-size: 16px;
+	--clew-editor-line-width: 44em;
+}

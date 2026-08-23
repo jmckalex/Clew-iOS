@@ -1,0 +1,15 @@
+{
+  "name": "jmarkdown-pdf-maker",
+  "version": "1.0.0",
+  "description": "A utility for exporting jmarkdown files to PDF",
+  "main": "print.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "J. McKenzie Alexander",
+  "license": "ISC",
+  "dependencies": {
+    "browser-sync": "^3.0.4",
+    "puppeteer": "^24.18.0"
+  }
+}

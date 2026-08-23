@@ -1,0 +1,44 @@
+{
+    "type": "module",
+    "bin": {
+        "jmarkdown": "./src/index.js"
+    },
+    "name": "jmarkdown",
+    "version": "1.0.0",
+    "main": "./src/index.js",
+    "scripts": {
+        "test": "sh tests/run-all.sh",
+        "test:update": "sh tests/run-all.sh --update",
+        "test:latex": "sh tests/latex-compile/run.sh"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "ISC",
+    "description": "",
+    "dependencies": {
+        "@octokit/rest": "^21.1.0",
+        "acorn": "^8.14.1",
+        "algebra.js": "^0.2.6",
+        "cheerio": "^1.0.0",
+        "chokidar": "^5.0.0",
+        "citation-js": "^0.7.22",
+        "commander": "^13.1.0",
+        "highlight.js": "^11.11.1",
+        "js-beautify": "^1.15.3",
+        "marked": "^16.2.1",
+        "marked-alert": "^2.1.2",
+        "marked-directive": "^1.0.7",
+        "marked-emoji": "^1.4.3",
+        "marked-extended-tables": "^1.1.0",
+        "marked-footnote": "^1.2.4",
+        "marked-gfm-heading-id": "^4.1.1",
+        "marked-highlight": "^2.2.1",
+        "marked-more-lists": "^1.0.0",
+        "marked-token-position": "^2.0.0",
+        "mathjs": "^14.4.0",
+        "morphdom": "^2.7.8",
+        "mustache": "^4.2.0",
+        "seedrandom": "^3.0.5",
+        "sync-request": "^6.1.0"
+    }
+}

@@ -1,0 +1,83 @@
+// The iOS render worker: jmarkdown inside a Web Worker.
+//
+// Mirrors the desktop pipeline exactly (render-service.js forks the engine's
+// watch-worker.js), with the process boundary swapped for a Worker boundary:
+//
+//   desktop: fork(watch-worker.js, {cwd: <vault>/.clew/engine}) + real fs
+//   iOS:     new Worker(engine-worker.js, {type:'module'}) + vfs snapshot
+//
+// Same one-shot discipline: ONE build per worker, then the host terminates
+// it (a build dirties the marked singleton, `global`, and String.prototype —
+// the reason the desktop app never reuses a worker either). The host keeps a
+// pre-warmed standby, so worker startup cost is off the critical path.
+//
+// Protocol (postMessage):
+//   → {type:'init', files, env, cwd}   install vfs snapshot, import engine
+//   ← {type:'ready'}
+//   → {type:'build', file, options, files?}  options: {to, output, fragment, normalSyntax}
+//   ← {type:'done', output, html} | {type:'error', message, stack}
+//
+// `files` maps absolute posix paths to text: the note, every vault text
+// file wikiembeds/queries may read, `<cwd>/.jmarkdown/config.json`, and the
+// template assets under /engine. Binary vault content never enters the
+// worker — media renders as URLs the preview iframe resolves.
+//
+// Clew's engine extensions are pre-bundled here and served to the engine's
+// config-driven loader through __jmdExtensionRegistry (the build patches
+// metadata-header.js to consult it before dynamic import). The config the
+// host generates references exactly these paths.
+
+import './shims/globals.js';
+import { vfs } from './shims/vfs.js';
+import * as wikilinks from '../../vendor/clew/engine/wikilinks.js';
+import * as obsidianFences from '../../vendor/clew/engine/obsidian-fences.js';
+import * as queryFences from '../../vendor/clew/engine/query-fences.js';
+
+globalThis.__jmdExtensionRegistry = {
+	'/engine-assets/wikilinks.js': wikilinks,
+	'/engine-assets/obsidian-fences.js': obsidianFences,
+	'/engine-assets/query-fences.js': queryFences,
+};
+
+let enginePromise = null;
+
+async function init({ files, env, cwd }) {
+	vfs.reset();
+	vfs.install(files);
+	Object.assign(process.env, env);
+	process.chdir(cwd);
+	// Importing the engine loads the module graph and reads ./.jmarkdown/
+	// config.json (relative to cwd) — which is why the snapshot and cwd must
+	// land first. Nothing builds until processFile().
+	// The build pins import.meta.url to file:///engine/… so the engine's
+	// 'Jmarkdown app directory' (recomputed per build) resolves template and
+	// css reads into the vfs's /engine directory.
+	enginePromise = import('../../vendor/jmarkdown/src/index.js');
+	await enginePromise;
+	self.postMessage({ type: 'ready' });
+}
+
+async function build({ file, options, files }) {
+	try {
+		if (files) vfs.install(files);
+		const { processFile } = await enginePromise;
+		const { outFile } = await processFile(file, options);
+		const html = vfs.writes.get(outFile) ?? vfs.read(outFile);
+		self.postMessage({ type: 'done', output: outFile, html: String(html) });
+	} catch (err) {
+		self.postMessage({
+			type: 'error',
+			message: String(err?.message ?? err),
+			stack: err?.stack,
+		});
+	}
+	// One-shot: the host terminates this worker after the result lands.
+}
+
+self.onmessage = (event) => {
+	const msg = event.data;
+	if (msg?.type === 'init') init(msg).catch((err) => self.postMessage({
+		type: 'error', message: `engine failed to load: ${String(err?.message ?? err)}`, stack: err?.stack,
+	}));
+	if (msg?.type === 'build') build(msg);
+};

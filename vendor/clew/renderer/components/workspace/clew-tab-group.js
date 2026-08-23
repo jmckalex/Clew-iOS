@@ -1,0 +1,139 @@
+// <clew-tab-group>: a leaf of the layout tree — tab bar plus the active
+// tab's content. Also the drop target for tab drags (center = move here,
+// edges = split).
+import { ClewElement } from '../base/clew-element.js';
+import { workspaceStore } from '../../state/workspace-store.js';
+import { createTab } from '../../workspace/tree.js';
+import './clew-tab-bar.js';
+import './clew-editor-view.js';
+import './clew-preview-view.js';
+import '../views/clew-graph-view.js';
+import '../views/clew-settings-view.js';
+import '../views/clew-file-view.js';
+import '../views/clew-canvas-view.js';
+
+class ClewTabGroup extends ClewElement {
+	groupId = null;
+	#renderedTabId = null;
+	#renderedPath = null;
+	#renderedMode = null;
+
+	subscribe() {
+		this.listen(workspaceStore, 'layout-changed', () => this.render());
+		this.addEventListener('pointerdown', this.#onPointerDown);
+	}
+
+	cleanup() {
+		this.removeEventListener('pointerdown', this.#onPointerDown);
+	}
+
+	#onPointerDown = () => {
+		if (this.groupId) workspaceStore.setActiveGroup(this.groupId);
+	};
+
+	get group() {
+		const found = workspaceStore.allGroups().find((g) => g.id === this.groupId);
+		return found ?? null;
+	}
+
+	render() {
+		const group = this.group;
+		if (!group) return; // about to be reconciled away
+
+		let bar = this.querySelector(':scope > clew-tab-bar');
+		let body = this.querySelector(':scope > .tab-body');
+		if (!bar) {
+			bar = document.createElement('clew-tab-bar');
+			body = document.createElement('div');
+			body.className = 'tab-body';
+			const overlay = document.createElement('div');
+			overlay.className = 'drop-overlay';
+			this.replaceChildren(bar, body, overlay);
+		}
+		bar.groupId = this.groupId;
+		bar.render?.();
+
+		const active = group.tabs.find((t) => t.id === group.activeTabId) ?? null;
+		if (!active) {
+			this.#renderedTabId = null;
+			this.#renderedPath = null;
+			this.#renderedMode = null;
+			body.replaceChildren(this.#emptyState());
+			return;
+		}
+		const mode = active.view?.mode ?? 'source';
+		if (active.id === this.#renderedTabId && active.path === this.#renderedPath
+			&& mode === this.#renderedMode) return;
+		this.#renderedTabId = active.id;
+		this.#renderedPath = active.path ?? null;
+		this.#renderedMode = mode;
+
+		if (active.kind === 'note' && mode === 'reading') {
+			const view = document.createElement('clew-preview-view');
+			view.tabId = active.id;
+			view.path = active.path;
+			body.replaceChildren(view);
+		} else if (active.kind === 'note') {
+			const view = document.createElement('clew-editor-view');
+			view.tabId = active.id;
+			view.path = active.path;
+			body.replaceChildren(view);
+		} else if (active.kind === 'file') {
+			const view = document.createElement('clew-file-view');
+			view.tabId = active.id;
+			view.path = active.path;
+			body.replaceChildren(view);
+		} else if (active.kind === 'canvas') {
+			const view = document.createElement('clew-canvas-view');
+			view.tabId = active.id;
+			view.path = active.path;
+			body.replaceChildren(view);
+		} else if (active.kind === 'graph') {
+			body.replaceChildren(document.createElement('clew-graph-view'));
+		} else if (active.kind === 'settings') {
+			body.replaceChildren(document.createElement('clew-settings-view'));
+		} else {
+			body.replaceChildren(this.#emptyState());
+		}
+	}
+
+	refreshActive() {
+		this.render();
+	}
+
+	#emptyState() {
+		const el = document.createElement('div');
+		el.className = 'empty-state';
+		const button = document.createElement('button');
+		button.textContent = 'Create new note';
+		button.addEventListener('click', () => {
+			document.querySelector('clew-file-explorer')?.createNote?.();
+		});
+		const hint = document.createElement('p');
+		hint.textContent = 'No file is open';
+		el.append(hint, button);
+		return el;
+	}
+
+	// ---- drop-target API used by tab-drag.js ----
+
+	showDrop(region) {
+		this.dataset.drop = region; // 'center' | 'left' | 'right' | 'top' | 'bottom'
+	}
+
+	clearDrop() {
+		delete this.dataset.drop;
+	}
+
+	acceptDrop(region, tabId) {
+		this.clearDrop();
+		if (region === 'center') {
+			workspaceStore.moveTab(tabId, this.groupId, Infinity);
+		} else {
+			workspaceStore.splitWithTab(this.groupId, region, tabId);
+		}
+	}
+}
+
+customElements.define('clew-tab-group', ClewTabGroup);
+export { createTab };

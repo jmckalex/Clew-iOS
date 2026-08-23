@@ -1,0 +1,190 @@
+{
+	"nodes": [
+		{
+			"id": "a1b2c3d4e5f60718",
+			"type": "group",
+			"x": -60,
+			"y": -80,
+			"width": 1020,
+			"height": 620,
+			"label": "The vault, embedded"
+		},
+		{
+			"id": "0f1e2d3c4b5a6978",
+			"type": "file",
+			"x": 0,
+			"y": 0,
+			"width": 440,
+			"height": 480,
+			"file": "Welcome.md"
+		},
+		{
+			"id": "1122334455667788",
+			"type": "text",
+			"x": 500,
+			"y": 0,
+			"width": 380,
+			"height": 430,
+			"color": "6",
+			"text": "# Cards\nCards render *markdown*: **intense**, /italic/, ==highlight==, `code`,\nreal math $e^{i\\pi} + 1 = 0$,\n- [x] task lists\n- [ ] with checkboxes\n\n> [!NOTE]\n> Alerts work too \u2014 cards are rendered by the engine itself.\n\nDouble-click to edit the raw text; [[Canvas]] links work when the card is engaged."
+		},
+		{
+			"id": "8877665544332211",
+			"type": "text",
+			"x": 500,
+			"y": 330,
+			"width": 380,
+			"height": 130,
+			"color": "4",
+			"text": "Connections start from the side dots of a hovered node. Double-click a connection to give it a label."
+		},
+		{
+			"id": "99aabbccddeeff00",
+			"type": "file",
+			"x": 1080,
+			"y": -80,
+			"width": 380,
+			"height": 300,
+			"file": "Attachments/clew-gradient.png"
+		},
+		{
+			"id": "00ffeeddccbbaa99",
+			"type": "file",
+			"x": 1080,
+			"y": 280,
+			"width": 440,
+			"height": 540,
+			"file": "Attachments/sample.pdf"
+		},
+		{
+			"id": "5a5b5c5d5e5f5061",
+			"type": "link",
+			"x": 0,
+			"y": 620,
+			"width": 520,
+			"height": 400,
+			"url": "https://jsoncanvas.org"
+		},
+		{
+			"id": "6162636465666768",
+			"type": "text",
+			"x": 600,
+			"y": 700,
+			"width": 400,
+			"height": 160,
+			"color": "2",
+			"text": "This canvas is a .canvas file in the JSON Canvas format, so it opens in Obsidian too. The drawing and the shapes ride along in a \"clew\" extension key."
+		}
+	],
+	"edges": [
+		{
+			"id": "e1e2e3e4e5e6e7e8",
+			"fromNode": "1122334455667788",
+			"fromSide": "left",
+			"toNode": "0f1e2d3c4b5a6978",
+			"toSide": "right",
+			"label": "a live preview"
+		},
+		{
+			"id": "f1f2f3f4f5f6f7f8",
+			"fromNode": "8877665544332211",
+			"fromSide": "right",
+			"toNode": "00ffeeddccbbaa99",
+			"toSide": "left"
+		},
+		{
+			"id": "d1d2d3d4d5d6d7d8",
+			"fromNode": "1122334455667788",
+			"fromSide": "right",
+			"toNode": "99aabbccddeeff00",
+			"toSide": "left",
+			"label": "images too"
+		}
+	],
+	"clew": {
+		"strokes": [
+			{
+				"id": "abcd0001abcd0001",
+				"color": "1",
+				"width": 3.5,
+				"points": [
+					498,
+					160,
+					530,
+					190,
+					575,
+					200,
+					640,
+					196,
+					700,
+					185,
+					760,
+					190,
+					810,
+					205,
+					860,
+					200,
+					884,
+					180
+				]
+			},
+			{
+				"id": "abcd0002abcd0002",
+				"color": "5",
+				"width": 3.5,
+				"points": [
+					940,
+					560,
+					960,
+					540,
+					990,
+					535,
+					1015,
+					548,
+					1025,
+					575,
+					1012,
+					600,
+					985,
+					610,
+					955,
+					602,
+					940,
+					580,
+					942,
+					562
+				]
+			}
+		],
+		"shapes": [
+			{
+				"id": "beef0001beef0001",
+				"kind": "rect",
+				"x": 480,
+				"y": 300,
+				"width": 420,
+				"height": 190,
+				"color": "4"
+			},
+			{
+				"id": "beef0002beef0002",
+				"kind": "ellipse",
+				"x": 580,
+				"y": 520,
+				"width": 220,
+				"height": 110,
+				"color": "3",
+				"label": "drawn shapes"
+			},
+			{
+				"id": "beef0003beef0003",
+				"kind": "arrow",
+				"x": 690,
+				"y": 520,
+				"width": -60,
+				"height": -50,
+				"color": "3"
+			}
+		]
+	}
+}

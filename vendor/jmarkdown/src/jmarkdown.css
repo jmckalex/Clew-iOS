@@ -1,0 +1,338 @@
+pre code.hljs {
+	tab-size: 2;
+	-moz-tab-size: 2;
+}
+
+.marked-emoji-img {
+	height: 1em;  /* Match line height */
+	vertical-align: -0.15em;  /* Fine-tune alignment */
+}
+
+.markdown-alert-title {
+	margin-top: 0pt;
+	margin-bottom: 3pt;
+}
+
+.markdown-alert svg.octicon {
+	margin: 3pt;
+	vertical-align: middle;
+}
+
+.markdown-demo-container {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	grid-template-areas:
+		"codelabel outlabel"
+		"code      out";
+	column-gap: 12pt;
+	row-gap: 4px;
+	align-items: start;
+}
+
+.markdown-demo-code-label   { grid-area: codelabel; }
+.markdown-demo-output-label { grid-area: outlabel; }
+.markdown-demo-markdown     { grid-area: code; min-width: 0; }
+.markdown-demo-parsed       { grid-area: out;  min-width: 0; }
+
+/* A grid track's implicit min-width is `auto`, so a <pre> of long code lines
+   would expand its column and squeeze the other; min-width:0 (above) plus
+   overflow-x lets each column keep its 1fr share and scroll instead. */
+.markdown-demo-container pre {
+	height: auto;
+	width: 100%;
+	max-width: 100%;
+	margin: 0pt;
+	overflow-x: auto;
+	box-sizing: border-box;
+}
+
+/* The source (left) pane sits flush — no panel padding eating its width. */
+.markdown-demo-markdown pre {
+	padding: 0;
+}
+
+.markdown-demo-container code {
+	height: auto;
+	display: block;
+	box-sizing: border-box;
+}
+
+/* Mobile: stack the source above the output, each under its own label. */
+@media (max-width: 720px) {
+	.markdown-demo-container {
+		grid-template-columns: 1fr;
+		grid-template-areas:
+			"codelabel"
+			"code"
+			"outlabel"
+			"out";
+	}
+	.markdown-demo-output-label {
+		margin-top: 12px;
+	}
+}
+
+table.game caption {
+	caption-side: bottom;
+	padding-top: 10px;
+	text-align: center;
+	color: inherit;
+}
+
+table.game {
+	border-collapse: collapse;
+}
+
+table.game td:not(.strategyLabels) {
+	border: 1px solid black;
+	border-collapse: collapse;
+	text-align: center;
+}
+
+table.game tr:first-child td:first-child {
+	border: none;
+}
+
+table.game td.columnLabel {
+	border: none;
+}
+
+table.game .caption {
+	padding: 6pt;
+}
+
+table.game td.rowLabel {
+	border: none;
+	vertical-align: middle;
+	padding-right: 6pt;
+}
+
+table.game td.strategyLabels {
+	border: none;
+}
+
+table.game tr.no-border td {
+	border: none;
+}
+
+table.game td.rowStrategies {
+	text-align: left;
+	padding-right: 12px;
+}
+
+table.game td.columnStrategies {
+	text-align: center;
+	min-width: 4em;
+}
+
+table.game td.payoffs {
+	padding-top: 6px;
+	padding-bottom: 6px;
+}
+
+table.game.playerLabels td {
+	border: 1px solid black !important;
+	text-align: center !important;
+}
+
+table.game.playerLabels tr:first-child td {
+	border: none !important;
+}
+
+table.game.playerLabels tr:nth-child(2) td {
+	border: none !important;
+}
+
+table.game.playerLabels tr:nth-child(3) td:first-child {
+	border: none !important;
+	vertical-align: middle;
+}
+
+table.game.playerLabels tr:nth-child(3) td:nth-child(2) {
+	border: none !important;
+}
+
+table.game td.caption p {
+	margin: 0pt;
+}
+
+table.game td.rowLabel p {
+	margin: 0pt;
+}
+
+table.game td.columnLabel p {
+	margin: 0pt;
+}
+
+.markdown-alert {
+	padding: 0.5rem 0.5rem;
+	margin-bottom: 16px;
+	border-left: .25em solid;
+}
+
+.markdown-alert-note {
+	border-color: #0969DA;
+	background-color: #DAEEFF;
+}
+
+.markdown-alert-warning {
+	border-color: #9A6700;
+	background-color: #FFF8E5;
+}
+
+.markdown-alert-tip {
+	border-color: #1A7F37;
+	background-color: #DDFBE6;
+}
+
+.markdown-alert-important {
+	border-color: #CF222E;
+	background-color: #FFEBE9;
+}
+
+.tikz-error {
+	border: 2px solid #ff6b6b;
+	background-color: #fff5f5;
+	padding: 15px;
+	margin: 10px 0;
+	border-radius: 4px;
+}
+
+.tikz-error-message {
+	color: #d63031;
+	font-weight: bold;
+	margin-top: 0;
+}
+
+.tikz-error button {
+	background-color: #0984e3;
+	color: white;
+	border: none;
+	padding: 8px 12px;
+	border-radius: 4px;
+	cursor: pointer;
+}
+
+.tikz-error button:hover {
+	background-color: #0570c0;
+}
+
+span.intense {
+	font-variant: small-caps;
+	font-weight: 700;
+	text-shadow: 0.5px 0.5px 1px rgba(0, 0, 0, 0.35);
+}
+
+span.underline {
+	text-decoration: underline;
+}
+
+
+span.highlight {
+	background: yellow;
+}
+
+
+/* Figure floats (@begin(figure)) and subfigures (@begin(subfigure)).
+   A figure centres its contents and caption; subfigures sit side by side,
+   each sized by its {width=…} inline style, wrapping when the row is full. */
+figure.figure {
+	margin: 1.25em 0;
+	text-align: center;
+}
+
+figure.figure > figcaption {
+	margin-top: 0.5em;
+	font-size: 0.95em;
+}
+
+figure.subfigure {
+	display: inline-block;
+	vertical-align: top;
+	margin: 0 1% 0.5em;
+}
+
+figure.subfigure img {
+	max-width: 100%;
+	height: auto;
+}
+
+figure.subfigure > figcaption {
+	margin-top: 0.3em;
+	font-size: 0.9em;
+}
+
+figure.table-float {
+	margin: 1.25em 0;
+	text-align: center;
+}
+
+figure.table-float > figcaption {
+	margin-bottom: 0.5em;
+	font-size: 0.95em;
+}
+
+figure.table-float table {
+	margin: 0 auto;
+}
+
+figure.listing {
+	margin: 1.25em 0;
+}
+
+figure.listing > figcaption {
+	margin-top: 0.5em;
+	font-size: 0.95em;
+}
+
+.figure-label,
+.subfigure-label,
+.table-label,
+.listing-label {
+	font-weight: bold;
+}
+
+
+/* Theorem-like environments (@begin(theorem|lemma|definition|…)) and proofs.
+   amsthm-style: the run-in label is bold upright; "plain" kinds (theorem,
+   lemma, …) italicise the body, while definitions/remarks stay upright. */
+.theorem-env {
+	margin: 1em 0;
+}
+
+.theorem-plain {
+	font-style: italic;
+}
+
+.theorem-label {
+	font-style: normal;
+	font-weight: bold;
+}
+
+.proof-env {
+	margin: 1em 0;
+}
+
+.proof-label {
+	font-style: italic;
+}
+
+.qed {
+	float: right;
+}
+
+
+/* Numbered display equations (@begin(equation)): centred math with the number
+   (N) flush right, vertically centred against the equation. */
+.equation {
+	position: relative;
+	margin: 1em 0;
+	text-align: center;
+}
+
+.equation .eqn-number {
+	position: absolute;
+	right: 0.5em;
+	top: 50%;
+	transform: translateY(-50%);
+}

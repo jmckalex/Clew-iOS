@@ -1,0 +1,30 @@
+{{#Biblify_activate}}
+const Cite = require('citation-js');
+Biblify.configure({
+	bibfile: '{{{Biblify.bibliography}}}',
+	template: '{{Biblify.bibliography_style}}',
+	defer: {{Biblify.defer}}
+	{{#Biblify.template}}
+	,
+	addTemplates: [{
+		name: '{{Biblify.template.name}}',
+		path: '{{{Biblify.template.file}}}'
+	}]
+	{{/Biblify.template}}
+});
+
+{{#Biblify.add_helper_function}}
+document.addEventListener('bibliography-ready', function() {
+	if (Biblify.numberOfCitations() > 0) {
+		{{#Biblify.add_section_heading}}
+		$('div.csl-bib-body').before('<h1 id="bib">Bibliography</h1>');
+		{{/Biblify.add_section_heading}}
+		{{#Biblify.add_toc_entry}}
+    	if ($('div.toc').length > 0) {
+    		$('div.toc ul').first().append('<li><a href="#bib">Bibliography</a></li>');
+    	}
+    	{{/Biblify.add_toc_entry}}
+    }
+});
+{{/Biblify.add_helper_function}}
+{{/Biblify_activate}}

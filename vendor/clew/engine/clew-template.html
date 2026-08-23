@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang='{{Lang}}'>
+<head>
+	<meta charset="utf-8">
+	<title>{{Title}}</title>
+	{{#MathJax.configuration}}
+	<script>
+		{{{MathJax.configuration}}};
+	</script>
+	{{/MathJax.configuration}}
+	{{#Fontawesome}}
+	<script src="{{{Fontawesome}}}"></script>
+	{{/Fontawesome}}
+	<style>
+	{{{Jmarkdown_css}}}
+	</style>
+	<link rel="stylesheet" href="/__clew_assets__/preview/preview.css">
+	{{#CSS}}
+	<link rel="stylesheet" href="{{{.}}}">
+	{{/CSS}}
+	{{#MathJax.src}}
+	<script src="{{{MathJax.src}}}"></script>
+	{{/MathJax.src}}
+	{{#Highlight_src}}
+	<link rel="stylesheet" href="{{{Highlight_src}}}">
+	{{/Highlight_src}}
+	{{#Mermaid}}
+	<script src="{{{Mermaid}}}"></script>
+	{{/Mermaid}}
+	{{#Script}}
+	<script src="{{{.}}}"></script>
+	{{/Script}}
+	<script src="/__clew_assets__/jquery/jquery.min.js"></script>
+	{{#Custom_elements}}
+	{{{.}}}
+	{{/Custom_elements}}
+	{{#HTML_header}}
+	{{{.}}}
+	{{/HTML_header}}
+</head>
+<body class='{{Body_classes}}'>
+{{{Content}}}
+{{#HTML_footer}}
+{{{.}}}
+{{/HTML_footer}}
+</body>
+</html>

@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.DS_Store
+*.map
+
+# Xcode
+ios/DerivedData/
+ios/build/
+*.xcuserstate
+xcuserdata/
+*.xcuserdatad/
+
+# Staged web bundle inside the app (built by scripts/build.js)
+ios/Clew/WebRoot/

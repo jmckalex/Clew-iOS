@@ -1,0 +1,12 @@
+<script type='module'>
+	class custom_element extends HTMLElement { 
+		constructor() {
+		    super();
+		    // Create a shadow root
+		    this.attachShadow({mode: 'open'});
+		    // Set the shadow DOM's content
+		    this.shadowRoot.innerHTML = `{{{definition}}}`;
+		}
+	}
+	customElements.define('{{name}}', custom_element);
+</script>

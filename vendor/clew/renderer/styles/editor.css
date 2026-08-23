@@ -1,0 +1,74 @@
+/* Editor host + markdown syntax classes (cmt-*) emitted by the highlight
+   style in src/renderer/editor/theme.js. */
+
+.editor-host {
+	display: flex;
+	min-width: 0;
+	min-height: 0;
+	overflow: hidden;
+}
+.editor-host .cm-editor { flex: 1; min-width: 0; }
+
+.cmt-heading { color: var(--clew-heading); font-weight: 650; }
+.cmt-heading1 { font-size: 1.55em; }
+.cmt-heading2 { font-size: 1.35em; }
+.cmt-heading3 { font-size: 1.18em; }
+.cmt-heading4 { font-size: 1.05em; }
+
+/* jmarkdown dialect semantics: *x* is STRONG, **x** is INTENSE (small caps),
+   /x/ is italic (painted by the overlay's jmd-italic). */
+.cmt-emphasis { font-style: normal; font-weight: 650; }
+.cmt-strong { font-weight: 700; font-variant: small-caps; letter-spacing: 0.02em; }
+.cmt-strikethrough { text-decoration: line-through; color: var(--clew-text-muted); }
+.cmt-link { color: var(--clew-link); }
+.cmt-url { color: var(--clew-text-faint); }
+.cmt-code {
+	font-family: var(--clew-mono-font);
+	font-size: 0.9em;
+	color: var(--clew-code);
+}
+.cmt-quote { color: var(--clew-quote); }
+.cmt-list { color: var(--clew-accent); }
+.cmt-meta, .cmt-formatting { color: var(--clew-formatting); }
+.cmt-label { color: var(--clew-accent); }
+.cmt-comment { color: var(--clew-text-faint); }
+.cmt-hr { color: var(--clew-formatting); }
+
+/* ---- jmarkdown dialect overlay (jmd-* classes from editor/jmd/overlay.js) ---- */
+.jmd-italic { font-style: italic; }
+.jmd-highlight { background: var(--clew-search-match); border-radius: 2px; }
+.jmd-mustache { color: var(--clew-code); }
+.jmd-math { color: var(--clew-quote); font-family: var(--clew-mono-font); font-size: 0.92em; }
+.jmd-cite { color: var(--clew-accent); }
+.jmd-cite-key { color: var(--clew-link); }
+.jmd-footnote { color: var(--clew-quote); }
+.jmd-embedded { opacity: 0.92; }
+
+.jmd-directive-punct, .jmd-env-keyword { color: var(--clew-formatting); font-weight: 600; }
+.jmd-directive-name, .jmd-env-name { color: var(--clew-accent); font-weight: 600; }
+.jmd-directive-bracket, .jmd-env-paren, .jmd-punct { color: var(--clew-formatting); }
+.jmd-attr-class { color: var(--clew-quote); }
+.jmd-attr-id { color: var(--clew-code); }
+.jmd-attr-name { color: var(--clew-text-muted); }
+.jmd-string { color: var(--clew-quote); }
+
+.jmd-meta-fence, .jmd-meta-delim { color: var(--clew-formatting); }
+.jmd-meta-key { color: var(--clew-accent); font-weight: 600; }
+.jmd-meta-element, .jmd-meta-regex { color: var(--clew-code); }
+.jmd-meta-bool, .jmd-meta-number, .jmd-number, .jmd-constant { color: var(--clew-code); }
+
+.jmd-wikilink-bracket { color: var(--clew-formatting); }
+.jmd-wikilink-target { color: var(--clew-link); }
+.jmd-wikilink-alias { color: var(--clew-link); font-style: italic; }
+.jmd-tag {
+	color: var(--clew-accent);
+	background: var(--clew-active-item);
+	border-radius: 8px;
+	padding: 0 2px;
+}
+
+.jmd-keyword { color: var(--clew-accent); }
+.jmd-operator, .jmd-paren { color: var(--clew-text-muted); }
+.jmd-function { color: var(--clew-link); }
+.jmd-variable, .jmd-type { color: var(--clew-text-normal); }
+.jmd-comment { color: var(--clew-text-faint); font-style: italic; }

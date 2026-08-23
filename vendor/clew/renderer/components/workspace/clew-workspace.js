@@ -1,0 +1,59 @@
+// <clew-workspace> renders the layout tree. Reconciliation is keyed by node
+// id: existing elements (and therefore the editor DOM inside them) are moved,
+// not recreated, when the tree changes shape.
+import { ClewElement } from '../base/clew-element.js';
+import { workspaceStore } from '../../state/workspace-store.js';
+
+/** Collect existing rendered nodes, keyed by layout-node id. */
+function collectExisting(rootEl) {
+	const map = new Map();
+	for (const el of rootEl.querySelectorAll('[data-node-id]')) {
+		map.set(el.dataset.nodeId, el);
+	}
+	return map;
+}
+
+/** Return an element rendering `node`, reusing elements from `existing`. */
+export function syncNode(node, existing) {
+	let el = existing.get(node.id);
+	if (node.type === 'tabs') {
+		if (!el || el.tagName !== 'CLEW-TAB-GROUP') {
+			el = document.createElement('clew-tab-group');
+			el.dataset.nodeId = node.id;
+		}
+		el.groupId = node.id;
+	} else {
+		if (!el || el.tagName !== 'CLEW-SPLIT') {
+			el = document.createElement('clew-split');
+			el.dataset.nodeId = node.id;
+		}
+		el.syncChildren(node, existing);
+	}
+	return el;
+}
+
+class ClewWorkspace extends ClewElement {
+	subscribe() {
+		this.listen(workspaceStore, 'layout-changed', () => this.render());
+		this.listen(workspaceStore, 'active-changed', () => this.#updateActive());
+	}
+
+	render() {
+		const existing = collectExisting(this);
+		const rootEl = syncNode(workspaceStore.root, existing);
+		if (this.firstElementChild !== rootEl) {
+			this.replaceChildren(rootEl);
+		}
+		this.#updateActive();
+	}
+
+	#updateActive() {
+		const activeId = workspaceStore.activeGroupId;
+		for (const el of this.querySelectorAll('clew-tab-group')) {
+			el.classList.toggle('is-active', el.dataset.nodeId === activeId);
+			el.refreshActive?.();
+		}
+	}
+}
+
+customElements.define('clew-workspace', ClewWorkspace);
