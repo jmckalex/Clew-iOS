@@ -27,13 +27,27 @@ first. (Learned 2026-08-24; also in Claude's memory.)
   iOS 26 SDK / Xcode 26, which needs a newer macOS than the owner runs).
   Local Xcode is for device debugging only; the cloud does releases.
   `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` for CLI.
-- **Repo state**: clean tree; **2 commits ahead of origin/main,
+- **Repo state**: `main` is **3 commits ahead of origin/main,
   deliberately unpushed** pending the owner's device check:
-  `3de9636` (inline PDF.js viewer) + `789c216` (Annotate button).
-  Owner has verified the inline viewer on the iPad ("that works").
+  `3de9636` (inline PDF.js viewer) + `789c216` (Annotate button) +
+  handover. Owner has verified the inline viewer on the iPad ("that
+  works"). Branch **`pdf-annotation-editor`** (from main) carries the
+  full inline annotation editor — owner asked for it 2026-08-24; needs
+  iPad verification, then merge to main + push on the owner's OK.
 
 ## 2. Shipped recently (newest first)
 
+- **Inline PDF annotation editor** (branch `pdf-annotation-editor`):
+  ✎ Annotate opens PDF.js's viewer component with the annotation editor
+  in an overlay — highlight/ink/text with color+size controls, zoom,
+  undo/redo; Save/Done run saveDocument() → new `updateBinary` bridge
+  (overwrite-in-place; writeBinary's dedupe forked "name 1.pdf") →
+  coordinated write into the vault file; reader remounts showing the
+  annotations. Verified end-to-end in the iPad sim via a temporary
+  vault script driving the editor inside the preview iframe (real
+  /Subtype /Ink landed in sample.pdf). Gotchas in the commit message:
+  pdfjsLib global binding order, destroy() on the loading task,
+  updateParams no-op outside active mode, data-clew-keep vs morphdom.
 - **Inline PDF viewer**: PDF.js (legacy build — modern build needs
   Iterator helpers this WebKit lacks) replaces `<embed>` in previews;
   bytes fetched by the client and passed as `{data}` (pdf.js rejects
@@ -53,9 +67,10 @@ first. (Learned 2026-08-24; also in Claude's memory.)
 
 ## 3. Open items
 
-1. **PDF.js full annotation editor** (inline highlight/ink/note +
-   save-to-vault via PDFViewer component): designed, offered, **decision
-   deferred** — owner is trying inline-read + QuickLook-annotate first.
+1. **PDF annotation editor**: built on branch `pdf-annotation-editor`,
+   awaiting the owner's iPad verification before merge; possible
+   follow-ups — edit existing (baked-in) annotations, stamp/image tool,
+   pinch-zoom inside the editor (buttons only for now).
 2. Kanban card drag on touch (HTML5 DnD dead); write path itself proven.
 3. Touch file move: drag-to-move is pointer-only; add "Move to folder…"
    to the long-press menu.
