@@ -14,6 +14,7 @@
 		C1E0000000000000000000A5 /* SchemeHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F0000000000000000000A5 /* SchemeHandler.swift */; };
 		C1E0000000000000000000A6 /* HEICConverter.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F0000000000000000000A6 /* HEICConverter.swift */; };
 		C1E0000000000000000000A8 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C1F0000000000000000000A8 /* Assets.xcassets */; };
+		C1E0000000000000000000A9 /* QuickLookPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F0000000000000000000A9 /* QuickLookPresenter.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -26,6 +27,7 @@
 		C1F0000000000000000000A6 /* HEICConverter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HEICConverter.swift; sourceTree = "<group>"; };
 		C1F0000000000000000000A7 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		C1F0000000000000000000A8 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		C1F0000000000000000000A9 /* QuickLookPresenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickLookPresenter.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -74,6 +76,7 @@
 				C1F0000000000000000000A4 /* FSBridge.swift */,
 				C1F0000000000000000000A5 /* SchemeHandler.swift */,
 				C1F0000000000000000000A6 /* HEICConverter.swift */,
+				C1F0000000000000000000A9 /* QuickLookPresenter.swift */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -172,6 +175,7 @@
 				C1E0000000000000000000A4 /* FSBridge.swift in Sources */,
 				C1E0000000000000000000A5 /* SchemeHandler.swift in Sources */,
 				C1E0000000000000000000A6 /* HEICConverter.swift in Sources */,
+				C1E0000000000000000000A9 /* QuickLookPresenter.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -8,6 +8,7 @@ import UniformTypeIdentifiers
 final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 	private let vaults: VaultStore
 	private let folderPicker = FolderPicker()
+	private let quickLook = QuickLookPresenter()
 
 	init(vaults: VaultStore) {
 		self.vaults = vaults
@@ -99,6 +100,21 @@ final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 				let data = Data(base64Encoded: base64) else { throw ClewError.badPayload }
 			shareFile(named: name, data: data, from: webView)
 			reply(nil, nil)
+
+		case "quickLook":
+			// The system viewer for vault files WebKit renders poorly inline
+			// (PDFs especially). Materialize handles evicted iCloud items.
+			guard let rel = params["rel"] as? String else { throw ClewError.badPayload }
+			vaults.ioQueue.async {
+				let url = self.vaults.materialize(rel: rel, timeout: 15)
+				DispatchQueue.main.async {
+					guard let url, let root = webView?.window?.rootViewController else {
+						return reply(nil, "file not available")
+					}
+					self.quickLook.present(url: url, from: root)
+					reply(nil, nil)
+				}
+			}
 
 		case "pickFolder":
 			// Anywhere Files can reach: iCloud Drive, Working Copy, other

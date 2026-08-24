@@ -5,6 +5,39 @@ import { EditorView } from '@codemirror/view';
 import { runCommand } from '../../vendor/clew/renderer/commands/registry.js';
 import { workspaceStore } from '../../vendor/clew/renderer/state/workspace-store.js';
 import * as actions from '../../vendor/clew/renderer/commands/actions.js';
+import { bridgeCall } from './native-bridge.js';
+
+// ---- PDFs open in QuickLook ------------------------------------------------
+// WebKit has no inline PDF viewer worth the name (an <embed> shows one
+// static page), so opening a PDF — from the explorer, a wikilink, or a
+// preview embed's title — presents the system reader instead: scrolling,
+// search, and Pencil markup that saves back into the vault file. The
+// inline first-page render in reading mode stays as a preview.
+const originalOpenFile = workspaceStore.openFile.bind(workspaceStore);
+workspaceStore.openFile = (path, opts) => {
+	if (/\.pdf$/i.test(path ?? '')) {
+		bridgeCall('quickLook', { rel: path }).catch((err) =>
+			console.error('[clew-ios] quickLook failed:', err));
+		return null;
+	}
+	return originalOpenFile(path, opts);
+};
+
+// ---- canvas media engages on a single tap ---------------------------------
+// Canvas node content is inert until the node is "engaged" (double-click on
+// desktop) — so a tap on a video's play button hit an inert overlay. On
+// touch, a single tap on a node holding playable/interactive content
+// engages it via the canvas's own dblclick path; the next tap reaches the
+// controls. Non-media nodes keep desktop semantics.
+document.addEventListener('click', (e) => {
+	if (lastPointerType !== 'touch') return;
+	const node = e.target.closest?.('.canvas-node');
+	if (!node || node.classList.contains('is-engaged')) return;
+	if (!node.querySelector('video, audio, iframe, embed')) return;
+	node.dispatchEvent(new MouseEvent('dblclick', {
+		bubbles: true, cancelable: true, clientX: e.clientX, clientY: e.clientY,
+	}));
+}, true);
 
 // ---- long-press → contextmenu ---------------------------------------------
 // Five surfaces put rename/delete/pin/canvas-styling exclusively behind
