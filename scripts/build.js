@@ -212,6 +212,20 @@ const clewPdfInit = () => {
 		host.className = 'pdf-pages';
 		host.style.cssText = 'max-height: 70vh; overflow-y: auto; -webkit-overflow-scrolling: touch; border-radius: 4px; background: rgba(128,128,128,0.08);';
 		embed.replaceWith(host);
+		const titleBar = host.closest('.pdf-embed-box')?.querySelector('.embed-title');
+		const titleLink = titleBar?.querySelector('a[data-href]');
+		if (titleBar && titleLink && !titleBar.querySelector('.pdf-annotate')) {
+			const annotate = document.createElement('button');
+			annotate.className = 'pdf-annotate';
+			annotate.textContent = '\u270e Annotate';
+			annotate.style.cssText = 'float: right; font: inherit; font-size: 0.85em; color: inherit; background: rgba(128,128,128,0.15); border: none; border-radius: 5px; padding: 2px 10px; cursor: pointer;';
+			annotate.addEventListener('click', (e) => {
+				e.preventDefault();
+				post({ type: 'link-click', target: titleLink.dataset.href, newTab: false });
+			});
+			titleBar.append(annotate);
+			host.addEventListener('dblclick', () => annotate.click());
+		}
 		(async () => {
 			try {
 				const pdfjs = await import('/__clew_assets__/pdfjs/pdf.min.mjs');
