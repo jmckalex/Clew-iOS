@@ -60,6 +60,7 @@ export const CH = {
 	// invoke: rendering (reading mode / preview)
 	RENDER_SUBSCRIBE: 'clew:render-subscribe',
 	RENDER_UNSUBSCRIBE: 'clew:render-unsubscribe',
+	RENDER_HTML: 'clew:render-html',
 	SHELL_OPEN_EXTERNAL: 'clew:shell-open-external',
 
 	// invoke: native application menu (renderer pushes context + hotkeys)

@@ -144,7 +144,9 @@ class ClewTabBar extends ClewElement {
 				: { label: 'Pin', click: () => workspaceStore.pinTab(tab.id, true) },
 			{ separator: true },
 			...(tab.pinned ? [] : [{ label: 'Close', click: () => this.#closeTab(tab.id) }]),
-			...(workspaceStore.allGroups().length > 1 ? [{ label: 'Close pane (split)', click: () => {
+			// "This" rather than "current": you right-clicked the pane, so which
+			// one closes is unambiguous even when another pane holds focus.
+			...(workspaceStore.allGroups().length > 1 ? [{ label: 'Close this pane', click: () => {
 				for (const t of [...(this.group?.tabs ?? [])]) editorPool.close(t.id);
 				workspaceStore.closeGroup(this.groupId);
 			} }] : []),

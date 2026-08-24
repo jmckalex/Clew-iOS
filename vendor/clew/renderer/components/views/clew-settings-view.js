@@ -102,6 +102,31 @@ class ClewSettingsView extends ClewElement {
 				+ 'with this on — enable it only for vaults you trust. See the Note API '
 				+ 'guide note.'),
 		);
+		section.append(
+			...this.#vaultTextRow('bibliography',
+				'Bibliography file (vault-wide)',
+				'refs.bib — a path from the vault root, or an absolute path',
+				'Every note resolves \\cite commands against this BibTeX file, '
+				+ 'with no per-note properties needed. A note that sets its own '
+				+ 'Bibliography: property still wins, and @bibliography blocks '
+				+ 'keep their full jmarkdown behaviour (sections, scopes, styles). '
+				+ 'Clear the field to turn vault-wide citations off.'),
+			...this.#vaultTextRow('bibliographyStyle',
+				'Bibliography style',
+				'chicago (default) — a style name or a .csl file path',
+				'Named styles ship with the engine: apa, chicago, harvard1, '
+				+ 'vancouver, bjps, ajp, econometrica, ergo. Anything else is '
+				+ 'read as a path to a custom CSL file (from the vault root, or '
+				+ 'absolute). Notes can override with a Bibliography style: '
+				+ 'property.',
+				['apa', 'chicago', 'harvard1', 'vancouver', 'bjps', 'ajp', 'econometrica', 'ergo']),
+			...this.#vaultToggle('bibliographyPanel',
+				'References panel: show the bibliography in the right sidebar',
+				'Adds a Refs tab beside Links/Out/Tags showing the active note\'s '
+				+ 'formatted references — even while the note is in source mode. '
+				+ 'Notes never need an inline @bibliography block for it; authoring '
+				+ 'one anyway still renders inline as usual.'),
+		);
 		this.#pluginRows(section);
 		return section;
 	}
@@ -142,6 +167,41 @@ class ClewSettingsView extends ClewElement {
 		}).catch(() => {});
 	}
 
+	#vaultTextRow(key, label, placeholder, hintText, suggestions = []) {
+		const input = document.createElement('input');
+		input.type = 'text';
+		input.placeholder = placeholder;
+		input.disabled = true;
+		const row = this.#row(label, input);
+		if (suggestions.length > 0) {
+			const list = document.createElement('datalist');
+			list.id = `vault-${key}-suggestions`;
+			for (const value of suggestions) {
+				const option = document.createElement('option');
+				option.value = value;
+				list.append(option);
+			}
+			input.setAttribute('list', list.id);
+			row.append(list);
+		}
+		const hint = document.createElement('p');
+		hint.className = 'settings-hint';
+		hint.textContent = hintText;
+		ipc.invoke(CH.VAULT_SETTINGS_GET).then((vaultSettings) => {
+			input.value = typeof vaultSettings?.[key] === 'string' ? vaultSettings[key] : '';
+			input.disabled = false;
+		}).catch(() => {});
+		const save = debounce(() => {
+			ipc.invoke(CH.VAULT_SETTINGS_SET, { key, value: input.value.trim() }).finally(() => {
+				window.dispatchEvent(new CustomEvent('clew:vault-settings-changed', { detail: { key } }));
+			});
+		}, 500);
+		input.addEventListener('input', save);
+		input.addEventListener('blur', () => save.flush());
+		input.addEventListener('keydown', (e) => e.stopPropagation());
+		return [row, hint];
+	}
+
 	#vaultToggle(key, label, hintText) {
 		const box = document.createElement('input');
 		box.type = 'checkbox';
@@ -160,6 +220,7 @@ class ClewSettingsView extends ClewElement {
 				.finally(() => {
 					box.disabled = false;
 					invalidateNoteApiGate();
+					window.dispatchEvent(new CustomEvent('clew:vault-settings-changed', { detail: { key } }));
 				});
 		});
 		return [row, hint];

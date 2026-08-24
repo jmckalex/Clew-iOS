@@ -74,6 +74,15 @@ export const DEFAULT_CONFIG = {
 	'TiKZ libgs': '/opt/homebrew/Cellar/ghostscript/10.05.0_1/lib/libgs.10.05.dylib',
 	'TiKZ optimise': 'group-attributes,collapse-groups',
 	'Code language': 'text',
+	// How @video renders in LaTeX (src/media.js), since a PDF cannot play one:
+	// 'link' (default) a hyperlinked poster frame — works in every viewer;
+	// 'embed' a media9 RichMedia annotation carrying the H.264 stream (Acrobat
+	// only, ~480KB of player per document); 'attach' the file as a PDF
+	// attachment; 'poster' the still frame alone. Per-video: {tex-mode=…}.
+	'Video mode': 'link',
+	// Where a poster frame is needed and none was given, extract one from the
+	// first frame with ffmpeg, cached under Video/. 'none' turns that off.
+	'Video poster': 'auto',
 	// Opt-in typographic educator (see src/smart-typography.js): straight
 	// quotes → curly, ---/-- → em/en dash, ... → ellipsis, in both outputs.
 	'Smart typography': false,
@@ -290,6 +299,13 @@ class ConfigManager {
 				// configManager.get('Smart typography') lazily at walk time.
 				str = value[0].trim().toLowerCase();
 				this.config["Smart typography"] = (str == "true");
+				break;
+			case "Video_mode":
+			case "Video_poster":
+				// Space-keyed for the same reason as Block_elements: media.js
+				// reads configManager.get('Video mode' / 'Video poster') at
+				// render time.
+				this.config[formattedKey.replace(/_/g, ' ')] = value[0].trim().toLowerCase();
 				break;
 			case "Math_macros":
 				// A multi-line metadata value arrives as one newline-joined

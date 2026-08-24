@@ -39,6 +39,13 @@ export function syncNode(node, existing) {
 		}
 		el.syncChildren(node, existing);
 	}
+	// Reused elements are moved, not rebuilt, so one may still carry the
+	// `flex` its former parent split gave it. Clear it: ClewSplit#applySizes
+	// re-sets it immediately for anything that is still a split child, and
+	// anything that is not must fall back to the stylesheet. Sizes are
+	// fractions summing to 1, so a promoted pane keeping `flex: 0.5 1 0`
+	// grows into only half the free space and leaves the rest void.
+	el.style.flex = '';
 	return el;
 }
 

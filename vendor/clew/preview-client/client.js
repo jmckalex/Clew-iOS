@@ -104,6 +104,12 @@ function applyRender(html) {
 			onBeforeNodeDiscarded(node) {
 				if (node.tagName === 'SCRIPT') return false;
 				if (node.id === '__clew_err') return false;
+				// Chrome a plugin or vault script added to the document — a
+				// banner, an overlay — is absent from the incoming HTML and
+				// would be discarded on every morph, taking any running
+				// animation or media playback down with it. Opt in to
+				// surviving by setting data-clew-keep on the element.
+				if (node.nodeType === 1 && node.hasAttribute?.('data-clew-keep')) return false;
 				return true;
 			},
 		});
@@ -215,6 +221,10 @@ window.addEventListener('keydown', (e) => {
 		post({ type: 'chord', key, shift: e.shiftKey, alt: e.altKey });
 	}
 });
+
+// Clicking into the preview must focus its pane, exactly as clicking into an
+// editor does — the app's pointerdown tracking cannot see inside this iframe.
+window.addEventListener('pointerdown', () => post({ type: 'focused' }), true);
 
 // Report scroll position (topmost stamped block + fraction) for scroll-sync.
 let scrollTicking = false;

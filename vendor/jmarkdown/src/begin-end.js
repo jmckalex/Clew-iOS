@@ -113,9 +113,19 @@ registerBlockEnvironment('span', {
 
 const blockPolicy = () => configManager.get('Block elements', 'hyphenated');
 
+// attributes-parser throws on anything outside the HTML attribute grammar, and a
+// BACKSLASH is the one an author meets — `{width="0.8\\linewidth"}` — whereupon the
+// whole {…} set is dropped.  Silently, until now: say so, and name the offender.
+const attrsWarning = (name, raw) => addWarning(
+	`@${name}: could not parse {${raw}} — the attributes were ignored. ` +
+	'A backslash is not valid in an attribute value; quote percentages ("50%") ' +
+	'and use tex-… keys for LaTeX-specific values.'
+);
+
 export const beginEnd = createBeginEnd({
 	getFormat: format,
 	blockElements: () => configManager.get('Block elements', 'hyphenated'),
+	onAttrsError: attrsWarning,
 
 	// The generic LaTeX environment for any unregistered name: \begin{name}…\end.
 	// (The core supplies the matching generic HTML; this is the LaTeX half.)
@@ -150,6 +160,7 @@ export const beginEnd = createBeginEnd({
 export const atInline = createAtInline({
 	getFormat: format,
 	blockElements: blockPolicy,
+	onAttrsError: attrsWarning,
 	fallback: { latex: (ctx) => ctx.inner },
 	// A `@name+[…]` block form used mid-paragraph (it must start its own line):
 	// record a build warning and emit a visible marker (HTML) / nothing (LaTeX).
@@ -162,6 +173,7 @@ export const atInline = createAtInline({
 export const atBlock = createAtBlock({
 	getFormat: format,
 	blockElements: blockPolicy,
+	onAttrsError: attrsWarning,
 	fallback: {
 		latex: (ctx) => {
 			addPreamble(`\\AtBeginDocument{\\ifcsname ${ctx.name}\\endcsname\\else\\newenvironment{${ctx.name}}{}{}\\fi}`);

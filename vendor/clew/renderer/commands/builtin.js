@@ -127,9 +127,15 @@ export function registerBuiltinCommands() {
 			run: () => actions.splitActive('right') },
 		{ id: 'workspace:split-down', name: 'Split down', hotkeys: ['Mod-Shift-\\'],
 			run: () => actions.splitActive('bottom') },
-		{ id: 'workspace:close-split', name: 'Close split pane', hotkeys: ['Mod-Shift-w'],
+		// The id stays `close-split` though the name no longer says so: hotkey
+		// customisations are persisted against command ids, and renaming it
+		// would silently orphan anyone's rebinding of ⌘⇧W.
+		{ id: 'workspace:close-split', name: 'Close current pane', hotkeys: ['Mod-Shift-w'],
 			when: () => workspaceStore.allGroups().length > 1,
-			run: () => actions.closeSplit() },
+			run: () => actions.closeCurrentPane() },
+		{ id: 'workspace:close-other-pane', name: 'Close other pane',
+			when: () => workspaceStore.allGroups().length > 1,
+			run: () => actions.closeOtherPane() },
 		{ id: 'workspace:toggle-mode', name: 'Toggle reading mode', hotkeys: ['Mod-e'], when: needsNote,
 			run: () => actions.toggleReadingMode() },
 		{ id: 'workspace:toggle-left-sidebar', name: 'Toggle left sidebar', hotkeys: ['Mod-b'],

@@ -32,6 +32,7 @@ import createMarkdownDemo from './markdown-demo.js';
 import strategicFormGame from './strategic-form-games.js';
 import createTiKZ from './tikz.js';
 import './metapost.js';   // side-effect: registers the @begin(metapost) block environment
+import './media.js';      // side-effect: registers the @image / @video directives
 import { inlineMathematica, createMathematica } from './mathematica.js';
 import markedMoreLists from 'marked-more-lists';
 import { jmarkdownScriptExtensions } from './script-blocks.js';

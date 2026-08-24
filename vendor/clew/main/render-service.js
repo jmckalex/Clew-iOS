@@ -135,6 +135,7 @@ export class RenderService {
 				// Enabled vault plugins' engine surfaces (custom syntax).
 				...engineExtensionEntries(this.vaultRoot, this.#vaultOptions),
 			],
+			...this.#biblifyConfig(),
 			'MathJax': { 'src': '/__clew_assets__/mathjax/tex-svg.js' },
 			'Mermaid': '/__clew_assets__/mermaid/mermaid.min.js',
 			'Fontawesome': '/__clew_assets__/fontawesome/all.min.js',
@@ -144,6 +145,40 @@ export class RenderService {
 			path.join(this.engineDir, '.jmarkdown', 'config.json'),
 			JSON.stringify(config, null, 2),
 		);
+	}
+
+	// Vault-wide bibliography (vault-settings `bibliography` +
+	// `bibliographyStyle`): written into the generated config as absolute
+	// paths, so every note resolves citations without per-note properties.
+	// Per-note `Bibliography:` / `Bibliography style:` metadata still wins —
+	// the engine processes metadata headers after the config file.
+	#biblifyConfig() {
+		const bib = String(this.#vaultOptions.bibliography ?? '').trim();
+		if (!bib) return {};
+		const abs = (p) => (path.isAbsolute(p) ? p : path.join(this.vaultRoot, p));
+		const biblify = { 'bibliography': abs(bib), 'resolve': true };
+		const style = String(this.#vaultOptions.bibliographyStyle ?? '').trim();
+		if (style) {
+			// The engine's named styles (three from @citation-js/plugin-csl,
+			// five bundled as CSL files in its own csl/ directory); anything
+			// else is a custom .csl file the engine registers by basename.
+			const named = ['apa', 'chicago', 'harvard1', 'vancouver', 'bjps', 'ajp', 'econometrica', 'ergo'];
+			if (named.includes(style)) {
+				biblify['bibliography style'] = style;
+			} else {
+				const file = abs(style);
+				const name = path.basename(file, '.csl');
+				biblify['bibliography style'] = name;
+				biblify['template'] = { name, file };
+			}
+		}
+		return { 'Biblify': biblify };
+	}
+
+	/** Rendered HTML for a note (rendered on demand) — the References panel's feed. */
+	async renderedHtml(relPath) {
+		const htmlFile = await this.ensureRendered(relPath);
+		return fs.readFileSync(htmlFile, 'utf8');
 	}
 
 	#spawnStandby() {

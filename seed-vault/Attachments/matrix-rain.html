@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<!--
+  Matrix Digital Rain — Header Background for Folio
+  Inspired by the iconic "falling code" effect from The Matrix (1999)
+  and Jamie Zawinski's xmatrix screensaver.
+
+  All tuneable parameters are in the CONFIG section below.
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<title>Matrix Rain</title>
+<style>
+  html, body, canvas {
+    margin: 0; padding: 0;
+    overflow: hidden;
+    width: 100%; height: 100%;
+  }
+  body { background: #000; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// =====================================================================
+//  CONFIG — Adjust these to taste!
+// =====================================================================
+const CONFIG = {
+
+  // -- Colours --
+  background:     'rgba(0, 0, 0, 0.05)', // Trail fade (lower alpha = longer trails)
+  glyphColor:     '#0f0',                 // Main glyph colour (classic green)
+  brightColor:    '#9f9',                 // Bright leading glyph colour
+  dimColor:       '#040',                 // Dim trailing glyph colour
+
+  // -- Typography --
+  fontSize:       14,           // Glyph size in pixels
+  fontFamily:     'monospace',  // Font face
+
+  // -- Glyphs --
+  // Which character sets to include in the rain:
+  useKatakana:    true,         // Japanese katakana (the classic Matrix look)
+  useDigits:      true,         // 0-9
+  useLatinUpper:  false,        // A-Z
+  useLatinLower:  false,        // a-z
+  useSymbols:     true,         // Various symbols: ><+=$@#%&
+  customGlyphs:   '',           // Add your own characters here
+
+  // -- Animation --
+  speed:          50,           // Milliseconds between frames (lower = faster)
+  density:        1.0,          // Column density: 1.0 = every column, 0.5 = half
+  dropSpeed:      0.9,          // Probability a column advances each frame (0–1)
+  respawnChance:  0.975,        // Probability a finished column restarts (0–1)
+  glyphFlicker:   0.02,         // Chance a glyph mutates each frame (0–1)
+
+  // -- Trail --
+  fadeAlpha:      0.05,         // Background overlay alpha (controls trail length)
+                                // 0.02 = very long trails, 0.1 = short trails
+  brightnessVariation: true,    // Vary brightness along each column
+};
+
+// =====================================================================
+//  ENGINE — You probably don't need to edit below here
+// =====================================================================
+
+// Build the glyph set from config
+function buildGlyphSet() {
+  let glyphs = '';
+
+  if (CONFIG.useKatakana) {
+    // Half-width katakana (U+FF65–FF9F) — the classic Matrix character set
+    for (let i = 0xFF65; i <= 0xFF9F; i++) glyphs += String.fromCharCode(i);
+  }
+  if (CONFIG.useDigits) {
+    glyphs += '0123456789';
+  }
+  if (CONFIG.useLatinUpper) {
+    glyphs += 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  }
+  if (CONFIG.useLatinLower) {
+    glyphs += 'abcdefghijklmnopqrstuvwxyz';
+  }
+  if (CONFIG.useSymbols) {
+    glyphs += '><+=$@#%&|{}[]~^';
+  }
+  if (CONFIG.customGlyphs) {
+    glyphs += CONFIG.customGlyphs;
+  }
+
+  // Fallback
+  if (glyphs.length === 0) glyphs = '01';
+
+  return glyphs;
+}
+
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H, columns, drops, glyphs, glyphGrid;
+
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  const colCount = Math.ceil(W / CONFIG.fontSize);
+
+  // Preserve existing drop positions on resize, add new columns
+  const oldDrops = drops || [];
+  const oldGrid = glyphGrid || [];
+  drops = [];
+  glyphGrid = [];
+  const rows = Math.ceil(H / CONFIG.fontSize);
+
+  for (let i = 0; i < colCount; i++) {
+    if (i < oldDrops.length) {
+      drops[i] = oldDrops[i];
+      glyphGrid[i] = oldGrid[i] || [];
+    } else {
+      // Stagger initial positions for a natural look
+      drops[i] = Math.random() * -rows;
+      glyphGrid[i] = [];
+    }
+    // Ensure glyph grid has enough rows
+    while (glyphGrid[i].length < rows + 10) {
+      glyphGrid[i].push(randomGlyph());
+    }
+  }
+  columns = colCount;
+}
+
+function randomGlyph() {
+  return glyphs[Math.floor(Math.random() * glyphs.length)];
+}
+
+function draw() {
+  // Semi-transparent black overlay creates the fading trail effect
+  ctx.fillStyle = `rgba(0, 0, 0, ${CONFIG.fadeAlpha})`;
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.font = CONFIG.fontSize + 'px ' + CONFIG.fontFamily;
+  const rows = Math.ceil(H / CONFIG.fontSize);
+
+  for (let i = 0; i < columns; i++) {
+    // Skip columns based on density
+    if (i / columns > CONFIG.density) continue;
+
+    const y = Math.floor(drops[i]);
+
+    // Flicker: randomly mutate some glyphs
+    if (CONFIG.glyphFlicker > 0) {
+      for (let r = Math.max(0, y - 20); r <= y && r < glyphGrid[i].length; r++) {
+        if (Math.random() < CONFIG.glyphFlicker) {
+          glyphGrid[i][r] = randomGlyph();
+        }
+      }
+    }
+
+    // Draw the leading (bright) glyph
+    if (y >= 0 && y < glyphGrid[i].length) {
+      ctx.fillStyle = CONFIG.brightColor;
+      ctx.fillText(glyphGrid[i][y], i * CONFIG.fontSize, y * CONFIG.fontSize);
+    }
+
+    // Draw a few glyphs behind the leader with varying brightness
+    if (CONFIG.brightnessVariation) {
+      const trailLen = 3;
+      for (let t = 1; t <= trailLen; t++) {
+        const ty = y - t;
+        if (ty >= 0 && ty < glyphGrid[i].length) {
+          const alpha = 1 - (t / (trailLen + 1));
+          ctx.fillStyle = CONFIG.glyphColor;
+          ctx.globalAlpha = alpha;
+          ctx.fillText(glyphGrid[i][ty], i * CONFIG.fontSize, ty * CONFIG.fontSize);
+          ctx.globalAlpha = 1;
+        }
+      }
+    }
+
+    // Advance the drop
+    if (Math.random() < CONFIG.dropSpeed) {
+      drops[i]++;
+
+      // Assign a new glyph at the new position
+      const newY = Math.floor(drops[i]);
+      if (newY >= 0) {
+        while (glyphGrid[i].length <= newY) {
+          glyphGrid[i].push(randomGlyph());
+        }
+        glyphGrid[i][newY] = randomGlyph();
+      }
+    }
+
+    // Reset the column once its leading glyph has fallen ENTIRELY below the
+    // canvas — not merely once its baseline has.
+    //
+    // fillText draws on the baseline, so a glyph at row r inks roughly
+    // (r-1)*fontSize … r*fontSize. The old test (baseline > H) retired the
+    // column one row too early, and the row it skipped was precisely the one
+    // straddling the bottom edge. Whenever H was not an exact multiple of
+    // fontSize — the usual case, since the canvas is sized by its container —
+    // that left a strip along the bottom the rain never reached. Now the drop
+    // advances until its glyph's TOP edge clears H, and the canvas crops the
+    // vertical over-run for us.
+    if (drops[i] * CONFIG.fontSize - CONFIG.fontSize > H) {
+      if (Math.random() < CONFIG.respawnChance) {
+        drops[i] = Math.random() * -20;  // Random offset above screen
+      }
+    }
+  }
+}
+
+function init() {
+  glyphs = buildGlyphSet();
+  resize();
+
+  // Initial fill — paint the canvas black
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+
+  setInterval(draw, CONFIG.speed);
+}
+
+window.addEventListener('resize', resize);
+init();
+</script>
+</body>
+</html>

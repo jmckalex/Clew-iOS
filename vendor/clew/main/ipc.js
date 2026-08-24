@@ -115,6 +115,7 @@ export function registerIpc() {
 
 	handle(CH.RENDER_SUBSCRIBE, (s, { path }) => s.renderService.subscribe(path));
 	handle(CH.RENDER_UNSUBSCRIBE, (s, { path }) => s.renderService.unsubscribe(path));
+	handle(CH.RENDER_HTML, (s, { path }) => s.renderService.renderedHtml(path));
 	handleGlobal(CH.SHELL_OPEN_EXTERNAL, ({ url }) => {
 		if (/^https?:|^mailto:/i.test(url)) shell.openExternal(url);
 	});
@@ -134,6 +135,10 @@ export function registerIpc() {
 		s.vaults.saveState('vault-settings.json', current);
 		if (key === 'jmarkdownProject' || key === 'normalSyntax') {
 			s.renderService.reconfigure({ [key]: value === true });
+		}
+		// Bibliography settings rewrite the engine config the same way.
+		if (key === 'bibliography' || key === 'bibliographyStyle') {
+			s.renderService.reconfigure({ [key]: value });
 		}
 		// Plugin toggles change the engine config (engine surfaces) and the
 		// preview injection; re-render open previews with the new set.

@@ -36,10 +36,27 @@ export function splitActive(edge) {
 	if (tab) workspaceStore.splitWithClone(workspaceStore.activeGroupId, edge, tab.id);
 }
 
-/** Close the active split pane (all its tabs); the layout collapses. */
-export function closeSplit() {
+/** Close the pane the user is working in (all its tabs); the layout collapses. */
+export function closeCurrentPane() {
 	if (workspaceStore.allGroups().length < 2) return; // nothing to unsplit
 	const closed = workspaceStore.closeGroup(workspaceStore.activeGroupId);
+	for (const id of closed) editorPool.close(id);
+}
+
+/**
+ * Close the pane NEXT to the focused one, which survives. With two panes
+ * that is just "the other one"; with more it is the neighbour in layout
+ * order (or the previous pane when focus is on the last), so exactly one
+ * pane ever closes and repeating the command absorbs the rest one at a
+ * time. The pane you are working in is never the one that disappears.
+ */
+export function closeOtherPane() {
+	const groups = workspaceStore.allGroups();
+	if (groups.length < 2) return;
+	const index = groups.findIndex((g) => g.id === workspaceStore.activeGroupId);
+	if (index < 0) return;
+	const target = groups[index + 1] ?? groups[index - 1];
+	const closed = workspaceStore.closeGroup(target.id);
 	for (const id of closed) editorPool.close(id);
 }
 

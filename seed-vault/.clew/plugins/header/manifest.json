@@ -1,8 +1,8 @@
 {
 	"id": "header",
 	"name": "Note Headers",
-	"version": "1.0.0",
-	"description": "Banner headers for notes: set header-image, header-title, and header-subtitle in a note's frontmatter and reading mode opens with a full-width image banner.",
+	"version": "1.2.0",
+	"description": "Banner headers for notes: set header-image, header-title, and header-subtitle in a note's frontmatter and reading mode opens with a full-width image banner; header-height, header-position, and header-align tune its size, focal point, and text placement. header-html puts a live HTML page behind the title instead — a canvas animation, CSS keyframes, anything a browser can draw — sandboxed, and kept running across re-renders.",
 	"apiVersion": 1,
 	"surfaces": {
 		"preview": "preview.js"

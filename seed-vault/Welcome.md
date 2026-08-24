@@ -2,6 +2,7 @@
 header-image: "[[clew-gradient.png]]"
 header-title: Welcome to Clew
 header-subtitle: A thread through your notes
+header-height: 120
 ---
 # Welcome to Clew
 
@@ -27,6 +28,8 @@ rendered; **⌘O** finds any note; **⌘P** lists every command.
   [[Habit Tracker]], and a tiny [[Adventure]]
 - [[Plugins]] — extend Clew from inside the vault (this page's banner
   is one)
+- [[Note Headers]] — that banner in detail, including animated HTML
+  backgrounds
 - [[Search]] — full-text search and its operators
 - [[Graph View]] — the vault as a graph
 - [[Daily Notes and Templates]] — the diary calendar, per-day or

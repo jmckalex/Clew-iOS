@@ -187,6 +187,11 @@ html[data-theme='light'] img[src*="TiKZ/"], html[data-theme='light'] img[src*="M
 	padding: 0 2px;
 }
 
+/* Alignment (">> text" / ">> text <<"): the engine emits these wrappers but
+   ships no rule for them — only its docs site styles them. */
+.jmarkdown-right { text-align: right; }
+.jmarkdown-center { text-align: center; }
+
 /* ---- canvas embeds (![[X.canvas]]) — read-only scene rendered by the
    preview client's canvas-embed.js ------------------------------------- */
 .canvas-embed .canvas-embed-scene {

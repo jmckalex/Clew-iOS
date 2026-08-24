@@ -27,6 +27,7 @@ import '../panels/clew-outgoing-links.js';
 import '../panels/clew-tag-pane.js';
 import '../panels/clew-outline.js';
 import '../panels/clew-properties.js';
+import '../panels/clew-bibliography.js';
 import '../views/clew-graph-view.js';
 import './clew-status-bar.js';
 
@@ -42,6 +43,8 @@ const TOOLS = {
 		{ id: 'outgoing', label: 'Out', element: 'clew-outgoing-links' },
 		{ id: 'tags', label: 'Tags', element: 'clew-tag-pane' },
 		{ id: 'outline', label: 'Outline', element: 'clew-outline' },
+		// Gated on the vault's bibliographyPanel setting (see #refreshVaultTools).
+		{ id: 'bibliography', label: 'Refs', element: 'clew-bibliography', when: (vs) => vs?.bibliographyPanel === true },
 		{ id: 'props', label: 'Props', element: 'clew-properties' },
 		{
 			id: 'graph', label: 'Graph', element: 'clew-graph-view',
@@ -51,8 +54,14 @@ const TOOLS = {
 };
 
 class ClewApp extends ClewElement {
+	#vaultSettings = null;
+
 	subscribe() {
-		this.listen(vaultStore, 'vault-changed', () => this.render());
+		this.listen(vaultStore, 'vault-changed', () => { this.render(); this.#refreshVaultTools(); });
+		// The settings view announces per-vault setting changes (window-level:
+		// the settings tab and this chrome share no store for vault settings).
+		this.listen({ on: (ev, cb) => { window.addEventListener(ev, cb); return () => window.removeEventListener(ev, cb); } },
+			'clew:vault-settings-changed', () => this.#refreshVaultTools());
 		this.listen(workspaceStore, 'sidebar-changed', () => this.#applySidebars());
 		this.listen(workspaceStore, 'active-changed', () => this.#updateTitle());
 		this.listen(workspaceStore, 'layout-changed', () => this.#updateTitle());
@@ -88,8 +97,16 @@ class ClewApp extends ClewElement {
 		this.#wireSidebarResize('right');
 	}
 
+	/** Re-fetch vault settings and re-render conditional right-bar tools. */
+	#refreshVaultTools() {
+		ipc.invoke(CH.VAULT_SETTINGS_GET).then((vs) => {
+			this.#vaultSettings = vs ?? {};
+			if (this.querySelector('.tool-tabs[data-side="right"]')) this.#renderTools('right');
+		}).catch(() => {});
+	}
+
 	#renderTools(side) {
-		const tools = TOOLS[side];
+		const tools = TOOLS[side].filter((t) => !t.when || t.when(this.#vaultSettings));
 		const tabs = this.querySelector(`.tool-tabs[data-side="${side}"]`);
 		if (!tabs) return;
 		const active = workspaceStore.state.sidebars[side].activeTool ?? tools[0].id;

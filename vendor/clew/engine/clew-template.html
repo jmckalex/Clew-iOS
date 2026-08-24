@@ -40,6 +40,11 @@
 </head>
 <body class='{{Body_classes}}'>
 {{{Content}}}
+<!-- References-panel feed: the engine's citation post-pass runs on the full
+     templated document, so this hidden placeholder collects every citation in
+     the note (or is removed when there are none). The app extracts it; it is
+     never visible in the preview. -->
+<aside class="clew-bib-panel-source" hidden><div class="biblify-bibliography" data-all="true"></div></aside>
 {{#HTML_footer}}
 {{{.}}}
 {{/HTML_footer}}

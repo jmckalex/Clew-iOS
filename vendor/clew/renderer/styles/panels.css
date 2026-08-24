@@ -692,3 +692,19 @@ body[data-theme='light'] .props-value[type='date'] { color-scheme: light; }
 }
 body[data-theme='dark'] .diary-date-input { color-scheme: dark; }
 body[data-theme='light'] .diary-date-input { color-scheme: light; }
+
+/* ---- References panel (clew-bibliography) ---- */
+clew-bibliography .bibliography-entries { padding: 2px 0 10px; }
+clew-bibliography .csl-entry {
+	margin: 0 0 10px;
+	font-size: 12.5px;
+	line-height: 1.5;
+	color: var(--clew-text-normal);
+	/* Hanging indent, the way reference lists are set. */
+	padding-left: 14px;
+	text-indent: -14px;
+}
+clew-bibliography .csl-entry a { color: var(--clew-accent); word-break: break-all; }
+/* Numeric styles (vancouver) put the label in a left-margin span. */
+clew-bibliography .csl-left-margin { margin-right: 5px; }
+clew-bibliography .csl-right-inline { display: inline; }

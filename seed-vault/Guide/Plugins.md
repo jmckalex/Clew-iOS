@@ -9,7 +9,10 @@ share the behavior), and every plugin is **off until you enable it** in
 Settings → This vault — a plugin is arbitrary code, so enabling one is a
 statement of trust, exactly like the note API toggle.
 
-This very vault ships one: **Note Headers** (the banner on [[Welcome]]).
+This very vault ships two: **Note Headers**, a preview surface that
+draws the banner on [[Welcome]] and can run a whole animated HTML page
+behind it ([[Note Headers]]), and **Word Count**, the app surface whose
+manifest and code appear below.
 
 ## The three surfaces
 

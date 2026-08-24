@@ -95,6 +95,15 @@ export function getBlockEnvironment(name) {
 	return registry.get(name);
 }
 
+// Does this name declare a `(…)` argument slot?  Opt-in per handler (arg: true),
+// because a parenthesis is ordinary prose: only a name that has ASKED for an
+// argument may swallow one, so a registered `@name` followed by `(an aside)`
+// keeps its aside.  Used by the single-shot @name(arg)[text]{attrs} forms —
+// @begin(name) spends its own parentheses on the name, so it has no arg slot.
+function takesArg(name) {
+	return registry.get(name)?.arg === true;
+}
+
 function regexEscape(s) {
 	return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -193,6 +202,8 @@ export function createBeginEnd(options = {}) {
 	const getFormat = options.getFormat || (() => 'html');
 	const policy = options.blockElements || 'hyphenated';
 	const resolvePolicy = typeof policy === 'function' ? policy : () => policy;
+	// Notified when an {attrs} string fails to parse — see attrsOrNull below.
+	const onAttrsError = options.onAttrsError || (() => {});
 
 	// Handler for any name with no registered environment. A host may add a
 	// `latex` (or other-format) renderer via options.fallback; it merges over the
@@ -239,9 +250,7 @@ export function createBeginEnd(options = {}) {
 			const text = (argStr.match(/\[([^\]]*)\]/) || [])[1];
 			const attrsMatch = argStr.match(/\{([^}]*)\}/);
 			let attrs;
-			if (attrsMatch) {
-				try { attrs = attributesParser(attrsMatch[1]); } catch { attrs = undefined; }
-			}
+			if (attrsMatch) attrs = attrsOrNull(attrsMatch[1], name, onAttrsError);
 
 			// Find the matching @end(name), depth-counting same-name @begin(name).
 			// Match by the bare name, allowing the optional `.`/`<…>` sigils on either
@@ -360,7 +369,43 @@ export function createBeginEnd(options = {}) {
 	flags and `text` carrying the raw bracket content (handlers that want a raw key,
 	e.g. cross-references, read ctx.text; handlers that want formatted content read
 	ctx.inner).
+
+	A handler may also declare an ARGUMENT slot — `arg: true` in its registry entry —
+	which adds a leading `(…)`:
+
+		@name(argument)[text]{attrs}     inline
+		@name+(argument)[text]{attrs}    block
+
+	reaching the handler as ctx.arg (raw, unparsed).  It is for the one mandatory
+	operand a directive can't do without — @image(path), @video(path) — so it reads
+	as a call rather than as a `{src=…}` attribute among optional ones.  The slot is
+	opt-in because a parenthesis is ordinary prose: an unregistered name, or a
+	registered one that didn't ask, still leaves `(an aside)` alone.  @begin(name)
+	has no arg slot — its parentheses already name the environment.
 */
+
+// Parse an {attrs} string, or undefined if it doesn't parse.  attributes-parser
+// THROWS on anything outside the HTML attribute grammar — a backslash anywhere in
+// the string is the common one (`{width="0.8\\linewidth"}`) — and the whole
+// attribute set is lost when it does.  That used to be silent; the host is now
+// told, so it can turn it into a build warning instead of a mystery.
+function attrsOrNull(raw, name, onAttrsError) {
+	try {
+		return attributesParser(raw);
+	} catch {
+		onAttrsError(name, raw);
+		return undefined;
+	}
+}
+
+// The single-shot forms, with and without the `(…)` argument slot.  Two regexes
+// rather than one optional group so the no-arg case cannot consume a parenthesis
+// it isn't entitled to; the group numbering differs by one, hence the `withArg`
+// index juggling at the call sites.
+const RE_AT_INLINE      = /^@(\.|<)?([A-Za-z][\w-]*)>?(?:\[([^\]]*)\])?(?:\{([^}]*)\})?/;
+const RE_AT_INLINE_ARG  = /^@(\.|<)?([A-Za-z][\w-]*)>?(?:\(([^)\n]*)\))?(?:\[([^\]]*)\])?(?:\{([^}]*)\})?/;
+const RE_AT_BLOCK       = /^[ \t]*@(\.|<)?([A-Za-z][\w-]*)>?\+(?:\[([^\]]*)\])?(?:\{([^}]*)\})?[ \t]*(?:\n|$)/;
+const RE_AT_BLOCK_ARG   = /^[ \t]*@(\.|<)?([A-Za-z][\w-]*)>?\+(?:\(([^)\n]*)\))?(?:\[([^\]]*)\])?(?:\{([^}]*)\})?[ \t]*(?:\n|$)/;
 
 // Generic inline fallback for an unregistered @name[…]: a hyphenated name becomes
 // a custom element (valid inline), otherwise <span class="name"> — the inline
@@ -387,6 +432,7 @@ function renderAtToken(self, token, getFormat, fallback) {
 		text: token.text,
 		inner,
 		rawText: token.text,
+		arg: token.arg,
 		override: token.override,
 		format,
 		parser: self.parser,
@@ -411,6 +457,7 @@ export function createAtInline(options = {}) {
 	// first), so it is necessarily misplaced. A host can warn + mark via
 	// options.misplaced(name, format); the default just emits a visible HTML marker.
 	const misplaced = options.misplaced || ((name) => `<span class="jmd-error">[@${name}+ must start its own line]</span>`);
+	const onAttrsError = options.onAttrsError || (() => {});
 
 	return {
 		name: 'atInline',
@@ -428,20 +475,30 @@ export function createAtInline(options = {}) {
 			// previous token's raw instead — reject an @ glued to a word char.
 			const prev = tokens && tokens[tokens.length - 1];
 			if (prev && typeof prev.raw === 'string' && /\w$/.test(prev.raw)) return;
-			// A `@name+[…]`/`@name+{…}` here is a misplaced block form (see above);
-			// the optional `.`/`<…>` override sigil is tolerated on the name.
-			const bad = /^@(?:\.|<)?([A-Za-z][\w-]*)>?\+(\[[^\]]*\])?(\{[^}]*\})?/.exec(src);
-			if (bad && (bad[2] !== undefined || bad[3] !== undefined)) {
+			// A `@name+[…]`/`@name+{…}`/`@name+(…)` here is a misplaced block form
+			// (see above); the optional `.`/`<…>` override sigil is tolerated on the
+			// name.  A `(…)` counts only for a name that takes an argument slot.
+			const bad = /^@(?:\.|<)?([A-Za-z][\w-]*)>?\+(\([^)\n]*\))?(\[[^\]]*\])?(\{[^}]*\})?/.exec(src);
+			if (bad && (bad[3] !== undefined || bad[4] !== undefined || (bad[2] !== undefined && takesArg(bad[1])))) {
 				return { type: 'atInline', raw: bad[0], misplaced: bad[1] };
 			}
 			// Optional override sigil, parity with @begin(.name)/@begin(<name>):
 			// `@.name[…]` forces a class (<span class="name">), `@<name>[…]` forces a
 			// custom element (<name>). The sigil only affects the generic fallback —
 			// a registered handler owns its own output.
-			const m = /^@(\.|<)?([A-Za-z][\w-]*)>?(?:\[([^\]]*)\])?(?:\{([^}]*)\})?/.exec(src);
+			// Peek the name first: only a handler that declared an argument slot
+			// (arg: true) may consume a following `(…)`.
+			const peek = /^@(?:\.|<)?([A-Za-z][\w-]*)>?/.exec(src);
+			if (!peek) return;
+			const withArg = takesArg(peek[1]);
+			const m = (withArg ? RE_AT_INLINE_ARG : RE_AT_INLINE).exec(src);
 			if (!m) return;
-			const sigil = m[1], name = m[2], text = m[3] ?? '', attrsRaw = m[4];
-			const hasBracket = m[3] !== undefined || m[4] !== undefined;
+			const sigil = m[1], name = m[2];
+			const arg = withArg ? m[3] : undefined;
+			const textRaw = withArg ? m[4] : m[3];
+			const attrsRaw = withArg ? m[5] : m[4];
+			const text = textRaw ?? '';
+			const hasBracket = arg !== undefined || textRaw !== undefined || attrsRaw !== undefined;
 			// A bracket form takes any name (generic fallback); a BARE @name is a
 			// directive only if explicitly registered (so prose @-words aren't eaten).
 			// A sigil form always needs a bracket for its content, so a bare `@.foo`
@@ -449,10 +506,10 @@ export function createAtInline(options = {}) {
 			if (!hasBracket && (sigil || !registry.has(name))) return;
 			const override = sigil === '.' ? 'class' : sigil === '<' ? 'element' : undefined;
 			let attrs;
-			if (attrsRaw !== undefined) { try { attrs = attributesParser(attrsRaw); } catch { attrs = undefined; } }
+			if (attrsRaw !== undefined) attrs = attrsOrNull(attrsRaw, name, onAttrsError);
 			const mode = (registry.get(name) || {}).mode || 'markdown';
 			return {
-				type: 'atInline', raw: m[0], name, text, attrs, override, mode,
+				type: 'atInline', raw: m[0], name, text, arg, attrs, override, mode,
 				tokens: mode === 'verbatim' ? [] : this.lexer.inlineTokens(text)
 			};
 		},
@@ -472,6 +529,7 @@ export function createAtBlock(options = {}) {
 		html: (ctx) => renderGenericHTML(ctx.name, ctx.attrs, undefined, ctx.inner, ctx.override, resolvePolicy()),
 		...(options.fallback || {})
 	};
+	const onAttrsError = options.onAttrsError || (() => {});
 
 	return {
 		name: 'atBlock',
@@ -479,22 +537,35 @@ export function createAtBlock(options = {}) {
 		// Only ever report a line start its tokenizer can match (the anti-shredding
 		// rule): an `@name+[` / `@name+{` at the beginning of a line.
 		start(src) {
-			const m = src.match(/(?:^|\n)[ \t]*@[.<]?[A-Za-z][\w-]*>?\+[\[{]/);
-			if (!m) return undefined;
-			return m.index + (src[m.index] === '\n' ? 1 : 0);
+			// A `(` opener counts only for a name that takes an argument slot —
+			// otherwise the tokenizer below could not claim what we reported, and a
+			// start() its own tokenizer can't match shreds the paragraph.
+			const re = /(?:^|\n)[ \t]*@[.<]?([A-Za-z][\w-]*)>?\+([\[{(])/g;
+			let m;
+			while ((m = re.exec(src)) !== null) {
+				if (m[2] === '(' && !takesArg(m[1])) continue;
+				return m.index + (src[m.index] === '\n' ? 1 : 0);
+			}
+			return undefined;
 		},
 		tokenizer(src) {
 			// Optional `.`/`<…>` override sigil, parity with @begin(.name)/@begin(<name>):
 			// `@.name+[…]` forces <div class="name">, `@<name>+[…]` forces a <name> element.
-			const m = /^[ \t]*@(\.|<)?([A-Za-z][\w-]*)>?\+(?:\[([^\]]*)\])?(?:\{([^}]*)\})?[ \t]*(?:\n|$)/.exec(src);
+			const peek = /^[ \t]*@(?:\.|<)?([A-Za-z][\w-]*)>?\+/.exec(src);
+			if (!peek) return;
+			const withArg = takesArg(peek[1]);
+			const m = (withArg ? RE_AT_BLOCK_ARG : RE_AT_BLOCK).exec(src);
 			if (!m) return;
-			const sigil = m[1], name = m[2], text = m[3] ?? '', attrsRaw = m[4];
+			const sigil = m[1], name = m[2];
+			const arg = withArg ? m[3] : undefined;
+			const text = (withArg ? m[4] : m[3]) ?? '';
+			const attrsRaw = withArg ? m[5] : m[4];
 			const override = sigil === '.' ? 'class' : sigil === '<' ? 'element' : undefined;
 			let attrs;
-			if (attrsRaw !== undefined) { try { attrs = attributesParser(attrsRaw); } catch { attrs = undefined; } }
+			if (attrsRaw !== undefined) attrs = attrsOrNull(attrsRaw, name, onAttrsError);
 			const mode = (registry.get(name) || {}).mode || 'markdown';
 			return {
-				type: 'atBlock', raw: m[0], name, text, attrs, override, mode,
+				type: 'atBlock', raw: m[0], name, text, arg, attrs, override, mode,
 				tokens: mode === 'verbatim' ? [] : this.lexer.inlineTokens(text)
 			};
 		},
