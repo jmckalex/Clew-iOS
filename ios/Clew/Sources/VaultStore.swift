@@ -273,6 +273,16 @@ final class VaultStore {
 		return ["rel": outRel, "size": data.count]
 	}
 
+	/// Overwrite an existing vault file in place (inline PDF annotation
+	/// saves). Unlike writeBinary this never creates or renames: a wrong
+	/// path must fail loudly, not scatter deduped "name 1" copies.
+	func updateBinary(rel: String, base64: String) throws {
+		guard let data = Data(base64Encoded: base64) else { throw ClewError.badPayload }
+		let file = try resolve(rel)
+		guard FileManager.default.fileExists(atPath: file.path) else { throw ClewError.notFound(rel) }
+		try coordinatedWrite(to: file) { try data.write(to: $0) }
+	}
+
 	func mkdir(rel: String) throws {
 		try FileManager.default.createDirectory(at: try resolve(rel), withIntermediateDirectories: true)
 	}
@@ -337,6 +347,7 @@ enum ClewError: Error, LocalizedError {
 	case badPayload
 	case unknownMethod(String)
 	case vaultUnreachable(String)
+	case notFound(String)
 
 	var errorDescription: String? {
 		switch self {
@@ -344,6 +355,7 @@ enum ClewError: Error, LocalizedError {
 		case .pathEscape(let rel): return "Path escapes vault: \(rel)"
 		case .badPayload: return "Bad payload"
 		case .unknownMethod(let name): return "Unknown bridge method: \(name)"
+		case .notFound(let rel): return "No such vault file: \(rel)"
 		case .vaultUnreachable(let path): return "Cannot access vault at \(path) — re-pick the folder to renew access"
 		}
 	}

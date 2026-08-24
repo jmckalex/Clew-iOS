@@ -64,6 +64,14 @@ final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 			}
 			performIO(reply) { try self.vaults.writeBinary(rel: rel, base64: base64) }
 
+		case "updateBinary":
+			// Overwrite-in-place for existing vault files (PDF annotation
+			// saves) — writeBinary's dedupe would fork "name 1.pdf" copies.
+			guard let rel = params["rel"] as? String, let base64 = params["base64"] as? String else {
+				throw ClewError.badPayload
+			}
+			performIO(reply) { try self.vaults.updateBinary(rel: rel, base64: base64); return nil }
+
 		case "mkdir":
 			guard let rel = params["rel"] as? String else { throw ClewError.badPayload }
 			performIO(reply) { try self.vaults.mkdir(rel: rel); return nil }

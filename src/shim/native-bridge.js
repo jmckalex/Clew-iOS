@@ -10,7 +10,8 @@
 //                                       (text present for text files only)
 //   pickFolder()                     -> { path } | null (document picker)
 //   write({vault, rel, text})        -> null
-//   writeBinary({vault, rel, base64})-> null (attachments)
+//   writeBinary({vault, rel, base64})-> {rel, size} (attachments; dedupes name)
+//   updateBinary({rel, base64})      -> null (overwrite existing file in place)
 //   mkdir({vault, rel})              -> null
 //   rename({vault, rel, newRel})     -> null
 //   trash({vault, rel})              -> null

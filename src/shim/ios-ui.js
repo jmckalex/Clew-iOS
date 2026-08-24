@@ -5,7 +5,7 @@ import { EditorView } from '@codemirror/view';
 import { runCommand } from '../../vendor/clew/renderer/commands/registry.js';
 import { workspaceStore } from '../../vendor/clew/renderer/state/workspace-store.js';
 import * as actions from '../../vendor/clew/renderer/commands/actions.js';
-import { bridgeCall } from './native-bridge.js';
+import { bridgeCall, toBase64 } from './native-bridge.js';
 
 // ---- PDFs open in QuickLook ------------------------------------------------
 // WebKit has no inline PDF viewer worth the name (an <embed> shows one
@@ -22,6 +22,35 @@ workspaceStore.openFile = (path, opts) => {
 	}
 	return originalOpenFile(path, opts);
 };
+
+// ---- PDF annotation saves (preview iframe → vault) ------------------------
+// The inline PDF.js annotation editor (src/preview/pdf-viewer.js) posts the
+// re-saved document bytes up from the preview iframe; the vendored preview
+// host ignores the unknown message type, and this listener overwrites the
+// vault file through the native bridge's coordinated updateBinary. Each
+// request carries an id; the reply goes back to the posting iframe only.
+window.addEventListener('message', async (event) => {
+	const msg = event.data;
+	if (!msg || msg.source !== 'clew-preview' || msg.type !== 'clew-pdf-save') return;
+	if (!String(event.origin).startsWith('clew-preview://')) return;
+	const reply = (ok, error) => event.source?.postMessage({
+		source: 'clew-preview-host', type: 'clew-pdf-save-result',
+		id: msg.id, ok, ...(error ? { error } : {}),
+	}, '*');
+	const rel = typeof msg.rel === 'string' ? msg.rel : '';
+	const bytes = msg.bytes instanceof Uint8Array ? msg.bytes : null;
+	if (!/\.pdf$/i.test(rel) || rel.split('/').some((part) => !part || part === '..')
+		|| !bytes?.length) {
+		return reply(false, 'malformed save request');
+	}
+	try {
+		await bridgeCall('updateBinary', { rel, base64: toBase64(bytes) });
+		reply(true);
+	} catch (err) {
+		console.error('[clew-ios] pdf save failed:', err);
+		reply(false, String(err?.message ?? err));
+	}
+});
 
 // ---- canvas media engages on a single tap ---------------------------------
 // Canvas node content is inert until the node is "engaged" (double-click on
