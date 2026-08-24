@@ -201,6 +201,66 @@ export async function buildAppBundle({ minify = true } = {}) {
 	});
 }
 
+// The inline PDF viewer injected into the preview client (iOS builds).
+// Kept as plain source appended to client.js — runs in the preview
+// document, same origin as the PDF, Range requests served by Swift.
+const iosPdfViewer = `
+const clewPdfInit = () => {
+	for (const embed of document.querySelectorAll('.pdf-embed-box embed.pdf-embed')) {
+		const src = embed.getAttribute('src');
+		const host = document.createElement('div');
+		host.className = 'pdf-pages';
+		host.style.cssText = 'max-height: 70vh; overflow-y: auto; -webkit-overflow-scrolling: touch; border-radius: 4px; background: rgba(128,128,128,0.08);';
+		embed.replaceWith(host);
+		(async () => {
+			try {
+				const pdfjs = await import('/__clew_assets__/pdfjs/pdf.min.mjs');
+				pdfjs.GlobalWorkerOptions.workerSrc = '/__clew_assets__/pdfjs/pdf.worker.min.mjs';
+				const data = await (await fetch(src)).arrayBuffer();
+				const doc = await pdfjs.getDocument({ data }).promise;
+				const first = await doc.getPage(1);
+				const baseRatio = first.getViewport({ scale: 1 }).height / first.getViewport({ scale: 1 }).width;
+				const render = async (holder, pageNumber) => {
+					const page = await doc.getPage(pageNumber);
+					const width = host.clientWidth || 600;
+					const scale = width / page.getViewport({ scale: 1 }).width;
+					const viewport = page.getViewport({ scale: scale * (window.devicePixelRatio || 2) });
+					const canvas = document.createElement('canvas');
+					canvas.width = viewport.width;
+					canvas.height = viewport.height;
+					canvas.style.cssText = 'width: 100%; display: block;';
+					await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+					holder.style.aspectRatio = String(viewport.width / viewport.height);
+					holder.replaceChildren(canvas);
+				};
+				const observer = new IntersectionObserver((entries) => {
+					for (const entry of entries) {
+						const holder = entry.target;
+						const pageNumber = Number(holder.dataset.page);
+						if (entry.isIntersecting && !holder.firstChild) {
+							render(holder, pageNumber).catch(() => {});
+						} else if (!entry.isIntersecting && holder.firstChild) {
+							holder.replaceChildren(); // release off-screen canvases
+						}
+					}
+				}, { root: host, rootMargin: '200% 0%' });
+				for (let n = 1; n <= doc.numPages; n++) {
+					const holder = document.createElement('div');
+					holder.dataset.page = String(n);
+					holder.style.cssText = 'aspect-ratio: ' + (1 / baseRatio) + '; background: white; margin-bottom: 6px;';
+					host.append(holder);
+					observer.observe(holder);
+				}
+			} catch (err) {
+				console.warn('[clew pdf] inline render failed:', err);
+			}
+		})();
+	}
+};
+clewPdfInit();
+document.addEventListener('clew:render', clewPdfInit);
+`;
+
 // WebKit can move/restore a preview iframe during workspace reconciliation
 // without re-running its scripts — the client's one-shot 'ready' is lost and
 // the host↔preview bridge never opens. Re-announce on pageshow (fires on
@@ -211,7 +271,15 @@ const previewClientPatches = {
 		builder.onLoad({ filter: /vendor\/clew\/preview-client\/client\.js$/ }, (args) => ({
 			contents: patched('preview-client/client.js', fs.readFileSync(args.path, 'utf8'),
 				"post({ type: 'ready' });",
-				"post({ type: 'ready' });\nwindow.addEventListener('pageshow', () => post({ type: 'ready' }));"),
+				"post({ type: 'ready' });\n"
+				+ "window.addEventListener('pageshow', () => post({ type: 'ready' }));\n"
+				// iOS: WebKit renders an <embed> PDF as ONE static page, so
+				// swap every PDF embed for an inline PDF.js viewer: all pages,
+				// correct aspect ratio, scrollable inside the box. Pages render
+				// lazily on scroll and are released off-screen, so book-length
+				// PDFs stay cheap. The embed title link still opens QuickLook
+				// (Pencil annotation that saves into the vault file).
+				+ iosPdfViewer),
 			loader: 'js',
 		}));
 	},
@@ -267,6 +335,8 @@ export function stageStatic() {
 		'@fortawesome/fontawesome-free/js/all.min.js': 'node_modules/@fortawesome/fontawesome-free/js/all.min.js',
 		'jquery/dist/jquery.min.js': 'node_modules/jquery/dist/jquery.min.js',
 		'leaflet/dist': 'node_modules/leaflet/dist',
+		'pdfjs/pdf.min.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.min.mjs',
+		'pdfjs/pdf.worker.min.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs',
 	};
 	for (const [to, from] of Object.entries(assets)) {
 		copy(path.join(root, from), path.join(webroot, 'preview-assets', to));
