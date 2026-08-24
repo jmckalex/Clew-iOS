@@ -54,7 +54,9 @@ final class WebHost: NSObject, ObservableObject {
 		config.preferences.isElementFullscreenEnabled = true
 
 		let webView = WKWebView(frame: .zero, configuration: config)
+		#if DEBUG
 		webView.isInspectable = true
+		#endif
 		webView.scrollView.isScrollEnabled = false // the app manages its own scrolling
 		webView.scrollView.contentInsetAdjustmentBehavior = .never
 		webView.uiDelegate = self
