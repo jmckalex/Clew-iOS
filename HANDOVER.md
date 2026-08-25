@@ -45,8 +45,12 @@ first. (Learned 2026-08-24; also in Claude's memory.)
   AUTOSAVE into the vault file (updateBinary bridge) ~2.5s after the
   pen lifts; status chip in the embed title bar. Canvas PDF file nodes:
   shared lazy PDF.js reader (scrollable, was a static single page) +
-  ✎ Annotate → EmbedPDF overlay (direct engine — module workers don't
-  start under clew-app; CSP gained 'wasm-unsafe-eval' for Pdfium).
+  ✎ Annotate → EmbedPDF annotator PAGE (src/preview/pdf-annotator.html,
+  staged into the embedpdf assets) in an iframe overlay, hosted under
+  clew-preview so the worker engine runs. First cut ran Pdfium's direct
+  engine on the app page — worked in the sim, HUNG a real iPad white
+  (content process killed); fixed 2026-08-24 evening. CSP gained
+  'wasm-unsafe-eval' for Pdfium.
   Pencil convention wired via onActiveToolChange: with a draw tool
   active, fingers pan, Pencil draws (needs iPad feel-check). All flows
   sim-verified end-to-end (real /Ink into sample.pdf, reader remount).
@@ -74,10 +78,12 @@ first. (Learned 2026-08-24; also in Claude's memory.)
 
 1. **EmbedPDF surface** (branch `embedpdf-annotator`): iPad pass on
    inline-in-note layout, canvas reader+overlay, Pencil-pan feel; then
-   merge+push. Follow-ups: why module workers never start under
-   clew-app (direct engine in use there), optional CJK/RTL font
-   fallback packages, per-embed engine memory on many-PDF notes,
-   preview-canvas-embed PDFs got the reader (verify on device).
+   merge+push — RETEST canvas ✎ Annotate on the iPad (the white-hang
+   is fixed by hosting the annotator in a clew-preview iframe).
+   Follow-ups: optional CJK/RTL font fallback packages, per-embed
+   engine memory on many-PDF notes, preview-canvas-embed PDFs got the
+   reader (verify on device), why module workers never start under
+   clew-app (academic now).
 2. Kanban card drag on touch (HTML5 DnD dead); write path itself proven.
 3. Touch file move: drag-to-move is pointer-only; add "Move to folder…"
    to the long-press menu.

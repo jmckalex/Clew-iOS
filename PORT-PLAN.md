@@ -187,7 +187,13 @@ Ranked; items 1–5 are in scope for the first working build, 6–10 tracked:
   the clew-app scheme even post-CSP-fix, while the identical worker runs
   under clew-preview; blob-URL workers work under both, including
   importScripts/fetch/wasm-compile of custom-scheme URLs (probed
-  2026-08-24). App-page EmbedPDF runs the direct engine (`worker: false`).
+  2026-08-24). And Pdfium's DIRECT engine on the app page's main thread
+  wedged/killed the content process on a real iPad (white screen, app
+  must be killed) despite running in the simulator — so the canvas
+  annotator is a clew-preview-hosted page (pdf-annotator.html) in an
+  iframe overlay, where the worker engine is device-proven. Rule of
+  thumb: heavy wasm belongs in clew-preview documents with the worker
+  engine, never on the app page.
 - URL "loaders" in third-party libs tend to allowlist http(s)/blob:
   Syncfusion treated a clew-preview:// documentPath as base64 data;
   EmbedPDF is fed an ArrayBuffer (openDocumentBuffer) to sidestep the

@@ -297,6 +297,11 @@ export function stageStatic() {
 	// pdfium.wasm, all inside the snippet's dist; staged whole, then pruned
 	// of demo PDFs / maps / types the app should not ship.
 	assets['embedpdf'] = 'node_modules/@embedpdf/snippet/dist';
+	// The canvas annotator page lives INSIDE the embedpdf asset dir so it
+	// resolves ./embedpdf.js and ./pdfium.wasm relatively, and is reachable
+	// at clew-preview://vault/__clew_assets__/embedpdf/clew-annotator.html
+	// without any scheme-handler changes. Must stage after the dir copy.
+	assets['embedpdf/clew-annotator.html'] = 'src/preview/pdf-annotator.html';
 
 	for (const [to, from] of Object.entries(assets)) {
 		copy(path.join(root, from), path.join(webroot, 'preview-assets', to));

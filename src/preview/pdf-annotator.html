@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<!-- The canvas PDF annotator page. Served from the EmbedPDF asset dir
+     (clew-preview://vault/__clew_assets__/embedpdf/clew-annotator.html)
+     and opened in an iframe overlay by the app page (ios-ui.js).
+
+     Hosted under clew-preview deliberately: the worker engine runs there
+     (device-proven by the inline note viewers), while running Pdfium's
+     direct engine on the app page's main thread hung/killed the content
+     process on real iPads. Same-origin with the vault, so the PDF fetch
+     and the EmbedPDF assets (./embedpdf.js, ./pdfium.wasm) are local.
+
+     Query params: file=/<sid>/<vault path> (fetch URL), rel=<vault path>
+     (for the save bridge), theme=dark|light.
+
+     Saves ride the existing bridge: postMessage {source:'clew-preview',
+     type:'clew-pdf-save'} to the parent app page, which writes the bytes
+     via the native updateBinary. Done posts 'clew-annotator-close'. -->
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<style>
+	html, body { margin: 0; height: 100%; background: #1e1e1e; color: #ddd; font: 15px system-ui, sans-serif; }
+	body[data-theme="light"] { background: #f5f5f5; color: #222; }
+	.bar { display: flex; align-items: center; gap: 10px; padding: 8px 12px; padding-top: calc(8px + env(safe-area-inset-top)); background: rgba(128,128,128,0.14); }
+	.bar .status { font-size: 0.85em; opacity: 0.75; margin-left: auto; }
+	.bar button { font: inherit; min-height: 38px; padding: 4px 18px; border: none; border-radius: 7px; background: rgba(128,128,128,0.22); color: inherit; cursor: pointer; }
+	.wrap { position: fixed; inset: 0; display: flex; flex-direction: column; }
+	.stage { flex: 1; position: relative; }
+	#viewer { position: absolute; inset: 0; }
+	.message { padding: 24px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+	<div class="bar">
+		<span id="title"></span>
+		<span class="status" id="status"></span>
+		<button id="done">Done</button>
+	</div>
+	<div class="stage"><div id="viewer"></div></div>
+</div>
+<script type="module">
+	const params = new URLSearchParams(location.search);
+	const file = params.get('file');
+	const rel = params.get('rel') ?? '';
+	const theme = params.get('theme') === 'light' ? 'light' : 'dark';
+	document.body.dataset.theme = theme;
+	document.getElementById('title').textContent = rel.split('/').pop() ?? '';
+	const setStatus = (text) => { document.getElementById('status').textContent = text; };
+
+	// -- save bridge (same protocol as the inline note viewers) --
+	let saveSeq = 0;
+	const pendingSaves = new Map();
+	window.addEventListener('message', (event) => {
+		const msg = event.data;
+		if (!msg || msg.source !== 'clew-preview-host' || msg.type !== 'clew-pdf-save-result') return;
+		const pending = pendingSaves.get(msg.id);
+		if (!pending) return;
+		pendingSaves.delete(msg.id);
+		clearTimeout(pending.timer);
+		msg.ok ? pending.resolve() : pending.reject(new Error(msg.error || 'save failed'));
+	});
+	const saveToVault = (bytes) => new Promise((resolve, reject) => {
+		const id = ++saveSeq;
+		pendingSaves.set(id, {
+			resolve, reject,
+			timer: setTimeout(() => {
+				pendingSaves.delete(id);
+				reject(new Error('save timed out'));
+			}, 30_000),
+		});
+		window.parent.postMessage({ source: 'clew-preview', type: 'clew-pdf-save', id, rel, bytes }, '*');
+	});
+
+	let saveTimer = null;
+	let saving = false;
+	let saveAgain = false;
+	let exportCap = null;
+	const saveNow = async () => {
+		if (saving) { saveAgain = true; return; }
+		saving = true;
+		setStatus('saving…');
+		try {
+			const bytes = await exportCap.saveAsCopy().toPromise();
+			await saveToVault(new Uint8Array(bytes));
+			setStatus('saved');
+		} catch (err) {
+			console.warn('[clew annotator] autosave failed:', err);
+			setStatus('save failed');
+		} finally {
+			saving = false;
+			if (saveAgain) { saveAgain = false; saveNow(); }
+		}
+	};
+
+	document.getElementById('done').addEventListener('click', async () => {
+		if (saveTimer) { clearTimeout(saveTimer); await saveNow().catch(() => {}); }
+		window.parent.postMessage({ source: 'clew-preview', type: 'clew-annotator-close' }, '*');
+	});
+
+	// -- Pencil convention: with a draw tool active, fingers pan ---------------
+	const DRAW_TOOL_IDS = new Set(['ink', 'inkHighlighter', 'circle', 'square',
+		'line', 'lineArrow', 'polyline', 'polygon']);
+	let pencilSeen = false;
+	let drawToolActive = false;
+	let container = null;
+	document.addEventListener('pointerdown', (e) => {
+		if (e.pointerType === 'pen') pencilSeen = true;
+	}, true);
+	let pan = null;
+	const findScroller = (x, y) => {
+		let el = container?.shadowRoot?.elementFromPoint?.(x, y) ?? null;
+		while (el) {
+			if (el.scrollHeight > el.clientHeight + 1) {
+				const overflow = getComputedStyle(el).overflowY;
+				if (overflow === 'auto' || overflow === 'scroll') return el;
+			}
+			el = el.parentElement ?? el.getRootNode()?.host ?? null;
+		}
+		return null;
+	};
+	document.addEventListener('pointerdown', (e) => {
+		if (e.pointerType !== 'touch' || !pencilSeen || pan || !drawToolActive) return;
+		const scroller = findScroller(e.clientX, e.clientY);
+		if (!scroller) return;
+		e.stopImmediatePropagation();
+		e.preventDefault();
+		pan = { pointerId: e.pointerId, scroller, x: e.clientX, y: e.clientY };
+	}, true);
+	document.addEventListener('pointermove', (e) => {
+		if (!pan || e.pointerId !== pan.pointerId) return;
+		e.stopImmediatePropagation();
+		e.preventDefault();
+		pan.scroller.scrollLeft += pan.x - e.clientX;
+		pan.scroller.scrollTop += pan.y - e.clientY;
+		pan.x = e.clientX;
+		pan.y = e.clientY;
+	}, true);
+	for (const type of ['pointerup', 'pointercancel']) {
+		document.addEventListener(type, (e) => {
+			if (!pan || e.pointerId !== pan.pointerId) return;
+			e.stopImmediatePropagation();
+			pan = null;
+		}, true);
+	}
+
+	// -- viewer ---------------------------------------------------------------
+	try {
+		setStatus('loading…');
+		const [{ default: EmbedPDF }, buffer] = await Promise.all([
+			import('./embedpdf.js'),
+			fetch(file).then((response) => response.arrayBuffer()),
+		]);
+		container = EmbedPDF.init({
+			type: 'container',
+			target: document.getElementById('viewer'),
+			wasmUrl: new URL('pdfium.wasm', location.href).href,
+			fontFallback: null, // airgapped
+			fonts: { ui: null, signature: null },
+			theme: { preference: theme },
+			tabBar: 'never',
+		});
+		if (!container) throw new Error('EmbedPDF.init returned nothing');
+		const registry = await container.registry;
+		const docManager = registry.getPlugin('document-manager')?.provides();
+		await docManager.openDocumentBuffer({
+			buffer,
+			name: rel.split('/').pop() ?? 'document.pdf',
+		}).toPromise();
+		setStatus('');
+		exportCap = registry.getPlugin('export')?.provides();
+		const annotationCap = registry.getPlugin('annotation')?.provides();
+		annotationCap?.onAnnotationEvent((event) => {
+			if (event.type === 'loaded') return; // opening isn't a change
+			setStatus('unsaved');
+			clearTimeout(saveTimer);
+			saveTimer = setTimeout(saveNow, 2500);
+		});
+		annotationCap?.onActiveToolChange((event) => {
+			const tool = event && typeof event === 'object' && 'tool' in event ? event.tool : event;
+			drawToolActive = !!tool && DRAW_TOOL_IDS.has(tool.id);
+		});
+		// Smoke hook: the app page can't reach into this cross-origin frame,
+		// so sim tests drive it with a message (see PORT-PLAN kit).
+		window.addEventListener('message', (event) => {
+			const msg = event.data;
+			if (!msg || msg.source !== 'clew-preview-host' || msg.type !== 'clew-annotator-smoke') return;
+			try {
+				annotationCap.createAnnotation(0, msg.annotation);
+			} catch (err) {
+				console.warn('[clew annotator] smoke annotation failed:', err);
+			}
+		});
+	} catch (err) {
+		console.warn('[clew annotator] failed to open:', err);
+		setStatus('failed');
+		const message = document.createElement('div');
+		message.className = 'message';
+		message.textContent = `Annotator failed: ${err?.message ?? err}`;
+		document.querySelector('.stage').replaceChildren(message);
+	}
+</script>
+</body>
+</html>
