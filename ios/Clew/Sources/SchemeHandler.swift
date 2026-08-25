@@ -48,6 +48,7 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 		"leaflet": "preview-assets/leaflet/dist",
 		"preview": "engine-assets",
 		"pdfjs": "preview-assets/pdfjs",
+		"embedpdf": "preview-assets/embedpdf",
 	]
 
 	private var webRootURL: URL? {

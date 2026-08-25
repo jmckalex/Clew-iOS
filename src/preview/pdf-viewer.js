@@ -396,6 +396,120 @@ async function openEditor({ src, rel, onSaved }) {
 	}
 }
 
+// ---- EMBEDPDF SPIKE --------------------------------------------------------
+// (embedpdf-spike branch) Evaluating EmbedPDF (MIT, Pdfium-in-wasm, full
+// viewer chrome + annotation suite) as the Annotate surface. Airgapped per
+// their docs: no external requests — wasm, fonts and stamps all disabled
+// or served from our own assets. The PDF.js editor above stays intact;
+// clewPdfInit routes here on this branch.
+
+const EMBEDPDF_ASSETS = '/__clew_assets__/embedpdf';
+
+let embedPdfPromise = null;
+// ESM bundle; its hashed chunks resolve relative to this URL.
+const loadEmbedPdf = () => embedPdfPromise ??= import(`${EMBEDPDF_ASSETS}/embedpdf.js`);
+
+let epOpen = false;
+
+async function openEmbedPdfEditor({ src, rel, onSaved }) {
+	if (epOpen) return;
+	epOpen = true;
+	ensureEditorStyles(); // reuse the overlay chrome
+
+	const root = document.createElement('div');
+	root.className = 'clew-pdf-editor';
+	root.setAttribute('data-clew-keep', '');
+	const toolbar = document.createElement('div');
+	toolbar.className = 'clew-pdf-toolbar';
+	const stage = document.createElement('div');
+	stage.className = 'clew-pdf-stage';
+	const viewerEl = document.createElement('div');
+	viewerEl.id = 'clew-embedpdf';
+	viewerEl.style.cssText = 'position: absolute; inset: 0;';
+	stage.append(viewerEl);
+	root.append(toolbar, stage);
+	document.body.append(root);
+
+	const status = document.createElement('span');
+	status.className = 'clew-pdf-status';
+	const setStatus = (text) => { status.textContent = text; };
+
+	let registry = null;
+	let savedAny = false;
+	let saving = false;
+
+	const save = async () => {
+		if (saving || !registry) return;
+		saving = true;
+		setStatus('Saving…');
+		try {
+			const exportCap = registry.getPlugin('export')?.provides();
+			if (!exportCap) throw new Error('export plugin unavailable');
+			const buffer = await exportCap.saveAsCopy().toPromise();
+			await saveToVault(rel, new Uint8Array(buffer));
+			savedAny = true;
+			setStatus('Saved');
+		} catch (err) {
+			console.warn('[clew pdf embedpdf] save failed:', err);
+			setStatus(`Save failed — ${err?.message ?? err}`);
+		} finally {
+			saving = false;
+		}
+	};
+	const close = () => {
+		root.remove(); // disconnects the custom element; it cleans itself up
+		epOpen = false;
+		delete window.__clewSpikeViewer;
+		if (savedAny) onSaved?.();
+	};
+
+	const button = (label, onTap) => {
+		const el = document.createElement('button');
+		el.textContent = label;
+		el.title = label;
+		el.addEventListener('click', onTap);
+		toolbar.append(el);
+		return el;
+	};
+	toolbar.append(status);
+	button('Save', () => { save(); });
+	button('Done', async () => { await save(); close(); });
+
+	try {
+		setStatus('loading EmbedPDF…');
+		const { default: EmbedPDF } = await loadEmbedPdf();
+		const container = EmbedPDF.init({
+			type: 'container',
+			target: viewerEl,
+			wasmUrl: new URL(`${EMBEDPDF_ASSETS}/pdfium.wasm`, location.href).href,
+			fontFallback: null,          // airgapped: no jsDelivr fonts
+			fonts: { ui: null, signature: null }, // airgapped: no Google Fonts
+			theme: { preference: document.documentElement.dataset.theme === 'light' ? 'light' : 'dark' },
+		});
+		if (!container) throw new Error('EmbedPDF.init returned nothing');
+		registry = await container.registry;
+		// Load via buffer, not src URL: lesson from the Syncfusion spike —
+		// URL loaders tend to allowlist http(s)/blob and mangle custom
+		// schemes, while a buffer has no provenance to argue about.
+		setStatus('opening document…');
+		const buffer = await (await fetch(src)).arrayBuffer();
+		const docManager = registry.getPlugin('document-manager')?.provides();
+		if (!docManager) throw new Error('document-manager plugin unavailable');
+		await docManager.openDocumentBuffer({
+			buffer,
+			name: rel.split('/').pop() ?? 'document.pdf',
+		}).toPromise();
+		window.__clewSpikeViewer = { container, registry, save }; // sim automation
+		setStatus('loaded');
+	} catch (err) {
+		console.warn('[clew pdf embedpdf] editor failed to open:', err);
+		const message = document.createElement('div');
+		message.className = 'clew-pdf-message';
+		message.textContent = `EmbedPDF editor failed: ${err?.message ?? err}`;
+		stage.replaceChildren(message);
+	}
+}
+
 // ---- embed wiring -----------------------------------------------------------
 
 const clewPdfInit = () => {
@@ -415,7 +529,9 @@ const clewPdfInit = () => {
 			annotate.style.cssText = 'float: right; font: inherit; font-size: 0.85em; color: inherit; background: rgba(128,128,128,0.15); border: none; border-radius: 5px; padding: 2px 10px; cursor: pointer;';
 			annotate.addEventListener('click', (e) => {
 				e.preventDefault();
-				openEditor({ src, rel, onSaved: () => remountReader(host, src) });
+				// SPIKE: route to the EmbedPDF editor; openEditor is the
+				// PDF.js editor this branch is evaluating against.
+				openEmbedPdfEditor({ src, rel, onSaved: () => remountReader(host, src) });
 			});
 			titleBar.append(annotate);
 			host.addEventListener('dblclick', () => annotate.click());

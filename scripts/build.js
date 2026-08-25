@@ -295,8 +295,20 @@ export function stageStatic() {
 		'pdfjs/wasm': 'node_modules/pdfjs-dist/wasm',
 		'pdfjs/iccs': 'node_modules/pdfjs-dist/iccs',
 	};
+	// SPIKE (embedpdf-spike branch): EmbedPDF (MIT) — Pdfium-in-wasm viewer
+	// with the full annotation suite. One ESM bundle + hashed chunks +
+	// pdfium.wasm, all inside the snippet's dist; staged whole, then pruned
+	// of demo PDFs / maps / types the app should not ship.
+	assets['embedpdf'] = 'node_modules/@embedpdf/snippet/dist';
+
 	for (const [to, from] of Object.entries(assets)) {
 		copy(path.join(root, from), path.join(webroot, 'preview-assets', to));
+	}
+	const embedPdfDir = path.join(webroot, 'preview-assets', 'embedpdf');
+	for (const name of fs.readdirSync(embedPdfDir)) {
+		if (/\.(pdf|map|d\.ts)$/.test(name) || name === 'index.html') {
+			fs.rmSync(path.join(embedPdfDir, name), { recursive: true, force: true });
+		}
 	}
 }
 
