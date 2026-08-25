@@ -33,9 +33,10 @@ first. (Learned 2026-08-24; also in Claude's memory.)
   handover. Owner has verified the inline viewer on the iPad ("that
   works"). Branch **`embedpdf-annotator`** (from main, supersedes the
   pdf-annotation-editor branch work) carries the EmbedPDF-based PDF
-  surface — owner called the annotator "a GAME CHANGER" on iPad; the
-  inline-in-note + canvas layout still needs an iPad pass, then merge
-  to main + push on the owner's OK.
+  surface — owner called the annotator "a GAME CHANGER" on iPad, and
+  the canvas-annotator white-hang fix is device-verified ("worked
+  perfectly", 2026-08-24 late). Branch is READY: merge to main + push
+  on the owner's OK.
 
 ## 2. Shipped recently (newest first)
 
@@ -49,8 +50,8 @@ first. (Learned 2026-08-24; also in Claude's memory.)
   staged into the embedpdf assets) in an iframe overlay, hosted under
   clew-preview so the worker engine runs. First cut ran Pdfium's direct
   engine on the app page — worked in the sim, HUNG a real iPad white
-  (content process killed); fixed 2026-08-24 evening. CSP gained
-  'wasm-unsafe-eval' for Pdfium.
+  (content process killed); fix device-verified same evening. CSP
+  gained 'wasm-unsafe-eval' for Pdfium.
   Pencil convention wired via onActiveToolChange: with a draw tool
   active, fingers pan, Pencil draws (needs iPad feel-check). All flows
   sim-verified end-to-end (real /Ink into sample.pdf, reader remount).
@@ -76,14 +77,13 @@ first. (Learned 2026-08-24; also in Claude's memory.)
 
 ## 3. Open items
 
-1. **EmbedPDF surface** (branch `embedpdf-annotator`): iPad pass on
-   inline-in-note layout, canvas reader+overlay, Pencil-pan feel; then
-   merge+push — RETEST canvas ✎ Annotate on the iPad (the white-hang
-   is fixed by hosting the annotator in a clew-preview iframe).
-   Follow-ups: optional CJK/RTL font fallback packages, per-embed
-   engine memory on many-PDF notes, preview-canvas-embed PDFs got the
-   reader (verify on device), why module workers never start under
-   clew-app (academic now).
+1. **EmbedPDF surface** (branch `embedpdf-annotator`): device-verified
+   incl. the canvas annotator fix — awaiting the owner's word to merge
+   to main + push (= TestFlight release). Follow-ups: Pencil finger-pan
+   feel-check while drawing, optional CJK/RTL font fallback packages,
+   per-embed engine memory on many-PDF notes, preview-canvas-embed
+   PDFs got the reader (verify on device), why module workers never
+   start under clew-app (academic now).
 2. Kanban card drag on touch (HTML5 DnD dead); write path itself proven.
 3. Touch file move: drag-to-move is pointer-only; add "Move to folder…"
    to the long-press menu.
