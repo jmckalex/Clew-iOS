@@ -6,6 +6,7 @@ import { runCommand } from '../../vendor/clew/renderer/commands/registry.js';
 import { workspaceStore } from '../../vendor/clew/renderer/state/workspace-store.js';
 import * as actions from '../../vendor/clew/renderer/commands/actions.js';
 import { bridgeCall, toBase64 } from './native-bridge.js';
+import { createPdfReader, vaultRelOf } from '../preview/pdf-reader-core.js';
 
 // ---- PDFs open in QuickLook ------------------------------------------------
 // WebKit has no inline PDF viewer worth the name (an <embed> shows one
@@ -52,6 +53,227 @@ window.addEventListener('message', async (event) => {
 	}
 });
 
+// ---- canvas PDF nodes: scrolling reader + inline annotate -------------------
+// The canvas renders PDF file nodes as an <iframe> onto the raw file,
+// which WebKit shows as ONE static, unscrollable page. Swap each for the
+// shared lazy PDF.js reader (all pages, scrollable inside the node) plus
+// an ✎ Annotate button that opens the EmbedPDF annotator over the
+// workspace; its edits autosave straight into the vault file through the
+// native bridge. App-page asset paths differ from the preview's: the same
+// staged files are served from WebRoot by the clew-app scheme.
+const canvasPdfReader = createPdfReader('/preview-assets/pdfjs');
+const EMBEDPDF_APP_ASSETS = '/preview-assets/embedpdf';
+let embedPdfAppPromise = null;
+const loadEmbedPdfApp = () => embedPdfAppPromise ??= import(`${EMBEDPDF_APP_ASSETS}/embedpdf.js`);
+
+const CANVAS_PDF_CSS = `
+.clew-canvas-pdf { overflow-y: auto; -webkit-overflow-scrolling: touch; position: relative; }
+.clew-canvas-pdf-annotate { position: absolute; top: 6px; right: 6px; z-index: 2; font: inherit; font-size: 0.85em; color: #333; background: rgba(255,255,255,0.85); border: none; border-radius: 5px; padding: 3px 10px; cursor: pointer; }
+.clew-pdf-overlay { position: fixed; inset: 0; z-index: 2147483000; display: flex; flex-direction: column; background: var(--clew-bg-primary, Canvas); color: inherit; }
+.clew-pdf-overlay-bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: rgba(128,128,128,0.12); }
+.clew-pdf-overlay-bar .clew-pdf-overlay-status { font-size: 0.85em; opacity: 0.75; margin-left: auto; }
+.clew-pdf-overlay-bar button { font: inherit; min-height: 38px; padding: 4px 16px; border: none; border-radius: 7px; background: rgba(128,128,128,0.18); color: inherit; cursor: pointer; }
+.clew-pdf-overlay-stage { flex: 1; position: relative; }
+`;
+const ensureCanvasPdfStyles = () => {
+	if (document.getElementById('clew-canvas-pdf-css')) return;
+	const style = document.createElement('style');
+	style.id = 'clew-canvas-pdf-css';
+	style.textContent = CANVAS_PDF_CSS;
+	document.head.append(style);
+};
+
+const CANVAS_DRAW_TOOLS = new Set(['ink', 'inkHighlighter', 'circle', 'square',
+	'line', 'lineArrow', 'polyline', 'polygon']);
+let canvasPdfOverlay = null; // one at a time
+
+async function openCanvasPdfAnnotator({ src, rel, onSaved }) {
+	if (canvasPdfOverlay) return;
+	ensureCanvasPdfStyles();
+	const root = document.createElement('div');
+	root.className = 'clew-pdf-overlay';
+	canvasPdfOverlay = root;
+	const bar = document.createElement('div');
+	bar.className = 'clew-pdf-overlay-bar';
+	const title = document.createElement('span');
+	title.textContent = rel.split('/').pop() ?? rel;
+	const status = document.createElement('span');
+	status.className = 'clew-pdf-overlay-status';
+	const doneBtn = document.createElement('button');
+	doneBtn.textContent = 'Done';
+	bar.append(title, status, doneBtn);
+	const stage = document.createElement('div');
+	stage.className = 'clew-pdf-overlay-stage';
+	root.append(bar, stage);
+	document.body.append(root);
+	const setStatus = (text) => { status.textContent = text; };
+
+	let savedAny = false;
+	let saveTimer = null;
+	let saving = false;
+	let saveAgain = false;
+	let saveNow = async () => {};
+	let drawToolActive = false;
+	let container = null;
+
+	// Pencil-aware inking, scoped to the overlay: once a Pencil has been
+	// seen (ios-ui's canvas tracking), a finger PANS while a draw tool is
+	// active instead of inking. Their layers set touch-action: none, so
+	// the pan is manual against the viewer's scroller.
+	let pan = null;
+	const findScroller = (x, y) => {
+		let el = container?.shadowRoot?.elementFromPoint?.(x, y) ?? null;
+		while (el) {
+			if (el.scrollHeight > el.clientHeight + 1) {
+				const overflow = getComputedStyle(el).overflowY;
+				if (overflow === 'auto' || overflow === 'scroll') return el;
+			}
+			el = el.parentElement ?? el.getRootNode()?.host ?? null;
+		}
+		return null;
+	};
+	const onDown = (e) => {
+		if (e.pointerType !== 'touch' || !pencilSeen || pan || !drawToolActive) return;
+		if (!e.composedPath().includes(root)) return;
+		const scroller = findScroller(e.clientX, e.clientY);
+		if (!scroller) return;
+		e.stopImmediatePropagation();
+		e.preventDefault();
+		pan = { pointerId: e.pointerId, scroller, x: e.clientX, y: e.clientY };
+	};
+	const onMove = (e) => {
+		if (!pan || e.pointerId !== pan.pointerId) return;
+		e.stopImmediatePropagation();
+		e.preventDefault();
+		pan.scroller.scrollLeft += pan.x - e.clientX;
+		pan.scroller.scrollTop += pan.y - e.clientY;
+		pan.x = e.clientX;
+		pan.y = e.clientY;
+	};
+	const onUp = (e) => {
+		if (!pan || e.pointerId !== pan.pointerId) return;
+		e.stopImmediatePropagation();
+		pan = null;
+	};
+	document.addEventListener('pointerdown', onDown, true);
+	document.addEventListener('pointermove', onMove, true);
+	document.addEventListener('pointerup', onUp, true);
+	document.addEventListener('pointercancel', onUp, true);
+
+	const close = () => {
+		document.removeEventListener('pointerdown', onDown, true);
+		document.removeEventListener('pointermove', onMove, true);
+		document.removeEventListener('pointerup', onUp, true);
+		document.removeEventListener('pointercancel', onUp, true);
+		clearTimeout(saveTimer);
+		root.remove();
+		canvasPdfOverlay = null;
+		if (savedAny) onSaved?.();
+	};
+	doneBtn.addEventListener('click', async () => {
+		if (saveTimer) { clearTimeout(saveTimer); await saveNow(); }
+		close();
+	});
+
+	try {
+		setStatus('loading…');
+		const [{ default: EmbedPDF }, buffer] = await Promise.all([
+			loadEmbedPdfApp(),
+			fetch(src).then((response) => response.arrayBuffer()),
+		]);
+		container = EmbedPDF.init({
+			type: 'container',
+			target: stage,
+			wasmUrl: new URL(`${EMBEDPDF_APP_ASSETS}/pdfium.wasm`, location.href).href,
+			// Module-worker spawns never come up under the clew-app scheme
+			// (verified 2026-08-24; the same worker engine runs fine in
+			// clew-preview documents). The overlay is modal, so the
+			// main-thread direct engine is acceptable here.
+			worker: false,
+			fontFallback: null, // airgapped
+			fonts: { ui: null, signature: null },
+			theme: { preference: document.body.dataset.theme === 'light' ? 'light' : 'dark' },
+			tabBar: 'never',
+		});
+		if (!container) throw new Error('EmbedPDF.init returned nothing');
+		const registry = await container.registry;
+		window.__clewCanvasPdfRegistry = registry; // smoke-test hook
+		const docManager = registry.getPlugin('document-manager')?.provides();
+		await docManager.openDocumentBuffer({
+			buffer,
+			name: rel.split('/').pop() ?? 'document.pdf',
+		}).toPromise();
+		setStatus('');
+		const exportCap = registry.getPlugin('export')?.provides();
+		const annotationCap = registry.getPlugin('annotation')?.provides();
+		saveNow = async () => {
+			if (saving) { saveAgain = true; return; }
+			saving = true;
+			setStatus('saving…');
+			try {
+				const bytes = new Uint8Array(await exportCap.saveAsCopy().toPromise());
+				await bridgeCall('updateBinary', { rel, base64: toBase64(bytes) });
+				savedAny = true;
+				setStatus('saved');
+			} catch (err) {
+				console.warn('[clew-ios] canvas pdf autosave failed:', err);
+				setStatus('save failed');
+			} finally {
+				saving = false;
+				if (saveAgain) { saveAgain = false; saveNow(); }
+			}
+		};
+		annotationCap?.onAnnotationEvent((event) => {
+			if (event.type === 'loaded') return;
+			setStatus('unsaved');
+			clearTimeout(saveTimer);
+			saveTimer = setTimeout(saveNow, 2500);
+		});
+		annotationCap?.onActiveToolChange((event) => {
+			const tool = event && typeof event === 'object' && 'tool' in event ? event.tool : event;
+			drawToolActive = !!tool && CANVAS_DRAW_TOOLS.has(tool.id);
+		});
+	} catch (err) {
+		console.warn('[clew-ios] canvas pdf annotator failed:', err);
+		setStatus(`failed — ${err?.message ?? err}`);
+	}
+}
+
+const upgradeCanvasPdfFrames = () => {
+	for (const iframe of document.querySelectorAll('iframe.canvas-pdf-frame')) {
+		ensureCanvasPdfStyles();
+		const src = iframe.src;
+		const rel = vaultRelOf(src, location.href);
+		const host = document.createElement('div');
+		// Keep the vendored class: it carries the node layout (flex sizing).
+		host.className = 'canvas-pdf-frame clew-canvas-pdf';
+		const annotate = document.createElement('button');
+		annotate.className = 'clew-canvas-pdf-annotate';
+		annotate.textContent = '✎ Annotate';
+		annotate.addEventListener('click', (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			openCanvasPdfAnnotator({ src, rel, onSaved: () => {
+				annotate.remove();
+				canvasPdfReader.remount(host, src);
+				host.append(annotate);
+			} });
+		});
+		iframe.replaceWith(host);
+		canvasPdfReader.mount(host, src);
+		host.append(annotate);
+	}
+};
+let canvasPdfSweep = null;
+new MutationObserver(() => {
+	clearTimeout(canvasPdfSweep);
+	canvasPdfSweep = setTimeout(() => {
+		canvasPdfReader.teardown((state) => !state.host.isConnected);
+		upgradeCanvasPdfFrames();
+	}, 100);
+}).observe(document.body, { childList: true, subtree: true });
+upgradeCanvasPdfFrames();
+
 // ---- canvas media engages on a single tap ---------------------------------
 // Canvas node content is inert until the node is "engaged" (double-click on
 // desktop) — so a tap on a video's play button hit an inert overlay. On
@@ -62,7 +284,7 @@ document.addEventListener('click', (e) => {
 	if (lastPointerType !== 'touch') return;
 	const node = e.target.closest?.('.canvas-node');
 	if (!node || node.classList.contains('is-engaged')) return;
-	if (!node.querySelector('video, audio, iframe, embed')) return;
+	if (!node.querySelector('video, audio, iframe, embed, .clew-canvas-pdf')) return;
 	node.dispatchEvent(new MouseEvent('dblclick', {
 		bubbles: true, cancelable: true, clientX: e.clientX, clientY: e.clientY,
 	}));

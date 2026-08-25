@@ -282,14 +282,11 @@ export function stageStatic() {
 		'jquery/dist/jquery.min.js': 'node_modules/jquery/dist/jquery.min.js',
 		'leaflet/dist': 'node_modules/leaflet/dist',
 		// Legacy builds throughout: the modern build needs Iterator helpers
-		// this WebKit lacks. pdf_viewer.mjs + css + images are the viewer
-		// component the annotation editor lives in; cmaps/standard_fonts/
-		// wasm/iccs are render-fidelity data pdf.js fetches on demand.
+		// this WebKit lacks. Reader only (annotation lives in EmbedPDF);
+		// cmaps/standard_fonts/wasm/iccs are render-fidelity data pdf.js
+		// fetches on demand.
 		'pdfjs/pdf.min.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.min.mjs',
 		'pdfjs/pdf.worker.min.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs',
-		'pdfjs/pdf_viewer.mjs': 'node_modules/pdfjs-dist/legacy/web/pdf_viewer.mjs',
-		'pdfjs/pdf_viewer.css': 'node_modules/pdfjs-dist/legacy/web/pdf_viewer.css',
-		'pdfjs/images': 'node_modules/pdfjs-dist/legacy/web/images',
 		'pdfjs/cmaps': 'node_modules/pdfjs-dist/cmaps',
 		'pdfjs/standard_fonts': 'node_modules/pdfjs-dist/standard_fonts',
 		'pdfjs/wasm': 'node_modules/pdfjs-dist/wasm',

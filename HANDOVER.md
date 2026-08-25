@@ -31,23 +31,28 @@ first. (Learned 2026-08-24; also in Claude's memory.)
   deliberately unpushed** pending the owner's device check:
   `3de9636` (inline PDF.js viewer) + `789c216` (Annotate button) +
   handover. Owner has verified the inline viewer on the iPad ("that
-  works"). Branch **`pdf-annotation-editor`** (from main) carries the
-  full inline annotation editor — owner asked for it 2026-08-24; needs
-  iPad verification, then merge to main + push on the owner's OK.
+  works"). Branch **`embedpdf-annotator`** (from main, supersedes the
+  pdf-annotation-editor branch work) carries the EmbedPDF-based PDF
+  surface — owner called the annotator "a GAME CHANGER" on iPad; the
+  inline-in-note + canvas layout still needs an iPad pass, then merge
+  to main + push on the owner's OK.
 
 ## 2. Shipped recently (newest first)
 
-- **Inline PDF annotation editor** (branch `pdf-annotation-editor`):
-  ✎ Annotate opens PDF.js's viewer component with the annotation editor
-  in an overlay — highlight/ink/text with color+size controls, zoom,
-  undo/redo; Save/Done run saveDocument() → new `updateBinary` bridge
-  (overwrite-in-place; writeBinary's dedupe forked "name 1.pdf") →
-  coordinated write into the vault file; reader remounts showing the
-  annotations. Verified end-to-end in the iPad sim via a temporary
-  vault script driving the editor inside the preview iframe (real
-  /Subtype /Ink landed in sample.pdf). Gotchas in the commit message:
-  pdfjsLib global binding order, destroy() on the loading task,
-  updateParams no-op outside active mode, data-clew-keep vs morphdom.
+- **EmbedPDF PDF surface** (branch `embedpdf-annotator`): note embeds
+  host a live EmbedPDF viewer (MIT, Pdfium-wasm, ~9.5MB staged) IN the
+  page at reading height — read/zoom/search/annotate in place, edits
+  AUTOSAVE into the vault file (updateBinary bridge) ~2.5s after the
+  pen lifts; status chip in the embed title bar. Canvas PDF file nodes:
+  shared lazy PDF.js reader (scrollable, was a static single page) +
+  ✎ Annotate → EmbedPDF overlay (direct engine — module workers don't
+  start under clew-app; CSP gained 'wasm-unsafe-eval' for Pdfium).
+  Pencil convention wired via onActiveToolChange: with a draw tool
+  active, fingers pan, Pencil draws (needs iPad feel-check). All flows
+  sim-verified end-to-end (real /Ink into sample.pdf, reader remount).
+  Earlier this arc: hand-rolled PDF.js annotation editor (superseded,
+  removed; updateBinary bridge + morphdom/data-clew-keep lessons live
+  on), Syncfusion spike (rejected: 26MB, packaging bug, license).
 - **Inline PDF viewer**: PDF.js (legacy build — modern build needs
   Iterator helpers this WebKit lacks) replaces `<embed>` in previews;
   bytes fetched by the client and passed as `{data}` (pdf.js rejects
@@ -67,10 +72,12 @@ first. (Learned 2026-08-24; also in Claude's memory.)
 
 ## 3. Open items
 
-1. **PDF annotation editor**: built on branch `pdf-annotation-editor`,
-   awaiting the owner's iPad verification before merge; possible
-   follow-ups — edit existing (baked-in) annotations, stamp/image tool,
-   pinch-zoom inside the editor (buttons only for now).
+1. **EmbedPDF surface** (branch `embedpdf-annotator`): iPad pass on
+   inline-in-note layout, canvas reader+overlay, Pencil-pan feel; then
+   merge+push. Follow-ups: why module workers never start under
+   clew-app (direct engine in use there), optional CJK/RTL font
+   fallback packages, per-embed engine memory on many-PDF notes,
+   preview-canvas-embed PDFs got the reader (verify on device).
 2. Kanban card drag on touch (HTML5 DnD dead); write path itself proven.
 3. Touch file move: drag-to-move is pointer-only; add "Move to folder…"
    to the long-press menu.

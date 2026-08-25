@@ -179,6 +179,19 @@ Ranked; items 1–5 are in scope for the first working build, 6–10 tracked:
 - TikZ cache keys hash the LaTeX preamble config: cross-device SVG reuse
   works only when desktop and iOS resolve the same preamble (MetaPost
   hashes source only and reuses cleanly).
+- WebAssembly compilation is CSP-gated: the app page's script-src needs
+  `'wasm-unsafe-eval'` or `WebAssembly.compile` fails (EmbedPDF's Pdfium
+  engine spun forever on "Initializing"). Preview documents carry no such
+  CSP, which is why the same engine ran there first try.
+- Module workers (`new Worker(url, {type:"module"})`) never come up under
+  the clew-app scheme even post-CSP-fix, while the identical worker runs
+  under clew-preview; blob-URL workers work under both, including
+  importScripts/fetch/wasm-compile of custom-scheme URLs (probed
+  2026-08-24). App-page EmbedPDF runs the direct engine (`worker: false`).
+- URL "loaders" in third-party libs tend to allowlist http(s)/blob:
+  Syncfusion treated a clew-preview:// documentPath as base64 data;
+  EmbedPDF is fed an ArrayBuffer (openDocumentBuffer) to sidestep the
+  whole class.
 
 ## Risks
 
