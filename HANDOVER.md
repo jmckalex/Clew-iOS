@@ -1,10 +1,10 @@
-# Handover — 2026-08-25 (upstream 0.8 sync executed, simulator-verified)
+# Handover — 2026-08-26 (upstream 0.8 sync executed, simulator-verified)
 
 Session-rollover state, upstream-style: rewritten each session, kept short.
 Durable architecture and build docs live in **README.md** and
 **PORT-PLAN.md** — trust those first. `UPSTREAM-0.8-PLAN.md` is now
-**history**: it was executed in full this session. Read it only for the
-reasoning behind a decision, not as a work list.
+**history**: it was executed in full. Read it only for the reasoning behind
+a decision, not as a work list.
 
 ## 0. THE ONE RULE
 
@@ -13,32 +13,55 @@ workflow builds and ships to TestFlight on every push to `main` — a push
 IS a release. Commit locally freely; the owner verifies on their iPad
 first. (Also in Claude's memory.)
 
-## 1. What happened
+## 1. Where things stand
 
 The 0.8 sync landed, start to finish, on a **chain of phase branches** so
 any phase can be dropped without losing the earlier ones:
 
 ```
-main (6f75e34, = embedpdf-annotator, 10 ahead of origin, UNPUSHED)
- └── sync-p1-vendor      prep → vendor drop @ ed35ba8 → engine plumbing
-      └── sync-p2-pdf    EmbedPDF everywhere, iOS parallel surface retired
-           └── sync-p3-excalidraw   editor page + assets + 2 channels
-                └── sync-p4-tests   19 → 160 tests
-                     └── sync-p5-verify  ← TIP, the branch to review/merge
+main               6f75e34   (= embedpdf-annotator; 10 ahead of origin, UNPUSHED)
+ └ sync-p1-vendor  d260805   prep → vendor drop @ ed35ba8 → engine plumbing
+   └ sync-p2-pdf   81a9c37   EmbedPDF everywhere, iOS parallel surface retired
+     └ sync-p3-excalidraw  8fe80b7   editor page + assets + 2 channels
+       └ sync-p4-tests     b24c1ea   19 → 160 tests
+         └ sync-p5-verify  f018535   ← TIP: the branch to review and merge
 ```
 
 `main` was fast-forwarded to `embedpdf-annotator` at the owner's request
 (it ships nothing until pushed). Each branch builds and tests green on its
-own tip.
+own tip. Working tree clean; **nothing pushed**.
 
-**Everything in the plan's Definition of Done (§10) is met**, plus three
-bugs the plan could not have known about (§3).
+Everything in the plan's Definition of Done (§10) is met, plus three bugs
+the plan could not have known about (§4).
 
-## 2. Verified, and how
+## 2. Read this before running `npm run sync-upstream`
+
+**Upstream has moved on: `../Clew-app` main is now `8422a45` (v0.9.0), 18
+commits past the `ed35ba8` this repo vendors.** So `sync-upstream` no
+longer reproduces our vendor tree — it pulls 0.9.0. Do not run it casually
+while device-verifying 0.8; it is the *start* of the next sync, not a
+propagation check.
+
+Pre-checked so the next session need not: **all 8 guarded patch anchors in
+`scripts/build.js` still match at `8422a45`**, including in the two patched
+files that changed (`clew-preview-view.js` +32, `preview-client/client.js`
++82). The next sync will build; as ever, the danger is silent runtime
+breakage.
+
+The 0.9 arcs, for scoping: Obsidian Kanban boards + the Tasks dialect;
+DQL `FLATTEN`, real `GROUP BY`, lambdas; Bases map views; admonitions,
+search embeds, Meta Bind widgets; `obsidian://` links and Back-able anchor
+jumps; Cmd+[ / Cmd+] navigation from reading mode; images inside Excalidraw
+drawings; a charts plugin; site-export fixes; new showpiece TikZ/MetaPost
+demo figures. `src/renderer/pdf-save.js` and `shared/excalidraw-file.js`
+both changed — the two files our new iOS seams hang off, so check those
+diffs first.
+
+## 3. Verified, and how
 
 `npm test` 160/160 (was 19). `npm run build` and `xcodebuild` both clean.
-Simulator sweep on the iPad sim, clean install, screenshots in the session
-scratchpad:
+Simulator sweep on the iPad sim from a clean install (screenshots lived in
+the session scratchpad and are gone — the findings below are the record):
 
 - **Callouts** — 14 typed boxes with icons, foldables as `<details>`.
 - **Block refs** — anchors emit ids; `![[Note#^id]]` transcludes the real
@@ -60,16 +83,17 @@ scratchpad:
   after dropping `'wasm-unsafe-eval'` from the app page.
 
 TikZ still errors in the demo vault — the documented accepted loss (no
-LaTeX toolchain), not a regression.
+LaTeX toolchain), not a regression. (0.9 replaces those demo figures, so
+expect the error to look different after the next sync, not to go away.)
 
 **Instrument worth knowing about**: app-page JS cannot read into a
 cross-origin preview iframe, so the sweep used a temporary vault plugin
-(`.clew/plugins/probe`) whose preview surface paints DOM counts on a banner
-and can drive a real annotation. It has been removed from the simulator
-vault. It needs `data-clew-keep` or the next morph strips it — that cost
-half an hour.
+(`.clew/plugins/probe`) whose preview surface painted DOM counts on a
+banner and could drive a real annotation. Removed from the simulator vault
+afterwards. It needs `data-clew-keep` or the next morph strips it — that
+cost half an hour. Full recipe is in Claude's memory.
 
-## 3. Bugs found and fixed along the way (not in the plan)
+## 4. Bugs found and fixed along the way (not in the plan)
 
 1. **`tools/render-note.mjs` carried a stale hand-copy of the engine
    config.** The Node battery rendered notes WITHOUT the app's extensions
@@ -87,7 +111,7 @@ Two build fixes also fell out: `stageStatic` now wipes `preview-assets/`
 anyway), and `pdf-core.js` publishes viewer handles so the touch layer can
 reach all three surfaces.
 
-## 4. Decisions the owner may want to reverse
+## 5. Decisions the owner may want to reverse
 
 Both were the plan's documented defaults, taken because the owner was
 asleep; both are a single-commit revert on `sync-p2-pdf`.
@@ -101,9 +125,10 @@ asleep; both are a single-commit revert on `sync-p2-pdf`.
    the device check to make; if it is bad, the fallback is keeping a
    lightweight reader for scenes only.
 
-Third, unchanged from the plan: CJK PDF fonts are stubbed off (§2).
+Third, unchanged from the plan: CJK PDF fonts are stubbed off (§2 of the
+plan; the settings section is patched out).
 
-## 5. Open items
+## 6. Open items
 
 1. **Device verification, then merge + push** = TestFlight release. Nothing
    is pushed. Specifically worth an iPad: Pencil finger-pan *feel* on both
@@ -115,22 +140,26 @@ Third, unchanged from the plan: CJK PDF fonts are stubbed off (§2).
 2. **Markdown table editing** (Tab/Enter in the editor) is vendored and
    covered by `tables.test.js`, but was NOT exercised in the simulator —
    it needs keyboard input. First thing to try on a device with a keyboard.
-3. Deferred from the sync: `\citefile` BibDesk attachments (BufferShim
+3. **The 0.9 sync** (§2). Worth deciding whether it waits for 0.8 to reach
+   TestFlight first; the phase-branch pattern worked well and is what the
+   owner asked for, so repeat it.
+4. Deferred from the 0.8 sync: `\citefile` BibDesk attachments (BufferShim
    gaps), a third-party notices surface for iOS (App Store licence hygiene
    — notices need regenerating for the iOS dependency set), native CJK font
    download.
-4. **App size**: Excalidraw's assets add 17 MB, 12 MB of which is the
+5. **App size**: Excalidraw's assets add 17 MB, 12 MB of which is the
    Xiaolai CJK face. Staged whole on purpose (the bundle fetches
    `locales/*.json` from the same root, so the plan's "fonts + data" guess
    would have broken every non-English UI). Prune the CJK face if size
    matters more than CJK handwriting.
-5. Pre-existing: kanban touch drag; "Move to folder…" long-press; empty
-   folders invisible in explorer; iCloud conflict surfacing + canvas-ink
-   merge; engine-surface vault plugins + TikZ preamble-hash reuse; stale
-   recents pruning. Upstream candidates now have their own section in
-   PORT-PLAN.md.
+6. Pre-existing: kanban touch drag (0.9 brings Obsidian Kanban boards, so
+   these two now collide — sequence them); "Move to folder…" long-press;
+   empty folders invisible in explorer; iCloud conflict surfacing +
+   canvas-ink merge; engine-surface vault plugins + TikZ preamble-hash
+   reuse; stale recents pruning. Upstream candidates now have their own
+   section in PORT-PLAN.md.
 
-## 6. Verification kit (works, use it)
+## 7. Verification kit (works, use it)
 
 - `npm test` — 160 green (upstream's ported suites + the iOS engine-worker
   battery + services).
@@ -149,12 +178,18 @@ Third, unchanged from the plan: CJK PDF fonts are stubbed off (§2).
 - **Gotchas that cost hours** (details in PORT-PLAN/memory): smoke
   `message` listeners never fire from callAsyncJavaScript closures; every
   `simctl install` rotates the data container, and the app then reopens a
-  now-missing vault path and looks empty — uninstall + reinstall for a
-  clean run; a failed xcodebuild leaves the previous build installed
+  now-missing vault path and comes up looking EMPTY — uninstall + reinstall
+  for a clean run; a failed xcodebuild leaves the previous build installed
   (check for `** BUILD SUCCEEDED`).
+- **`sync-upstream` regenerates `AppIcon.png` non-deterministically** —
+  ImageMagick writes different bytes for identical input, so it shows as a
+  4 MB binary diff every single time. `git checkout --` it unless the
+  upstream icon actually changed.
 - **Upstream propagation**: `npm run sync-upstream && npm run build &&
-  npm test`; the build fails loudly if a vendored patch no longer matches
-  (fix in scripts/build.js — 9 guarded anchors across 8 files now, the
-  settings-view and pdf-core ones new this sync, plus the metadata-header
-  dynamic-import transform). Check `shared/channels.js` and `main/render-service.js`
-  diffs for new shim/engine work; npm deps do NOT auto-merge from upstream.
+  npm test` — but see §2 first: upstream is ahead now, so this pulls 0.9.0
+  rather than checking propagation. The build fails loudly if a vendored
+  patch no longer matches (fix in `scripts/build.js` — 9 guarded anchors
+  across 8 files, the settings-view and pdf-core ones new this sync, plus
+  the metadata-header dynamic-import transform). Check `shared/channels.js`
+  and `main/render-service.js` diffs for new shim/engine work; npm deps do
+  NOT auto-merge from upstream.
