@@ -13,13 +13,15 @@
 import { vfs } from '../worker/shims/vfs.js';
 import { bridgeCall, toBase64 } from './native-bridge.js';
 import { settings } from './settings.js';
+import { isTextPath } from './engine-config.js';
 
 const IGNORED_DIRS = new Set(['.obsidian', '.clew', '.git', 'node_modules', '.trash']);
 
 export const VAULT_ROOT = '/vault';
 
-const TEXT_EXT = /\.(md|jmd|bib|canvas|json|css|js|mjs|txt|csl|xml|yaml|yml|svg|html|gpx|geojson|tex|bibtex|org|csv)$/i;
-export const isTextPath = (rel) => TEXT_EXT.test(rel);
+// Which files are text lives with the engine config — the Node harness needs
+// both without dragging the bridge in. Re-exported here for existing callers.
+export { isTextPath };
 
 export class VaultManager {
 	/** Real on-device path of the open vault (bridge-side), or null. */

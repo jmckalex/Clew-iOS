@@ -8,7 +8,8 @@
 // vfs snapshot + engine import), consumed per build, terminated after its
 // single result, while the replacement warms in the background.
 import { vfs } from '../worker/shims/vfs.js';
-import { VAULT_ROOT, isTextPath } from './vault-manager.js';
+import { VAULT_ROOT } from './vault-manager.js';
+import { engineConfig, engineEnv, isTextPath } from './engine-config.js';
 
 const REBUILD_DEBOUNCE_MS = 300;
 const ENGINE_CWD = `${VAULT_ROOT}/.clew/engine`;
@@ -107,24 +108,14 @@ export class RenderService {
 		}
 	}
 
-	// Mirrors desktop #writeEngineConfig. Extension paths are registry keys
-	// the worker pre-bundles (vault plugins' engine surfaces are not yet
-	// loadable on iOS — they would need bundling at runtime).
+	// Mirrors desktop #writeEngineConfig — the body lives in engine-config.js
+	// so the Node harness renders through the identical config. (Vault
+	// plugins' engine surfaces are not yet loadable on iOS: they would need
+	// bundling at runtime.)
 	#engineConfig() {
-		return JSON.stringify({
-			'File inclusion': this.#vaultOptions.jmarkdownProject === true,
-			'Header style': 'fenced',
-			'Template': '/engine/clew-template.html',
-			'Extensions': [
-				'wikiembed, wikilink from /engine-assets/wikilinks.js',
-				'mermaidFence, leafletFence from /engine-assets/obsidian-fences.js',
-				'queryFence, tasksFence, kanbanFence from /engine-assets/query-fences.js',
-			],
-			'MathJax': { 'src': '/__clew_assets__/mathjax/tex-svg.js' },
-			'Mermaid': '/__clew_assets__/mermaid/mermaid.min.js',
-			'Fontawesome': '/__clew_assets__/fontawesome/all.min.js',
-			'Highlight src': '/__clew_assets__/highlight/atom-one-dark.min.css',
-		}, null, 2);
+		return JSON.stringify(
+			engineConfig({ vaultRoot: VAULT_ROOT, vaultOptions: this.#vaultOptions }),
+			null, 2);
 	}
 
 	/** Snapshot every vault text file (plus stubs so wikilink resolution can
@@ -160,7 +151,11 @@ export class RenderService {
 			type: 'init',
 			files: this.#snapshot(),
 			cwd: ENGINE_CWD,
-			env: { CLEW_VAULT_ROOT: VAULT_ROOT, CLEW_SESSION_ID: this.sessionId ?? '' },
+			env: engineEnv({
+				vaultRoot: VAULT_ROOT,
+				sessionId: this.sessionId,
+				vaultOptions: this.#vaultOptions,
+			}),
 		});
 		this.#standby = { worker, ready };
 	}

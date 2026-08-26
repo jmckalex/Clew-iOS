@@ -5,13 +5,23 @@
 // must not clobber the test runner's) and handy as a dev CLI:
 //
 //   node tools/render-note.mjs <vault-dir> <note-rel-path> [--fragment]
+//                              [--vault-options '<json>']
 //
+// The engine config and the text-file rule come from src/shim/engine-config.js
+// — the SAME module the app's render service uses. They used to be hand-copied
+// here, and the copy went stale silently: notes rendered without the
+// extensions the app loads, and the battery still reported green.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { engineConfig, engineEnv, isTextPath } from '../src/shim/engine-config.js';
 
 const [vaultDir, noteRel, ...flags] = process.argv.slice(2);
 const fragment = flags.includes('--fragment');
+const optionsAt = flags.indexOf('--vault-options');
+// Per-vault settings the app would read from .clew/vault-settings.json
+// (dataviewJs, pandocCitations, bibliography, …).
+const vaultOptions = optionsAt === -1 ? {} : JSON.parse(flags[optionsAt + 1] ?? '{}');
 if (!vaultDir || !noteRel) {
 	console.error('usage: node tools/render-note.mjs <vault-dir> <note-rel-path> [--fragment]');
 	process.exit(2);
@@ -24,14 +34,13 @@ const realErr = (...a) => console.error(...a);
 
 // ---- snapshot the vault's text files -------------------------------------
 
-const TEXT_EXT = /\.(md|jmd|bib|canvas|json|css|js|txt|csl|xml|yaml|yml|svg|html|gpx|geojson)$/i;
 const files = {};
 const walk = (dir, rel) => {
 	for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
 		if (entry.name.startsWith('.') || ['node_modules', '.trash'].includes(entry.name)) continue;
 		const childRel = rel ? `${rel}/${entry.name}` : entry.name;
 		if (entry.isDirectory()) walk(path.join(dir, entry.name), childRel);
-		else if (TEXT_EXT.test(entry.name)) {
+		else if (isTextPath(entry.name)) {
 			files[`/vault/${childRel}`] = fs.readFileSync(path.join(dir, entry.name), 'utf8');
 		} else {
 			// Binary files exist in the tree (wikilink resolution needs their
@@ -44,20 +53,8 @@ walk(vaultAbs, '');
 
 // ---- engine config + template assets (mirrors render-service.js) ---------
 
-files['/vault/.clew/engine/.jmarkdown/config.json'] = JSON.stringify({
-	'File inclusion': false,
-	'Header style': 'fenced',
-	'Template': '/engine/clew-template.html',
-	'Extensions': [
-		'wikiembed, wikilink from /engine-assets/wikilinks.js',
-		'mermaidFence, leafletFence from /engine-assets/obsidian-fences.js',
-		'queryFence, tasksFence, kanbanFence from /engine-assets/query-fences.js',
-	],
-	'MathJax': { 'src': '/__clew_assets__/mathjax/tex-svg.js' },
-	'Mermaid': '/__clew_assets__/mermaid/mermaid.min.js',
-	'Fontawesome': '/__clew_assets__/fontawesome/all.min.js',
-	'Highlight src': '/__clew_assets__/highlight/atom-one-dark.min.css',
-}, null, 2);
+files['/vault/.clew/engine/.jmarkdown/config.json'] = JSON.stringify(
+	engineConfig({ vaultRoot: '/vault', vaultOptions }), null, 2);
 
 for (const [target, source] of Object.entries({
 	'/engine/default-template.html.mustache': 'vendor/jmarkdown/src/default-template.html.mustache',
@@ -89,7 +86,7 @@ send({
 	type: 'init',
 	files,
 	cwd: '/vault/.clew/engine',
-	env: { CLEW_VAULT_ROOT: '/vault', CLEW_SESSION_ID: 's1' },
+	env: engineEnv({ vaultRoot: '/vault', sessionId: 's1', vaultOptions }),
 });
 const ready = await waiter;
 if (ready.type !== 'ready') {

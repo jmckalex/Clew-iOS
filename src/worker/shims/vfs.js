@@ -134,12 +134,23 @@ class Vfs {
 		}
 		const isFile = !!file;
 		const size = file ? (typeof file.data === 'string' ? file.data.length : file.data.byteLength) : 0;
+		const ms = file?.mtimeMs ?? 0;
 		return {
 			isFile: () => isFile,
 			isDirectory: () => !isFile,
 			isSymbolicLink: () => false,
-			mtimeMs: file?.mtimeMs ?? 0,
-			mtime: new Date(file?.mtimeMs ?? 0),
+			mtimeMs: ms,
+			mtime: new Date(ms),
+			// The mirror carries no creation time, and callers that ask for one
+			// feed it straight to `new Date(...).toISOString()` — Dataview's
+			// vault-model reads `birthtimeMs || ctimeMs` for every page's
+			// ctime/cday. Leaving these undefined threw RangeError and failed
+			// the whole render, so mtime stands in: approximate but always a
+			// valid date.
+			birthtimeMs: ms,
+			birthtime: new Date(ms),
+			ctimeMs: ms,
+			ctime: new Date(ms),
 			size,
 		};
 	}

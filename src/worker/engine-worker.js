@@ -32,11 +32,22 @@ import { vfs } from './shims/vfs.js';
 import * as wikilinks from '../../vendor/clew/engine/wikilinks.js';
 import * as obsidianFences from '../../vendor/clew/engine/obsidian-fences.js';
 import * as queryFences from '../../vendor/clew/engine/query-fences.js';
+import * as blockRefs from '../../vendor/clew/engine/block-refs.js';
+import * as dataview from '../../vendor/clew/engine/dataview.js';
+import * as bases from '../../vendor/clew/engine/bases.js';
+import * as callouts from '../../vendor/clew/engine/callouts.js';
 
+// One entry per file the generated config NAMES; each module's own imports
+// (dataview's dv-expr/dv-functions/dataview-js/vault-model, bases' share of
+// the same) resolve through the bundler, never through the registry.
 globalThis.__jmdExtensionRegistry = {
 	'/engine-assets/wikilinks.js': wikilinks,
 	'/engine-assets/obsidian-fences.js': obsidianFences,
 	'/engine-assets/query-fences.js': queryFences,
+	'/engine-assets/block-refs.js': blockRefs,
+	'/engine-assets/dataview.js': dataview,
+	'/engine-assets/bases.js': bases,
+	'/engine-assets/callouts.js': callouts,
 };
 
 let enginePromise = null;

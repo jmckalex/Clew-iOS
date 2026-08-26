@@ -202,8 +202,17 @@ export function createClewShim({ workerFactory, assetLoader } = {}) {
 			const current = vaults.loadState('vault-settings.json') ?? {};
 			current[key] = value;
 			vaults.saveState('vault-settings.json', current);
-			if (key === 'jmarkdownProject' || key === 'normalSyntax') {
+			// `dataviewJs` is ours: upstream leaves it to the next vault open,
+			// which reads as an oversight — an immediate reconfigure is
+			// strictly better and this handler is iOS-owned. (Upstream
+			// candidate, recorded in PORT-PLAN.)
+			if (key === 'jmarkdownProject' || key === 'normalSyntax'
+				|| key === 'pandocCitations' || key === 'dataviewJs') {
 				renderService.reconfigure({ [key]: value === true });
+			}
+			// Bibliography settings rewrite the engine config the same way.
+			if (key === 'bibliography' || key === 'bibliographyStyle') {
+				renderService.reconfigure({ [key]: value });
 			}
 			if (key === 'plugins') renderService.reconfigure({ plugins: value });
 			return current;
