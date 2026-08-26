@@ -58,6 +58,15 @@ const fakeBridge = {
 			case 'trash':
 				fs.rmSync(path.join(params.vault, params.rel), { recursive: true, force: true });
 				return null;
+			// Overwrite-in-place, like VaultStore.updateBinary: never creates,
+			// never dedupes a name. The shim's own guards are what the tests
+			// below exercise, but this mirrors the native refusal too.
+			case 'updateBinary': {
+				const abs = path.join(vaultDir, params.rel);
+				if (!fs.existsSync(abs)) throw new Error(`No such file: ${params.rel}`);
+				fs.writeFileSync(abs, Buffer.from(params.base64, 'base64'));
+				return null;
+			}
 			default:
 				return null;
 		}
@@ -97,7 +106,20 @@ const CH = {
 	BIB_ENTRIES: 'clew:bib-entries',
 	WORKSPACE_SAVE: 'clew:workspace-save',
 	WORKSPACE_LOAD: 'clew:workspace-load',
+	PDF_WRITE: 'clew:pdf-write',
+	PDF_FONTS_STATUS: 'clew:pdf-fonts-status',
+	PDF_FONTS_DOWNLOAD: 'clew:pdf-fonts-download',
+	EXCALIDRAW_LIB_GET: 'clew:excalidraw-lib-get',
+	EXCALIDRAW_LIB_SET: 'clew:excalidraw-lib-set',
 };
+
+// A byte-for-byte valid, one-page PDF — small enough to inline, real enough
+// that "we wrote a PDF" means something.
+const MINIMAL_PDF = Buffer.from(
+	'%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n'
+	+ '2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n'
+	+ '3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 99 99]>>endobj\n'
+	+ 'trailer<</Root 1 0 R>>\n%%EOF\n', 'latin1');
 
 let clew, native, services;
 const settle = () => new Promise((resolve) => setTimeout(resolve, 10));
@@ -105,6 +127,10 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 10));
 before(async () => {
 	vaultDir = fs.mkdtempSync(path.join(os.tmpdir(), 'clew-ios-test-'));
 	fs.cpSync(path.join(root, 'seed-vault'), vaultDir, { recursive: true });
+	// A PDF for the annotation-save path, in place before the vault opens so
+	// the mirror carries it as a binary stub, exactly as a real one would be.
+	fs.mkdirSync(path.join(vaultDir, 'Attachments'), { recursive: true });
+	fs.writeFileSync(path.join(vaultDir, 'Attachments', 'Paper.pdf'), MINIMAL_PDF);
 	globalThis.__clewBridgeImpl = fakeBridge;
 	const { createClewShim } = await import(path.join(root, 'dist', 'test', 'services.js'));
 	({ clew, native, services } = createClewShim({
@@ -199,6 +225,56 @@ test('rendered html comes back through the render service', async () => {
 	const html = await native.renderNote('Welcome.md');
 	assert.equal(html, '<html>fake</html>');
 	void services;
+});
+
+// ---- upstream 0.8 channels the iOS shim had to supply ---------------------
+
+test('pdf write overwrites an existing PDF in place', async () => {
+	const annotated = Buffer.concat([MINIMAL_PDF, Buffer.from('\n% annotated\n')]);
+	const result = await clew.invoke(CH.PDF_WRITE, {
+		path: 'Attachments/Paper.pdf',
+		bytes: new Uint8Array(annotated),
+	});
+	assert.equal(result, true);
+	const onDisk = fs.readFileSync(path.join(vaultDir, 'Attachments', 'Paper.pdf'));
+	assert.ok(onDisk.equals(annotated), 'the annotated bytes reached the vault file');
+});
+
+test('pdf write refuses anything that is not an existing vault PDF', async () => {
+	const bytes = new Uint8Array(MINIMAL_PDF);
+	// This channel is reachable from a PREVIEW document, which renders
+	// vault-authored content — so its narrowness is the security argument.
+	// Each of these must throw, not quietly create a file.
+	await assert.rejects(
+		() => clew.invoke(CH.PDF_WRITE, { path: 'Notes/Secret.md', bytes }),
+		/Not a PDF/, 'non-PDF extension');
+	await assert.rejects(
+		() => clew.invoke(CH.PDF_WRITE, { path: '../Escape.pdf', bytes }),
+		/Bad PDF path/, 'parent-directory segment');
+	await assert.rejects(
+		() => clew.invoke(CH.PDF_WRITE, { path: 'Attachments/Nope.pdf', bytes }),
+		/No such PDF/, 'never creates a file that does not exist');
+	await assert.rejects(
+		() => clew.invoke(CH.PDF_WRITE, { path: 'Attachments/Paper.pdf', bytes: new Uint8Array(0) }),
+		/Empty PDF payload/, 'empty payload');
+	assert.ok(!fs.existsSync(path.join(vaultDir, 'Attachments', 'Nope.pdf')));
+});
+
+test('excalidraw shape library round-trips per vault', async () => {
+	assert.deepEqual(await clew.invoke(CH.EXCALIDRAW_LIB_GET), []);
+	const items = [{ id: 'lib-1', status: 'published', elements: [] }];
+	assert.equal(await clew.invoke(CH.EXCALIDRAW_LIB_SET, { items }), true);
+	assert.deepEqual(await clew.invoke(CH.EXCALIDRAW_LIB_GET), items);
+	await native.flush();
+	assert.ok(fs.existsSync(path.join(vaultDir, '.clew', 'excalidraw-library.json')));
+});
+
+test('CJK PDF fonts answer honestly instead of failing as unknown channels', async () => {
+	const status = await clew.invoke(CH.PDF_FONTS_STATUS);
+	assert.equal(status.installed, false);
+	assert.equal(status.downloading, false);
+	assert.deepEqual(status.packs, []);
+	await assert.rejects(() => clew.invoke(CH.PDF_FONTS_DOWNLOAD), /not available on iOS/);
 });
 
 test('builds carry the CURRENT vault, not the standby snapshot', async () => {
