@@ -30,40 +30,63 @@ const CLEW_DRAW_TOOL_IDS = new Set(['ink', 'inkHighlighter', 'circle', 'square',
 // `container.registry` resolves to the plugin registry.
 const clewPdfHandles = () => window.__clewPdfHandles ?? new Set();
 
-// Handles whose annotation capability we have already subscribed to, and
-// whether a free-drag tool is currently active on each.
-const clewToolState = new WeakMap(); // handle -> { drawing: boolean }
+// handle -> annotation capability. The capability is reached through
+// `container.registry`, which is a PROMISE, so it is resolved ahead of time
+// and cached: a pointerdown has to decide synchronously whether this touch
+// is a pan or a draw.
+const clewCaps = new WeakMap();
+const clewCapPending = new WeakSet();
 
-async function clewWatchTools(handle) {
-	if (clewToolState.has(handle)) return;
-	const state = { drawing: false };
-	clewToolState.set(handle, state);
+function clewResolveCap(handle) {
+	if (clewCaps.has(handle) || clewCapPending.has(handle)) return;
+	clewCapPending.add(handle);
+	Promise.resolve(handle.container?.registry)
+		.then((registry) => {
+			const cap = registry?.getPlugin('annotation')?.provides();
+			if (cap?.getActiveTool) clewCaps.set(handle, cap);
+		})
+		.catch((err) => console.warn('[clew pdf] annotation capability unavailable:', err))
+		.finally(() => clewCapPending.delete(handle));
+}
+
+/**
+ * Is a free-drag tool armed on this viewer right now?
+ *
+ * Asked of the capability directly rather than tracked from
+ * onActiveToolChange. A change event only fires on a CHANGE: subscribing
+ * lazily (which is what a touch-driven layer does) means the tool that was
+ * already selected is invisible, so the first finger after arming would draw
+ * instead of panning — precisely the stroke a user notices.
+ */
+function clewIsDrawing(handle) {
+	const cap = clewCaps.get(handle);
+	if (!cap) return false;
 	try {
-		const registry = await handle.container?.registry;
-		const annotationCap = registry?.getPlugin('annotation')?.provides();
-		if (!annotationCap?.onActiveToolChange) return;
-		annotationCap.onActiveToolChange((event) => {
-			// Scope-level hooks hand over the tool itself, capability-level
-			// ones wrap it in { tool } — accept either shape.
-			const tool = event && typeof event === 'object' && 'tool' in event ? event.tool : event;
-			state.drawing = !!tool && CLEW_DRAW_TOOL_IDS.has(tool.id);
-		});
-	} catch (err) {
-		console.warn('[clew pdf] tool watch failed:', err);
+		const tool = cap.getActiveTool();
+		return !!tool && CLEW_DRAW_TOOL_IDS.has(tool.id);
+	} catch {
+		return false;
 	}
 }
 
 let clewPencilSeen = false;
+
+// Resolve capabilities for whatever viewers exist now. Handles appear
+// asynchronously (lazily, as an embed nears the viewport), so this runs at
+// every moment that plausibly precedes a pan.
+const clewSyncHandles = () => {
+	for (const handle of clewPdfHandles()) clewResolveCap(handle);
+};
+
 document.addEventListener('pointerdown', (e) => {
-	if (e.pointerType === 'pen') clewPencilSeen = true;
+	if (e.pointerType !== 'pen') return;
+	// Arming and capability resolution happen on the SAME event, well before
+	// the finger that will want to pan.
+	clewPencilSeen = true;
+	clewSyncHandles();
 }, true);
 
-// Subscribe to viewers as they appear. Handles are created asynchronously
-// (lazily, as an embed nears the viewport), so poll the published set on the
-// pointer events we already handle rather than adding a timer.
-const clewSyncHandles = () => {
-	for (const handle of clewPdfHandles()) clewWatchTools(handle);
-};
+document.addEventListener('clew:render', clewSyncHandles);
 
 /** The nearest scrollable ancestor of the point, inside the viewer's shadow DOM. */
 function clewFindScroller(shadowRoot, x, y) {
@@ -84,7 +107,7 @@ document.addEventListener('pointerdown', (e) => {
 	if (e.pointerType !== 'touch' || !clewPencilSeen || clewFingerPan) return;
 	clewSyncHandles();
 	const handle = [...clewPdfHandles()].find((h) =>
-		clewToolState.get(h)?.drawing && h.container && e.composedPath().includes(h.target));
+		h.container && e.composedPath().includes(h.target) && clewIsDrawing(h));
 	if (!handle) return;
 	const scroller = clewFindScroller(handle.container.shadowRoot, e.clientX, e.clientY);
 	if (!scroller) return;
@@ -111,9 +134,13 @@ for (const clewEndType of ['pointerup', 'pointercancel']) {
 	}, true);
 }
 
-// Smoke hook: `window.__clewPdfTouch.armed` says whether a Pencil has been
-// seen, `.watching` how many viewers the layer has hooked.
+// Smoke hooks: `armed` says whether a Pencil has been seen, `watching` how
+// many viewers have a resolved annotation capability, and `drawing` how many
+// currently have a free-drag tool selected. `sync()` forces resolution so a
+// smoke test need not fake a pen event first.
 window.__clewPdfTouch = {
 	get armed() { return clewPencilSeen; },
-	get watching() { return [...clewPdfHandles()].filter((h) => clewToolState.has(h)).length; },
+	get watching() { return [...clewPdfHandles()].filter((h) => clewCaps.has(h)).length; },
+	get drawing() { return [...clewPdfHandles()].filter(clewIsDrawing).length; },
+	sync: clewSyncHandles,
 };
