@@ -56,6 +56,15 @@ globalThis.__jmdExtensionRegistry = {
 	'/engine-assets/kanban-board.js': kanbanBoard,
 };
 
+// Enabled vault plugins' engine surfaces: the config names them by absolute
+// vault path and the host snapshots their source into the vfs. The build's
+// __jmdImport helper (the metadata-header patch) asks here before falling
+// back to a real dynamic import — a Worker has no disk to import from.
+globalThis.__jmdImportSource = (p) => {
+	const entry = vfs.files.get(p);
+	return typeof entry?.data === 'string' && entry.data !== '' ? entry.data : null;
+};
+
 let enginePromise = null;
 
 async function init({ files, env, cwd }) {

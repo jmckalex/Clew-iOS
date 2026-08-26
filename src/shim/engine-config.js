@@ -53,9 +53,17 @@ function biblifyConfig(vaultRoot, vaultOptions) {
 
 /**
  * The generated `.jmarkdown/config.json` contents, as an object.
- * @param {{vaultRoot?: string, vaultOptions?: Record<string, any>}} opts
+ *
+ * `engineExtensions` are enabled vault plugins' engine surfaces —
+ * "exportA, exportB from <vaultRoot>/.clew/plugins/<id>/<file>" strings.
+ * Both callers compute them with vendor/clew/main/plugins.js
+ * #engineExtensionEntries (the app over the aliased vfs-backed fs, the Node
+ * harness over the real one) so manifest reading has one implementation;
+ * they are parameters here because this module stays dependency-free.
+ * @param {{vaultRoot?: string, vaultOptions?: Record<string, any>,
+ *          engineExtensions?: string[]}} opts
  */
-export function engineConfig({ vaultRoot = '/vault', vaultOptions = {} } = {}) {
+export function engineConfig({ vaultRoot = '/vault', vaultOptions = {}, engineExtensions = [] } = {}) {
 	return {
 		// "jmarkdown project" vaults (the book manuscript case) re-enable the
 		// engine's own-line [[file.md]] inclusion in previews.
@@ -93,6 +101,12 @@ export function engineConfig({ vaultRoot = '/vault', vaultOptions = {} } = {}) {
 			// claims the whole body before any other rule can render it
 			// as prose. Inert for every other note.
 			'kanbanBoard from /engine-assets/kanban-board.js',
+			// Enabled vault plugins' engine surfaces (custom syntax), named by
+			// absolute vault path. The worker loads them from its vfs snapshot
+			// (__jmdImportSource): they must be SELF-CONTAINED modules — a
+			// blob/data import cannot resolve relative siblings, unlike
+			// desktop's real-disk dynamic import.
+			...engineExtensions,
 		],
 		...biblifyConfig(vaultRoot, vaultOptions),
 		'MathJax': { 'src': '/__clew_assets__/mathjax/tex-svg.js' },

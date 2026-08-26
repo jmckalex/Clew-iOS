@@ -15,13 +15,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { engineConfig, engineEnv, isTextPath } from '../src/shim/engine-config.js';
+import { engineExtensionEntries } from '../vendor/clew/main/plugins.js';
 
 const [vaultDir, noteRel, ...flags] = process.argv.slice(2);
 const fragment = flags.includes('--fragment');
 const optionsAt = flags.indexOf('--vault-options');
-// Per-vault settings the app would read from .clew/vault-settings.json
-// (dataviewJs, pandocCitations, bibliography, …).
-const vaultOptions = optionsAt === -1 ? {} : JSON.parse(flags[optionsAt + 1] ?? '{}');
 if (!vaultDir || !noteRel) {
 	console.error('usage: node tools/render-note.mjs <vault-dir> <note-rel-path> [--fragment]');
 	process.exit(2);
@@ -29,6 +27,19 @@ if (!vaultDir || !noteRel) {
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const vaultAbs = path.resolve(vaultDir);
+
+// Per-vault settings (dataviewJs, pandocCitations, bibliography, plugins…):
+// the vault's own .clew/vault-settings.json by default — the file the app
+// reads, so a battery run exercises the config the app would actually use —
+// with --vault-options REPLACING it when a case needs a specific gate.
+const vaultOptions = optionsAt !== -1
+	? JSON.parse(flags[optionsAt + 1] ?? '{}')
+	: (() => {
+		try {
+			return JSON.parse(fs.readFileSync(
+				path.join(vaultAbs, '.clew', 'vault-settings.json'), 'utf8'));
+		} catch { return {}; }
+	})();
 const realExit = process.exit.bind(process);
 const realErr = (...a) => console.error(...a);
 
@@ -51,10 +62,23 @@ const walk = (dir, rel) => {
 };
 walk(vaultAbs, '');
 
+// Enabled plugins' engine surfaces, exactly as the app snapshots them:
+// entries are computed over the real vault dir (manifest validation lives
+// in vendor/clew/main/plugins.js), then re-rooted onto the vfs, and the
+// named files ride in the snapshot — the only .clew content that does.
+const engineExtensions = [];
+for (const entry of engineExtensionEntries(vaultAbs, vaultOptions)) {
+	const at = entry.indexOf(' from ');
+	const real = entry.slice(at + ' from '.length);
+	const vfsPath = '/vault/' + path.relative(vaultAbs, real).split(path.sep).join('/');
+	files[vfsPath] = fs.readFileSync(real, 'utf8');
+	engineExtensions.push(entry.slice(0, at) + ' from ' + vfsPath);
+}
+
 // ---- engine config + template assets (mirrors render-service.js) ---------
 
 files['/vault/.clew/engine/.jmarkdown/config.json'] = JSON.stringify(
-	engineConfig({ vaultRoot: '/vault', vaultOptions }), null, 2);
+	engineConfig({ vaultRoot: '/vault', vaultOptions, engineExtensions }), null, 2);
 
 for (const [target, source] of Object.entries({
 	'/engine/default-template.html.mustache': 'vendor/jmarkdown/src/default-template.html.mustache',

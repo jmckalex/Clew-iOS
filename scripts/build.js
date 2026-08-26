@@ -52,9 +52,25 @@ const enginePatches = {
 				throw new Error('[build] patch no longer matches metadata-header.js: no `await import(` sites found');
 			}
 			source = source.replaceAll('await import(', 'await __jmdImport(');
-			const helper = 'const __jmdImport = (p) => {\n'
+			// Vault plugins' engine surfaces are config-named absolute vault
+			// paths with no module behind them in the bundle; the worker
+			// supplies their SOURCE from the vfs (__jmdImportSource) and it is
+			// imported as a blob module — data: fallback because Node (the
+			// render-note harness) cannot import blob: URLs, and WebKit is
+			// happier with blob:. Both environments hit the same code path.
+			const helper = 'const __jmdImportText = async (text) => {\n'
+				+ '\ttry {\n'
+				+ "\t\tconst url = URL.createObjectURL(new Blob([text], { type: 'text/javascript' }));\n"
+				+ '\t\ttry { return await import(url); } finally { URL.revokeObjectURL(url); }\n'
+				+ '\t} catch {\n'
+				+ "\t\treturn import('data:text/javascript;base64,' + btoa(unescape(encodeURIComponent(text))));\n"
+				+ '\t}\n'
+				+ '};\n'
+				+ 'const __jmdImport = (p) => {\n'
 				+ '\tconst hit = globalThis.__jmdExtensionRegistry?.[p];\n'
-				+ '\treturn hit ? Promise.resolve(hit) : import(p);\n'
+				+ '\tif (hit) return Promise.resolve(hit);\n'
+				+ '\tconst text = globalThis.__jmdImportSource?.(p);\n'
+				+ '\treturn text != null ? __jmdImportText(text) : import(p);\n'
 				+ '};\n';
 			return { contents: helper + source, loader: 'js' };
 		});

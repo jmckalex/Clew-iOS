@@ -10,6 +10,7 @@
 import { vfs } from '../worker/shims/vfs.js';
 import { VAULT_ROOT } from './vault-manager.js';
 import { engineConfig, engineEnv, isTextPath } from './engine-config.js';
+import { engineExtensionEntries } from '../../vendor/clew/main/plugins.js';
 
 const REBUILD_DEBOUNCE_MS = 300;
 const ENGINE_CWD = `${VAULT_ROOT}/.clew/engine`;
@@ -109,12 +110,13 @@ export class RenderService {
 	}
 
 	// Mirrors desktop #writeEngineConfig — the body lives in engine-config.js
-	// so the Node harness renders through the identical config. (Vault
-	// plugins' engine surfaces are not yet loadable on iOS: they would need
-	// bundling at runtime.)
-	#engineConfig() {
+	// so the Node harness renders through the identical config. Enabled vault
+	// plugins' engine surfaces are named by absolute vault path; the worker
+	// loads them from its vfs snapshot (__jmdImportSource) — a Web Worker has
+	// no disk to dynamic-import from.
+	#engineConfig(engineExtensions) {
 		return JSON.stringify(
-			engineConfig({ vaultRoot: VAULT_ROOT, vaultOptions: this.#vaultOptions }),
+			engineConfig({ vaultRoot: VAULT_ROOT, vaultOptions: this.#vaultOptions, engineExtensions }),
 			null, 2);
 	}
 
@@ -131,7 +133,20 @@ export class RenderService {
 				? { data: typeof entry.data === 'string' ? entry.data : '', mtimeMs: entry.mtimeMs }
 				: '';
 		}
-		files[`${ENGINE_CWD}/.jmarkdown/config.json`] = this.#engineConfig();
+		// Enabled plugins' engine surfaces: the config names them by absolute
+		// vault path, so the snapshot must carry exactly those .clew files
+		// (the loop above excludes .clew/ wholesale — the worker never needs
+		// the rest of it, e.g. the charts plugin's ~200 KB chart.umd.js,
+		// which belongs to the PREVIEW surface).
+		const engineExtensions = engineExtensionEntries(VAULT_ROOT, this.#vaultOptions);
+		for (const entry of engineExtensions) {
+			const abs = entry.slice(entry.indexOf(' from ') + ' from '.length);
+			const source = vfs.files.get(abs);
+			if (source && typeof source.data === 'string') {
+				files[abs] = { data: source.data, mtimeMs: source.mtimeMs };
+			}
+		}
+		files[`${ENGINE_CWD}/.jmarkdown/config.json`] = this.#engineConfig(engineExtensions);
 		Object.assign(files, this.#assets);
 		return files;
 	}
