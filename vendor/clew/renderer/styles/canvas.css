@@ -269,6 +269,8 @@
 }
 .canvas-tool:hover { background: var(--clew-hover); color: var(--clew-text-normal); }
 .canvas-tool.is-active { background: var(--clew-accent); color: var(--clew-text-on-accent); }
+.canvas-tool:disabled { opacity: 0.35; cursor: default; }
+.canvas-tool:disabled:hover { background: none; color: var(--clew-text-muted); }
 .canvas-width { font-size: 11px; font-weight: 600; }
 .canvas-toolbar-sep {
 	width: 1px;

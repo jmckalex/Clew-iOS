@@ -106,6 +106,20 @@ lesson again: the battery must run the config the app runs.
    into hits); stale recents pruning.
 4. Upstream candidates from this sync: none new — the two fixes in §3
    are genuinely iOS-only. Existing candidates list lives in PORT-PLAN.
+5. **Post-sync, from the owner's iPad testing** (branch
+   `canvas-delete-button`, on top of the 0.9 tip): the canvas toolbar
+   gained a trash-icon "Delete selection" button — on touch there was NO
+   way to delete shapes (the eraser is ink-only by the owner's explicit
+   call, Delete/Backspace needs a keyboard, and Pencil long-press never
+   synthesizes contextmenu). Implemented in the GOLDEN MASTER
+   (clew-canvas-view.js, canvas.css, generate-icons.js + regenerated
+   icons.js) and vendored surgically — **the upstream copies are
+   UNCOMMITTED in ../Clew-app** (the owner has other work in flight
+   there; they live-test and commit). Verified in the sim end-to-end:
+   disabled ↔ selection tracking and a select-all + tap deleting shapes
+   AND strokes from the .canvas file on disk. Canvas toolbar undo/redo
+   are still keyboard-only (Cmd+Z) — the remaining half of PORT-PLAN
+   touch item 6.
 
 ## 5. Verification kit (works, use it)
 

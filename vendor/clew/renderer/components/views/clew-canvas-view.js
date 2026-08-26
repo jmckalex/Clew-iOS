@@ -76,6 +76,7 @@ class ClewCanvasView extends ClewElement {
 	#loaded = false;
 	#conflict = null; // disk text during an unresolved external-change conflict
 	#ink = { color: 'ink', width: 3 };
+	#deleteBtn = null;
 	/** Defaults for newly drawn shapes/strokes/text; the style bar edits
 	 *  these and applies changes to the current selection too. */
 	#shapeStyle = {
@@ -398,7 +399,18 @@ class ClewCanvasView extends ClewElement {
 		addWeb.append(icon('globe'));
 		addWeb.title = 'Add web page…';
 		addWeb.addEventListener('click', () => this.#addWebPrompt());
-		bar.append(addNote, addWeb, sep());
+		// Delete the selection — the toolbar twin of Backspace/Delete, and
+		// the only delete route for shapes on a keyboardless (touch) device
+		// (the eraser is for ink alone, deliberately). Disabled state tracks
+		// the selection from #syncSelectionViews.
+		const del = document.createElement('button');
+		del.className = 'canvas-tool';
+		del.append(icon('trash'));
+		del.title = 'Delete selection';
+		del.disabled = this.#selCount() + this.#sel.edges.size === 0;
+		del.addEventListener('click', () => this.#deleteSelection());
+		this.#deleteBtn = del;
+		bar.append(addNote, addWeb, del, sep());
 
 		// Ink / shape color swatches.
 		for (const color of ['ink', '1', '2', '3', '4', '5', '6']) {
@@ -663,6 +675,11 @@ class ClewCanvasView extends ClewElement {
 	}
 
 	#syncOverlay() {
+		// Every selection change redraws the halos through here, so this is
+		// where the toolbar's delete button learns whether it has work.
+		if (this.#deleteBtn) {
+			this.#deleteBtn.disabled = this.#selCount() + this.#sel.edges.size === 0;
+		}
 		const svg = this.#els.overlay;
 		const z = this.#camera.zoom;
 		const parts = [];
