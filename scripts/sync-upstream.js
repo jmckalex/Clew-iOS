@@ -6,7 +6,7 @@
 //
 // Copied:
 //   ../Clew-app/vendor/jmarkdown/{src,package.json}  -> vendor/jmarkdown/
-//   ../Clew-app/src/{renderer,shared,preview-client,engine} -> vendor/clew/
+//   ../Clew-app/src/{renderer,shared,preview-client,engine,main,excalidraw} -> vendor/clew/
 //   ../Clew-app/demo-vault -> seed-vault/   (the bundled starter vault)
 import fs from 'node:fs';
 import path from 'node:path';
@@ -38,7 +38,7 @@ fs.copyFileSync(
 	path.join(upstream, 'vendor', 'jmarkdown', 'package.json'),
 	path.join(root, 'vendor', 'jmarkdown', 'package.json'));
 
-for (const dir of ['renderer', 'shared', 'preview-client', 'engine', 'main']) {
+for (const dir of ['renderer', 'shared', 'preview-client', 'engine', 'main', 'excalidraw']) {
 	copyDir(path.join(upstream, 'src', dir), path.join(root, 'vendor', 'clew', dir));
 }
 
@@ -46,8 +46,11 @@ for (const dir of ['renderer', 'shared', 'preview-client', 'engine', 'main']) {
 // DURABLE .clew state ships with it — vault-settings.json (the noteApi gate
 // and enabled plugins) and the sample plugins/scripts/snippets are part of
 // what the vault documents. Device-local state (caches, engine dir,
-// workspace layout) stays behind — the app regenerates those.
-const CLEW_STATE_EXCLUDED = new Set(['cache', 'cache.json', 'engine', 'workspace.json']);
+// workspace layout) stays behind — the app regenerates those. The Excalidraw
+// shape library is per-user state too, not vault documentation.
+const CLEW_STATE_EXCLUDED = new Set([
+	'cache', 'cache.json', 'engine', 'workspace.json', 'excalidraw-library.json',
+]);
 copyDir(path.join(upstream, 'demo-vault'), path.join(root, 'seed-vault'), (src) => {
 	const marker = `${path.sep}.clew${path.sep}`;
 	const at = src.indexOf(marker);
