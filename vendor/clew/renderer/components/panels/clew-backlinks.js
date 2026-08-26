@@ -16,6 +16,7 @@ import { ClewElement } from '../base/clew-element.js';
 import { vaultStore } from '../../state/vault-store.js';
 import { workspaceStore } from '../../state/workspace-store.js';
 import { ipc, CH } from '../../ipc.js';
+import { isExcalidrawPath, parseExcalidraw, drawingText } from '../../../shared/excalidraw-file.js';
 import { debounce } from '../../lib/debounce.js';
 import { openNoteAtLine, linkMention } from '../../commands/actions.js';
 import { icon } from '../../lib/icons.js';
@@ -74,7 +75,12 @@ export class ClewBacklinks extends ClewElement {
 
 		// Context snippets, fetched once per source note; one row per line
 		// (several links on one line share a snippet).
-		const text = await ipc.invoke(CH.NOTE_READ, { path: source }).catch(() => null);
+		const raw = await ipc.invoke(CH.NOTE_READ, { path: source }).catch(() => null);
+		// A drawing's link lines count through its TEXT ELEMENTS, not the file —
+		// the file is JSON, or base64 in a markdown wrapper. Quoting the raw
+		// bytes gave backlinks from drawings a context line reading "{".
+		const parsed = raw !== null && isExcalidrawPath(source) ? parseExcalidraw(raw, source) : null;
+		const text = parsed ? drawingText(parsed.scene) : raw;
 		const seenLines = new Set();
 		for (const link of links) {
 			if (seenLines.has(link.line)) continue;

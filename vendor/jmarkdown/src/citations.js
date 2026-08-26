@@ -16,6 +16,14 @@
 	   inside fenced code or code spans, so literal \cite examples in code blocks
 	   are left alone for free.
 
+	1a. `citefile` — an inline extension for \citefile[…]{key}, which links to a
+	   reference's attachment on disk (BibDesk's Bdsk-File-N, or a JabRef/Zotero
+	   `file` field). Unlike the \cite family it is resolved at BUILD time in
+	   both output formats — a file path is a static fact with no CSL in it — so
+	   it works whether or not `Resolve citations` is on, and the runtime Biblify
+	   client never sees it. See src/bib-attachments.js for the reading of the
+	   .bib and the resolving of the path.
+
 	2. `bibliography` — a block extension implementing the `@bibliography`
 	   placement marker. (A dedicated block extension rather than a labelled
 	   directive because the directive framework in extended-directives.js
@@ -45,12 +53,19 @@ import path from 'path';
 import { configManager } from './config-manager.js';
 import { isChapterClass } from './sectioning.js';
 import { escapeLatexText } from './latex-escape.js';
+import { attachmentsFor } from './bib-attachments.js';
+import { addWarning } from './warnings.js';
+import { requirePackage } from './preamble.js';
 
 // The canonical \cite-family grammar, shared with the post-pass. Anchored so it
 // can be used to re-parse a single stored command.
-//   1:full  2:no  3:author  4:t|p  5:*  6:[opt]  7:[opt]  8:keys
+//   1:full  2:no  3:author  4:year  5:t|p|par  6:*  7:[opt]  8:[opt]  9:keys
+//
+// `year` (\citeyear, \citeyearpar) is the author-suppressed form — natbib has
+// both, and it is what pandoc's [-@key] / -@key translate to. `par` must precede
+// `p` in the alternation so \citeyearpar isn't read as \citeyear + "ar".
 export const CITE_RE =
-	/^\\(full)?(no)?cite(author)?(t|p)?(\*)?(\[[^\]]*\])?(\[[^\]]*\])?\{([^}]*)\}/i;
+	/^\\(full)?(no)?cite(author)?(year)?(t|par|p)?(\*)?(\[[^\]]*\])?(\[[^\]]*\])?\{([^}]*)\}/i;
 
 // Locate where the next cite command could begin (a backslash followed by an
 // optional full/no prefix and "cite").
@@ -83,8 +98,19 @@ export const citations = {
 		}
 	},
 	renderer(token) {
-		const cmd = token.text;
+		return renderCiteCommand(token.text);
+	}
+};
 
+/*
+	Render one \cite-family command, in whichever of the three modes is active.
+	Shared with pandoc-citations.js, which translates [@key] / @key into exactly
+	these commands and hands them here — so all three back-ends (native natbib in
+	LaTeX, the compile-time CSL pass, the runtime Biblify client) serve both
+	syntaxes with no further work.
+*/
+export function renderCiteCommand(cmd) {
+	{
 		if (global.isLatex) {
 			// Native natbib: hand the command through unchanged. natbib has no
 			// \fullcite, so translate it to \bibentry (the bibentry package).
@@ -102,6 +128,155 @@ export const citations = {
 
 		// Compile-time HTML: emit a placeholder for the post-pass to resolve.
 		return `<span class="biblify-cite" data-cite-cmd="${escapeAttr(cmd)}"></span>`;
+	}
+}
+
+/* --- \citefile[…]{key} — a link to the reference's file on disk ---------------
+
+	\citefile{key}                          the first attachment, labelled with its
+	                                        filename
+	\citefile[file=2]{key}                  the second attachment
+	\citefile[text="the preprint"]{key}     custom link text
+	\citefile[file=2, text="…"]{key}        both
+	\citefile[2]{key}                       shorthand: a bare number is file=
+
+	Nothing is emitted when the entry has no attachment at all — the command is
+	meant to be dropped into prose that reads correctly without it. An attachment
+	that is RECORDED but missing from disk still emits its link, plus a build
+	warning: a broken link the author can see beats a silent omission.
+
+	The optional argument is LaTeX keyval, not the {…} attribute syntax used
+	elsewhere: commas separate the pairs, and a value may be quoted with straight
+	or CURLY quotes, since those are what an author actually types.
+*/
+
+const CITEFILE_RE = /^\\citefile(?:\[([^\]]*)\])?\{([^}]*)\}/i;
+
+// Straight and curly quote pairs, opener → closer.
+const QUOTES = { '"': '"', "'": "'", '\u201c': '\u201d', '\u2018': '\u2019' };
+
+function parseKeyval(raw) {
+	if (raw === undefined) return {};
+	const text = raw.trim();
+	if (text === '') return {};
+	if (/^\d+$/.test(text)) return { file: Number(text) };      // [2] shorthand
+
+	// Split on top-level commas, dropping quote marks as we pass through them so
+	// a quoted value may itself contain a comma.
+	const parts = [];
+	let current = '', closer = null;
+	for (const ch of text) {
+		if (closer) {
+			if (ch === closer) closer = null;
+			else current += ch;
+		} else if (QUOTES[ch]) {
+			closer = QUOTES[ch];
+		} else if (ch === ',') {
+			parts.push(current); current = '';
+		} else {
+			current += ch;
+		}
+	}
+	parts.push(current);
+
+	const out = {};
+	for (const part of parts) {
+		const trimmed = part.trim();
+		if (!trimmed) continue;
+		const eq = trimmed.indexOf('=');
+		if (eq < 0) { out[trimmed.toLowerCase()] = true; continue; }
+		out[trimmed.slice(0, eq).trim().toLowerCase()] = trimmed.slice(eq + 1).trim();
+	}
+	return out;
+}
+
+// An absolute path as a file:// URL for a browser. encodeURI leaves # and ?
+// alone and both would truncate the URL, so they are encoded here as well.
+function fileURL(absolutePath) {
+	return 'file://' + encodeURI(absolutePath).replace(/#/g, '%23').replace(/\?/g, '%3F');
+}
+
+/*
+	The LaTeX target for the same file — deliberately NOT the URL above.
+
+	hyperref recognises a file:/run: target and writes a PDF *file action* whose
+	/F is a PATH, not a URL, so a percent-encoded space arrives as a literal
+	"%20" and the link fails. Raw spaces are correct there and compile fine
+	(verified: xelatex, no errors, /F carries the real path).
+
+	Which action to ask for depends on the file. A .pdf goes through file://,
+	which hyperref turns into /GoToR — the viewer opens it as a document, the
+	smooth path for the PDFs that make up nearly every BibDesk attachment.
+	Anything else uses run:, giving /Launch, which hands the file to whatever
+	application owns it.
+*/
+function latexTarget(absolutePath) {
+	const target = /\.pdf$/i.test(absolutePath) ? `file://${absolutePath}` : `run:${absolutePath}`;
+	// % and # would still be read by TeX itself before hyperref sees them.
+	return target.replace(/([%#])/g, '\\$1');
+}
+
+export const citefile = {
+	name: 'citefile',
+	level: 'inline',
+	start(src) {
+		const m = src.match(/\\citefile/i);
+		return m ? m.index : undefined;
+	},
+	tokenizer(src) {
+		const match = CITEFILE_RE.exec(src);
+		if (!match) return;
+		return {
+			type: 'citefile',
+			raw: match[0],
+			text: match[0],
+			options: parseKeyval(match[1]),
+			key: match[2].trim(),
+			tokens: []
+		};
+	},
+	renderer(token) {
+		const key = token.key.split(',')[0].trim();
+		if (token.key.includes(',')) {
+			addWarning(`\\citefile{${token.key}} takes a single key; only ${key} was used`);
+		}
+
+		const { error, attachments } = attachmentsFor(key);
+		if (error === 'no-bibliography') {
+			addWarning(`\\citefile{${key}}: no \`Bibliography\` file is configured, so attachments cannot be looked up`);
+			return '';
+		}
+		if (error === 'bibliography-missing') {
+			addWarning(`\\citefile{${key}}: the \`Bibliography\` file could not be read`);
+			return '';
+		}
+		if (error === 'unknown-key') {
+			addWarning(`\\citefile{${key}}: no bibliography entry with that key`);
+			return '';
+		}
+		// No attachment recorded: emit nothing, silently. This is the ordinary
+		// case for most entries and is what makes the command safe in prose.
+		if (attachments.length === 0) return '';
+
+		const index = Number(token.options.file ?? 1);
+		if (!Number.isInteger(index) || index < 1 || index > attachments.length) {
+			addWarning(`\\citefile[file=${token.options.file}]{${key}}: the entry has ${attachments.length} attachment${attachments.length === 1 ? '' : 's'}`);
+			return '';
+		}
+
+		const attachment = attachments[index - 1];
+		if (!attachment.exists) {
+			addWarning(`\\citefile{${key}}: ${attachment.path} is recorded as an attachment but was not found on disk`);
+		}
+
+		const label = typeof token.options.text === 'string' && token.options.text !== ''
+			? token.options.text
+			: path.basename(attachment.path);
+		if (global.isLatex) {
+			requirePackage('hyperref');
+			return `\\href{${latexTarget(attachment.path)}}{${escapeLatexText(label)}}`;
+		}
+		return `<a class="citation-file" href="${escapeAttr(fileURL(attachment.path))}" title="${escapeAttr(attachment.path)}">${escapeAttr(label)}</a>`;
 	}
 };
 

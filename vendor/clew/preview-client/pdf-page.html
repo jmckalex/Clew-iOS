@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<!--
+  Host page for the EmbedPDF viewer, loaded in an iframe by the file tab and
+  by canvas PDF nodes. Served from
+  __clew_assets__/clewpdf/ so it shares the clew-preview origin with the PDF
+  it is about to fetch. See pdf-page.js.
+-->
+<html data-theme="dark">
+<head>
+<meta charset="utf-8">
+<title>PDF</title>
+<style>
+	html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }
+	body { background: #1a1a1e; }
+	html[data-theme='light'] body { background: #fafafa; }
+	#viewer { position: absolute; inset: 0; }
+	#status {
+		position: absolute; right: 10px; bottom: 8px; z-index: 10;
+		padding: 3px 9px; border-radius: 10px;
+		background: rgba(0, 0, 0, 0.6); color: #fff;
+		font: 12px/1.4 system-ui, sans-serif;
+		opacity: 0; transition: opacity 0.2s;
+		pointer-events: none;
+	}
+</style>
+</head>
+<body>
+<div id="viewer"></div>
+<div id="status"></div>
+<script src="pdf-page.js"></script>
+</body>
+</html>

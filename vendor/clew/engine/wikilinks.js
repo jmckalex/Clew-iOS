@@ -15,7 +15,9 @@
 //
 // Syntax (Obsidian-compatible):
 //     [[Note]]  [[Note|alias]]  [[Note#Heading]]  [[Note#Heading|alias]]
-//     ![[Note]] / ![[Note#Heading]] on its own line — block embed (transclusion)
+//     [[Note#^block-id]] — a block reference (see block-refs.js for the marker)
+//     ![[Note]] / ![[Note#Heading]] / ![[Note#^block-id]] on its own line —
+//     transclusion of the note, the section, or the single block
 //
 // This file runs inside a one-shot jmarkdown worker: module-level caches last
 // exactly one build, so the lazy vault scan below is per-build by construction.
@@ -23,6 +25,8 @@
 // without it, links render unresolved but nothing breaks.
 import fs from 'node:fs';
 import path from 'node:path';
+import { sliceBlock } from './block-refs.js';
+import { renderBaseEmbed } from './bases.js';
 
 const NOTE_EXT = /\.(md|jmd)$/i;
 const IGNORED = new Set(['.obsidian', '.clew', '.git', 'node_modules', '.trash']);
@@ -34,8 +38,16 @@ const MEDIA_KIND = {
 	'.mp3': 'audio', '.m4a': 'audio', '.wav': 'audio', '.ogg': 'audio', '.flac': 'audio',
 	'.mp4': 'video', '.webm': 'video', '.mov': 'video',
 	'.canvas': 'canvas',
+	'.excalidraw': 'excalidraw',
+	'.base': 'base',
 };
-const mediaKind = (p) => MEDIA_KIND[p.slice(p.lastIndexOf('.')).toLowerCase()] ?? null;
+// An Obsidian drawing is `name.excalidraw.md` — a .md by extension, which the
+// note path would otherwise claim and transclude as prose. The compound suffix
+// is therefore tested first.
+const mediaKind = (p) => {
+	if (/\.excalidraw\.md$/i.test(p)) return 'excalidraw';
+	return MEDIA_KIND[p.slice(p.lastIndexOf('.')).toLowerCase()] ?? null;
+};
 
 let noteIndex = null; // Map<lowercased basename-no-ext, string[] of vault-relative paths>
 let fileIndex = null; // Map<lowercased basename WITH ext, string[]> for non-note files
@@ -144,17 +156,27 @@ export function parseMediaAlias(alias) {
 	};
 }
 
-// [[target]] / [[target#heading]] / [[target|alias]] — target may be empty
-// for same-file heading links ([[#Heading]]).
+// [[target]] / [[target#heading]] / [[target#^block-id]] / [[target|alias]] —
+// target may be empty for same-file links ([[#Heading]], [[#^block-id]]).
 const LINK_RE = /^\[\[([^\[\]|#\n]*)(?:#([^\[\]|\n]+))?(?:\|([^\[\]\n]+))?\]\]/;
 
 function parseLink(match) {
 	const target = match[1].trim();
-	const heading = match[2]?.trim() ?? null;
+	const fragment = match[2]?.trim() ?? null;
+	// Obsidian overloads `#`: a leading caret means a block identifier rather
+	// than a heading. They resolve against different things, so they are split
+	// apart here once and never re-sniffed downstream.
+	const isBlock = fragment !== null && fragment.startsWith('^');
+	const block = isBlock ? fragment.slice(1).trim() : null;
+	const heading = isBlock ? null : fragment;
 	const alias = match[3]?.trim() ?? null;
-	const label = alias ?? (target && heading ? `${target} § ${heading}` : target || heading || '');
-	const full = target + (heading ? `#${heading}` : '');
-	return { target, heading, alias, label, full };
+	// § for a heading, ¶ for a block: the typographic marks for precisely these
+	// two things, so a reader can see which kind of link it is without being
+	// shown Obsidian's `#^` machinery.
+	const section = block ? `¶ ${block}` : heading ? `§ ${heading}` : null;
+	const label = alias ?? (target && section ? `${target} ${section}` : target || section || '');
+	const full = target + (fragment ? `#${fragment}` : '');
+	return { target, fragment, heading, block, alias, label, full };
 }
 
 export const wikilink = {
@@ -174,7 +196,9 @@ export const wikilink = {
 			const rel = token.target ? resolveTarget(token.target) : null;
 			if (!rel) return `<span class="internal-link unresolved">${escapeHtml(token.label)}</span>`;
 			const page = sitePath(rel.replace(NOTE_EXT, '')) + '.html'
-				+ (token.heading ? `#${encodeURIComponent(token.heading)}` : '');
+				// A block anchor's id IS `^the-id`; browsers percent-decode a
+				// fragment before matching, so `#%5Ethe-id` lands on it.
+				+ (token.fragment ? `#${encodeURIComponent(token.fragment)}` : '');
 			return `<a class="internal-link" href="${escapeAttr(page)}">${escapeHtml(token.label)}</a>`;
 		}
 		const resolved = token.target
@@ -227,10 +251,22 @@ export const wikiembed = {
 		const token = { type: 'wikiembed', raw: match[0], ...link, tokens: [], failed: null };
 
 		// Media embeds: ![[img.png]], ![[paper.pdf]], ![[clip.mp3]] …
-		const fileRel = link.target ? resolveFileTarget(link.target) : null;
+		let fileRel = link.target ? resolveFileTarget(link.target) : null;
+		// An Obsidian drawing is `name.excalidraw.md`, so it lives in the NOTE
+		// index and resolveFileTarget never finds it. Without this it falls
+		// through to note transclusion and the embed renders the wrapper's
+		// prose and its base64 payload — the exact failure this feature exists
+		// to prevent.
+		if (!fileRel && link.target) {
+			const noteRel = resolveTarget(link.target);
+			if (noteRel && /\.excalidraw\.md$/i.test(noteRel)) fileRel = noteRel;
+		}
 		if (fileRel && mediaKind(fileRel)) {
 			const { alt, width, height } = parseMediaAlias(link.alias);
 			token.media = { rel: fileRel, kind: mediaKind(fileRel), width, height };
+			// `![[Trips.base#Location]]` names a VIEW, not a heading — the one
+			// embed whose fragment means something other than a place to scroll.
+			if (token.media.kind === 'base') token.media.view = link.heading ?? null;
 			// A pure-size alias ("300") is not a caption — fall back to the name.
 			if (link.alias) token.label = alt ?? link.target;
 			return token;
@@ -254,6 +290,10 @@ export const wikiembed = {
 			const section = sliceHeading(content, link.heading);
 			if (section === null) { token.failed = 'missing-heading'; return token; }
 			content = section;
+		} else if (link.block) {
+			const chunk = sliceBlock(content, link.block);
+			if (chunk === null) { token.failed = 'missing-block'; return token; }
+			content = chunk;
 		}
 		embedStack.push(abs);
 		try {
@@ -294,6 +334,29 @@ export const wikiembed = {
 					return `<audio class="internal-media" controls src="${src}"></audio>\n`;
 				case 'video':
 					return `<video class="internal-media" controls src="${src}"${dims}></video>\n`;
+				case 'excalidraw':
+					// A read-only Excalidraw view. The preview client turns this
+					// into an iframe running the editor page in view mode, lazily
+					// — each one is a React instance, so a note holding several
+					// drawings must not build them all at once.
+					return `<div class="internal-embed excalidraw-embed-box">`
+						+ `<div class="embed-title"><a class="internal-link" href="#" data-href="${escapeAttr(token.full)}">${alt}</a></div>`
+						+ `<div class="excalidraw-embed" data-excalidraw-src="${src}"`
+						+ ` data-excalidraw-path="${escapeAttr(token.media.rel ?? '')}"></div></div>\n`;
+				case 'base': {
+					// An Obsidian Bases view, rendered server-side like a query
+					// rather than shipped to the client — it is a table over the
+					// vault, and the worker is where the vault is.
+					const html = renderBaseEmbed(token.media.rel, token.media.view,
+						(rel) => { try { return fs.readFileSync(path.join(vaultRoot(), rel), 'utf8'); } catch { return null; } });
+					// The title is the base FILE. Its `§` label would read as a
+					// heading, and the fragment here names a view — which the
+					// rendered output captions for itself.
+					const baseName = escapeHtml(token.media.rel.split('/').pop());
+					return `<div class="internal-embed base-embed" data-href="${escapeAttr(token.full)}">`
+						+ `<div class="embed-title"><a class="internal-link" href="#" data-href="${escapeAttr(token.full)}">${baseName}</a></div>`
+						+ html + '</div>\n';
+				}
 				case 'canvas':
 					// A live, read-only canvas view — the preview client fetches
 					// the JSON at data-canvas-path and renders the scene into the
@@ -310,7 +373,10 @@ export const wikiembed = {
 		const title = escapeHtml(token.label);
 		const target = escapeAttr(token.full);
 		if (token.failed) {
-			const reason = token.failed === 'cycle' ? 'circular embed' : 'not found';
+			const reason = token.failed === 'cycle' ? 'circular embed'
+				: token.failed === 'missing-block' ? 'no such block'
+				: token.failed === 'missing-heading' ? 'no such heading'
+				: 'not found';
 			return `<div class="internal-embed unresolved" data-href="${target}">`
 				+ `<div class="embed-title">${title}</div>`
 				+ `<div class="embed-note">(${reason})</div></div>\n`;

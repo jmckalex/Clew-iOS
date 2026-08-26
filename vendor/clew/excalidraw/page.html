@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<!--
+  Host page for the Excalidraw editor, loaded in an iframe by
+  <clew-excalidraw-view>. Served from __clew_assets__/clewex/ so it shares the
+  clew-preview origin with the drawing it fetches. See page.js — React lives
+  here and nowhere else in Clew.
+-->
+<html data-theme="dark">
+<head>
+<meta charset="utf-8">
+<title>Excalidraw</title>
+<link rel="stylesheet" href="page.css">
+<style>
+	html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }
+	body { background: #1a1a1e; }
+	html[data-theme='light'] body { background: #fff; }
+	#root { position: absolute; inset: 0; }
+	#status {
+		position: absolute; right: 12px; bottom: 10px; z-index: 10;
+		padding: 3px 9px; border-radius: 10px;
+		background: rgba(0, 0, 0, 0.6); color: #fff;
+		font: 12px/1.4 system-ui, sans-serif;
+		opacity: 0; transition: opacity 0.2s; pointer-events: none;
+	}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<div id="status"></div>
+<script src="page.js"></script>
+</body>
+</html>

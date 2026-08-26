@@ -14,14 +14,20 @@
 // Persisted to .clew/cache.json (mtime-validated) for fast reopen.
 import fs from 'node:fs';
 import path from 'node:path';
-import { extractNoteMetadata } from '../shared/note-metadata.js';
+import { extractNoteMetadata, extractDrawingMetadata } from '../shared/note-metadata.js';
+import { isExcalidrawPath } from '../shared/excalidraw-file.js';
 import { CH, NOTE_EXTENSIONS } from '../shared/channels.js';
 import { direntKind, shouldRecurse, walkGuard } from './fs-utils.js';
 
 const IGNORED_DIRS = new Set(['.obsidian', '.clew', '.git', 'node_modules', '.trash']);
 const CACHE_VERSION = 1;
 
-const isNote = (name) => NOTE_EXTENSIONS.some((ext) => name.toLowerCase().endsWith(ext));
+// Drawings are indexed alongside notes. A .excalidraw.md already qualified by
+// extension (and was being scanned as raw markdown, so its base64 blob was
+// producing junk); a plain .excalidraw did not qualify at all. Both do now, and
+// both are read as scenes — see extractDrawingMetadata.
+const isNote = (name) => isExcalidrawPath(name)
+	|| NOTE_EXTENSIONS.some((ext) => name.toLowerCase().endsWith(ext));
 const baseName = (relPath) => relPath.split('/').pop().replace(/\.(md|jmd)$/i, '');
 
 export class Indexer {
@@ -87,7 +93,10 @@ export class Indexer {
 		}
 		let text;
 		try { text = fs.readFileSync(abs, 'utf8'); } catch { return null; }
-		const meta = { mtimeMs: stat.mtimeMs, ...extractNoteMetadata(text) };
+		const extracted = isExcalidrawPath(relPath)
+			? (extractDrawingMetadata(text, relPath) ?? extractNoteMetadata(text))
+			: extractNoteMetadata(text);
+		const meta = { mtimeMs: stat.mtimeMs, ...extracted };
 		this.notes.set(relPath, meta);
 		return meta;
 	}

@@ -112,6 +112,27 @@ a.internal-link { text-decoration: none; border-bottom: 1px solid transparent; }
 a.internal-link:hover { border-bottom-color: var(--preview-accent); }
 a.internal-link.unresolved { color: var(--preview-muted); border-bottom: 1px dashed var(--preview-muted); }
 
+/* Block identifiers (^some-id). The marker is a navigation target, not
+   content: it takes no space and shows nothing, exactly as in Obsidian's
+   reading view — a note full of visible `^a3f9c1` would be unreadable. */
+.block-anchor {
+	display: inline-block;
+	width: 0;
+	height: 0;
+	overflow: hidden;
+	/* Anchors sit flush against the block's last word, so a fragment jump in
+	   an exported site would otherwise scroll the block's first line under
+	   any sticky chrome. */
+	scroll-margin-top: 3em;
+}
+/* Following `[[Note#^id]]` in an exported site: say what was arrived at.
+   In the app, navigation is line-based and never sets a fragment. */
+:has(> .block-anchor:target) {
+	background: color-mix(in srgb, var(--preview-accent) 14%, transparent);
+	border-radius: 4px;
+	box-shadow: 0 0 0 4px color-mix(in srgb, var(--preview-accent) 14%, transparent);
+}
+
 /* Embeds (transclusion) */
 .internal-embed {
 	border: 1px solid var(--preview-border);
@@ -379,6 +400,57 @@ td.clew-q-cell:hover { background: rgba(168, 130, 255, 0.08); }
 	letter-spacing: 0.05em;
 }
 
+/* ---- ```dataview (and .base views) ---------------------------------------- */
+/* A refusal is a first-class result: it has to read as "Clew did not run this",
+   never as an empty answer that might be the truth. */
+.clew-query.is-unsupported {
+	border: 1px solid var(--preview-border);
+	border-left: 3px solid var(--preview-danger);
+	border-radius: 6px;
+	padding: 10px 14px;
+	margin: 0.6em 0;
+	font-size: 0.92em;
+}
+.clew-query-title { font-weight: 600; margin-bottom: 4px; }
+.clew-query-note { color: var(--preview-muted); }
+.clew-query-source {
+	margin: 0.4em 0 0.6em;
+	max-height: 16em;
+	overflow: auto;
+	font-size: 0.85em;
+	opacity: 0.75;
+}
+.clew-inline-query { border-bottom: 1px dotted var(--preview-muted); }
+
+/* A base embed is a table in a box, not a transcluded note: no prose padding. */
+.internal-embed.base-embed { padding: 8px 10px; }
+.internal-embed.base-embed .clew-query-group { margin-top: 0.2em; }
+
+/* Bases card views. --clew-card-size comes from the view's own cardSize. */
+.clew-cards {
+	--clew-card-size: 160px;
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(var(--clew-card-size), 1fr));
+	gap: 10px;
+	margin: 0.6em 0;
+}
+.clew-card {
+	border: 1px solid var(--preview-border);
+	border-radius: 8px;
+	padding: 8px;
+	overflow: hidden;
+}
+.clew-card-image {
+	display: block;
+	width: 100%;
+	aspect-ratio: 1 / 1;
+	object-fit: cover;
+	border-radius: 5px;
+	margin-bottom: 6px;
+}
+.clew-card-title { font-weight: 600; font-size: 0.92em; }
+.clew-card-meta { color: var(--preview-muted); font-size: 0.82em; margin-top: 2px; }
+
 /* ---- ```kanban ------------------------------------------------------------ */
 .clew-kanban {
 	display: flex;
@@ -422,3 +494,75 @@ td.clew-q-cell:hover { background: rgba(168, 130, 255, 0.08); }
 .kanban-card.is-dragging { opacity: 0.45; }
 .kanban-card-title { font-size: 0.95em; font-weight: 600; }
 .kanban-card-meta { font-size: 0.78em; color: var(--preview-muted); margin-top: 3px; }
+
+/* ---- Obsidian callouts (src/engine/callouts.js) --------------------------
+   One accent colour per type drives the border, the icon and the title; the
+   body stays the page's own text colour so a callout reads as emphasis
+   rather than as a coloured box. Tinting the background from the same
+   variable keeps that relationship true in both themes. */
+.callout {
+	--callout: #6b7785;
+	margin: 1.1em 0;
+	padding: 12px 16px;
+	border-left: 4px solid var(--callout);
+	border-radius: 5px;
+	background: color-mix(in srgb, var(--callout) 12%, transparent);
+}
+.callout-title {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin: 0;
+	font-weight: 600;
+	color: var(--callout);
+}
+.callout-icon {
+	width: 1em;
+	height: 1em;
+	flex: none;
+}
+.callout-content { margin-top: 6px; }
+.callout-content > :first-child { margin-top: 0; }
+.callout-content > :last-child { margin-bottom: 0; }
+/* An empty callout is a title on its own — no gap below it. */
+.callout-content:empty { display: none; }
+
+/* Foldables are <details>: the browser does the work. */
+details.callout > summary {
+	cursor: pointer;
+	list-style: none;
+}
+details.callout > summary::-webkit-details-marker { display: none; }
+/* A chevron that turns, so a collapsed callout says so without a plugin. */
+details.callout > summary::after {
+	content: '';
+	width: 6px;
+	height: 6px;
+	margin-left: auto;
+	border-right: 2px solid currentColor;
+	border-bottom: 2px solid currentColor;
+	transform: rotate(-45deg);
+	transition: transform 0.15s ease;
+	opacity: 0.7;
+}
+details.callout[open] > summary::after { transform: rotate(45deg); }
+
+/* Obsidian's palette, near enough that a vault looks like itself. */
+.callout[data-callout='note']          { --callout: #5b8def; }
+.callout[data-callout='abstract']      { --callout: #00b8a3; }
+.callout[data-callout='info']          { --callout: #3b9dd8; }
+.callout[data-callout='todo']          { --callout: #3b9dd8; }
+.callout[data-callout='tip']           { --callout: #00b8a3; }
+.callout[data-callout='success']       { --callout: #3fb950; }
+.callout[data-callout='question']      { --callout: #d9a441; }
+.callout[data-callout='warning']       { --callout: #e08c3c; }
+.callout[data-callout='failure']       { --callout: #e5534b; }
+.callout[data-callout='danger']        { --callout: #e5534b; }
+.callout[data-callout='bug']           { --callout: #e5534b; }
+.callout[data-callout='example']       { --callout: #a371f7; }
+.callout[data-callout='quote']         { --callout: #8b949e; }
+.callout[data-callout='compatibility'] { --callout: #00b8a3; }
+
+/* The engine's own alert styling assumes a light page and would otherwise
+   fight the tint above; ours is the one that applies. */
+.callout.markdown-alert { border-top: 0; border-right: 0; border-bottom: 0; }

@@ -119,6 +119,22 @@ export class VaultManager {
 		fs.writeFileSync(abs, content);
 	}
 
+	/**
+	 * Overwrite an existing PDF in place (annotation autosave).
+	 *
+	 * Deliberately narrow. The caller is a viewer running inside a preview
+	 * document, which is vault-authored content, so this must not become a
+	 * general "write arbitrary bytes anywhere" capability: the path has to
+	 * resolve inside the vault, end in .pdf, and already exist. Annotating
+	 * edits a file you are looking at; it never creates one.
+	 */
+	writePdf(rel, data) {
+		if (!/\.pdf$/i.test(rel)) throw new Error(`Not a PDF: ${rel}`);
+		const abs = this.resolve(rel);
+		if (!fs.existsSync(abs)) throw new Error(`No such PDF: ${rel}`);
+		fs.writeFileSync(abs, Buffer.from(data));
+	}
+
 	/** Create a new note; appends " 1", " 2", … if the name is taken. Returns the rel path. */
 	createNote(rel) {
 		let abs = this.resolve(rel);

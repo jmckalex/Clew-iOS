@@ -18,7 +18,7 @@
 // Multi-window: state pushes are stored per session, and the one macOS
 // menu always reflects — and dispatches into — the FOCUSED window. Focus
 // changes rebuild it (main.js wires browser-window-focus).
-import { app, Menu } from 'electron';
+import { app, Menu, shell } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { CH } from '../shared/channels.js';
@@ -194,6 +194,7 @@ class AppMenu {
 			submenu: [
 				c('file:new-note', 'New Note', { chord: 'Mod-n', needs: 'vault' }),
 				c('file:new-canvas', 'New Canvas', { needs: 'vault' }),
+				c('file:new-drawing', 'New Drawing (Excalidraw)', { needs: 'vault' }),
 				c('file:new-folder', 'New Folder', { needs: 'vault' }),
 				c('workspace:new-tab', 'New Tab', { chord: 'Mod-t' }),
 				{
@@ -246,6 +247,11 @@ class AppMenu {
 				{ role: 'paste' },
 				{ role: 'pasteAndMatchStyle' },
 				{ role: 'selectAll' },
+				{ type: 'separator' },
+				// Obsidian's "Copy link to block". It lives here rather than in
+				// the palette alone because an identifier nobody can discover
+				// is an identifier nobody writes.
+				c('editor:copy-block-ref', 'Copy Link to Block', { needs: 'editor' }),
 				{ type: 'separator' },
 				c('edit:find-in-note', 'Find in Note', { chord: 'Mod-f', needs: 'editor' }),
 				c('nav:search', 'Search in All Files', { chord: 'Mod-Shift-f', needs: 'vault' }),
@@ -333,6 +339,20 @@ class AppMenu {
 					label: 'Clew Documentation',
 					enabled: !!demoVault && fs.existsSync(demoVault),
 					click: () => this.#openVault(demoVault),
+				},
+				{
+					// Licences have to REACH the reader to mean anything. The
+					// file ships in Resources/ (extraResources) and sits at the
+					// repo root in development.
+					label: 'Third-Party Notices',
+					click: () => {
+						const candidates = [
+							path.join(process.resourcesPath ?? '', 'THIRD-PARTY-NOTICES.md'),
+							this.#rootDir ? path.join(this.#rootDir, 'THIRD-PARTY-NOTICES.md') : null,
+						].filter(Boolean);
+						const found = candidates.find((file) => fs.existsSync(file));
+						if (found) shell.openPath(found);
+					},
 				},
 				...(isMac ? [] : [{ type: 'separator' }, { role: 'about' }]),
 			],

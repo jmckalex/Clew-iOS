@@ -13,6 +13,7 @@
 // App-global concerns (settings, the recents list, the menu) stay
 // session-free; everything vault-shaped routes through the session.
 import { app, dialog, ipcMain, shell } from 'electron';
+import * as pdfFonts from './pdf-fonts.js';
 import { CH } from '../shared/channels.js';
 import { settings } from './settings.js';
 import { appMenu } from './menu.js';
@@ -116,6 +117,17 @@ export function registerIpc() {
 	handle(CH.RENDER_SUBSCRIBE, (s, { path }) => s.renderService.subscribe(path));
 	handle(CH.RENDER_UNSUBSCRIBE, (s, { path }) => s.renderService.unsubscribe(path));
 	handle(CH.RENDER_HTML, (s, { path }) => s.renderService.renderedHtml(path));
+	handle(CH.PDF_WRITE, (s, { path, bytes }) => s.vaults.writePdf(path, bytes));
+	// The Excalidraw shape library, per vault: it is a working set that belongs
+	// with the notes it illustrates, so a vault carries its own.
+	handle(CH.EXCALIDRAW_LIB_GET, (s) => s.vaults.loadState('excalidraw-library.json') ?? []);
+	handle(CH.EXCALIDRAW_LIB_SET, (s, { items }) => {
+		s.vaults.saveState('excalidraw-library.json', items ?? []);
+		return true;
+	});
+	handleGlobal(CH.PDF_FONTS_STATUS, () => pdfFonts.status());
+	handleGlobal(CH.PDF_FONTS_DOWNLOAD, () => pdfFonts.download());
+	handleGlobal(CH.PDF_FONTS_REMOVE, () => pdfFonts.remove());
 	handleGlobal(CH.SHELL_OPEN_EXTERNAL, ({ url }) => {
 		if (/^https?:|^mailto:/i.test(url)) shell.openExternal(url);
 	});
@@ -133,7 +145,7 @@ export function registerIpc() {
 		const current = s.vaults.loadState('vault-settings.json') ?? {};
 		current[key] = value;
 		s.vaults.saveState('vault-settings.json', current);
-		if (key === 'jmarkdownProject' || key === 'normalSyntax') {
+		if (key === 'jmarkdownProject' || key === 'normalSyntax' || key === 'pandocCitations') {
 			s.renderService.reconfigure({ [key]: value === true });
 		}
 		// Bibliography settings rewrite the engine config the same way.

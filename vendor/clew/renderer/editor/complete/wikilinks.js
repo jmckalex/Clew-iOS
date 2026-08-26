@@ -29,11 +29,22 @@ export function wikilinkCompletions(context) {
 			: null; // [[#… — same-file headings need the active note; skip for now
 		if (!path) return null;
 		const from = context.pos - headingMatch[2].length;
-		const options = vaultStore.headingsFor(path).map((h) => ({
-			label: h.text,
-			type: 'text',
-			apply: h.text,
-		}));
+		// A caret switches the list from headings to block identifiers. The
+		// caret stays in the completion label and in what gets applied, so the
+		// result is the `#^id` Obsidian expects rather than a bare id that
+		// would silently resolve to nothing.
+		const options = headingMatch[2].startsWith('^')
+			? vaultStore.blocksFor(path).map((b) => ({
+				label: `^${b.id}`,
+				detail: `line ${b.line}`,
+				type: 'property',
+				apply: `^${b.id}`,
+			}))
+			: vaultStore.headingsFor(path).map((h) => ({
+				label: h.text,
+				type: 'text',
+				apply: h.text,
+			}));
 		return options.length ? { from, options, validFor: /^[^\[\]#|]*$/ } : null;
 	}
 

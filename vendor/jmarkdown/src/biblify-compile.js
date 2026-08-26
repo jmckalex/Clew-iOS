@@ -388,11 +388,12 @@ function resolveOne($, el, ctx, style) {
 	const fullcite = m[1] !== undefined;
 	const nocite = m[2] !== undefined;
 	const citeAuthors = m[3] !== undefined;
-	let type = m[4] || 't';
-	const isStarred = m[5] !== undefined;
-	const firstOptional = m[6];
-	const secondOptional = m[7];
-	const keyString = m[8];
+	const citeYear = m[4] !== undefined;
+	let type = m[5] || 't';
+	const isStarred = m[6] !== undefined;
+	const firstOptional = m[7];
+	const secondOptional = m[8];
+	const keyString = m[9];
 	const keys = parseKeys(keyString);
 	const entries = getEntries(keys, ctx.bibfileMap);
 
@@ -424,6 +425,32 @@ function resolveOne($, el, ctx, style) {
 		const names = getFullNamesFromCitation(new Cite(entries), isStarred);
 		$el.replaceWith(
 			`<span class="biblify-cite-author" data-bibtex="${escapeAttr(keyString)}" data-bib-member="all">${names}</span>`
+		);
+		return;
+	}
+
+	if (citeYear) {
+		// \citeyear / \citeyearpar — the author-suppressed form (pandoc's [-@key]).
+		// The year comes from the entry data rather than the CSL template: every
+		// style renders a date differently inside a citation, but "the year alone"
+		// is what this asks for, exactly as natbib does it.
+		if (entries.length === 0) { $el.replaceWith(document_text(cmd)); return; }
+		const years = new Cite(entries).data.map(entry => {
+			const issued = entry.issued;
+			if (issued && Array.isArray(issued['date-parts']) && issued['date-parts'][0]) {
+				return String(issued['date-parts'][0][0]);
+			}
+			return (issued && issued.literal) ? String(issued.literal) : 'n.d.';
+		});
+		const notes = [firstOptional, secondOptional]
+			.filter(o => o !== undefined)
+			.map(o => o.slice(1, -1))
+			.filter(Boolean);
+		let text = years.join('; ');
+		if (notes.length) text = [text, ...notes].join(', ');
+		if (type === 'par') text = `(${text})`;
+		$el.replaceWith(
+			`<span class="biblify-cite-year" data-bibtex="${escapeAttr(keyString)}" data-bib-member="section">${text}</span>`
 		);
 		return;
 	}

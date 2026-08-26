@@ -149,9 +149,9 @@ class ClewCanvasView extends ClewElement {
 					<svg class="canvas-layer canvas-strokes"></svg>
 					<svg class="canvas-layer canvas-overlay"></svg>
 				</div>
-				<div class="canvas-toolbar"></div>
-				<div class="canvas-stylebar"></div>
-				<div class="canvas-zoombar">
+				<div class="canvas-toolbar canvas-chrome"></div>
+				<div class="canvas-stylebar canvas-chrome"></div>
+				<div class="canvas-zoombar canvas-chrome">
 					<button data-zoom="out" title="Zoom out"></button>
 					<button data-zoom="reset" class="canvas-zoom-label" title="Reset zoom">100%</button>
 					<button data-zoom="in" title="Zoom in"></button>
@@ -779,7 +779,11 @@ class ClewCanvasView extends ClewElement {
 	// ---- pointer machine ---------------------------------------------------
 
 	#onPointerDown = (e) => {
-		if (e.target.closest('.canvas-toolbar, .canvas-zoombar, .canvas-inline-input')) return;
+		// Clicks on the app's own chrome are not canvas gestures. Without this
+		// a style-bar click hit-tests as empty world space, which clears the
+		// selection AND rebuilds the bar — destroying the button between
+		// pointerdown and pointerup, so its click never fires at all.
+		if (e.target.closest('.canvas-chrome, .canvas-inline-input')) return;
 		if (this.#editingId) this.#commitEdit();
 		this.#els.viewport.focus({ preventScroll: true });
 		const p = this.#toWorld(e.clientX, e.clientY);
@@ -1694,7 +1698,7 @@ class ClewCanvasView extends ClewElement {
 	// ---- events: dblclick, keys, wheel, menu, paste ------------------------
 
 	#onDblClick = (e) => {
-		if (e.target.closest('.canvas-toolbar, .canvas-zoombar, .canvas-inline-input')) return;
+		if (e.target.closest('.canvas-chrome, .canvas-inline-input')) return;
 		const p = this.#toWorld(e.clientX, e.clientY);
 		if (this.#tool !== 'select') return;
 
@@ -1878,7 +1882,7 @@ class ClewCanvasView extends ClewElement {
 
 	#onContextMenu = (e) => {
 		e.preventDefault();
-		if (e.target.closest('.canvas-toolbar, .canvas-zoombar')) return;
+		if (e.target.closest('.canvas-chrome')) return;
 		const p = this.#toWorld(e.clientX, e.clientY);
 		const z = this.#camera.zoom;
 

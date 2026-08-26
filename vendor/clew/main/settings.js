@@ -23,6 +23,9 @@ const DEFAULTS = {
 	diaryLogFile: 'Diary.md',
 	lastVault: null,
 	theme: 'dark',
+	// Optional 139 MB CJK font download for the PDF viewer, off by
+	// default and fetched on demand — see src/main/pdf-fonts.js.
+	pdfCjkFonts: false,
 };
 
 class Settings {

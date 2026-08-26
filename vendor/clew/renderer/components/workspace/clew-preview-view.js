@@ -69,6 +69,9 @@ class ClewPreviewView extends ClewElement {
 		// ![[x.pdf]] embeds. Isolation still holds — previews load from the
 		// clew-preview:// origin (the app is file://), window.open is denied
 		// globally, and main blocks all main-frame navigation after load.
+		// EmbedPDF's fullscreen control calls requestFullscreen() inside this
+		// frame, which is refused unless the frame is allowed it.
+		this.#iframe.allow = 'fullscreen';
 		this.#iframe.src = previewUrl(this.path);
 		this.replaceChildren(this.#iframe);
 	}

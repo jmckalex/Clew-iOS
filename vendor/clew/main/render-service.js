@@ -126,12 +126,29 @@ export class RenderService {
 			// "jmarkdown project" vaults (the book manuscript case) re-enable
 			// the engine's own-line [[file.md]] inclusion in previews.
 			'File inclusion': this.#vaultOptions.jmarkdownProject === true,
+			// Pandoc-style [@key] / @key citations. Off unless the vault asks:
+			// @ is the engine's directive sigil, so with this on a bare @word
+			// that is not a registered directive becomes a citation key. The
+			// engine exposes it as a config key precisely for a host like Clew,
+			// rendering notes that carry no metadata header of their own.
+			'Pandoc citations': this.#vaultOptions.pandocCitations === true,
 			'Header style': 'fenced',
 			'Template': path.join(engineAssets, 'clew-template.html'),
 			'Extensions': [
 				`wikiembed, wikilink from ${path.join(engineAssets, 'wikilinks.js')}`,
 				`mermaidFence, leafletFence from ${path.join(engineAssets, 'obsidian-fences.js')}`,
 				`queryFence, tasksFence, kanbanFence from ${path.join(engineAssets, 'query-fences.js')}`,
+				`tableBeforeAnchor, blockAnchorLine, blockAnchor from ${path.join(engineAssets, 'block-refs.js')}`,
+				// Obsidian's Dataview, for vaults that arrive carrying it.
+				`dataviewFence, dataviewJsFence, dataviewInline from ${path.join(engineAssets, 'dataview.js')}`,
+				// Obsidian Bases. The `![[X.base]]` embed path lives in
+				// wikilinks.js; this registers the inline ```base fence.
+				`baseFence from ${path.join(engineAssets, 'bases.js')}`,
+				// LAST on purpose: marked offers the most recently registered
+				// block extension first, and callouts must be seen before the
+				// engine's own GFM-alert rule so that every `> [!type]` in a
+				// document — the five GFM ones included — renders identically.
+				`calloutBlock from ${path.join(engineAssets, 'callouts.js')}`,
 				// Enabled vault plugins' engine surfaces (custom syntax).
 				...engineExtensionEntries(this.vaultRoot, this.#vaultOptions),
 			],
@@ -191,6 +208,10 @@ export class RenderService {
 				PATH: toolchainPath(),
 				CLEW_VAULT_ROOT: this.vaultRoot,
 				CLEW_SESSION_ID: this.sessionId ?? '',
+				// Per-vault opt-in for running ```dataviewjs. Safe as spawn-time
+				// env because reconfigure() discards the warm standby whenever
+				// vault options change.
+				CLEW_DATAVIEW_JS: this.#vaultOptions.dataviewJs === true ? '1' : '',
 				// Engine console chatter goes to the pipes; keep them from filling.
 			},
 		});

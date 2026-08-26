@@ -22,8 +22,10 @@ rendered; **⌘O** finds any note; **⌘P** lists every command.
 - [[Navigation]] — switcher, palette, tabs and splits, history
 - [[Panels]] — backlinks, outgoing links, tags, outline, bookmarks
 - [[Properties]] — frontmatter as typed, editable rows
+- [[Callouts]] — `> [!note]` boxes, titles, and folding
 - [[Canvas]] — an infinite board of notes, web pages, PDFs, ink, and
   shapes ([[Demo Canvas.canvas]])
+- [[Drawings]] — Excalidraw, for the drawings an Obsidian vault is full of
 - [[Note API]] — notes as programs: [[API Playground]],
   [[Habit Tracker]], and a tiny [[Adventure]]
 - [[Plugins]] — extend Clew from inside the vault (this page's banner

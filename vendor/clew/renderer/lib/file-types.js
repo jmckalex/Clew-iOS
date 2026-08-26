@@ -14,12 +14,19 @@ export const IMAGE_EXT = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.avif', '.s
 export const AUDIO_EXT = ['.mp3', '.m4a', '.wav', '.ogg', '.flac'];
 export const VIDEO_EXT = ['.mp4', '.webm', '.mov'];
 
+import { isExcalidrawPath } from '../../shared/excalidraw-file.js';
+export { isExcalidrawPath };
+
 const extOf = (path) => {
 	const i = path.lastIndexOf('.');
 	return i === -1 ? '' : path.slice(i).toLowerCase();
 };
 
 export function fileKind(path) {
+	// Checked before the extension map: a drawing is named `.excalidraw.md`,
+	// whose extension is `.md`, and Obsidian's plugin owns it. Getting this
+	// order wrong opens someone's drawing as a wall of base64.
+	if (isExcalidrawPath(path)) return 'excalidraw';
 	const ext = extOf(path);
 	if (IMAGE_EXT.includes(ext)) return 'image';
 	if (ext === '.pdf') return 'pdf';

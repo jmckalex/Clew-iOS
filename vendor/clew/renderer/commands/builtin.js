@@ -13,6 +13,8 @@
 import { registerCommand, buildContext, allCommands, isEnabled, effectiveKeymap } from './registry.js';
 import { openSearchPanel } from '@codemirror/search';
 import { registerFormatCommands, activeEditorView, needsEditor } from './format.js';
+import { formatTableAtCursor } from '../editor/tables.js';
+import { blockRefEdit, blockRefLink } from '../editor/block-ids.js';
 import { openDiaryDay } from './diary.js';
 import { notice } from '../plugins.js';
 import { substituteTemplate } from '../../shared/diary.js';
@@ -54,6 +56,43 @@ function insertTemplate() {
 	openListModal({ placeholder: 'Insert template…', items, emptyText: 'No templates found (folder: Templates/)' });
 }
 
+/**
+ * Obsidian's "Copy link to block": name the block under the cursor, writing
+ * the marker into the note if it has none, and put `[[Note#^id]]` on the
+ * clipboard. Running it twice on the same block copies the same link — the
+ * marker is only ever written once.
+ */
+async function copyBlockReference() {
+	const ctx = buildContext();
+	const view = activeEditorView();
+	if (!view || !ctx.notePath) return;
+	const { state } = view;
+	const lineNo = state.doc.lineAt(state.selection.main.head).number - 1;
+	const edit = blockRefEdit(state.doc.toString().split('\n'), lineNo);
+	if (!edit) { notice('Put the cursor inside a block first'); return; }
+
+	if (edit.insert) {
+		const line = state.doc.line(edit.insert.line + 1);
+		view.dispatch({
+			changes: { from: line.from + edit.insert.column, insert: edit.insert.text },
+			userEvent: 'input.blockid',
+		});
+		// The link is only good once the marker is on disk, since resolving it
+		// reads the indexed file rather than the editor.
+		editorPool.flush(ctx.activeTab.id);
+	}
+	const link = blockRefLink(ctx.notePath, edit.id, (name) => vaultStore.resolveNoteName(name));
+	// The clipboard refuses an unfocused document. The marker is written
+	// either way, so say what the link is rather than failing silently — it
+	// can be retyped, and running the command again will copy it.
+	try {
+		await navigator.clipboard.writeText(link);
+		notice(`Copied ${link}`);
+	} catch {
+		notice(`Block reference: ${link}`);
+	}
+}
+
 async function exportActiveNote(format) {
 	const ctx = buildContext();
 	if (!ctx.notePath) return;
@@ -78,6 +117,15 @@ export function registerBuiltinCommands() {
 			run: () => document.querySelector('clew-file-explorer')?.createFolder?.('') },
 		{ id: 'file:new-canvas', name: 'Create new canvas', when: needsVault,
 			run: () => document.querySelector('clew-file-explorer')?.createCanvas?.('') },
+		{ id: 'file:new-drawing', name: 'Create new drawing (Excalidraw)', when: needsVault,
+			run: () => document.querySelector('clew-file-explorer')?.createDrawing?.('') },
+		{ id: 'editor:copy-block-ref', name: 'Copy link to block', when: needsEditor,
+			run: () => copyBlockReference() },
+		{ id: 'editor:format-table', name: 'Format table at cursor', when: needsEditor,
+			run: () => {
+				const view = activeEditorView();
+				if (view) formatTableAtCursor(view);
+			} },
 		{ id: 'file:save', name: 'Save note', hotkeys: ['Mod-s'], when: needsNote,
 			run: (ctx) => editorPool.flush(ctx.activeTab.id) },
 		{ id: 'file:open-vault', name: 'Open another vault…',

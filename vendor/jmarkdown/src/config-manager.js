@@ -83,6 +83,14 @@ export const DEFAULT_CONFIG = {
 	// Where a poster frame is needed and none was given, extract one from the
 	// first frame with ffmpeg, cached under Video/. 'none' turns that off.
 	'Video poster': 'auto',
+	// Opt-in pandoc-style citations ([@key] / @key — see src/pandoc-citations.js),
+	// translated into the \cite commands. Off by default because @ is the
+	// directive sigil: with this on, a bare @word that isn't a registered
+	// directive is read as a citation key. Like `File inclusion` and
+	// `Header style` above, this exists for an embedding host rendering notes
+	// written elsewhere (Obsidian-style), which is why it is settable from
+	// config: such notes carry no JMarkdown metadata header of their own.
+	'Pandoc citations': false,
 	// Opt-in typographic educator (see src/smart-typography.js): straight
 	// quotes → curly, ---/-- → em/en dash, ... → ellipsis, in both outputs.
 	'Smart typography': false,
@@ -293,6 +301,12 @@ class ConfigManager {
 				// Written to the space-keyed config so begin-end.js can read it
 				// directly via configManager.get('Block elements').
 				this.config["Block elements"] = value[0].trim().toLowerCase();
+				break;
+			case "Pandoc_citations":
+				// Space-keyed, like Block_elements: pandoc-citations.js reads
+				// configManager.get('Pandoc citations') lazily while tokenizing.
+				str = value[0].trim().toLowerCase();
+				this.config["Pandoc citations"] = (str == "true");
 				break;
 			case "Smart_typography":
 				// Space-keyed for the same reason: smart-typography.js reads

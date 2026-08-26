@@ -141,13 +141,24 @@ export function headingLine(path, heading) {
 	return headings.find((h) => h.text.trim().toLowerCase() === clean)?.line ?? null;
 }
 
+/** The 1-based line of a `^block-id` marker's block. Ids are case-sensitive in
+ *  Obsidian — two blocks may differ only in case — so this does not fold. */
+export function blockLine(path, id) {
+	const clean = id.trim();
+	return (vaultStore.blocksFor?.(path) ?? []).find((b) => b.id === clean)?.line ?? null;
+}
+
 /**
- * Land a note tab on a heading: cursor jump in source mode; in reading
- * mode a still-loading preview picks up view.cursorLine when it becomes
- * ready, and an already-live one follows the scroll bus.
+ * Land a note tab on a heading or a block: cursor jump in source mode; in
+ * reading mode a still-loading preview picks up view.cursorLine when it
+ * becomes ready, and an already-live one follows the scroll bus.
+ *
+ * `fragment` is whatever followed the `#` — a heading, or `^id` for a block.
  */
-export function jumpToHeading(tab, path, heading) {
-	const line = headingLine(path, heading);
+export function jumpToHeading(tab, path, fragment) {
+	const line = fragment.startsWith('^')
+		? blockLine(path, fragment.slice(1))
+		: headingLine(path, fragment);
 	if (!line) return;
 	if (tab.view.mode === 'reading') {
 		workspaceStore.updateTabView(tab.id, { cursorLine: line });

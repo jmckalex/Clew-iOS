@@ -32,6 +32,7 @@ import { attachments } from './attachments.js';
 import { citationCompletions } from './complete/citations.js';
 import { jmdOverlay } from './jmd/overlay.js';
 import { jmdFolding } from './jmd/folding.js';
+import { tableKeymap } from './tables.js';
 
 /**
  * Build an EditorState for a note. `handlerRef` is a mutable `{fn}` box the
@@ -65,6 +66,10 @@ export function makeNoteState(doc, handlerRef) {
 			wikilinkClick(),
 			attachments(),
 			search({ top: true }),
+			// Before the general keymap: Tab has to reach a table before
+			// indentWithTab claims it. Every handler declines when the cursor
+			// is not in a table, so ordinary Tab is untouched.
+			tableKeymap(),
 			keymap.of([
 				...closeBracketsKeymap,
 				...markdownKeymap,

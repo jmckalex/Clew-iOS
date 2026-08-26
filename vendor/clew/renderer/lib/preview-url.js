@@ -30,6 +30,29 @@ export function vaultFileUrl(path) {
 	return `clew-preview://vault/${sessionId}/${encode(path)}`;
 }
 
+/**
+ * Our EmbedPDF viewer page, wrapping a raw PDF URL. Used where a PDF is shown
+ * in an iframe of its own (the file tab, canvas PDF nodes) rather than inside
+ * a rendered note.
+ */
+export function pdfViewerUrl(fileUrl) {
+	// NB: no session id. Asset URLs sit at the root of the URL space
+	// (vault/__clew_assets__/…); only vault FILES are sid-prefixed. The PDF
+	// itself keeps its sid — it travels in the src parameter.
+	return `clew-preview://vault/__clew_assets__/clewpdf/pdf-page.html`
+		+ `?src=${encodeURIComponent(fileUrl)}`;
+}
+
+/**
+ * The Excalidraw editor page, wrapping a drawing. Like pdfViewerUrl, the page
+ * itself is an ASSET (no session id) while the file it edits is a vault path
+ * (which carries one) — the two travel as separate parameters.
+ */
+export function excalidrawUrl(path) {
+	return 'clew-preview://vault/__clew_assets__/clewex/page.html'
+		+ `?src=${encodeURIComponent(vaultFileUrl(path))}&path=${encodeURIComponent(path)}`;
+}
+
 /** Engine fragment-render endpoint (canvas cards; POST markdown → HTML). */
 export function fragmentUrl() {
 	return `clew-preview://vault/${sessionId}/__clew_fragment__`;
