@@ -301,8 +301,8 @@ class AppMenu {
 		const goMenu = {
 			label: 'Go',
 			submenu: [
-				c('nav:back', 'Back', { chord: 'Mod-Alt-ArrowLeft', needs: 'vault' }),
-				c('nav:forward', 'Forward', { chord: 'Mod-Alt-ArrowRight', needs: 'vault' }),
+				c('nav:back', 'Back', { chord: 'Mod-[', needs: 'vault' }),
+				c('nav:forward', 'Forward', { chord: 'Mod-]', needs: 'vault' }),
 				{ type: 'separator' },
 				c('nav:quick-switcher', 'Quick Switcher…', { chord: 'Mod-o', needs: 'vault' }),
 				c('nav:graph', 'Graph View', { chord: 'Mod-g', needs: 'vault' }),

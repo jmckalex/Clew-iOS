@@ -35,7 +35,10 @@ import * as queryFences from '../../vendor/clew/engine/query-fences.js';
 import * as blockRefs from '../../vendor/clew/engine/block-refs.js';
 import * as dataview from '../../vendor/clew/engine/dataview.js';
 import * as bases from '../../vendor/clew/engine/bases.js';
+import * as admonitions from '../../vendor/clew/engine/admonitions.js';
+import * as metaBind from '../../vendor/clew/engine/meta-bind.js';
 import * as callouts from '../../vendor/clew/engine/callouts.js';
+import * as kanbanBoard from '../../vendor/clew/engine/kanban-board.js';
 
 // One entry per file the generated config NAMES; each module's own imports
 // (dataview's dv-expr/dv-functions/dataview-js/vault-model, bases' share of
@@ -47,7 +50,10 @@ globalThis.__jmdExtensionRegistry = {
 	'/engine-assets/block-refs.js': blockRefs,
 	'/engine-assets/dataview.js': dataview,
 	'/engine-assets/bases.js': bases,
+	'/engine-assets/admonitions.js': admonitions,
+	'/engine-assets/meta-bind.js': metaBind,
 	'/engine-assets/callouts.js': callouts,
+	'/engine-assets/kanban-board.js': kanbanBoard,
 };
 
 let enginePromise = null;

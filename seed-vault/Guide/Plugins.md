@@ -9,10 +9,13 @@ share the behavior), and every plugin is **off until you enable it** in
 Settings → This vault — a plugin is arbitrary code, so enabling one is a
 statement of trust, exactly like the note API toggle.
 
-This very vault ships two: **Note Headers**, a preview surface that
+This very vault ships three: **Note Headers**, a preview surface that
 draws the banner on [[Welcome]] and can run a whole animated HTML page
-behind it ([[Note Headers]]), and **Word Count**, the app surface whose
-manifest and code appear below.
+behind it ([[Note Headers]]); **Word Count**, the app surface whose
+manifest and code appear below; and **Charts**, an engine + preview
+pair — the engine surface parses ` ```chart ` fences into Chart.js
+configurations, the preview surface draws them ([[Charts]]). Its folder
+is the worked example for a plugin that adds *syntax*.
 
 ## The three surfaces
 

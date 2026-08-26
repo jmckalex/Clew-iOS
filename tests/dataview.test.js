@@ -70,7 +70,9 @@ after(() => {
 const pages = () => scanPages().pages;
 const pageNamed = (name) => pages().find((p) => p.name === name);
 const inside = (rel) => { global.current_file = path.join(root, rel); };
-const names = (rows) => rows.map((p) => p.name).sort();
+// FROM tests get pages; runQuery tests get { page, extra } rows — the helper
+// reads whichever it was handed.
+const names = (rows) => rows.map((r) => (r.page ?? r).name).sort();
 
 // ---- the expression language ------------------------------------------------
 
@@ -273,29 +275,106 @@ test('corpus shape 4: TABLE WITHOUT ID … WHERE contains(this.file.inlinks, fil
 
 test('SORT orders, and multiple keys break ties', () => {
 	const rows = run('table rating\nfrom "Projects"\nsort rating desc');
-	assert.deepEqual(rows.map((p) => p.name), ['Alpha', 'Beta']);
+	assert.deepEqual(rows.map((r) => r.page.name), ['Alpha', 'Beta']);
 	const asc = run('table rating\nfrom "Projects"\nsort rating asc');
-	assert.deepEqual(asc.map((p) => p.name), ['Beta', 'Alpha']);
+	assert.deepEqual(asc.map((r) => r.page.name), ['Beta', 'Alpha']);
 });
 
 test('LIMIT truncates after sorting, not before', () => {
 	const rows = run('table rating\nsort rating desc\nlimit 1');
-	assert.deepEqual(rows.map((p) => p.name), ['Signals']);
+	assert.deepEqual(rows.map((r) => r.page.name), ['Signals']);
+});
+
+// ---- the pipeline: FLATTEN, GROUP BY, lambdas -----------------------------------
+
+test('FLATTEN expands a list into one row per element, bound by name', () => {
+	const rows = run('TABLE n\nFROM "Projects"\nFLATTEN list(1, 2) AS n');
+	assert.equal(rows.length, 4);
+	assert.deepEqual(rows.map((r) => r.extra.n), [1, 2, 1, 2]);
+	assert.deepEqual(rows.map((r) => r.page.name), ['Alpha', 'Alpha', 'Beta', 'Beta']);
+});
+
+test('clauses run in written order: WHERE after FLATTEN sees the binding', () => {
+	const rows = run('LIST\nFROM "Projects"\nFLATTEN list(1, 2, 3) AS n\nWHERE n = 2');
+	assert.equal(rows.length, 2);
+	assert.ok(rows.every((r) => r.extra.n === 2));
+});
+
+test('SORT after FLATTEN orders by the binding', () => {
+	const rows = run('LIST\nFROM "Projects"\nFLATTEN list(1, 2) AS n\nSORT n DESC\nLIMIT 1');
+	assert.equal(rows[0].extra.n, 2);
+});
+
+test('lambdas: filter and map take (x) => …', () => {
+	const rows = run('LIST\nFROM "Projects"\nWHERE length(filter(list(1, 2, 3), (x) => x > 1)) = 2');
+	assert.equal(rows.length, 2, 'the lambda filter kept 2 of 3 elements for every row');
+	const mapped = run('LIST\nFROM "Projects"\nFLATTEN map(list(1, 2), (x) => x * 10) AS n\nSORT n ASC');
+	assert.deepEqual(mapped.map((r) => r.extra.n), [10, 10, 20, 20]);
+});
+
+test('any/all/none: bare truthiness, or a lambda verdict', () => {
+	const rows = run([
+		'LIST\nFROM "Projects"',
+		'WHERE any(list(0, 2), (x) => x > 1) AND all(list(2, 3), (x) => x > 1)'
+		+ ' AND none(list(0, false)) AND any(list(0, 1))',
+	].join('\n'));
+	assert.equal(rows.length, 2);
+});
+
+test('DQL list() CONSTRUCTS (the LET idiom); an empty flatten drops the row', () => {
+	// list(<a list>) wraps it, so FLATTEN unwraps exactly once — a per-row LET.
+	const rows = run('TABLE big\nFROM "Projects"\nFLATTEN list(filter(list(1, 2, 3, 4), (x) => x > 2)) AS big');
+	assert.equal(rows.length, 2, 'one row per page — the wrap kept the list whole');
+	assert.deepEqual(rows[0].extra.big, [3, 4]);
+	const dropped = run('LIST\nFROM "Projects"\nFLATTEN list(filter(list(1), (x) => x > 5)) AS none\nFLATTEN none AS n');
+	assert.equal(dropped.length, 0, 'flattening an empty list removes the row');
+});
+
+test('GROUP BY has real semantics: one row per group, with key and rows', () => {
+	const rows = run('TABLE length(rows) AS N\nFROM "Projects"\nGROUP BY status');
+	assert.equal(rows.length, 2);
+	assert.deepEqual(rows.map((r) => r.extra.key), ['active', 'done']);
+	assert.deepEqual(rows.map((r) => r.extra.rows.length), [1, 1]);
+	assert.equal(rows[0].extra.rows[0].file.name, 'Alpha', 'rows carries the member pages');
+});
+
+test('rows spreads in expressions, and FLATTEN rows AS R ungroups', () => {
+	inside('Method.md');
+	const html = renderQuery('TABLE rows.file.name AS Members\nFROM "Projects"\nGROUP BY status');
+	assert.match(html, /<th>Group<\/th><th>Members<\/th>/);
+	assert.match(html, /Alpha/);
+	assert.match(html, /Beta/);
+	const rows = run('LIST R.file.name\nFROM "Projects"\nGROUP BY status\nFLATTEN rows AS R');
+	assert.equal(rows.length, 2);
+	assert.deepEqual(rows.map((r) => r.extra.R.file.name).sort(), ['Alpha', 'Beta']);
+});
+
+test('the wild shape: FLATTEN list(filter(x, (t) => …)) AS name renders', () => {
+	inside('Method.md');
+	const html = renderQuery([
+		'TABLE length(Open) AS Open',
+		'FROM "Projects"',
+		'FLATTEN list(filter(list(1, 2, 3), (t) => t > 1)) AS Open',
+	].join('\n'));
+	assert.doesNotMatch(html, /is-unsupported/);
+	assert.match(html, /<td[^>]*>2<\/td>/, 'length(Open) is 2 in every row');
 });
 
 // ---- honest refusal ------------------------------------------------------------
 
 test('unsupported constructs are named, not silently dropped', () => {
-	assert.deepEqual(unsupportedIn('TABLE x\nFLATTEN file.lists'), ['FLATTEN', 'file.lists / file.day']);
+	assert.deepEqual(unsupportedIn('TABLE x\nFLATTEN file.lists'), ['file.lists / file.day']);
 	assert.deepEqual(unsupportedIn('CALENDAR file.day'), ['CALENDAR queries', 'file.lists / file.day']);
-	assert.deepEqual(unsupportedIn('TABLE map(x, (r) => r.y)'), ['lambda functions', 'the function map()']);
+	assert.deepEqual(unsupportedIn('TABLE meta(x)'), ['the function meta()']);
+	const taskFlatten = parseQuery('TASK\nFLATTEN tags AS t');
+	assert.deepEqual(unsupportedIn('TASK\nFLATTEN tags AS t', taskFlatten), ['FLATTEN in TASK queries']);
 	assert.deepEqual(unsupportedIn('TABLE rating FROM "A" WHERE contains(x, "y")'), []);
 });
 
 test('a refused query says so instead of rendering wrong numbers', () => {
-	const html = renderQuery('TABLE file.lists\nFLATTEN file.lists');
+	const html = renderQuery('TABLE file.lists\nWHERE file.lists');
 	assert.match(html, /is-unsupported/);
-	assert.match(html, /FLATTEN/);
+	assert.match(html, /file\.lists/);
 	assert.doesNotMatch(html, /<table/, 'no table is rendered from a query we cannot run');
 });
 

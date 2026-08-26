@@ -13,9 +13,11 @@
 // morphdom-patches re-renders in place so scroll position and rendered math
 // survive updates.
 import morphdom from 'morphdom';
+import { anchorTarget } from './anchors.js';
 import { initCanvasEmbeds, refreshCanvasEmbeds, broadcastThemeToNested } from './canvas-embed.js';
 import { initLeafletMaps } from './leaflet-maps.js';
 import { initQueryInteract } from './query-interact.js';
+import { initMetaBind } from './meta-bind.js';
 import { initPdfEmbeds } from './pdf-embed.js';
 import { initExcalidrawEmbeds } from './excalidraw-embed.js';
 
@@ -35,6 +37,7 @@ window.addEventListener('message', (event) => {
 		broadcastThemeToNested(msg.theme);
 	}
 	else if (msg.type === 'canvas-changed') refreshCanvasEmbeds(msg.path);
+	else if (msg.type === 'app-chords') appChords = new Set(msg.chords ?? []);
 	else if (msg.type === 'error') showError(msg.message);
 	else if (msg.type === 'clear-error') showError(null);
 });
@@ -78,6 +81,9 @@ function applyRender(html) {
 			onBeforeElUpdated(fromEl, toEl) {
 				if (fromEl.tagName === 'SCRIPT') return false;
 				if (fromEl.id === '__clew_err') return false;
+				// A Meta Bind widget mid-interaction must not be yanked back
+				// to the on-disk value by an unrelated re-render.
+				if (fromEl.classList?.contains('clew-mb') && fromEl === document.activeElement) return false;
 				if (fromEl.classList?.contains('canvas-embed-scene')) return false;
 				// Custom elements (vault scripts / Script: metadata) render
 				// their own content, which the incoming HTML doesn't carry —
@@ -149,6 +155,9 @@ function enableTaskCheckboxes() {
 document.addEventListener('change', (e) => {
 	const box = e.target;
 	if (box?.type !== 'checkbox') return;
+	// Meta Bind toggles are FIELD edits, not task toggles; their own
+	// handler (meta-bind.js) owns them.
+	if (box.classList.contains('clew-mb')) return;
 	// A ```tasks item carries its SOURCE note; route the toggle there.
 	const remote = box.closest('[data-task-path]');
 	if (remote) {
@@ -209,16 +218,63 @@ document.addEventListener('click', (e) => {
 		e.preventDefault();
 		post({ type: 'external-link', url: href });
 	} else if (href.startsWith('#')) {
-		// In-document anchor: let default behavior scroll.
+		// In-document anchor. The wild writes GitHub-style hashes
+		// (#deep-work) while the engine ids headings toc-<slug>; resolve
+		// rather than letting the browser silently miss (anchors.js). The
+		// jump is browser-style navigation, so tell the host where we left
+		// from and where we landed — that is what makes Back work.
+		e.preventDefault();
+		const target = anchorTarget(href);
+		if (target) {
+			post({ type: 'anchor-jump', fromLine: topVisibleLine(), toLine: lineOf(target) });
+			target.scrollIntoView({ block: 'start' });
+		}
 	} else {
 		e.preventDefault(); // unknown relative navigation — never leave the doc
 	}
 }, true);
 
-// Forward the app-level chords the user expects to keep working while the
-// preview has focus (the iframe swallows keydown otherwise).
+// Forward app-level chords while the preview has focus — the iframe swallows
+// keydown, so without this every app shortcut is dead the moment a click
+// lands in reading mode (which read, from the outside, as "the menu commands
+// are broken"). The host sends its full effective chord list on ready
+// ('app-chords'); we forward exactly those, which also means chords the app
+// does NOT own — Cmd+C, text selection, find — stay the browser's.
+let appChords = null;
+const isMacLike = /Mac|iP(hone|ad|od)/.test(navigator.platform);
+
+// Mirrors the registry's chordOf(): same names, same order, so membership
+// tests against the host's normalized chord list are exact.
+function chordOf(e) {
+	const parts = [];
+	if (isMacLike) {
+		if (e.metaKey) parts.push('Mod');
+		if (e.ctrlKey) parts.push('Ctrl');
+	} else {
+		if (e.ctrlKey) parts.push('Mod');
+		if (e.metaKey) parts.push('Meta');
+	}
+	if (e.altKey) parts.push('Alt');
+	if (e.shiftKey) parts.push('Shift');
+	let key = e.key;
+	if (key === ' ') key = 'Space';
+	if (key.length === 1) key = key.toLowerCase();
+	if (['Meta', 'Control', 'Alt', 'Shift'].includes(key)) return null;
+	parts.push(key);
+	return parts.join('-');
+}
+
 window.addEventListener('keydown', (e) => {
 	if (!(e.metaKey || e.ctrlKey)) return;
+	if (appChords) {
+		const chord = chordOf(e);
+		if (chord && appChords.has(chord)) {
+			e.preventDefault();
+			post({ type: 'app-chord', chord });
+		}
+		return;
+	}
+	// Host predates 'app-chords' (a stale cached document): the historic four.
 	const key = e.key.toLowerCase();
 	if (['e', 'w', 't', '\\'].includes(key)) {
 		e.preventDefault();
@@ -229,6 +285,28 @@ window.addEventListener('keydown', (e) => {
 // Clicking into the preview must focus its pane, exactly as clicking into an
 // editor does — the app's pointerdown tracking cannot see inside this iframe.
 window.addEventListener('pointerdown', () => post({ type: 'focused' }), true);
+
+/** The topmost stamped line in view — where the reader currently "is". */
+function topVisibleLine() {
+	for (const el of document.querySelectorAll('[data-source-line]')) {
+		if (el.getBoundingClientRect().bottom > 0) return Number(el.dataset.sourceLine) || 1;
+	}
+	return 1;
+}
+
+/** The source line an element belongs to: itself, a stamped ancestor, or
+ *  the last stamped element before it in document order. */
+function lineOf(el) {
+	const stamped = el.closest?.('[data-source-line]');
+	if (stamped) return Number(stamped.dataset.sourceLine) || 1;
+	let line = 1;
+	for (const s of document.querySelectorAll('[data-source-line]')) {
+		if (s.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) {
+			line = Number(s.dataset.sourceLine) || line;
+		} else break;
+	}
+	return line;
+}
 
 // Report scroll position (topmost stamped block + fraction) for scroll-sync.
 let scrollTicking = false;
@@ -272,4 +350,5 @@ initLeafletMaps();
 initPdfEmbeds();
 initExcalidrawEmbeds();
 initQueryInteract();
+initMetaBind();
 post({ type: 'ready' });

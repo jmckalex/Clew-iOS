@@ -30,7 +30,7 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { Excalidraw, MainMenu } from '@excalidraw/excalidraw';
 import '@excalidraw/excalidraw/index.css';
-import { parseExcalidraw, serializeExcalidraw } from '../shared/excalidraw-file.js';
+import { parseExcalidraw, serializeExcalidraw, embeddedFileLinks } from '../shared/excalidraw-file.js';
 
 // Fonts and locale data, served from our own copy of the package. Without this
 // Excalidraw fetches them from unpkg — a note app must open a drawing on a
@@ -65,6 +65,7 @@ window.addEventListener('message', (event) => {
 	pending.delete(msg.id);
 	clearTimeout(entry.timer);
 	if (msg.type === 'excalidraw-library-result') entry.resolve(msg.items ?? []);
+	else if (msg.type === 'excalidraw-resolve-result') entry.resolve(msg.paths ?? {});
 	else if (msg.ok) entry.resolve();
 	else entry.reject(new Error(msg.error || 'save failed'));
 });
@@ -107,6 +108,16 @@ async function boot() {
 	// a round trip a note does not need while it renders.
 	const libraryItems = viewMode ? [] : await ask({ type: 'excalidraw-library-load' }).catch(() => []);
 	window.__clewExcalidrawLibraryCount = libraryItems.length;   // smoke hook
+
+	// Obsidian's plugin keeps a pasted image OUT of the scene: the element has
+	// only a fileId, the bytes live as a vault attachment, and the markdown's
+	// "## Embedded Files" section maps one to the other. Resolve those links
+	// (same resolution as a wikilink click, via the host) and rehydrate the
+	// files map so the images actually appear — remembering which entries are
+	// ours, because a save must strip them again or every save would copy the
+	// image INTO the markdown.
+	const { files: hydratedFiles, injected } = await rehydrateEmbeddedFiles(parsed);
+	window.__clewExcalidrawInjected = injected.size;   // smoke hook
 
 	// Excalidraw owns the scene from here; we keep only what saving needs.
 	//
@@ -152,13 +163,17 @@ async function boot() {
 	const onChange = (elements, appState, files) => {
 		if (!userHasEdited) return;
 		clearTimeout(saveTimer);
+		const kept = {};
+		for (const [id, file] of Object.entries(files ?? parsed.scene.files ?? {})) {
+			if (!injected.has(id)) kept[id] = file;
+		}
 		const scene = {
 			...parsed.scene,
 			type: 'excalidraw',
 			version: 2,
 			elements,
 			appState: { ...parsed.scene.appState, ...pickPersisted(appState) },
-			files: files ?? parsed.scene.files ?? {},
+			files: kept,
 		};
 		saveTimer = setTimeout(() => save(scene), SAVE_DEBOUNCE_MS);
 	};
@@ -168,7 +183,7 @@ async function boot() {
 			initialData: {
 				elements: parsed.scene.elements ?? [],
 				appState: { ...parsed.scene.appState, collaborators: new Map() },
-				files: parsed.scene.files ?? {},
+				files: hydratedFiles,
 				libraryItems,
 				scrollToContent: true,
 			},
@@ -190,6 +205,59 @@ async function boot() {
 		)),
 	);
 	window.__clewExcalidrawReady = true;
+}
+
+const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|svg|bmp|avif|ico)$/i;
+
+/**
+ * The scene's files map, plus every image the markdown's Embedded Files
+ * section can supply: resolve the wikilink targets to vault paths (host does
+ * the resolving — same rules as clicking a wikilink), fetch the bytes over
+ * the preview protocol this page already lives on, and hand Excalidraw
+ * dataURL entries. A link that does not resolve, or points at something that
+ * is not an image (the plugin also embeds note transclusions and drawing
+ * areas this way), is simply left out — the element shows Excalidraw's own
+ * missing-image placeholder, which is the truthful rendering.
+ */
+async function rehydrateEmbeddedFiles(parsed) {
+	const files = { ...(parsed.scene.files ?? {}) };
+	const injected = new Set();
+	const needed = new Set((parsed.scene.elements ?? [])
+		.filter((el) => el?.type === 'image' && el.fileId && !el.isDeleted && !files[el.fileId])
+		.map((el) => el.fileId));
+	const links = embeddedFileLinks(parsed.source).filter((l) => l.target && needed.has(l.id));
+	if (!links.length) return { files, injected };
+
+	const resolved = await ask({
+		type: 'excalidraw-resolve-files',
+		names: [...new Set(links.map((l) => l.target))],
+	}).catch(() => ({}));
+	// src is clew-preview://vault/<sid>/<path>; vault fetches share the sid.
+	const sid = new URL(src, location.href).pathname.split('/')[1];
+
+	await Promise.all(links.map(async (link) => {
+		const path = resolved?.[link.target];
+		if (!path || !IMAGE_EXT_RE.test(path)) return;
+		try {
+			const res = await fetch(`/${sid}/${path.split('/').map(encodeURIComponent).join('/')}`);
+			if (!res.ok) return;
+			const blob = await res.blob();
+			const dataURL = await new Promise((resolve, reject) => {
+				const reader = new FileReader();
+				reader.onload = () => resolve(reader.result);
+				reader.onerror = () => reject(new Error('unreadable image'));
+				reader.readAsDataURL(blob);
+			});
+			files[link.id] = {
+				id: link.id,
+				mimeType: blob.type || 'application/octet-stream',
+				dataURL,
+				created: Date.now(),
+			};
+			injected.add(link.id);
+		} catch { /* placeholder rather than a failed open */ }
+	}));
+	return { files, injected };
 }
 
 /**

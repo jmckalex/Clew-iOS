@@ -29,7 +29,7 @@
 
 // ---- lexer -----------------------------------------------------------------
 
-const PUNCT = ['>=', '<=', '!=', '<>', '==', '&&', '||', '(', ')', '[', ']', ',',
+const PUNCT = ['>=', '<=', '!=', '<>', '=>', '==', '&&', '||', '(', ')', '[', ']', ',',
 	'.', '+', '-', '*', '/', '%', '>', '<', '=', '!'];
 const WORD_OPS = new Set(['and', 'or', 'not']);
 
@@ -216,7 +216,13 @@ class Parser {
 			return { kind: 'ident', name: token.value };
 		}
 		if (token.type === 'punct') {
-			if (token.value === '(') { const inner = this.expression(0); this.eat(')'); return inner; }
+			if (token.value === '(') {
+				// `(x) => expr` — a lambda, distinguished from a parenthesized
+				// expression by lookahead: identifiers, ')', then '=>'.
+				const lambda = this.lambda();
+				if (lambda) return lambda;
+				const inner = this.expression(0); this.eat(')'); return inner;
+			}
 			if (token.value === '[') {
 				const items = [];
 				if (!this.eat(']')) {
@@ -227,6 +233,21 @@ class Parser {
 			}
 		}
 		return { kind: 'literal', value: undefined };
+	}
+
+	/** Called with '(' consumed. Parses `ident, …) => body` or backtracks. */
+	lambda() {
+		const start = this.pos;
+		const params = [];
+		while (this.peek().type === 'ident') {
+			params.push(this.next().value);
+			if (!this.eat(',')) break;
+		}
+		if (this.eat(')') && this.eat('=>')) {
+			return { kind: 'lambda', params, body: this.expression(0) };
+		}
+		this.pos = start;
+		return null;
 	}
 }
 
@@ -366,6 +387,10 @@ function run(node, ctx) {
 			// A field named `today` in someone's frontmatter wins over the keyword.
 			return resolved !== undefined ? resolved : temporal ?? undefined;
 		}
+		// A lambda evaluates to a closure over its defining context; only
+		// callFunction (below) can apply it, so it stays inert data everywhere
+		// else — a lambda in a cell renders as nothing, not as code.
+		case 'lambda': return { __lambda: true, params: node.params, body: node.body, ctx };
 		case 'field': {
 			const object = run(node.object, ctx);
 			if (object === undefined || object === null) return undefined;
@@ -397,6 +422,23 @@ function run(node, ctx) {
 		case 'binary': return binary(node, ctx);
 		default: return undefined;
 	}
+}
+
+/**
+ * Apply a lambda value — `filter(list, (x) => …)` reaches here. Parameters
+ * shadow the defining context's names; everything else resolves as it did
+ * where the lambda was written. Not a lambda → undefined, never a throw.
+ */
+export function callFunction(fn, args, outerCtx) {
+	if (typeof fn === 'function') return fn(args, outerCtx);
+	if (!fn || fn.__lambda !== true) return undefined;
+	const ctx = fn.ctx;
+	const scope = {};
+	fn.params.forEach((p, i) => { scope[p] = args[i]; });
+	return evaluate(fn.body, {
+		...ctx,
+		resolve: (name) => (name in scope ? scope[name] : ctx.resolve(name)),
+	});
 }
 
 function binary(node, ctx) {

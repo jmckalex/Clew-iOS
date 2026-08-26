@@ -14,8 +14,12 @@
 // pages are documents. window.__clewAssetBase (set by the exporter, per
 // page depth) points leaflet at the copied assets.
 import { initLeafletMaps } from './leaflet-maps.js';
+import { installAnchorClicks } from './anchors.js';
 
 initLeafletMaps();
+// Hand-written `#anchor` TOCs vs the engine's toc-<slug> heading ids — the
+// same resolution reading mode does (anchors.js), for static pages.
+installAnchorClicks();
 
 if (window.mermaid) {
 	window.mermaid.initialize({ startOnLoad: false, theme: 'dark' });

@@ -17,7 +17,7 @@
 // Anything absent evaluates to `undefined` rather than throwing, so an
 // unsupported function narrows a query instead of breaking a note.
 import {
-	asArray, coerceDate, display, formatDuration, isDate, isDuration,
+	asArray, callFunction, coerceDate, display, formatDuration, isDate, isDuration,
 	makeDuration, parseDuration, truthy, valuesEqual,
 } from './dv-expr.js';
 import { linkKey, makeLink, isLink, isLinkish } from './vault-model.js';
@@ -130,6 +130,13 @@ export const FUNCTIONS = {
 		return out;
 	},
 	flat: ([a]) => asArray(a).flat(Infinity),
+	filter: ([a, f], ctx) => asArray(a).filter((v) => truthy(callFunction(f, [v], ctx))),
+	map: ([a, f], ctx) => asArray(a).map((v) => callFunction(f, [v], ctx)),
+	// With one argument these test the elements' own truthiness; with a
+	// lambda they test its verdicts — both arities are Dataview's.
+	any: ([a, f], ctx) => asArray(a).some((v) => truthy(f === undefined ? v : callFunction(f, [v], ctx))),
+	all: ([a, f], ctx) => asArray(a).every((v) => truthy(f === undefined ? v : callFunction(f, [v], ctx))),
+	none: ([a, f], ctx) => !asArray(a).some((v) => truthy(f === undefined ? v : callFunction(f, [v], ctx))),
 	nonnull: ([a]) => asArray(a).filter((v) => v !== null && v !== undefined && v !== ''),
 	sum: ([a]) => asArray(a).reduce((total, v) => total + (num(v) ?? 0), 0),
 	product: ([a]) => asArray(a).reduce((total, v) => total * (num(v) ?? 1), 1),

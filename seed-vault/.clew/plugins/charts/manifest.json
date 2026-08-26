@@ -1,0 +1,11 @@
+{
+	"id": "charts",
+	"name": "Charts",
+	"version": "1.0.0",
+	"description": "Obsidian's ```chart fences: bar, line, pie, doughnut, radar and polar-area charts from YAML, drawn with the bundled Chart.js (MIT). With dataviewjs enabled, renderChart(config, element) works from scripts too. Unsupported chart options are refused by name.",
+	"apiVersion": 1,
+	"surfaces": {
+		"engine": { "file": "engine.js", "extensions": "chartFence" },
+		"preview": "preview.js"
+	}
+}

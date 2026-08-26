@@ -13,21 +13,24 @@
 // that a vault arriving from Obsidian contains literal DQL, and rewriting
 // someone's queries is not an option.
 //
-// WHAT IS SUPPORTED was decided by measuring four vaults (~480 notes), not by
-// working down the reference page:
+// WHAT IS SUPPORTED was decided by measuring five vaults, not by working down
+// the reference page:
 //
 //   TABLE / TABLE WITHOUT ID / LIST / TASK, with AS aliases
 //   FROM  "folder", #tag, [[link]], outgoing([[link]]), and/or, ! and - negation
-//   WHERE, SORT (multi-key), GROUP BY, LIMIT
-//   the file.* namespace, `this`, and the function table in dv-functions.js
+//   WHERE, SORT (multi-key), GROUP BY (real semantics: `key` and `rows`),
+//   FLATTEN (incl. the `FLATTEN list(expr) AS name` LET idiom), LIMIT —
+//   applied as a PIPELINE in written order, the way Dataview applies them
+//   lambdas `(x) => …`, and the function table in dv-functions.js
+//   the file.* namespace and `this`
 //
-// That subset covered 100% of the DQL in three real vaults (25/25 queries) and
-// 43% of the vault that exists to TEACH Dataview — the difference being
-// FLATTEN, `GROUP BY … rows`, file.day/file.lists and CALENDAR, which are
-// syllabus rather than usage.
+// FLATTEN earned its place when a fifth measured vault used it in real
+// queries (always alongside lambdas and filter(), which is why those came
+// with it); before that, all 92 occurrences were in the vault that exists to
+// TEACH Dataview.
 //
 // What is NOT supported is REFUSED, by name, in the rendered note. A query
-// that silently drops a FLATTEN would show numbers that are wrong, which is
+// that silently dropped a clause would show numbers that are wrong, which is
 // worse than showing nothing: see `unsupportedIn`.
 import {
 	display, evaluate, parseExpression, isDate, isDuration,
@@ -142,7 +145,12 @@ function parseColumn(text) {
 export function parseQuery(source) {
 	const query = {
 		type: 'LIST', withoutId: false, columns: [], listExpr: null,
-		from: null, where: [], sort: [], groupBy: null, limit: null,
+		from: null, where: [], sort: [], groupBy: null, flatten: [], limit: null,
+		// Dataview applies data commands IN WRITTEN ORDER — `WHERE … FLATTEN …
+		// GROUP BY … FLATTEN rows …` is a pipeline, and a FLATTEN before a
+		// WHERE means the WHERE sees the flattened rows. `steps` keeps that
+		// order; the flat fields above stay for the renderers and refusals.
+		steps: [],
 	};
 	for (const { keyword, body } of splitClauses(source)) {
 		switch (keyword) {
@@ -161,19 +169,33 @@ export function parseQuery(source) {
 				break;
 			}
 			case 'FROM': query.from = body; break;
-			case 'WHERE': if (body) query.where.push(body); break;
-			case 'SORT':
+			case 'WHERE':
+				if (body) { query.where.push(body); query.steps.push({ kind: 'where', source: body }); }
+				break;
+			case 'SORT': {
+				const keys = [];
 				for (const part of splitTopLevel(body)) {
 					const m = /^([\s\S]+?)(?:\s+(ASC|DESC|ASCENDING|DESCENDING))?\s*$/i.exec(part);
-					query.sort.push({
-						source: m[1].trim(),
-						desc: /^desc/i.test(m[2] ?? ''),
-					});
+					keys.push({ source: m[1].trim(), desc: /^desc/i.test(m[2] ?? '') });
 				}
+				query.sort.push(...keys);
+				query.steps.push({ kind: 'sort', keys });
 				break;
-			case 'GROUP BY': query.groupBy = parseColumn(body); break;
-			case 'FLATTEN': query.flatten = body; break;
-			case 'LIMIT': query.limit = Number(body.trim()) || null; break;
+			}
+			case 'GROUP BY':
+				query.groupBy = parseColumn(body);
+				query.steps.push({ kind: 'group', column: query.groupBy });
+				break;
+			case 'FLATTEN': {
+				const column = parseColumn(body);
+				query.flatten.push(column);
+				query.steps.push({ kind: 'flatten', column });
+				break;
+			}
+			case 'LIMIT':
+				query.limit = Number(body.trim()) || null;
+				query.steps.push({ kind: 'limit', n: query.limit });
+				break;
 		}
 	}
 	return query;
@@ -242,11 +264,8 @@ export function parseSource(text) {
 // ---- honest refusal ---------------------------------------------------------
 
 const OUT_OF_SUBSET = [
-	[/(^|\n)\s*FLATTEN\b/i, 'FLATTEN'],
 	[/^\s*CALENDAR\b/i, 'CALENDAR queries'],
-	[/\brows\b/i, 'GROUP BY … rows aggregation'],
 	[/\bfile\.(lists|day|starred|frontmatter)\b/i, 'file.lists / file.day'],
-	[/=>/, 'lambda functions'],
 ];
 
 /** What in this query Clew does not implement — named, so the note can say so. */
@@ -260,25 +279,54 @@ export function unsupportedIn(source, query) {
 		if (!KNOWN_FUNCTIONS.has(name.toLowerCase())) found.push(`the function ${name}()`);
 	}
 	if (query?.type === 'CALENDAR') found.push('CALENDAR queries');
+	// TASK rows are tasks, not pages; expanding them with FLATTEN has its own
+	// semantics Clew has not implemented, so it is refused rather than guessed.
+	if (query?.type === 'TASK' && query.flatten?.length) found.push('FLATTEN in TASK queries');
 	return [...new Set(found)];
 }
 
 // ---- running ----------------------------------------------------------------
 
+// Dataview's list() CONSTRUCTS a list from its arguments — `list(x)` where x
+// is already a list gives a one-element list holding it, which is precisely
+// what makes `FLATTEN list(expr) AS name` the idiom for a per-row LET. Bases'
+// list() NORMALIZES (list-or-scalar → list) instead, and kepano's filters
+// depend on that; the two dialects genuinely differ here, so the shared
+// function table keeps the Bases meaning and DQL contexts override it.
+const dataviewList = (args) => args;
+const DQL_FUNCTIONS = { ...FUNCTIONS, list: dataviewList, array: dataviewList };
+
 function contextFor(page, self, extra = {}) {
 	return {
-		functions: FUNCTIONS,
+		functions: DQL_FUNCTIONS,
 		linkKey,
 		isLinkish,
 		makeLink,
 		resolve(name) {
 			if (name === 'this') return self ? { file: fileFields(self), ...self.fields } : undefined;
+			if (name in extra) return extra[name];
+			if (!page) return undefined;
 			if (name === 'file') return fileFields(page);
 			if (name === 'note') return page.fields;
-			if (name in extra) return extra[name];
 			return pageValue(page, name);
 		},
 	};
+}
+
+// ---- the row pipeline --------------------------------------------------------
+// A row is { page, extra }: the page (null once GROUP BY has replaced pages
+// with groups) plus every binding a FLATTEN or GROUP BY introduced. `extra`
+// resolves BEFORE the page's own fields so `FLATTEN x AS x` shadows the list
+// with the element, exactly as Dataview's own binding order does.
+
+const rowContext = (row, self) => contextFor(row.page, self, row.extra);
+
+/** A row as a VALUE — what `rows` holds after GROUP BY, so `rows.file.name`
+ *  and `rows.<binding>` both spread the way Dataview's do. */
+function rowValue(row) {
+	return row.page
+		? { file: fileFields(row.page), ...row.page.fields, ...row.extra }
+		: { ...row.extra };
 }
 
 const cache = new Map();
@@ -287,32 +335,78 @@ const compile = (source) => {
 	return cache.get(source);
 };
 
-/** Filter, sort and limit pages for a parsed query. Pure given the page list. */
+/**
+ * Run a query's data commands, in written order, over { page, extra } rows.
+ * Pure given the page list. TASK queries skip GROUP BY here — their grouping
+ * is display grouping over tasks, handled by the renderer as before.
+ */
 export function runQuery(query, pages, self) {
 	const inSource = parseSource(query.from);
-	let rows = pages.filter((page) => {
-		if (!inSource(page)) return false;
-		for (const clause of query.where) {
-			const value = evaluate(compile(clause), contextFor(page, self));
-			if (!truthyRow(value)) return false;
-		}
-		return true;
-	});
+	let rows = pages.filter(inSource).map((page) => ({ page, extra: {} }));
+	// No SORT clause → name order, applied up front so a LIMIT slices the
+	// alphabetically-first rows, exactly as it did before the pipeline.
+	if (!query.sort.length) rows = [...rows].sort((a, b) => a.page.name.localeCompare(b.page.name));
+	const steps = query.type === 'TASK'
+		? query.steps.filter((s) => s.kind !== 'group') : query.steps;
 
-	for (const key of [...query.sort].reverse()) {
-		const tree = compile(key.source);
-		rows = rows.map((page, i) => ({ page, i })).sort((x, y) => {
-			const a = sortKey(evaluate(tree, contextFor(x.page, self)));
-			const b = sortKey(evaluate(tree, contextFor(y.page, self)));
-			if (a === b) return x.i - y.i;                       // stable
-			if (a === null) return 1;
-			if (b === null) return -1;
-			const order = a < b ? -1 : 1;
-			return key.desc ? -order : order;
-		}).map((entry) => entry.page);
+	for (const step of steps) {
+		if (step.kind === 'where') {
+			const tree = compile(step.source);
+			rows = rows.filter((row) => truthyRow(evaluate(tree, rowContext(row, self))));
+		} else if (step.kind === 'flatten') {
+			// `FLATTEN expr AS name`: one row per element of a list value, the
+			// element bound to the name; a non-list value binds as-is (with
+			// `list(expr)` wrapping, that is Dataview's LET); an empty list
+			// drops the row, as Dataview does.
+			const tree = compile(step.column.source);
+			const name = step.column.alias
+				?? (/^[A-Za-z_][\w-]*$/.test(step.column.source) ? step.column.source : null);
+			const next = [];
+			for (const row of rows) {
+				const value = evaluate(tree, rowContext(row, self));
+				for (const item of Array.isArray(value) ? value : [value]) {
+					next.push({ page: row.page, extra: name ? { ...row.extra, [name]: item } : row.extra });
+				}
+			}
+			rows = next;
+		} else if (step.kind === 'group') {
+			// Real GROUP BY: one row per group, exposing `key` and `rows` —
+			// which is what makes `rows.file.name` and `FLATTEN rows AS R` work.
+			const tree = compile(step.column.source);
+			const groups = new Map();
+			for (const row of rows) {
+				const key = evaluate(tree, rowContext(row, self));
+				const id = display(key) || '—';
+				if (!groups.has(id)) groups.set(id, { key, members: [] });
+				groups.get(id).members.push(row);
+			}
+			rows = [...groups.entries()]
+				.sort((a, b) => a[0].localeCompare(b[0]))
+				.map(([, group]) => ({
+					page: null,
+					extra: {
+						key: group.key,
+						...(step.column.alias ? { [step.column.alias]: group.key } : {}),
+						rows: group.members.map(rowValue),
+					},
+				}));
+		} else if (step.kind === 'sort') {
+			for (const key of [...step.keys].reverse()) {
+				const tree = compile(key.source);
+				rows = rows.map((row, i) => ({ row, i })).sort((x, y) => {
+					const a = sortKey(evaluate(tree, rowContext(x.row, self)));
+					const b = sortKey(evaluate(tree, rowContext(y.row, self)));
+					if (a === b) return x.i - y.i;                   // stable
+					if (a === null) return 1;
+					if (b === null) return -1;
+					const order = a < b ? -1 : 1;
+					return key.desc ? -order : order;
+				}).map((entry) => entry.row);
+			}
+		} else if (step.kind === 'limit' && step.n) {
+			rows = rows.slice(0, step.n);
+		}
 	}
-	if (!query.sort.length) rows = [...rows].sort((a, b) => a.name.localeCompare(b.name));
-	if (query.limit) rows = rows.slice(0, query.limit);
 	return rows;
 }
 
@@ -351,17 +445,24 @@ function editableAttrs(page, columnSource) {
 		+ ` data-edit-field="${escapeHtml(columnSource)}" data-edit-source="${escapeHtml(source)}"`;
 }
 
+/** A row's identity cell: the page link, or (after GROUP BY) the group key. */
+const rowIdHtml = (row) => (row.page
+	? internalLink(row.page.path, row.page.name)
+	: cellHtml(row.extra.key));
+
 function renderTable(query, rows, self) {
+	const grouped = rows.some((row) => !row.page);
 	const headers = [
-		...(query.withoutId ? [] : ['File']),
+		...(query.withoutId ? [] : [grouped ? 'Group' : 'File']),
 		...query.columns.map((c) => c.alias ?? c.source),
 	];
-	const body = rows.map((page) => {
+	const body = rows.map((row) => {
 		const cells = query.columns.map((column) => {
-			const value = evaluate(compile(column.source), contextFor(page, self));
-			return `<td${editableAttrs(page, column.source)}>${cellHtml(value)}</td>`;
+			const value = evaluate(compile(column.source), rowContext(row, self));
+			const editable = row.page ? editableAttrs(row.page, column.source) : '';
+			return `<td${editable}>${cellHtml(value)}</td>`;
 		});
-		const id = query.withoutId ? '' : `<td>${internalLink(page.path, page.name)}</td>`;
+		const id = query.withoutId ? '' : `<td>${rowIdHtml(row)}</td>`;
 		return `<tr>${id}${cells.join('')}</tr>`;
 	}).join('\n');
 	return `<table class="clew-query clew-dataview"><thead><tr>`
@@ -370,10 +471,10 @@ function renderTable(query, rows, self) {
 }
 
 function renderList(query, rows, self) {
-	const items = rows.map((page) => {
-		if (!query.listExpr) return `<li>${internalLink(page.path, page.name)}</li>`;
-		const value = evaluate(compile(query.listExpr), contextFor(page, self));
-		return `<li>${internalLink(page.path, page.name)}: ${cellHtml(value)}</li>`;
+	const items = rows.map((row) => {
+		if (!query.listExpr) return `<li>${rowIdHtml(row)}</li>`;
+		const value = evaluate(compile(query.listExpr), rowContext(row, self));
+		return `<li>${rowIdHtml(row)}: ${cellHtml(value)}</li>`;
 	});
 	return `<ul class="clew-query clew-dataview">\n${items.join('\n')}\n</ul>`;
 }
@@ -437,26 +538,31 @@ export function renderQuery(source) {
 	const self = currentPage();
 	const rows = runQuery(query, pages.filter((p) => p !== self || query.from), self);
 
-	const render = (subset) => {
-		if (query.type === 'TABLE') return renderTable(query, subset, self);
-		if (query.type === 'TASK') return renderTasks(query, subset, self);
-		return renderList(query, subset, self);
-	};
-
-	if (query.groupBy) {
-		const tree = compile(query.groupBy.source);
-		const groups = new Map();
-		for (const page of rows) {
-			const key = display(evaluate(tree, contextFor(page, self))) || '—';
-			if (!groups.has(key)) groups.set(key, []);
-			groups.get(key).push(page);
+	// TASK grouping is DISPLAY grouping over the matching pages' tasks (the
+	// pipeline skipped its group step); TABLE and LIST get real GROUP BY
+	// semantics from the pipeline — one row per group.
+	if (query.type === 'TASK') {
+		const taskPages = rows.map((row) => row.page);
+		if (query.groupBy) {
+			const tree = compile(query.groupBy.source);
+			const groups = new Map();
+			for (const page of taskPages) {
+				const key = display(evaluate(tree, contextFor(page, self))) || '—';
+				if (!groups.has(key)) groups.set(key, []);
+				groups.get(key).push(page);
+			}
+			if (!groups.size) return `<div class="clew-query is-empty">No results.</div>\n`;
+			return [...groups.keys()].sort().map((key) =>
+				`<div class="clew-query-group">${escapeHtml(key)}</div>`
+				+ renderTasks(query, groups.get(key), self)).join('\n') + '\n';
 		}
-		if (!groups.size) return `<div class="clew-query is-empty">No results.</div>\n`;
-		return [...groups.keys()].sort().map((key) =>
-			`<div class="clew-query-group">${escapeHtml(key)}</div>` + render(groups.get(key))).join('\n') + '\n';
+		const html = renderTasks(query, taskPages, self);
+		if (!html) return `<div class="clew-query is-empty">No results.</div>\n`;
+		return html + '\n';
 	}
 
-	const html = render(rows);
+	const html = query.type === 'TABLE'
+		? renderTable(query, rows, self) : renderList(query, rows, self);
 	if (!rows.length || !html) return `<div class="clew-query is-empty">No results.</div>\n`;
 	return html + '\n';
 }

@@ -336,6 +336,60 @@ function renderCardsView(base, view, rows, self) {
 	return `<div class="clew-cards"${style}>\n${cards}\n</div>`;
 }
 
+/**
+ * The map view: every row that yields a coordinate becomes a marker on the
+ * same Leaflet map the ```leaflet fence produces — the `clew-leaflet` div
+ * and its data-leaflet config are the contract, and the preview client's
+ * leaflet-maps.js does everything else (tiles, fit-to-markers, popups whose
+ * links open the note). `coordinates:` names the property holding
+ * [lat, long] — kepano's vaults store a list of two strings — and a
+ * "lat, long" string works too. `defaultZoom` caps the fit. `markerColor`
+ * is evaluated per row; a named marker color tints the pin the way
+ * `mapmarker:` does on leaflet fences. `markerIcon` names Lucide icons
+ * Clew does not ship, so markers stay pins and dots — presentation
+ * degrades, the data does not.
+ */
+function renderMapView(base, view, rows, self) {
+	const coordSource = String(view.coordinates ?? 'note.coordinates');
+	const colorSource = view.markerColor !== undefined ? String(view.markerColor) : null;
+	const markers = [];
+	for (const page of rows) {
+		const ctx = contextFor(page, self, base.formulas);
+		let coords = null;
+		try { coords = coordsFrom(evaluate(compile(coordSource), ctx)); } catch { /* no marker */ }
+		if (!coords) continue;
+		const marker = { lat: coords[0], long: coords[1], link: page.path, label: page.name };
+		if (colorSource) {
+			try {
+				const color = evaluate(compile(colorSource), ctx);
+				if (typeof color === 'string' && /^[a-z]+$/i.test(color)) marker.type = color.toLowerCase();
+			} catch { /* default pin */ }
+		}
+		markers.push(marker);
+	}
+	if (!markers.length) {
+		return `<div class="clew-query is-empty">No rows in this view carry coordinates.</div>`;
+	}
+	const config = { noteMarkers: markers };
+	const zoom = Number(view.defaultZoom);
+	if (Number.isFinite(zoom)) config.zoom = zoom;
+	const json = JSON.stringify(config)
+		.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+	return `<div class="clew-leaflet" data-leaflet="${json}" style="height:400px"></div>`;
+}
+
+/** [lat, long] out of the shapes vaults store: a two-element list of numbers
+ *  or numeric strings, or one "lat, long" string. */
+function coordsFrom(value) {
+	const list = Array.isArray(value) ? value
+		: typeof value === 'string' ? value.split(',')
+			: null;
+	if (!list || list.length < 2) return null;
+	const lat = Number(list[0]);
+	const long = Number(list[1]);
+	return Number.isFinite(lat) && Number.isFinite(long) ? [lat, long] : null;
+}
+
 /** Render one view of a parsed base. */
 export function renderBaseView(base, viewName) {
 	const view = viewName
@@ -347,10 +401,10 @@ export function renderBaseView(base, viewName) {
 		]);
 	}
 	const type = String(view.type ?? 'table').toLowerCase();
-	if (type !== 'table' && type !== 'cards' && type !== 'list') {
+	if (type !== 'table' && type !== 'cards' && type !== 'list' && type !== 'map') {
 		return notice(`Clew does not render "${type}" base views`, [
-			'Table, list and card views work; this one is left alone rather than '
-			+ 'approximated with a different kind of view.',
+			'Table, list, card and map views work; this one is left alone rather '
+			+ 'than approximated with a different kind of view.',
 		]);
 	}
 
@@ -359,7 +413,8 @@ export function renderBaseView(base, viewName) {
 	if (!rows.length) return `<div class="clew-query is-empty">No results in this base view.</div>\n`;
 	const title = view.name ? `<div class="clew-query-group">${escapeHtml(view.name)}</div>` : '';
 	const body = type === 'cards' ? renderCardsView(base, view, rows, self)
-		: renderTableView(base, view, rows, self);
+		: type === 'map' ? renderMapView(base, view, rows, self)
+			: renderTableView(base, view, rows, self);
 	return title + body + '\n';
 }
 

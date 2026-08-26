@@ -138,9 +138,9 @@ export function registerBuiltinCommands() {
 		// navigation
 		{ id: 'nav:quick-switcher', name: 'Open quick switcher', hotkeys: ['Mod-o'], when: needsVault,
 			inModal: false, run: () => openQuickSwitcher() },
-		{ id: 'nav:back', name: 'Navigate back', hotkeys: ['Mod-Alt-ArrowLeft'], when: needsVault,
+		{ id: 'nav:back', name: 'Navigate back', hotkeys: ['Mod-[', 'Mod-Alt-ArrowLeft'], when: needsVault,
 			run: () => actions.historyBack() },
-		{ id: 'nav:forward', name: 'Navigate forward', hotkeys: ['Mod-Alt-ArrowRight'], when: needsVault,
+		{ id: 'nav:forward', name: 'Navigate forward', hotkeys: ['Mod-]', 'Mod-Alt-ArrowRight'], when: needsVault,
 			run: () => actions.historyForward() },
 		// Disabled on a canvas so Mod-g reaches the canvas view, where it means
 		// Group — the binding every drawing app uses, and the one users reach

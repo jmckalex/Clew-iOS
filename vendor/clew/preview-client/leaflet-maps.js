@@ -41,8 +41,11 @@ function loadLeaflet() {
 
 const post = (msg) => window.parent.postMessage({ source: 'clew-preview', ...msg }, '*');
 
-// Named tile styles (all ToS-clean, attribution required). Voyager — the
-// Google-Maps-like cartography from CARTO — is the default look.
+// Named tile styles (all ToS-clean, attribution required). OSM is the
+// default: CARTO's free basemaps began watermarking keyless requests with
+// "API KEY REQUIRED" tiles, so voyager/light/dark remain available BY NAME
+// for vaults that carry a key-fronting proxy or accept the watermark, but
+// the out-of-the-box look must be a map, not a licensing banner.
 const OSM_ATTR = '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
 const CARTO_ATTR = OSM_ATTR + ' © <a href="https://carto.com/attributions">CARTO</a>';
 const TILE_STYLES = {
@@ -117,7 +120,7 @@ function buildMap(el, config) {
 	}
 	const style = config.tileServer
 		? { url: config.tileServer, attribution: '' }
-		: TILE_STYLES[config.tiles] ?? TILE_STYLES.voyager;
+		: TILE_STYLES[config.tiles] ?? TILE_STYLES.osm;
 	map = L.map(el, {
 		minZoom: config.minZoom,
 		maxZoom: config.maxZoom ?? style.maxZoom,

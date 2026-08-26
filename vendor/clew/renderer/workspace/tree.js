@@ -306,6 +306,22 @@ export function navigateTab(state, tabId, path, kind = 'note') {
 	tab.view = { mode: tab.view.mode };
 }
 
+/**
+ * An in-document jump (a TOC/anchor click in reading mode): browser-style,
+ * the spot the reader left becomes a Back entry. Same path, same kind —
+ * only the remembered line differs, which restore() carries in `view`.
+ */
+export function recordAnchorJump(state, tabId, fromLine, toLine) {
+	const found = findTab(state.root, tabId);
+	if (!found || found.tab.pinned) return false;
+	const { tab } = found;
+	tab.history.back.push({ path: tab.path, kind: tab.kind, view: { ...tab.view, cursorLine: fromLine } });
+	if (tab.history.back.length > HISTORY_LIMIT) tab.history.back.shift();
+	tab.history.forward = [];
+	tab.view = { ...tab.view, cursorLine: toLine };
+	return true;
+}
+
 export function goBack(state, tabId) {
 	const found = findTab(state.root, tabId);
 	if (!found || found.tab.pinned || found.tab.history.back.length === 0) return false;

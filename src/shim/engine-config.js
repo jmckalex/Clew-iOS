@@ -76,11 +76,23 @@ export function engineConfig({ vaultRoot = '/vault', vaultOptions = {} } = {}) {
 			// Obsidian Bases. The `![[X.base]]` embed path lives in
 			// wikilinks.js; this registers the inline ```base fence.
 			'baseFence from /engine-assets/bases.js',
-			// LAST on purpose, exactly as upstream: marked offers the most
-			// recently registered block extension first, and calloutBlock must
-			// be seen before the engine's own GFM-alert rule so that every
-			// `> [!type]` — the five GFM ones included — renders identically.
+			// The Admonition plugin's ```ad-* fences (pre-callout vaults),
+			// mapped onto callout tokens so callouts.js renders them.
+			'admonitionFence from /engine-assets/admonitions.js',
+			// Meta Bind's INPUT[…]/VIEW[…] widgets — editable cells that
+			// live in prose, on the same field-edit write path.
+			'metaBindInline, metaBindFence from /engine-assets/meta-bind.js',
+			// Registered late on purpose, exactly as upstream: marked offers
+			// the most recently registered block extension first, and
+			// calloutBlock must be seen before the engine's own GFM-alert rule
+			// so that every `> [!type]` — the five GFM ones included —
+			// renders identically.
 			'calloutBlock from /engine-assets/callouts.js',
+			// After callouts (so it is offered first): a note whose
+			// frontmatter declares `kanban-plugin` IS a board, and this
+			// claims the whole body before any other rule can render it
+			// as prose. Inert for every other note.
+			'kanbanBoard from /engine-assets/kanban-board.js',
 		],
 		...biblifyConfig(vaultRoot, vaultOptions),
 		'MathJax': { 'src': '/__clew_assets__/mathjax/tex-svg.js' },

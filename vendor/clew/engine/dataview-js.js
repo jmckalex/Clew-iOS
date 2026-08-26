@@ -46,6 +46,16 @@ const unavailable = (what, why) => {
 	throw new UnavailableError(`${what} is not available in Clew — ${why}.`);
 };
 
+/**
+ * `dv.container` (and a block's `this.container`) must be PASSABLE — the
+ * Charts bridge takes it as renderChart's second argument and ignores it —
+ * but there is still no live DOM here, so anything actually done WITH the
+ * container fails by name on first touch instead.
+ */
+const containerToken = new Proxy({}, {
+	get: (_, prop) => unavailable(`container.${String(prop)}`, 'there is no live DOM during rendering'),
+});
+
 // ---- DataArray ---------------------------------------------------------------
 
 /**
@@ -188,11 +198,15 @@ export function makeDv(out, self, viewDepth = 0) {
 		current: () => (self ? pageProxy(self) : undefined),
 		array: (value) => dataArray(asList(value)),
 		isArray: (value) => Array.isArray(value) || Boolean(value?.values),
-		/** The DQL engine, for `dv.tryQuery`-style use. Returns a DataArray. */
+		/** The DQL engine, for `dv.tryQuery`-style use. Returns a DataArray.
+		 *  Rows carry FLATTEN bindings; after GROUP BY they are `{key, rows}`
+		 *  group objects rather than pages, as in Dataview. */
 		tryQuery: (source) => {
 			const query = parseQuery(String(source));
 			const rows = runQuery(query, scanPages().pages.filter((p) => p.isNote), self);
-			return dataArray(rows.map(pageProxy));
+			return dataArray(rows.map((row) => (row.page
+				? { ...pageProxy(row.page), ...row.extra }
+				: { ...row.extra })));
 		},
 		query: (source) => ({ successful: true, value: { values: dv.tryQuery(source).values } }),
 
@@ -257,11 +271,27 @@ export function makeDv(out, self, viewDepth = 0) {
 			unavailable(`dv.view("${viewPath}")`, 'no such view script in the vault');
 		},
 
+		// -- the Charts plugin's bridge -----------------------------------------
+		/**
+		 * Obsidian's Charts plugin gives dataviewjs `renderChart(config, el)`:
+		 * a raw Chart.js configuration in, a chart in the output. The Clew
+		 * Charts plugin's engine surface registers global.clewCharts when a
+		 * vault enables it; without the plugin the call fails by name like
+		 * everything else here. The element argument is accepted and ignored —
+		 * output lands in call order, like every dv.* renderer.
+		 */
+		renderChart: (config, _element) => {
+			const hook = globalThis.clewCharts;
+			if (!hook) unavailable('renderChart', 'the Charts plugin is not enabled in this vault');
+			try { out.push(hook.emit(config)); }
+			catch (error) { throw new UnavailableError(`renderChart: ${String(error?.message ?? error)}`); }
+		},
+
 		// -- honestly missing -------------------------------------------------------
 		get app() { return unavailable('dv.app', 'it is Obsidian\'s internal application object'); },
 		get io() { return unavailable('dv.io', 'it is asynchronous, and rendering here is not'); },
 		get luxon() { return unavailable('dv.luxon', 'Clew does not ship the Luxon date library; use dv.date()'); },
-		get container() { return unavailable('dv.container', 'there is no live DOM during rendering'); },
+		get container() { return containerToken; },
 		get component() { return unavailable('dv.component', 'there is no live DOM during rendering'); },
 	};
 	return dv;
@@ -279,9 +309,17 @@ export function runScript(code, dv, input) {
 	const app = new Proxy({}, {
 		get: () => unavailable('The Obsidian `app` object', 'it is Obsidian\'s own application, which Clew is not'),
 	});
+	// Obsidian also puts `window` in scope. The one property with a Clew
+	// answer is renderChart (the Charts bridge); every other property names
+	// itself as missing rather than pretending a browser is here.
+	const windowShim = new Proxy({}, {
+		get: (_, prop) => (prop === 'renderChart' ? dv.renderChart
+			: unavailable(`window.${String(prop)}`, 'there is no browser window during rendering')),
+	});
 	// eslint-disable-next-line no-new-func
-	const fn = new Function('dv', 'input', 'dataview', 'app', `"use strict";\n${code}\n`);
-	fn(dv, input, dv, app);
+	const fn = new Function('dv', 'input', 'dataview', 'app', 'window', 'renderChart', `"use strict";\n${code}\n`);
+	// `this.container` is how the wild calls renderChart; give it something.
+	fn.call({ container: dv.container }, dv, input, dv, app, windowShim, dv.renderChart);
 }
 
 const notice = (title, lines) =>

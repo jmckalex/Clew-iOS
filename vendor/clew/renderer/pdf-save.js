@@ -24,6 +24,7 @@
 import { ipc } from './ipc.js';
 import { CH } from '../shared/channels.js';
 import { isExcalidrawPath } from '../shared/excalidraw-file.js';
+import { vaultStore } from './state/vault-store.js';
 
 /**
  * Excalidraw saves, app-page side. The editor runs in an iframe under
@@ -76,6 +77,26 @@ export function installExcalidrawLibraryBridge() {
 			console.warn('[clew] excalidraw library:', err);
 			reply({ type: 'excalidraw-library-result', items: [], ok: false });
 		}
+	});
+}
+
+/**
+ * Embedded-file resolution for drawings. Obsidian's Excalidraw plugin stores
+ * pasted images as vault attachments named from the markdown's Embedded Files
+ * section, so the editor page asks us to turn those wikilink targets into
+ * vault paths — the same resolution a wikilink click uses. Read-only: the
+ * page fetches the bytes itself, over the preview protocol it lives on.
+ */
+export function installExcalidrawResolveBridge() {
+	window.addEventListener('message', (event) => {
+		const msg = event.data;
+		if (!msg || msg.source !== 'clew-excalidraw' || msg.type !== 'excalidraw-resolve-files') return;
+		const paths = {};
+		for (const name of Array.isArray(msg.names) ? msg.names.slice(0, 500) : []) {
+			paths[String(name)] = vaultStore.resolveFileName(String(name));
+		}
+		event.source?.postMessage(
+			{ source: 'clew-excalidraw-host', type: 'excalidraw-resolve-result', id: msg.id, paths }, '*');
 	});
 }
 

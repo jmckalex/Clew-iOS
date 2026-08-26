@@ -111,6 +111,26 @@ export function effectiveKeymap() {
 	return map;
 }
 
+/** Every effective chord — what a forwarding surface (the preview iframe)
+ *  needs to know which keydowns belong to the app. Already normalized, so
+ *  membership tests against chordOf() output are exact. */
+export function effectiveChords() {
+	return [...effectiveKeymap().keys()];
+}
+
+/** Dispatch one chord exactly as the window keydown dispatcher would —
+ *  same context gates, same enablement. Returns whether a command ran. */
+export function runChord(chord) {
+	const id = effectiveKeymap().get(normalizeChord(chord));
+	if (!id) return false;
+	const command = commands.get(id);
+	const ctx = buildContext();
+	if (ctx.modalOpen && !command.inModal) return false;
+	if (!isEnabled(command, ctx)) return false;
+	command.run(ctx);
+	return true;
+}
+
 /** Install the global dispatcher (capture phase; CM keymaps see the rest). */
 export function installHotkeys() {
 	window.addEventListener('keydown', (event) => {

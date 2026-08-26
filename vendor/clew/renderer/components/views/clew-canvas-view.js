@@ -25,6 +25,7 @@ import { settingsStore } from '../../state/settings-store.js';
 import { ipc, CH } from '../../ipc.js';
 import { debounce } from '../../lib/debounce.js';
 import { isViewablePath } from '../../lib/file-types.js';
+import { openExternal } from '../../lib/external-links.js';
 import * as actions from '../../commands/actions.js';
 import * as model from '../../canvas/canvas-model.js';
 import { buildNodeContent, contentKey, setCardText } from '../../canvas/node-content.js';
@@ -2323,7 +2324,7 @@ class ClewCanvasView extends ClewElement {
 				actions.openWikilink(msg.target, { newTab: true });
 				break;
 			case 'external-link':
-				ipc.invoke(CH.SHELL_OPEN_EXTERNAL, { url: msg.url }).catch(() => {});
+				openExternal(msg.url);
 				break;
 			case 'checkbox-toggle':
 				actions.toggleTaskLine(embed.path, msg.line, msg.checked);

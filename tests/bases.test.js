@@ -86,6 +86,11 @@ const NOTES = {
 	'Places/Japan.md': '---\nrating: 0\n---\nJapan.\n',
 	'Places/Portugal.md': '---\nrating: 2\n---\nPortugal.\n',
 	'Notes/Plain.md': 'Nothing special. Links to [[Japan]].\n',
+	// The shapes kepano's vault stores coordinates in: a list of two strings,
+	// and (for coverage) a single "lat, long" string; one note with none.
+	'Spots/Fushimi Inari.md': '---\ncategories: "[[Spots]]"\ncolor: green\ncoordinates:\n  - "34.9689499"\n  - "135.7692576"\n---\nA shrine.\n',
+	'Spots/Osaka.md': '---\ncategories: "[[Spots]]"\ncolor: "#ff0000"\ncoordinates: "34.6937, 135.5023"\n---\nA city.\n',
+	'Spots/Somewhere.md': '---\ncategories: "[[Spots]]"\n---\nNo coordinates.\n',
 };
 
 before(() => {
@@ -272,9 +277,54 @@ test('a named view is selected by name; a missing one says which exist', () => {
 
 test('a view type Clew cannot draw is refused, not approximated', () => {
 	inside('Notes/Plain.md');
-	const html = renderBase('views:\n  - type: map\n    name: M\n', 'M');
-	assert.match(html, /does not render &quot;map&quot;/);
+	const html = renderBase('views:\n  - type: chart\n    name: M\n', 'M');
+	assert.match(html, /does not render &quot;chart&quot;/);
 	assert.doesNotMatch(html, /<table/);
+});
+
+// kepano's Map.base, near enough: coordinates property, zoom, marker colors.
+const MAP_BASE = [
+	'filters:',
+	'  and:',
+	'    - note.categories.contains(link("Spots"))',
+	'views:',
+	'  - type: map',
+	'    name: Map',
+	'    coordinates: note.coordinates',
+	'    defaultZoom: 10.6',
+	'    markerColor: note.color',
+].join('\n');
+
+test('map views become the leaflet placeholder, one marker per located row', () => {
+	inside('Notes/Plain.md');
+	const html = renderBase(MAP_BASE, 'Map');
+	assert.match(html, /<div class="clew-leaflet" data-leaflet="/);
+	const config = JSON.parse(/data-leaflet="([^"]*)"/.exec(html)[1]
+		.replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&amp;/g, '&'));
+	assert.equal(config.noteMarkers.length, 2); // Somewhere has no coordinates
+	assert.equal(config.zoom, 10.6);
+	const fushimi = config.noteMarkers.find((m) => m.label === 'Fushimi Inari');
+	assert.equal(fushimi.lat, 34.9689499);
+	assert.equal(fushimi.long, 135.7692576);
+	assert.equal(fushimi.link, 'Spots/Fushimi Inari.md');
+	assert.equal(fushimi.type, 'green'); // a NAMED color tints the pin…
+	const osaka = config.noteMarkers.find((m) => m.label === 'Osaka');
+	assert.equal(osaka.lat, 34.6937); // …the "lat, long" string form parses…
+	assert.equal(osaka.type, undefined); // …and a hex color falls back to the default pin
+});
+
+test('a map whose rows have no coordinates says so instead of drawing', () => {
+	inside('Notes/Plain.md');
+	const html = renderBase([
+		'filters:',
+		'  and:',
+		'    - note.categories.contains(link("Trips"))',
+		'views:',
+		'  - type: map',
+		'    name: M',
+	].join('\n'), 'M');
+	assert.match(html, /No rows in this view carry coordinates/);
+	assert.doesNotMatch(html, /clew-leaflet/);
 });
 
 test('card views render cards, with the image the view names', () => {

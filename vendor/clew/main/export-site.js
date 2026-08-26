@@ -26,6 +26,7 @@ import path from 'node:path';
 import { paths } from './paths.js';
 import { toolchainPath } from './render-service.js';
 import { direntKind, shouldRecurse, walkGuard } from './fs-utils.js';
+import { enabledPlugins, previewPluginPaths } from './plugins.js';
 
 const SITE_MARK = '@@SITE@@';
 const NOTE_EXT = /\.(md|jmd)$/i;
@@ -64,6 +65,9 @@ export async function exportSite({ vaultRoot, engineDir, outDir, distDir, vaultO
 				CLEW_VAULT_ROOT: vaultRoot,
 				CLEW_SESSION_ID: SITE_MARK,
 				CLEW_SITE_EXPORT: '1',
+				// The same per-vault gate the live render service passes — an
+				// exported site bakes what the vault's previews show.
+				CLEW_DATAVIEW_JS: vaultOptions.dataviewJs === true ? '1' : '',
 			},
 		});
 		child.stdout.on('data', () => {});
@@ -106,7 +110,7 @@ export async function exportSite({ vaultRoot, engineDir, outDir, distDir, vaultO
 			const html = fs.readFileSync(tmp, 'utf8');
 			const outFile = path.join(outDir, rel.replace(NOTE_EXT, '.html'));
 			fs.mkdirSync(path.dirname(outFile), { recursive: true });
-			fs.writeFileSync(outFile, finishPage(html, rel, vaultRoot));
+			fs.writeFileSync(outFile, finishPage(html, rel, vaultRoot, vaultOptions));
 		} catch (err) {
 			failures.push({ note: rel, message: String(err.message ?? err) });
 		}
@@ -121,7 +125,7 @@ export async function exportSite({ vaultRoot, engineDir, outDir, distDir, vaultO
 		fs.copyFileSync(path.join(vaultRoot, rel), target);
 	}
 
-	copyAssets(outDir, vaultRoot, distDir);
+	copyAssets(outDir, vaultRoot, distDir, vaultOptions);
 
 	// index.html: the vault's home note, already exported at depth 0.
 	for (const home of ['Welcome.md', 'Start Here.md', 'Home.md', 'index.md', notes[0]]) {
@@ -137,7 +141,7 @@ export async function exportSite({ vaultRoot, engineDir, outDir, distDir, vaultO
 }
 
 /** Relativize marker URLs and wire in the static runtime. */
-function finishPage(html, rel, vaultRoot) {
+function finishPage(html, rel, vaultRoot, vaultOptions) {
 	const depth = rel.split('/').length - 1;
 	const prefix = depth === 0 ? '' : '../'.repeat(depth);
 	let out = html
@@ -153,13 +157,21 @@ function finishPage(html, rel, vaultRoot) {
 			.map((f) => `<script src="${prefix || './'}assets/vault-scripts/${encodeURIComponent(f)}"></script>`)
 			.join('');
 	} catch { /* none */ }
+	// Enabled plugins' preview surfaces ship too (engine surfaces already ran
+	// in the worker; without this half their fences would land as inert divs).
+	const pluginScripts = previewPluginPaths(vaultRoot, vaultOptions)
+		// ".clew/plugins/<id>/<file>" → "assets/plugins/<id>/<file>"
+		.map((p) => `<script src="${prefix || './'}assets/plugins/${p.split('/').slice(2)
+			.map(encodeURIComponent).join('/')}"></script>`)
+		.join('');
 	const runtime = `<script>window.__clewAssetBase=${JSON.stringify((prefix || './') + 'assets')}</script>`
 		+ vaultScripts
-		+ `<script src="${prefix || './'}assets/site-client.js"></script>`;
+		+ `<script src="${prefix || './'}assets/site-client.js"></script>`
+		+ pluginScripts;
 	return out.replace(/<\/body>/i, `${runtime}</body>`);
 }
 
-function copyAssets(outDir, vaultRoot, distDir) {
+function copyAssets(outDir, vaultRoot, distDir, vaultOptions) {
 	const assets = path.join(outDir, 'assets');
 	const nm = paths.previewAssets;
 	const engineAssets = paths.engineAssets;
@@ -188,5 +200,12 @@ function copyAssets(outDir, vaultRoot, distDir) {
 	const scriptsDir = path.join(vaultRoot, '.clew', 'scripts');
 	if (fs.existsSync(scriptsDir)) {
 		fs.cpSync(scriptsDir, path.join(assets, 'vault-scripts'), { recursive: true });
+	}
+	// Enabled plugins with a preview surface travel whole (a surface may load
+	// siblings from its own folder — the Charts plugin fetches chart.umd.js).
+	for (const plugin of enabledPlugins(vaultRoot, vaultOptions)) {
+		if (!plugin.surfaces.preview) continue;
+		fs.cpSync(path.join(vaultRoot, '.clew', 'plugins', plugin.id),
+			path.join(assets, 'plugins', plugin.id), { recursive: true });
 	}
 }

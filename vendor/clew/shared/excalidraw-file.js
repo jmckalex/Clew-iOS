@@ -171,6 +171,44 @@ export function newMarkdownFile(scene = emptyScene()) {
 }
 
 /**
+ * The "## Embedded Files" section of the markdown wrapper.
+ *
+ * Obsidian's plugin does not store a pasted image inside the scene: the image
+ * becomes an ordinary vault attachment, the scene's element keeps only its
+ * `fileId`, and this section maps the id to a wikilink —
+ *
+ *   ## Embedded Files
+ *   1f8f5a7ac9a2…: [[Pasted image 20240101120000.png]]
+ *
+ * — so the drawing file stays small and the image stays a real file. Reading
+ * such a drawing therefore means resolving these links and rehydrating the
+ * scene's `files` map at load; anything we inject that way must be stripped
+ * again at save, or every save would copy the image INTO the markdown.
+ *
+ * Returns [{ id, target }] for wikilink entries (size suffix and anchor
+ * dropped) and [{ id, url }] for hyperlink ones, in file order. Tolerates
+ * both heading depths and stops at the next section.
+ */
+export function embeddedFileLinks(source) {
+	const section = /\n#{1,2} Embedded Files[ \t]*\n([\s\S]*?)(?=\n#{1,2} |\n%%|$)/
+		.exec(source.startsWith('\n') ? source : `\n${source}`);
+	if (!section) return [];
+	const entries = [];
+	for (const line of section[1].split('\n')) {
+		const m = /^([A-Za-z0-9_-]+):\s*(.+)$/.exec(line.trim());
+		if (!m) continue;
+		const [, id, rest] = m;
+		const link = /^\[\[([^\]]+)\]\]/.exec(rest);
+		if (link) {
+			entries.push({ id, target: link[1].split('|')[0].split('#')[0].trim() });
+		} else if (/^[a-z][a-z0-9+.-]*:\/\//i.test(rest)) {
+			entries.push({ id, url: rest.trim() });
+		}
+	}
+	return entries;
+}
+
+/**
  * The words inside a drawing, one text element per line.
  *
  * This is what makes a drawing searchable and linkable in Clew. Obsidian gets
