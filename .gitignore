@@ -12,3 +12,6 @@ xcuserdata/
 
 # Staged web bundle inside the app (built by scripts/build.js)
 ios/Clew/WebRoot/
+
+# xcodebuild -derivedDataPath used by CLI builds
+build/

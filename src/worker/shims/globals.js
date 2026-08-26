@@ -95,7 +95,12 @@ class BufferShim extends Uint8Array {
 
 // `global` must be the worker's real global object: the engine deliberately
 // hangs shared state (cheerio, require, isLatex, script-block exports) on it.
+// It must also exist as a REAL global property, not just esbuild's injected
+// binding: plugin engine surfaces are imported at runtime (blob/data URL,
+// outside the bundle) and reference `global` the way any Node module may —
+// under real Node it simply exists, so only the worker needs this.
 const globalShim = globalThis;
+globalThis.global = globalThis;
 globalThis.process = processShim;
 globalThis.Buffer = BufferShim;
 
