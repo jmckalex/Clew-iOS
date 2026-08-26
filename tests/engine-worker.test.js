@@ -120,3 +120,29 @@ test('dataviewjs is gated per vault, and executes when the vault opts in', (t) =
 	const on = renderIn(vault, 'Run.md', '--vault-options', '{"dataviewJs":true}');
 	assert.match(on, /DVJS-RAN:5/);
 });
+
+test('a plugin ENGINE surface loads from the vault snapshot (charts)', () => {
+	// The one render path unit tests cannot reach: the config names the
+	// plugin by absolute vault path, the snapshot carries its source, and
+	// the worker imports it at runtime (__jmdImportSource → blob/data URL).
+	// The harness reads seed-vault's own vault-settings, so this render runs
+	// exactly the config the app ships with — charts enabled.
+	const html = flat(render('Guide/Charts.md'));
+	assert.match(html, /<div class="clew-chart" data-chart="/);
+	// Six charts: five ```chart fences plus the dataviewjs renderChart one —
+	// the bridge through global.clewCharts only exists because the plugin
+	// module actually executed in the worker.
+	assert.ok((html.match(/<div class="clew-chart"/g) ?? []).length >= 6,
+		'expected all six charts, fences and renderChart alike');
+	// Disabled ⇒ the fence must fall back to a plain code block, not crash.
+	const off = render('Guide/Charts.md', '--vault-options', '{}');
+	assert.ok(!off.includes('clew-chart'), 'no placeholders without the plugin');
+	assert.match(off, /language-chart/);
+});
+
+test('a kanban-plugin board note renders as a board', () => {
+	const html = flat(render('Features/Project Board.md'));
+	assert.match(html, /clew-kanban clew-kanban-note/);
+	// Cards keep their true source lines — the checkbox write path.
+	assert.match(html, /data-source-line="\d+"[^>]*data-source-path="Features\/Project Board\.md"|data-task-path|type="checkbox"/);
+});
