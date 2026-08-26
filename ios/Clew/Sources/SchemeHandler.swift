@@ -239,8 +239,21 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 			guard id.range(of: #"^[a-z0-9][a-z0-9-]{0,63}$"#, options: .regularExpression) != nil,
 				let manifestData = try? Data(contentsOf: base.appendingPathComponent(".clew/plugins/\(id)/manifest.json")),
 				let manifest = try? JSONSerialization.jsonObject(with: manifestData) as? [String: Any],
-				let surfaces = manifest["surfaces"] as? [String: String] else { return nil }
-			return (id: id, surfaces: surfaces)
+				let rawSurfaces = manifest["surfaces"] as? [String: Any] else { return nil }
+			// A surface is either "file.js" or { "file": "file.js", … } — the
+			// engine surface uses the dict form (plugins.js accepts both for
+			// any surface), so a per-key cast is required: a whole-dictionary
+			// [String: String] cast dies on the FIRST dict-form surface and
+			// silently drops every surface the plugin has.
+			var surfaces: [String: String] = [:]
+			for (key, value) in rawSurfaces {
+				if let file = value as? String {
+					surfaces[key] = file
+				} else if let spec = value as? [String: Any], let file = spec["file"] as? String {
+					surfaces[key] = file
+				}
+			}
+			return surfaces.isEmpty ? nil : (id: id, surfaces: surfaces)
 		}
 	}
 
