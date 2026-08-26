@@ -52,6 +52,11 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 		// Our own PDF viewer page + its bundle (pdf-page.html/.js), which the
 		// file tab, canvas PDF nodes and canvas-embed scenes load in an iframe.
 		"clewpdf": "preview-client",
+		// The Excalidraw editor page + its bundle (React lives only here).
+		"clewex": "preview-assets/clewex",
+		// Excalidraw's own fonts and locale data — window.EXCALIDRAW_ASSET_PATH
+		// points here so the editor never calls unpkg.
+		"excalidraw": "preview-assets/excalidraw",
 	]
 
 	private var webRootURL: URL? {

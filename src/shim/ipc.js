@@ -222,6 +222,16 @@ export function createClewShim({ workerFactory, assetLoader } = {}) {
 			return true;
 		},
 
+		// The Excalidraw shape library, per vault: it is a working set that
+		// belongs with the notes it illustrates, so a vault carries its own.
+		// (Excalidraw itself keeps libraries in browser storage, which for a
+		// note app means "until something clears it".)
+		[CH.EXCALIDRAW_LIB_GET]: () => vaults.loadState('excalidraw-library.json') ?? [],
+		[CH.EXCALIDRAW_LIB_SET]: ({ items }) => {
+			vaults.saveState('excalidraw-library.json', items ?? []);
+			return true;
+		},
+
 		// CJK fallback fonts: upstream downloads a 139 MB Noto pack on demand.
 		// Not built on iOS — the settings section that offers it is patched out
 		// of the renderer (scripts/build.js) and the scheme handler answers

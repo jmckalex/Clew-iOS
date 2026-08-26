@@ -297,6 +297,39 @@ export async function buildPreviewClients({ minify = true } = {}) {
 	return results;
 }
 
+// The Excalidraw editor page — the ONLY bundle in the project that contains
+// React. It is loaded in an iframe when a drawing is opened, so the app's own
+// renderer never carries a framework and React is parsed only by someone who
+// owns a drawing. Config mirrors upstream's bundle entry exactly; nothing of
+// ours is inside it, so upgrading is `npm install @excalidraw/excalidraw` and
+// a rebuild.
+//
+// Runs AFTER stageStatic (which wipes preview-assets/) because it writes into
+// preview-assets/clewex — page.js, the page.css esbuild emits from
+// Excalidraw's index.css import, and the font/image files the loaders below
+// turn into separate assets.
+export async function buildExcalidrawPage({ minify = true } = {}) {
+	return build({
+		entryPoints: [path.join(root, 'vendor', 'clew', 'excalidraw', 'page.js')],
+		outfile: path.join(webroot, 'preview-assets', 'clewex', 'page.js'),
+		bundle: true,
+		format: 'iife',
+		target: 'safari16',
+		jsx: 'automatic',
+		// Excalidraw's exports map offers only development/production
+		// conditions — no default — so without this neither its entry point nor
+		// its stylesheet resolves.
+		conditions: ['production'],
+		// Always minified, like upstream: React plus Excalidraw is ~14 MB
+		// unminified, and there is nothing of ours in here to debug.
+		minify: true,
+		loader: { '.woff2': 'file', '.ttf': 'file', '.png': 'file', '.svg': 'file' },
+		define: { 'process.env.NODE_ENV': '"production"' },
+		logLevel: 'warning',
+		metafile: true,
+	});
+}
+
 export function stageStatic() {
 	const copy = (from, to) => {
 		fs.rmSync(to, { recursive: true, force: true });
@@ -331,6 +364,15 @@ export function stageStatic() {
 		'@fortawesome/fontawesome-free/js/all.min.js': 'node_modules/@fortawesome/fontawesome-free/js/all.min.js',
 		'jquery/dist/jquery.min.js': 'node_modules/jquery/dist/jquery.min.js',
 		'leaflet/dist': 'node_modules/leaflet/dist',
+		// Excalidraw's own fonts, locale data and subsetting worker chunks.
+		// page.js sets window.EXCALIDRAW_ASSET_PATH to this root so the editor
+		// never reaches unpkg — a note app has to open a drawing on a train.
+		// Staged whole, exactly as upstream's protocol.js maps dist/prod: the
+		// editor fetches from here lazily and by name, and guessing at the
+		// subset is how a font silently stops loading. (12 MB of the 17 is the
+		// Xiaolai CJK face — a candidate prune if app size ever matters more
+		// than CJK handwriting.)
+		'excalidraw': 'node_modules/@excalidraw/excalidraw/dist/prod',
 	};
 	// EmbedPDF (MIT) — Pdfium-in-wasm viewer with the full annotation suite,
 	// and now the ONLY PDF stack in the app: one ESM bundle + hashed chunks +
@@ -353,6 +395,10 @@ export function stageStatic() {
 	// pdfViewerUrl() points the file tab and canvas PDF nodes.
 	copy(path.join(root, 'vendor', 'clew', 'preview-client', 'pdf-page.html'),
 		path.join(webroot, 'preview-client', 'pdf-page.html'));
+	// Likewise the Excalidraw editor's host page, beside the page.js/page.css
+	// buildExcalidrawPage writes — the `clewex` asset root.
+	copy(path.join(root, 'vendor', 'clew', 'excalidraw', 'page.html'),
+		path.join(webroot, 'preview-assets', 'clewex', 'page.html'));
 }
 
 export async function buildServicesTestBundle() {
@@ -378,6 +424,7 @@ if (isMain) {
 	const outputs = [];
 	outputs.push(await buildEngineWorker({ minify }));
 	stageStatic();
+	outputs.push(await buildExcalidrawPage({ minify }));
 	outputs.push(await buildAppBundle({ minify }));
 	outputs.push(...await buildPreviewClients({ minify }));
 	outputs.push(await buildServicesTestBundle());
