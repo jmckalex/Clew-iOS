@@ -47,8 +47,11 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 		"jquery": "preview-assets/jquery/dist",
 		"leaflet": "preview-assets/leaflet/dist",
 		"preview": "engine-assets",
-		"pdfjs": "preview-assets/pdfjs",
+		// The EmbedPDF bundle + pdfium.wasm (the only PDF stack in the app).
 		"embedpdf": "preview-assets/embedpdf",
+		// Our own PDF viewer page + its bundle (pdf-page.html/.js), which the
+		// file tab, canvas PDF nodes and canvas-embed scenes load in an iframe.
+		"clewpdf": "preview-client",
 	]
 
 	private var webRootURL: URL? {
@@ -96,6 +99,15 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 
 		if rel.hasPrefix("__clew_assets__/") {
 			let rest = String(rel.dropFirst("__clew_assets__/".count))
+			// Every EmbedPDF viewer asks for CJK fallback fonts on open.
+			// Desktop answers with a font config when the user has downloaded
+			// the 139 MB Noto pack, and the literal `null` when they have not.
+			// iOS has no downloader, so the answer is always `null` — EmbedPDF's
+			// "no fallback, and no CDN either". Answering explicitly (rather
+			// than 404ing into pdf-core's catch) keeps the viewer's happy path.
+			if rest == "pdffonts/fallback.json" {
+				return respondData(task, data: Data("null".utf8), mime: "application/json")
+			}
 			let parts = rest.split(separator: "/", maxSplits: 1).map(String.init)
 			guard parts.count == 2, let base = Self.assetRoots[parts[0]], let webRoot = webRootURL else {
 				return fail(task, "unknown asset root")

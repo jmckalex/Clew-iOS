@@ -5,149 +5,14 @@ import { EditorView } from '@codemirror/view';
 import { runCommand } from '../../vendor/clew/renderer/commands/registry.js';
 import { workspaceStore } from '../../vendor/clew/renderer/state/workspace-store.js';
 import * as actions from '../../vendor/clew/renderer/commands/actions.js';
-import { bridgeCall, toBase64 } from './native-bridge.js';
-import { createPdfReader, vaultRelOf } from '../preview/pdf-reader-core.js';
-
-// ---- PDFs open in QuickLook ------------------------------------------------
-// WebKit has no inline PDF viewer worth the name (an <embed> shows one
-// static page), so opening a PDF — from the explorer, a wikilink, or a
-// preview embed's title — presents the system reader instead: scrolling,
-// search, and Pencil markup that saves back into the vault file. The
-// inline first-page render in reading mode stays as a preview.
-const originalOpenFile = workspaceStore.openFile.bind(workspaceStore);
-workspaceStore.openFile = (path, opts) => {
-	if (/\.pdf$/i.test(path ?? '')) {
-		bridgeCall('quickLook', { rel: path }).catch((err) =>
-			console.error('[clew-ios] quickLook failed:', err));
-		return null;
-	}
-	return originalOpenFile(path, opts);
-};
-
-// ---- PDF annotation saves (preview iframe → vault) ------------------------
-// The inline PDF.js annotation editor (src/preview/pdf-viewer.js) posts the
-// re-saved document bytes up from the preview iframe; the vendored preview
-// host ignores the unknown message type, and this listener overwrites the
-// vault file through the native bridge's coordinated updateBinary. Each
-// request carries an id; the reply goes back to the posting iframe only.
-window.addEventListener('message', async (event) => {
-	const msg = event.data;
-	if (!msg || msg.source !== 'clew-preview' || msg.type !== 'clew-pdf-save') return;
-	if (!String(event.origin).startsWith('clew-preview://')) return;
-	const reply = (ok, error) => event.source?.postMessage({
-		source: 'clew-preview-host', type: 'clew-pdf-save-result',
-		id: msg.id, ok, ...(error ? { error } : {}),
-	}, '*');
-	const rel = typeof msg.rel === 'string' ? msg.rel : '';
-	const bytes = msg.bytes instanceof Uint8Array ? msg.bytes : null;
-	if (!/\.pdf$/i.test(rel) || rel.split('/').some((part) => !part || part === '..')
-		|| !bytes?.length) {
-		return reply(false, 'malformed save request');
-	}
-	try {
-		await bridgeCall('updateBinary', { rel, base64: toBase64(bytes) });
-		if (canvasPdfOverlay) canvasPdfOverlay.savedAny = true;
-		reply(true);
-	} catch (err) {
-		console.error('[clew-ios] pdf save failed:', err);
-		reply(false, String(err?.message ?? err));
-	}
-});
-
-// ---- canvas PDF nodes: scrolling reader + inline annotate -------------------
-// The canvas renders PDF file nodes as an <iframe> onto the raw file,
-// which WebKit shows as ONE static, unscrollable page. Swap each for the
-// shared lazy PDF.js reader (all pages, scrollable inside the node) plus
-// an ✎ Annotate button that opens the EmbedPDF annotator page in an
-// iframe overlay. The annotator is HOSTED UNDER clew-preview
-// (src/preview/pdf-annotator.html, staged into the embedpdf assets):
-// running Pdfium's direct engine on the app page's main thread hung and
-// killed the content process on real iPads, while the worker engine in a
-// clew-preview document is device-proven by the inline note viewers.
-// Its saves arrive through the same clew-pdf-save listener above.
-const canvasPdfReader = createPdfReader('/preview-assets/pdfjs');
-const ANNOTATOR_PAGE = 'clew-preview://vault/__clew_assets__/embedpdf/clew-annotator.html';
-
-const CANVAS_PDF_CSS = `
-.clew-canvas-pdf { overflow-y: auto; -webkit-overflow-scrolling: touch; position: relative; }
-.clew-canvas-pdf-annotate { position: absolute; top: 6px; right: 6px; z-index: 2; font: inherit; font-size: 0.85em; color: #333; background: rgba(255,255,255,0.85); border: none; border-radius: 5px; padding: 3px 10px; cursor: pointer; }
-.clew-pdf-overlay { position: fixed; inset: 0; z-index: 2147483000; background: var(--clew-bg-primary, #1e1e1e); }
-.clew-pdf-overlay iframe { width: 100%; height: 100%; border: none; }
-`;
-const ensureCanvasPdfStyles = () => {
-	if (document.getElementById('clew-canvas-pdf-css')) return;
-	const style = document.createElement('style');
-	style.id = 'clew-canvas-pdf-css';
-	style.textContent = CANVAS_PDF_CSS;
-	document.head.append(style);
-};
-
-let canvasPdfOverlay = null; // { root, onSaved, savedAny } — one at a time
-
-function openCanvasPdfAnnotator({ src, rel, onSaved }) {
-	if (canvasPdfOverlay) return;
-	ensureCanvasPdfStyles();
-	const root = document.createElement('div');
-	root.className = 'clew-pdf-overlay';
-	const iframe = document.createElement('iframe');
-	const query = new URLSearchParams({
-		file: new URL(src, location.href).pathname,
-		rel,
-		theme: document.body.dataset.theme === 'light' ? 'light' : 'dark',
-	});
-	iframe.src = `${ANNOTATOR_PAGE}?${query}`;
-	root.append(iframe);
-	document.body.append(root);
-	canvasPdfOverlay = { root, onSaved, savedAny: false };
-}
-
-// The annotator page signals Done; successful saves already flowed
-// through the clew-pdf-save listener, which marks the overlay dirty so
-// the node's reader remounts with the fresh bytes on close.
-window.addEventListener('message', (event) => {
-	const msg = event.data;
-	if (!msg || msg.source !== 'clew-preview' || msg.type !== 'clew-annotator-close') return;
-	if (!String(event.origin).startsWith('clew-preview://') || !canvasPdfOverlay) return;
-	const { root, onSaved, savedAny } = canvasPdfOverlay;
-	root.remove();
-	canvasPdfOverlay = null;
-	if (savedAny) onSaved?.();
-});
-
-const upgradeCanvasPdfFrames = () => {
-	for (const iframe of document.querySelectorAll('iframe.canvas-pdf-frame')) {
-		ensureCanvasPdfStyles();
-		const src = iframe.src;
-		const rel = vaultRelOf(src, location.href);
-		const host = document.createElement('div');
-		// Keep the vendored class: it carries the node layout (flex sizing).
-		host.className = 'canvas-pdf-frame clew-canvas-pdf';
-		const annotate = document.createElement('button');
-		annotate.className = 'clew-canvas-pdf-annotate';
-		annotate.textContent = '✎ Annotate';
-		annotate.addEventListener('click', (e) => {
-			e.preventDefault();
-			e.stopPropagation();
-			openCanvasPdfAnnotator({ src, rel, onSaved: () => {
-				annotate.remove();
-				canvasPdfReader.remount(host, src);
-				host.append(annotate);
-			} });
-		});
-		iframe.replaceWith(host);
-		canvasPdfReader.mount(host, src);
-		host.append(annotate);
-	}
-};
-let canvasPdfSweep = null;
-new MutationObserver(() => {
-	clearTimeout(canvasPdfSweep);
-	canvasPdfSweep = setTimeout(() => {
-		canvasPdfReader.teardown((state) => !state.host.isConnected);
-		upgradeCanvasPdfFrames();
-	}, 100);
-}).observe(document.body, { childList: true, subtree: true });
-upgradeCanvasPdfFrames();
+// PDFs are no longer special-cased on iOS. Every PDF surface — note embeds,
+// file tabs, canvas nodes, and canvas-embed scenes — is upstream's EmbedPDF
+// viewer running in a clew-preview document, saving through CH.PDF_WRITE
+// (src/shim/ipc.js) into the native coordinated write. What used to live here
+// (a QuickLook override for .pdf tabs, a clew-pdf-save listener, a PDF.js
+// reader for canvas nodes, and an ✎ Annotate overlay) was a parallel
+// implementation of the same thing and is gone; the `quickLook` bridge itself
+// stays available for anything that wants the system reader.
 
 // ---- canvas media engages on a single tap ---------------------------------
 // Canvas node content is inert until the node is "engaged" (double-click on
@@ -159,7 +24,7 @@ document.addEventListener('click', (e) => {
 	if (lastPointerType !== 'touch') return;
 	const node = e.target.closest?.('.canvas-node');
 	if (!node || node.classList.contains('is-engaged')) return;
-	if (!node.querySelector('video, audio, iframe, embed, .clew-canvas-pdf')) return;
+	if (!node.querySelector('video, audio, iframe, embed')) return;
 	node.dispatchEvent(new MouseEvent('dblclick', {
 		bubbles: true, cancelable: true, clientX: e.clientX, clientY: e.clientY,
 	}));

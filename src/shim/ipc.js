@@ -186,6 +186,60 @@ export function createClewShim({ workerFactory, assetLoader } = {}) {
 
 		[CH.RENDER_SUBSCRIBE]: ({ path }) => renderService.subscribe(path),
 		[CH.RENDER_UNSUBSCRIBE]: ({ path }) => renderService.unsubscribe(path),
+
+		// Annotation autosaves from every EmbedPDF surface (note embeds, the
+		// file tab, canvas nodes, canvas-embed scenes) land here via the
+		// vendored renderer/pdf-save.js bridge. Deliberately as narrow as
+		// upstream's vault.writePdf: an existing .pdf inside the vault,
+		// overwritten in place — never created, never renamed. That narrowness
+		// IS the security argument for exposing a binary write to preview
+		// documents, which are vault-authored content: the worst it can do is
+		// overwrite a PDF the user already has, which is what annotating does
+		// on purpose. Swift's updateBinary re-enforces existence and
+		// containment and takes the coordinated-write lock.
+		[CH.PDF_WRITE]: async ({ path, bytes }) => {
+			const rel = typeof path === 'string' ? path : '';
+			if (!/\.pdf$/i.test(rel)) throw new Error(`Not a PDF: ${rel}`);
+			// resolve() would quietly pop a '..' back inside the vault; a save
+			// request carrying one is malformed either way, so refuse it.
+			if (rel.split('/').some((seg) => seg === '..' || seg === '')) {
+				throw new Error(`Bad PDF path: ${rel}`);
+			}
+			const abs = vaults.resolve(rel);
+			if (!vfs.has(abs)) throw new Error(`No such PDF: ${rel}`);
+			// postMessage delivers a structured-clone Uint8Array; the bridge
+			// speaks base64.
+			const data = bytes instanceof Uint8Array ? bytes
+				: ArrayBuffer.isView(bytes) ? new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+				: bytes instanceof ArrayBuffer ? new Uint8Array(bytes)
+				: null;
+			if (!data?.length) throw new Error('Empty PDF payload');
+			await bridgeCall('updateBinary', { rel, base64: toBase64(data) });
+			// Binaries live in the mirror as size-only stubs; move the mtime so
+			// anything re-reading the file (a viewer remount, a rescan diff)
+			// knows these bytes are new.
+			vfs.patch(abs, '', Date.now());
+			return true;
+		},
+
+		// CJK fallback fonts: upstream downloads a 139 MB Noto pack on demand.
+		// Not built on iOS — the settings section that offers it is patched out
+		// of the renderer (scripts/build.js) and the scheme handler answers
+		// pdffonts/fallback.json with `null`, EmbedPDF's "no fallback, and no
+		// CDN either". These handlers exist so nothing reaches an unknown
+		// channel: STATUS answers honestly that nothing is installed, and the
+		// two mutating calls say why rather than failing obscurely. A native
+		// URLSession downloader is a possible later feature.
+		[CH.PDF_FONTS_STATUS]: () => ({
+			installed: false, downloading: false, progress: null,
+			packs: [], totalBytes: 0, bytesOnDisk: 0,
+		}),
+		[CH.PDF_FONTS_DOWNLOAD]: () => {
+			throw new Error('CJK PDF fonts are not available on iOS');
+		},
+		[CH.PDF_FONTS_REMOVE]: () => {
+			throw new Error('CJK PDF fonts are not available on iOS');
+		},
 		[CH.SHELL_OPEN_EXTERNAL]: ({ url }) => {
 			if (/^https?:|^mailto:/i.test(url)) bridgeCall('openExternal', { url }).catch(() => {});
 		},

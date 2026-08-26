@@ -158,6 +158,19 @@ const rendererPatches = {
 				+ "\t\twebview.addEventListener('error', () => webview.dispatchEvent(new Event('did-fail-load')));"),
 			loader: 'js',
 		}));
+		// The "PDF viewer" settings section offers a 139 MB CJK fallback-font
+		// download, which on iOS has nothing behind it (the three
+		// CH.PDF_FONTS_* channels answer "not available" — see src/shim/ipc.js)
+		// and would dead-end at a button that never finishes. Drop the section
+		// rather than ship a control that lies. A native URLSession downloader
+		// is a possible later feature; until then PDFs simply render without
+		// CJK fallback fonts, exactly as upstream does with the pack absent.
+		builder.onLoad({ filter: /vendor\/clew\/renderer\/components\/views\/clew-settings-view\.js$/ }, (args) => ({
+			contents: patched('clew-settings-view.js', fs.readFileSync(args.path, 'utf8'),
+				"\t\t\tthis.#section('PDF viewer', [...this.#cjkFontRow()]),\n",
+				''),
+			loader: 'js',
+		}));
 		// WebKit + custom schemes: when the workspace reconciler moves a
 		// freshly inserted preview iframe, the reinserted frame's window
 		// proxy goes stale — its document loads and runs, but postMessage is
@@ -201,48 +214,81 @@ export async function buildAppBundle({ minify = true } = {}) {
 	});
 }
 
-// The inline PDF surface (reader + annotation editor) injected into the
-// preview client (iOS builds). Real source in src/preview/pdf-viewer.js;
-// appended to client.js so it shares the client's module scope (`post`)
-// and runs in the preview document — same origin as the PDF, Range
-// requests and writeBinary saves served by Swift.
-const iosPdfViewer = fs.readFileSync(path.join(root, 'src', 'preview', 'pdf-viewer.js'), 'utf8');
+// iOS-only additions to the preview-side bundles. Real sources in
+// src/preview/, appended so they share the bundle's module scope and run in
+// the document they belong to.
+//
+//  - pdf-touch.js goes into BOTH client.js (note embeds) and pdf-page.js
+//    (file tabs, canvas nodes): the Pencil finger-pan convention, which has
+//    no desktop equivalent.
+//  - pdf-scene-embeds.js goes into client.js only: raw <embed> PDFs inside
+//    .canvas-embed-scene, which WebKit shows as one static page.
+const readPreviewModule = (name) =>
+	fs.readFileSync(path.join(root, 'src', 'preview', name), 'utf8');
+const iosPdfTouch = readPreviewModule('pdf-touch.js');
+const iosPdfSceneEmbeds = readPreviewModule('pdf-scene-embeds.js');
 
-// WebKit can move/restore a preview iframe during workspace reconciliation
-// without re-running its scripts — the client's one-shot 'ready' is lost and
-// the host↔preview bridge never opens. Re-announce on pageshow (fires on
-// WebKit document restores) so the handshake always completes.
 const previewClientPatches = {
 	name: 'clew-preview-client-patches',
 	setup(builder) {
+		// WebKit can move/restore a preview iframe during workspace
+		// reconciliation without re-running its scripts — the client's
+		// one-shot 'ready' is lost and the host↔preview bridge never opens.
+		// Re-announce on pageshow (fires on WebKit document restores) so the
+		// handshake always completes.
 		builder.onLoad({ filter: /vendor\/clew\/preview-client\/client\.js$/ }, (args) => ({
 			contents: patched('preview-client/client.js', fs.readFileSync(args.path, 'utf8'),
 				"post({ type: 'ready' });",
 				"post({ type: 'ready' });\n"
 				+ "window.addEventListener('pageshow', () => post({ type: 'ready' }));\n"
-				// iOS: WebKit renders an <embed> PDF as ONE static page, so
-				// swap every PDF embed for the inline PDF.js surface — lazy
-				// scrollable reader plus the full annotation editor
-				// (highlight / ink / text) that saves back into the vault
-				// file. The embed title link still opens QuickLook.
-				+ iosPdfViewer),
+				+ iosPdfTouch + iosPdfSceneEmbeds),
+			loader: 'js',
+		}));
+		// Both PDF surfaces build their viewer here, so one hook reaches all
+		// three. pdf-embed.js publishes its own viewers on
+		// window.__clewPdfViewers, but pdf-page.js keeps its handle private —
+		// and the touch layer needs the annotation capability from every
+		// surface, not just embeds. (Upstream candidate: publish handles from
+		// pdf-core itself; the smoke hooks beside this line already exist for
+		// the same reason.)
+		builder.onLoad({ filter: /vendor\/clew\/preview-client\/pdf-core\.js$/ }, (args) => ({
+			contents: patched('preview-client/pdf-core.js', fs.readFileSync(args.path, 'utf8'),
+				'\t// Spike instrumentation.\n'
+				+ '\twindow.__clewPdfReady = (window.__clewPdfReady ?? 0) + 1;',
+				'\t(window.__clewPdfHandles ??= new Set()).add(handle);\n'
+				+ '\t// Spike instrumentation.\n'
+				+ '\twindow.__clewPdfReady = (window.__clewPdfReady ?? 0) + 1;'),
+			loader: 'js',
+		}));
+	},
+};
+
+const previewPagePatches = {
+	name: 'clew-preview-page-patches',
+	setup(builder) {
+		previewClientPatches.setup(builder);
+		// The standalone viewer page gets the Pencil layer too — it is the
+		// surface a file tab and a canvas PDF node both load.
+		builder.onLoad({ filter: /vendor\/clew\/preview-client\/pdf-page\.js$/ }, (args) => ({
+			contents: fs.readFileSync(args.path, 'utf8') + iosPdfTouch,
 			loader: 'js',
 		}));
 	},
 };
 
 export async function buildPreviewClients({ minify = true } = {}) {
-	// Classic <script> injections into rendered-note documents — same three
-	// bundles the desktop build produces.
+	// Classic <script> injections into rendered-note documents — the same
+	// bundles the desktop build produces. pdf-page.js is the standalone
+	// viewer page's bundle (loaded by pdf-page.html in an iframe).
 	const results = [];
-	for (const name of ['client.js', 'api.js', 'site-client.js']) {
+	for (const name of ['client.js', 'api.js', 'site-client.js', 'pdf-page.js']) {
 		results.push(await build({
 			entryPoints: [path.join(root, 'vendor', 'clew', 'preview-client', name)],
 			bundle: true,
 			format: 'iife',
 			target: 'safari16',
 			outfile: path.join(webroot, 'preview-client', name),
-			plugins: [previewClientPatches],
+			plugins: [previewPagePatches],
 			minify,
 			logLevel: 'warning',
 			metafile: true,
@@ -274,6 +320,10 @@ export function stageStatic() {
 	// Preview iframe assets, laid out like the desktop packaged app
 	// (protocol.js assetRoots → Swift scheme handler).
 	copy(path.join(root, 'vendor', 'clew', 'engine'), path.join(webroot, 'engine-assets'));
+	// Wipe the tree rather than overwriting entry by entry: an asset REMOVED
+	// from the map below (PDF.js, when EmbedPDF became the only PDF stack)
+	// otherwise lingers forever in an incremental dist and ships in the app.
+	fs.rmSync(path.join(webroot, 'preview-assets'), { recursive: true, force: true });
 	const assets = {
 		'mathjax/es5': 'node_modules/mathjax/es5',
 		'mermaid/dist/mermaid.min.js': 'node_modules/mermaid/dist/mermaid.min.js',
@@ -281,27 +331,12 @@ export function stageStatic() {
 		'@fortawesome/fontawesome-free/js/all.min.js': 'node_modules/@fortawesome/fontawesome-free/js/all.min.js',
 		'jquery/dist/jquery.min.js': 'node_modules/jquery/dist/jquery.min.js',
 		'leaflet/dist': 'node_modules/leaflet/dist',
-		// Legacy builds throughout: the modern build needs Iterator helpers
-		// this WebKit lacks. Reader only (annotation lives in EmbedPDF);
-		// cmaps/standard_fonts/wasm/iccs are render-fidelity data pdf.js
-		// fetches on demand.
-		'pdfjs/pdf.min.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.min.mjs',
-		'pdfjs/pdf.worker.min.mjs': 'node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs',
-		'pdfjs/cmaps': 'node_modules/pdfjs-dist/cmaps',
-		'pdfjs/standard_fonts': 'node_modules/pdfjs-dist/standard_fonts',
-		'pdfjs/wasm': 'node_modules/pdfjs-dist/wasm',
-		'pdfjs/iccs': 'node_modules/pdfjs-dist/iccs',
 	};
-	// SPIKE (embedpdf-spike branch): EmbedPDF (MIT) — Pdfium-in-wasm viewer
-	// with the full annotation suite. One ESM bundle + hashed chunks +
-	// pdfium.wasm, all inside the snippet's dist; staged whole, then pruned
-	// of demo PDFs / maps / types the app should not ship.
+	// EmbedPDF (MIT) — Pdfium-in-wasm viewer with the full annotation suite,
+	// and now the ONLY PDF stack in the app: one ESM bundle + hashed chunks +
+	// pdfium.wasm, all inside the snippet's dist; staged whole, then pruned of
+	// demo PDFs / maps / types the app should not ship.
 	assets['embedpdf'] = 'node_modules/@embedpdf/snippet/dist';
-	// The canvas annotator page lives INSIDE the embedpdf asset dir so it
-	// resolves ./embedpdf.js and ./pdfium.wasm relatively, and is reachable
-	// at clew-preview://vault/__clew_assets__/embedpdf/clew-annotator.html
-	// without any scheme-handler changes. Must stage after the dir copy.
-	assets['embedpdf/clew-annotator.html'] = 'src/preview/pdf-annotator.html';
 
 	for (const [to, from] of Object.entries(assets)) {
 		copy(path.join(root, from), path.join(webroot, 'preview-assets', to));
@@ -312,6 +347,12 @@ export function stageStatic() {
 			fs.rmSync(path.join(embedPdfDir, name), { recursive: true, force: true });
 		}
 	}
+	// The standalone viewer page, beside the pdf-page.js bundle that
+	// buildPreviewClients writes — together they are the `clewpdf` asset root
+	// (SchemeHandler.assetRoots), which is where preview-url.js's
+	// pdfViewerUrl() points the file tab and canvas PDF nodes.
+	copy(path.join(root, 'vendor', 'clew', 'preview-client', 'pdf-page.html'),
+		path.join(webroot, 'preview-client', 'pdf-page.html'));
 }
 
 export async function buildServicesTestBundle() {
