@@ -119,8 +119,10 @@ Ranked; items 1–5 are in scope for the first working build, 6–10 tracked:
 6. Canvas: two-finger pan/pinch zoom, toolbar undo/redo/delete.
 7. Graph view: pinch zoom, tap threshold fix.
 8. Kanban drag: pointer-based rewrite of the HTML5 DnD.
-9. PDF embeds: WKWebView renders PDFs natively in iframes only partially —
-   evaluate, else link out to QuickLook.
+9. PDF embeds: WKWebView renders an `<embed>` PDF as one static page. ✅
+   Solved by EmbedPDF (Pdfium-in-wasm) in clew-preview documents — note
+   embeds, file tabs, canvas nodes and canvas-embed scenes all use it, and
+   annotations autosave into the vault file through `CH.PDF_WRITE`.
 10. Hotkey editor hidden without hardware keyboard; chord display via
     `navigator.maxTouchPoints`-aware platform detection.
 
@@ -162,6 +164,59 @@ Ranked; items 1–5 are in scope for the first working build, 6–10 tracked:
   sandboxed iframes (Electron's <webview> was a dead element on iOS),
   state-aware read/edit toggle in the toolbar (👁/✎). Apple Pencil drawing
   confirmed working on a real iPad.
+- **Upstream 0.8 sync** ✅ vendored at `ed35ba8`, 43 commits on from the
+  previous sync point. Brought over: EmbedPDF as the single PDF stack
+  (retiring the iOS-built parallel surface and PDF.js entirely), Excalidraw
+  (React quarantined in one iframe page), Dataview/dataviewjs/Bases,
+  Obsidian callouts, block references, markdown table editing, `@image`/
+  `@video` directives and pandoc citations. Six new IPC channels: three
+  implemented (`PDF_WRITE`, `EXCALIDRAW_LIB_GET`/`SET`), three honestly
+  stubbed (`PDF_FONTS_*`). Simulator-verified across every arc; tests
+  19 → 160. Device verification (Pencil feel, Excalidraw with Pencil,
+  per-scene Pdfium memory) still outstanding.
+
+### Upstream candidates (iOS-owned today, worth pushing to ../Clew-app)
+
+Behaviour that is not actually iOS-specific and would be better living in
+the golden master than forked here:
+
+- **A registry hook in the engine** for config-named extensions, instead of
+  the build patching `metadata-header.js`'s dynamic imports (see above).
+- **Rebuild a preview iframe that never reports ready** — the WebKit
+  moved-iframe fix, currently a `clew-preview-view` build patch.
+- **The Pencil pan convention** (`src/preview/pdf-touch.js`): once a pen
+  pointer has been seen in a document, fingers pan the PDF and only the
+  Pencil draws. It self-arms on a `pen` event, so a desktop that never sees
+  one is untouched — which is exactly why it is safe to upstream.
+- **Publish viewer handles from `pdf-core.js`.** `pdf-embed.js` exposes
+  `window.__clewPdfViewers`, but `pdf-page.js` keeps its handle private, so
+  anything wanting all three surfaces (the touch layer) needs a build patch.
+  The smoke hooks already there exist for the same reason.
+- **`dataviewJs` in the VAULT_SETTINGS_SET reconfigure list.** Upstream
+  reconfigures on `jmarkdownProject`/`normalSyntax`/`pandocCitations` but
+  leaves `dataviewJs` to take effect at the next vault open, which looks
+  like an oversight rather than a decision. iOS reconfigures immediately.
+- **Canvas-embed scene PDFs.** Upstream still emits a raw
+  `<embed type="application/pdf">` inside `.canvas-embed-scene`, relying on
+  Chromium's plugin; every other PDF surface went through `pdf-page.html` in
+  0.8. Routing scenes there too (as `src/preview/pdf-scene-embeds.js` does)
+  would make it one pipeline everywhere — and would need upstream's own
+  answer to the save relay, since a scene viewer is one frame deeper than
+  `pdf-core.js`'s `window.parent` assumption. (The Excalidraw page already
+  solves the same problem by posting to `window.top`.)
+
+### Decisions taken on iOS that diverge from desktop
+
+- **PDF file tabs no longer open in QuickLook** (0.8 sync). They open
+  upstream's `pdf-page.html` viewer, for desktop parity and in-tab
+  annotation. The `quickLook` Swift bridge stays available as a fallback.
+- **PDF.js is gone.** EmbedPDF is the only PDF stack; canvas-embed scenes
+  use `pdf-page.html` like everything else.
+- **CJK PDF fallback fonts are stubbed off.** Upstream downloads a 139 MB
+  Noto pack on demand; iOS has no downloader, so the three `CH.PDF_FONTS_*`
+  channels answer "not available", the settings section is patched out, and
+  `pdffonts/fallback.json` answers `null`. A native URLSession downloader is
+  a possible later feature.
 
 ### WebKit findings worth keeping
 

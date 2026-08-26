@@ -57,5 +57,7 @@ xcrun simctl spawn booted log stream --predicate 'eventMessage CONTAINS "CLEWJS"
 TikZ/MetaPost/Mathematica compile (cached SVGs from desktop display when
 the hash inputs match — MetaPost verified), LaTeX/PDF export, site export,
 vault plugins (engine/app surfaces), kanban drag on touch, touch-only
-file move (drag-to-move is pointer-only; no Move menu item yet), PDF
-embeds inside previews, iCloud conflict-version surfacing (sync Phase 2).
+file move (drag-to-move is pointer-only; no Move menu item yet), iCloud
+conflict-version surfacing (sync Phase 2), CJK fallback fonts for PDFs
+(upstream's 139 MB pack has no iOS downloader), `\citefile` BibDesk
+attachments (BufferShim gaps), and a third-party-notices surface.
