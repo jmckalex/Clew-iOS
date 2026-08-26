@@ -1,5 +1,10 @@
 # Upstream 0.9 Sync — Implementation Plan for Clew-iOS
 
+**STATUS: executed in full on 2026-08-26, same day it was written.** Like
+UPSTREAM-0.8-PLAN.md, this document is now history — read it for the
+reasoning behind a decision, not as a work list. Results are recorded in
+PORT-PLAN.md (milestone entry) and HANDOVER.md.
+
 Written 2026-08-26. Brings the iOS port from upstream `ed35ba8` (v0.8.0) to
 `8422a45` (v0.9.0) — **18 commits, ~4,100 insertions**. Read `README.md` and
 `PORT-PLAN.md` for architecture, `HANDOVER.md` for session state.

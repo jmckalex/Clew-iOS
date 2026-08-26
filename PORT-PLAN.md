@@ -118,7 +118,9 @@ Ranked; items 1–5 are in scope for the first working build, 6–10 tracked:
    library import.
 6. Canvas: two-finger pan/pinch zoom, toolbar undo/redo/delete.
 7. Graph view: pinch zoom, tap threshold fix.
-8. Kanban drag: pointer-based rewrite of the HTML5 DnD.
+8. Kanban drag: pointer-based rewrite of the HTML5 DnD. (Clew's own
+   ```kanban fence only — 0.9's Obsidian-Kanban board notes are
+   read-only in reading mode, so they do not add to this.)
 9. PDF embeds: WKWebView renders an `<embed>` PDF as one static page. ✅
    Solved by EmbedPDF (Pdfium-in-wasm) in clew-preview documents — note
    embeds, file tabs, canvas nodes and canvas-embed scenes all use it, and
@@ -174,6 +176,30 @@ Ranked; items 1–5 are in scope for the first working build, 6–10 tracked:
   stubbed (`PDF_FONTS_*`). Simulator-verified across every arc; tests
   19 → 160. Device verification (Pencil feel, Excalidraw with Pencil,
   per-scene Pdfium memory) still outstanding.
+- **Upstream 0.9 sync** ✅ vendored at `8422a45`, 18 commits on. No new
+  IPC channels, no new npm deps. Brought over: Obsidian Kanban boards
+  (read-only render; the card checkbox writes through its true source
+  line), the Tasks dialect and search embeds, DQL FLATTEN / real GROUP BY
+  / lambdas, admonitions, Meta Bind widgets (a toggle verified writing
+  `done: false → true` into frontmatter on disk from the simulator),
+  Bases map views on the existing leaflet machinery, `obsidian://` link
+  planning, Back-able anchor jumps, full chord forwarding from reading
+  mode, images in Excalidraw drawings (verified: an Embedded Files
+  wikilink rehydrated into the editor over the preview protocol), and the
+  demo vault's Charts plugin. **Engine-surface vault plugins now load on
+  iOS**: the config names them by absolute vault path, the worker
+  snapshot carries exactly those files, and the build's `__jmdImport`
+  helper falls back to `__jmdImportSource` — vfs text imported as a blob
+  module (data:-URL fallback for Node) — so the app worker, the
+  render-note harness and `node --test` all run the same path. Surfaces
+  must be SELF-CONTAINED modules (a blob import has no base for relative
+  siblings; noted in engine-config.js). The harness now defaults
+  vaultOptions to the vault's own `.clew/vault-settings.json`. Two iOS
+  bugs surfaced: esbuild's injected `global` was invisible to
+  runtime-imported modules (now a real global in the worker), and the
+  Swift manifest parser's whole-dictionary `[String: String]` cast
+  silently dropped every surface of any plugin with a dict-form surface.
+  Tests 160 → 240.
 
 ### Upstream candidates (iOS-owned today, worth pushing to ../Clew-app)
 

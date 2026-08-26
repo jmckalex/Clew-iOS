@@ -1,10 +1,10 @@
-# Handover — 2026-08-26 (upstream 0.8 sync executed, simulator-verified)
+# Handover — 2026-08-26 (upstream 0.9 sync executed, simulator-verified)
 
 Session-rollover state, upstream-style: rewritten each session, kept short.
 Durable architecture and build docs live in **README.md** and
-**PORT-PLAN.md** — trust those first. `UPSTREAM-0.8-PLAN.md` is now
-**history**: it was executed in full. Read it only for the reasoning behind
-a decision, not as a work list.
+**PORT-PLAN.md** — trust those first. `UPSTREAM-0.8-PLAN.md` and
+`UPSTREAM-0.9-PLAN.md` are both **history**: executed in full. Read them
+only for the reasoning behind a decision, not as work lists.
 
 ## 0. THE ONE RULE
 
@@ -15,181 +15,144 @@ first. (Also in Claude's memory.)
 
 ## 1. Where things stand
 
-The 0.8 sync landed, start to finish, on a **chain of phase branches** so
-any phase can be dropped without losing the earlier ones:
+TWO syncs are now stacked locally, neither pushed. The 0.8 chain
+(`sync-p1-vendor` … `sync-p5-verify`, see the 0.8 plan) still exists; the
+0.9 sync continues from its tip on its own chain:
 
 ```
-main               6f75e34   (= embedpdf-annotator; 10 ahead of origin, UNPUSHED)
- └ sync-p1-vendor  d260805   prep → vendor drop @ ed35ba8 → engine plumbing
-   └ sync-p2-pdf   81a9c37   EmbedPDF everywhere, iOS parallel surface retired
-     └ sync-p3-excalidraw  8fe80b7   editor page + assets + 2 channels
-       └ sync-p4-tests     b24c1ea   19 → 160 tests
-         └ sync-p5-verify  f018535   ← TIP: the branch to review and merge
+main                      6f75e34   (10 ahead of origin, UNPUSHED)
+ └ …0.8 chain… └ sync-p5-verify  edcd261
+                  └ sync09-p1-vendor    7d9532f  vendor drop @ 8422a45 + 3 new engine extensions
+                    └ sync09-p2-plugins 0879402  engine-surface vault plugins + worker `global` fix
+                      └ sync09-p3-features dd8d369  Swift dict-form-surfaces fix (sim sweep lived here)
+                        └ sync09-p4-tests    (174 → 240)
+                          └ sync09-p5-verify ← TIP: review and merge
 ```
 
-`main` was fast-forwarded to `embedpdf-annotator` at the owner's request
-(it ships nothing until pushed). Each branch builds and tests green on its
-own tip. Working tree clean; **nothing pushed**.
+Each branch builds and tests green on its own tip. Working tree clean;
+**nothing pushed**. `main` was NOT moved this time — the owner said
+nothing about it, so merging the two chains (or dropping a phase) is
+their call.
 
-Everything in the plan's Definition of Done (§10) is met, plus three bugs
-the plan could not have known about (§4).
+## 2. What the 0.9 sync brought (all simulator-verified)
 
-## 2. Read this before running `npm run sync-upstream`
+Vendor + seed-vault at upstream `8422a45` (v0.9.0). No new IPC channels,
+no new npm deps (chart.js ships vendored INSIDE the demo vault's plugin).
+Full list + verification detail in PORT-PLAN's 0.9 milestone entry.
+Highlights and the proof used:
 
-**Upstream has moved on: `../Clew-app` main is now `8422a45` (v0.9.0), 18
-commits past the `ed35ba8` this repo vendors.** So `sync-upstream` no
-longer reproduces our vendor tree — it pulls 0.9.0. Do not run it casually
-while device-verifying 0.8; it is the *start* of the next sync, not a
-propagation check.
+- **Charts plugin end-to-end** — the demo vault's first ENGINE-surface
+  plugin forced the known iOS gap closed: engine-config takes
+  `engineExtensions` entries (computed by both callers via vendored
+  `main/plugins.js`), the worker snapshot carries the named files, and
+  the build's `__jmdImport` falls back to `__jmdImportSource` (vfs text →
+  blob-URL module import, data:-URL under Node). Probe banner in the sim:
+  `chart=6 canvas=6` on Guide/Charts.md — fences AND dataviewjs
+  `renderChart`. Plugin engine surfaces must be self-contained modules.
+- **Meta Bind writes through**: probe toggled the compat page's
+  `INPUT[toggle:done]`; the file's frontmatter changed `done: false →
+  true` on disk.
+- **Excalidraw images**: a fabricated drawing with `## Embedded Files`
+  → `[[NASA - Earthrise.jpg]]` opened in the editor with the photo
+  rendered (resolve bridge + same-origin preview fetch both work as
+  vendored — the clewex page and vault files share the `vault` host).
+- **Kanban board** renders read-only with cards/dates/wikilinks; the
+  checkbox is the only write path (same data-source-line toggle 0.8
+  verified). NOT a collision with the pre-existing kanban-drag item.
+- **Bases map view**: leaflet + two markers from note `coordinates`.
+- **Diagrams**: MetaPost's new abacus figure is a cache HIT (renders);
+  TikZ misses cache and errors per block — the same accepted loss, new
+  error shape, exactly as predicted.
+- **Regressions**: callouts, queries/bases/dataview, MathJax, wikilinks,
+  search (36 hits), PDF file tab in EmbedPDF viewer — all green.
 
-Pre-checked so the next session need not: **all 8 guarded patch anchors in
-`scripts/build.js` still match at `8422a45`**, including in the two patched
-files that changed (`clew-preview-view.js` +32, `preview-client/client.js`
-+82). The next sync will build; as ever, the danger is silent runtime
-breakage.
+## 3. Bugs found and fixed (not in the plan)
 
-The 0.9 arcs, for scoping: Obsidian Kanban boards + the Tasks dialect;
-DQL `FLATTEN`, real `GROUP BY`, lambdas; Bases map views; admonitions,
-search embeds, Meta Bind widgets; `obsidian://` links and Back-able anchor
-jumps; Cmd+[ / Cmd+] navigation from reading mode; images inside Excalidraw
-drawings; a charts plugin; site-export fixes; new showpiece TikZ/MetaPost
-demo figures. `src/renderer/pdf-save.js` and `shared/excalidraw-file.js`
-both changed — the two files our new iOS seams hang off, so check those
-diffs first.
+1. **esbuild-injected `global` was invisible to runtime-imported
+   modules** (worker). The charts engine surface references `global` at
+   module scope; under Node it exists, in the worker it was only a
+   bundle-scoped binding — "Can't find variable: global" in the sim while
+   the harness passed. globals.js now sets `globalThis.global`.
+2. **Swift manifest parsing dropped dict-form surfaces.**
+   `manifest["surfaces"] as? [String: String]` fails wholesale when ANY
+   surface is `{ "file": … }` — so a plugin with an engine surface lost
+   its preview surface too (charts drew nothing, silently). SchemeHandler
+   now parses per-key, mirroring plugins.js.
 
-## 3. Verified, and how
+Also: `tools/render-note.mjs` now defaults vaultOptions to the vault's
+own `.clew/vault-settings.json` (--vault-options REPLACES it) — the 0.8
+lesson again: the battery must run the config the app runs.
 
-`npm test` 160/160 (was 19). `npm run build` and `xcodebuild` both clean.
-Simulator sweep on the iPad sim from a clean install (screenshots lived in
-the session scratchpad and are gone — the findings below are the record):
+## 4. Open items
 
-- **Callouts** — 14 typed boxes with icons, foldables as `<details>`.
-- **Block refs** — anchors emit ids; `![[Note#^id]]` transcludes the real
-  paragraph text.
-- **Dataview + Bases** — TABLE and ```base render with resolved links and
-  display names. `dataviewjs` gated off by default, executes when the vault
-  opts in (so `new Function` works in the worker).
-- **PDF, all four surfaces** — note embed, file tab, canvas node, and
-  canvas-embed scene. All render upstream's viewer; **all four save**:
-  driving a real annotation changed `sample.pdf` on disk twice
-  (`77c5f1ac` → `56e3dbad` → `cf8dc84b`, still a valid PDF 1.4).
-- **Excalidraw** — the embed renders, and the editor tab opens the real
-  Excalidraw (full toolbar, drawing, undo/redo) under WKWebView. This was
-  the plan's biggest unknown; it works.
-- **Channels** — all six new ones answer; zero "Unknown channel".
-- **Settings** — the CJK "PDF viewer" section is gone, as intended.
-- **Regressions** — search, index (42 notes, drawings indexed), tree, bib,
-  mermaid, MetaPost cached SVG, Note Headers banner. No CSP/wasm errors
-  after dropping `'wasm-unsafe-eval'` from the app page.
+1. **Device verification, then merge + push** = TestFlight release —
+   unchanged from 0.8 and now covering both syncs: Pencil finger-pan
+   feel (inline + pdf-page), Excalidraw with Pencil, EmbedPDF in a small
+   canvas node (element fullscreen?), per-scene Pdfium memory,
+   markdown table editing with a hardware keyboard. New from 0.9, also
+   needing hardware: **Cmd+[ / Cmd+] and full chord forwarding from
+   reading mode** (unit-tested; not exercisable in the sim), anchor-jump
+   Back behavior feel, obsidian:// links in a real vault.
+2. **The two chains are stacked** — if the owner wants 0.8 shipped alone
+   first, `sync-p5-verify` is still a valid tip; 0.9 rebases cleanly on
+   whatever lands (it only touches vendor/, seed-vault/, src/, ios/,
+   tests/, tools/).
+3. Deferred, unchanged: `\citefile` BibDesk attachments; third-party
+   notices surface (note: chart.umd.js MIT now ships inside seed-vault);
+   native CJK font download; the 17 MB Excalidraw asset set (12 MB CJK
+   face prune candidate); kanban ```kanban-fence touch drag; "Move to
+   folder…" long-press; empty folders in explorer; iCloud conflict
+   surfacing; TikZ preamble-hash reuse (would turn the demo TikZ misses
+   into hits); stale recents pruning.
+4. Upstream candidates from this sync: none new — the two fixes in §3
+   are genuinely iOS-only. Existing candidates list lives in PORT-PLAN.
 
-TikZ still errors in the demo vault — the documented accepted loss (no
-LaTeX toolchain), not a regression. (0.9 replaces those demo figures, so
-expect the error to look different after the next sync, not to go away.)
+## 5. Verification kit (works, use it)
 
-**Instrument worth knowing about**: app-page JS cannot read into a
-cross-origin preview iframe, so the sweep used a temporary vault plugin
-(`.clew/plugins/probe`) whose preview surface painted DOM counts on a
-banner and could drive a real annotation. Removed from the simulator vault
-afterwards. It needs `data-clew-keep` or the next morph strips it — that
-cost half an hour. Full recipe is in Claude's memory.
+- `npm test` — 240 green. `npm run build` then xcodebuild (see §6).
+- `node tools/render-note.mjs <vault> <note> [--fragment]` — now reads
+  the vault's vault-settings by default; `--vault-options '<json>'`
+  replaces them (needed for gate-off tests).
+- Smoke: `xcrun simctl launch <sim> org.jmckalex.clew.ios -ClewSmokeJS
+  '<js>'` — **terminate the app first or the script won't run**; read via
+  `xcrun simctl spawn <sim> log show --last 40s --predicate 'eventMessage
+  CONTAINS "CLEWJS"'` (sim's own store; `--start` wants LOCAL time — use
+  `--last`). iPad sim 90DCB612-1B85-4E1A-A17A-DBEB98F6C36D.
+- App-page surface: `__clew` = workspaceStore/vaultStore/editorPool/
+  settingsStore/ipc/actions/registry; `__clewNative` =
+  **renderNote/renderFragment/externalDiff/flush/sessionId** (NOT
+  `render` — an older note said otherwise). `renderNote(rel)` returns the
+  full rendered HTML: the fastest way to assert engine output in-app.
+- Open a note: `__clew.actions.openWikilink(name, { mode: "reading" })`
+  (mode option beats the old two-step). Open a DRAWING or PDF:
+  `__clew.workspaceStore.openFile("path/File.excalidraw.md", {})` — a
+  wikilink to a drawing needs the `.excalidraw`-inclusive name, and an
+  unresolved openWikilink CREATES the note (it did; the stray was
+  deleted).
+- **Probe plugin recipe** (cross-origin preview iframes are unreachable
+  from the app page): temporary vault plugin with a `preview` surface
+  painting counts on a fixed banner — MUST carry `data-clew-keep` or the
+  morph strips it. It can also DRIVE the document (it toggled the Meta
+  Bind checkbox). Removed from the sim vault after the sweep, as always.
+- Gotchas: every `simctl install` rotates the data container (re-run
+  `get_app_container`); a failed xcodebuild leaves the previous build
+  installed (grep `BUILD SUCCEEDED`); uninstall+reinstall to reseed the
+  demo vault; smoke `message` listeners never fire from
+  callAsyncJavaScript closures.
 
-## 4. Bugs found and fixed along the way (not in the plan)
+## 6. Build
 
-1. **`tools/render-note.mjs` carried a stale hand-copy of the engine
-   config.** The Node battery rendered notes WITHOUT the app's extensions
-   and still reported green — the exact silent-degradation shape this sync
-   existed to catch. Both sides now import one `src/shim/engine-config.js`.
-2. **`vfs.stat()` returned no `birthtimeMs`/`ctimeMs`.** Dataview's
-   vault-model feeds them to `new Date(...).toISOString()`, so *every*
-   dataview render died with "Invalid time value".
-3. **Vault-wide bibliography never reached the iOS shim** — shipped
-   upstream in the *previous* sync point (b1b5790); the settings UI was
-   live and the engine config ignored it.
+`export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` first
+(xcode-select points at CLT). `npm run build`, then
+`xcodebuild -project ios/Clew.xcodeproj -scheme Clew -destination
+'id=<sim>' -derivedDataPath build/DerivedData build` (build/ is
+gitignored now). The one esbuild warning — duplicate "Highlight theme"
+key — is in vendor/jmarkdown's config files, pre-existing, upstream's.
 
-Two build fixes also fell out: `stageStatic` now wipes `preview-assets/`
-(the dropped PDF.js megabytes lingered in an incremental dist and shipped
-anyway), and `pdf-core.js` publishes viewer handles so the touch layer can
-reach all three surfaces.
-
-## 5. Decisions the owner may want to reverse
-
-Both were the plan's documented defaults, taken because the owner was
-asleep; both are a single-commit revert on `sync-p2-pdf`.
-
-1. **PDF file tabs no longer open in QuickLook** — they open upstream's
-   `pdf-page.html` viewer (desktop parity, in-tab annotation). The
-   `quickLook` Swift bridge is still there.
-2. **Canvas-scene PDFs use Pdfium too, and PDF.js is deleted outright.**
-   One PDF stack, several MB smaller. **Watch memory on a note embedding a
-   canvas with several PDFs — one Pdfium engine per scene PDF.** That is
-   the device check to make; if it is bad, the fallback is keeping a
-   lightweight reader for scenes only.
-
-Third, unchanged from the plan: CJK PDF fonts are stubbed off (§2 of the
-plan; the settings section is patched out).
-
-## 6. Open items
-
-1. **Device verification, then merge + push** = TestFlight release. Nothing
-   is pushed. Specifically worth an iPad: Pencil finger-pan *feel* on both
-   the inline and `pdf-page` surfaces; Excalidraw with Pencil; EmbedPDF
-   inside a small canvas node (upstream's answer is its fullscreen control
-   — verify element fullscreen works in WKWebView, and if it disappoints,
-   resurrect a thin overlay *reusing pdf-page.html*); memory on
-   many-PDF / many-drawing notes.
-2. **Markdown table editing** (Tab/Enter in the editor) is vendored and
-   covered by `tables.test.js`, but was NOT exercised in the simulator —
-   it needs keyboard input. First thing to try on a device with a keyboard.
-3. **The 0.9 sync** (§2). Worth deciding whether it waits for 0.8 to reach
-   TestFlight first; the phase-branch pattern worked well and is what the
-   owner asked for, so repeat it.
-4. Deferred from the 0.8 sync: `\citefile` BibDesk attachments (BufferShim
-   gaps), a third-party notices surface for iOS (App Store licence hygiene
-   — notices need regenerating for the iOS dependency set), native CJK font
-   download.
-5. **App size**: Excalidraw's assets add 17 MB, 12 MB of which is the
-   Xiaolai CJK face. Staged whole on purpose (the bundle fetches
-   `locales/*.json` from the same root, so the plan's "fonts + data" guess
-   would have broken every non-English UI). Prune the CJK face if size
-   matters more than CJK handwriting.
-6. Pre-existing: kanban touch drag (0.9 brings Obsidian Kanban boards, so
-   these two now collide — sequence them); "Move to folder…" long-press;
-   empty folders invisible in explorer; iCloud conflict surfacing +
-   canvas-ink merge; engine-surface vault plugins + TikZ preamble-hash
-   reuse; stale recents pruning. Upstream candidates now have their own
-   section in PORT-PLAN.md.
-
-## 7. Verification kit (works, use it)
-
-- `npm test` — 160 green (upstream's ported suites + the iOS engine-worker
-  battery + services).
-- `node tools/render-note.mjs <vault> <note> [--vault-options '<json>']` —
-  render under Node through the SAME config the app uses.
-- Simulator smoke: `xcrun simctl launch <sim> org.jmckalex.clew.ios
-  -ClewSmokeJS '<js>'`; `window.__clew` = stores/registry/ipc,
-  `window.__clewNative` = render/diff/flush. Read results with
-  `xcrun simctl spawn <sim> log show --last 40s --predicate 'process ==
-  "Clew"'` — **`--start` wants LOCAL time, not UTC** (that silently
-  returned nothing). iPad sim 90DCB612-1B85-4E1A-A17A-DBEB98F6C36D.
-- Open a note deterministically: `openWikilink(name, {})` then
-  `workspaceStore.setTabMode(tab.id, 'reading')`. **Do not use
-  `toggleReadingMode`** in a smoke script — workspace state persists, so a
-  blind toggle lands in source mode half the time.
-- **Gotchas that cost hours** (details in PORT-PLAN/memory): smoke
-  `message` listeners never fire from callAsyncJavaScript closures; every
-  `simctl install` rotates the data container, and the app then reopens a
-  now-missing vault path and comes up looking EMPTY — uninstall + reinstall
-  for a clean run; a failed xcodebuild leaves the previous build installed
-  (check for `** BUILD SUCCEEDED`).
-- **`sync-upstream` regenerates `AppIcon.png` non-deterministically** —
-  ImageMagick writes different bytes for identical input, so it shows as a
-  4 MB binary diff every single time. `git checkout --` it unless the
-  upstream icon actually changed.
-- **Upstream propagation**: `npm run sync-upstream && npm run build &&
-  npm test` — but see §2 first: upstream is ahead now, so this pulls 0.9.0
-  rather than checking propagation. The build fails loudly if a vendored
-  patch no longer matches (fix in `scripts/build.js` — 9 guarded anchors
-  across 8 files, the settings-view and pdf-core ones new this sync, plus
-  the metadata-header dynamic-import transform). Check `shared/channels.js`
-  and `main/render-service.js` diffs for new shim/engine work; npm deps do
-  NOT auto-merge from upstream.
+`npm run sync-upstream` currently REPRODUCES the vendor tree (upstream
+main = 8422a45 = our sync point, checked 2026-08-26) — but it regenerates
+`AppIcon.png` non-deterministically; `git checkout --` it unless the
+upstream icon actually changed. When upstream moves again, the same
+drill: guarded patch anchors fail the build loudly if a patched line
+drifted; check `shared/channels.js` and `main/render-service.js` diffs
+first; npm deps do NOT auto-merge.
