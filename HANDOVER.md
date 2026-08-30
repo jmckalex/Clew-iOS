@@ -1,4 +1,4 @@
-# Handover — 2026-08-26 (upstream 0.9 sync executed, simulator-verified)
+# Handover — 2026-08-30 (0.9 sync + canvas delete button done; upstream moved again)
 
 Session-rollover state, upstream-style: rewritten each session, kept short.
 Durable architecture and build docs live in **README.md** and
@@ -15,144 +15,144 @@ first. (Also in Claude's memory.)
 
 ## 1. Where things stand
 
-TWO syncs are now stacked locally, neither pushed. The 0.8 chain
-(`sync-p1-vendor` … `sync-p5-verify`, see the 0.8 plan) still exists; the
-0.9 sync continues from its tip on its own chain:
+Three layers of finished, unpushed work, each green on its own tip
+(`npm test` 240, build + xcodebuild clean):
 
 ```
-main                      6f75e34   (10 ahead of origin, UNPUSHED)
- └ …0.8 chain… └ sync-p5-verify  edcd261
-                  └ sync09-p1-vendor    7d9532f  vendor drop @ 8422a45 + 3 new engine extensions
-                    └ sync09-p2-plugins 0879402  engine-surface vault plugins + worker `global` fix
-                      └ sync09-p3-features dd8d369  Swift dict-form-surfaces fix (sim sweep lived here)
-                        └ sync09-p4-tests    (174 → 240)
-                          └ sync09-p5-verify ← TIP: review and merge
+main                6f75e34   (10 ahead of origin, UNPUSHED, deliberately not moved)
+ └ …0.8 chain… sync-p1-vendor … sync-p5-verify (edcd261)
+    └ …0.9 chain… sync09-p1-vendor … sync09-p5-verify (322224e)
+       └ canvas-delete-button  e618a00   ← TIP: review and merge
 ```
 
-Each branch builds and tests green on its own tip. Working tree clean;
-**nothing pushed**. `main` was NOT moved this time — the owner said
-nothing about it, so merging the two chains (or dropping a phase) is
-their call.
+- **0.8 sync** — EmbedPDF everywhere, Excalidraw, Dataview/Bases,
+  callouts, block refs, tables. Simulator-verified 2026-08-25.
+- **0.9 sync** — vendored at upstream `8422a45`: kanban boards, Tasks
+  dialect, DQL FLATTEN/GROUP BY/lambdas, admonitions, Meta Bind, Bases
+  map views, obsidian:// links, Back-able anchors, chord forwarding,
+  Excalidraw embedded images, and **engine-surface vault plugins**
+  (charts demo). Simulator-verified 2026-08-26; details in PORT-PLAN's
+  0.9 milestone entry.
+- **canvas-delete-button** — from the owner's iPad testing: a trash-icon
+  "Delete selection" button in the canvas toolbar. Touch had no delete
+  route for shapes: the eraser is ink-only **by the owner's explicit
+  call** ("it feels wrong to use the eraser for a shape"), Delete needs
+  a keyboard, and a Pencil long-press never synthesizes contextmenu.
+  Sim-verified end-to-end (disabled↔selection tracking; select-all + tap
+  emptied shapes AND strokes from the .canvas file on disk).
 
-## 2. What the 0.9 sync brought (all simulator-verified)
+The iPad sim (90DCB612…) has the tip build installed. Working tree clean.
 
-Vendor + seed-vault at upstream `8422a45` (v0.9.0). No new IPC channels,
-no new npm deps (chart.js ships vendored INSIDE the demo vault's plugin).
-Full list + verification detail in PORT-PLAN's 0.9 milestone entry.
-Highlights and the proof used:
+## 2. SPLIT-BRAIN WARNING: the trash button is uncommitted upstream
 
-- **Charts plugin end-to-end** — the demo vault's first ENGINE-surface
-  plugin forced the known iOS gap closed: engine-config takes
-  `engineExtensions` entries (computed by both callers via vendored
-  `main/plugins.js`), the worker snapshot carries the named files, and
-  the build's `__jmdImport` falls back to `__jmdImportSource` (vfs text →
-  blob-URL module import, data:-URL under Node). Probe banner in the sim:
-  `chart=6 canvas=6` on Guide/Charts.md — fences AND dataviewjs
-  `renderChart`. Plugin engine surfaces must be self-contained modules.
-- **Meta Bind writes through**: probe toggled the compat page's
-  `INPUT[toggle:done]`; the file's frontmatter changed `done: false →
-  true` on disk.
-- **Excalidraw images**: a fabricated drawing with `## Embedded Files`
-  → `[[NASA - Earthrise.jpg]]` opened in the editor with the photo
-  rendered (resolve bridge + same-origin preview fetch both work as
-  vendored — the clewex page and vault files share the `vault` host).
-- **Kanban board** renders read-only with cards/dates/wikilinks; the
-  checkbox is the only write path (same data-source-line toggle 0.8
-  verified). NOT a collision with the pre-existing kanban-drag item.
-- **Bases map view**: leaflet + two markers from note `coordinates`.
-- **Diagrams**: MetaPost's new abacus figure is a cache HIT (renders);
-  TikZ misses cache and errors per block — the same accepted loss, new
-  error shape, exactly as predicted.
-- **Regressions**: callouts, queries/bases/dataview, MathJax, wikilinks,
-  search (36 hits), PDF file tab in EmbedPDF viewer — all green.
+The delete button was implemented in the GOLDEN MASTER and vendored
+surgically into this repo (commit e618a00). In `../Clew-app` it is
+**still uncommitted working-tree state**, deliberately — the owner
+live-tests and commits there themselves:
 
-## 3. Bugs found and fixed (not in the plan)
+- `src/renderer/components/views/clew-canvas-view.js` (+19: #deleteBtn,
+  toolbar button, disabled sync in #syncOverlay)
+- `src/renderer/styles/canvas.css` (+2: .canvas-tool:disabled rules)
+- `scripts/generate-icons.js` (+1: `'trash': 'regular/trash-can'`)
+- `src/renderer/lib/icons.js` (+1: the generated trash entry —
+  regenerated 2026-08-30 against their moved HEAD and the hand-kept
+  licence header restored, so the diff is exactly the icon)
 
-1. **esbuild-injected `global` was invisible to runtime-imported
-   modules** (worker). The charts engine surface references `global` at
-   module scope; under Node it exists, in the worker it was only a
-   bundle-scoped binding — "Can't find variable: global" in the sim while
-   the harness passed. globals.js now sets `globalThis.global`.
-2. **Swift manifest parsing dropped dict-form surfaces.**
-   `manifest["surfaces"] as? [String: String]` fails wholesale when ANY
-   surface is `{ "file": … }` — so a plugin with an engine surface lost
-   its preview surface too (charts drew nothing, silently). SchemeHandler
-   now parses per-key, mirroring plugins.js.
+If the owner commits these upstream, the next sync converges. If not,
+`sync-upstream` copies the working tree, so it still carries them — but
+do not let them silently vanish in an upstream `git checkout --`.
 
-Also: `tools/render-note.mjs` now defaults vaultOptions to the vault's
-own `.clew/vault-settings.json` (--vault-options REPLACES it) — the 0.8
-lesson again: the battery must run the config the app runs.
+## 3. Upstream has moved again — the next sync's scope
+
+`../Clew-app` main is now **`de45fe7`, 14 commits past `8422a45`**
+(402 files, +4136/−1445, checked 2026-08-30). Do not run
+`npm run sync-upstream` casually — it pulls all of this. Highlights:
+
+1. **The owner's custom EmbedPDF OCG build is now VENDORED upstream**
+   (`vendor/embedpdf/` + `scripts/vendor-embedpdf.js`). iOS currently
+   stages EmbedPDF from `node_modules/@embedpdf/snippet/dist`
+   (scripts/build.js assets map), and **our sync-upstream.js does NOT
+   copy upstream's vendor/embedpdf** — the next sync must extend the
+   sync script, switch the asset staging to the vendored build, and
+   probably drop the three npm @embedpdf deps. This is the biggest and
+   most iOS-relevant item: it changes the wasm/viewer we ship.
+2. File explorer: "folders anchor the hierarchy" (+ a phantom-token
+   trap noted in their HANDOVER).
+3. Demo vault: Dashboards page, a "marking vault" recipe, Note Headers
+   and Demo Canvas edits.
+4. A "canvas-cards-are-the-app-page trap" fix.
+5. `vendor/jmarkdown` moved: `config-manager.js` (the duplicate-key
+   build-warning file) and `metapost.js`.
+
+**Pre-checked at de45fe7:** only two anchor-bearing files changed
+(`preview-client/client.js` +18, `clew-file-explorer.js` ±1) and BOTH
+guarded patch anchors still match — all 9 build.js patches will apply.
+Read `../Clew-app` HANDOVER.md for their own traps before scoping.
+
+The owner also has unrelated uncommitted demo-vault edits in
+`../Clew-app` (Note Headers.md, Demo Canvas.canvas, clewdata.json) —
+never `git add -A` or checkout over them.
 
 ## 4. Open items
 
-1. **Device verification, then merge + push** = TestFlight release —
-   unchanged from 0.8 and now covering both syncs: Pencil finger-pan
-   feel (inline + pdf-page), Excalidraw with Pencil, EmbedPDF in a small
-   canvas node (element fullscreen?), per-scene Pdfium memory,
-   markdown table editing with a hardware keyboard. New from 0.9, also
-   needing hardware: **Cmd+[ / Cmd+] and full chord forwarding from
-   reading mode** (unit-tested; not exercisable in the sim), anchor-jump
-   Back behavior feel, obsidian:// links in a real vault.
-2. **The two chains are stacked** — if the owner wants 0.8 shipped alone
-   first, `sync-p5-verify` is still a valid tip; 0.9 rebases cleanly on
-   whatever lands (it only touches vendor/, seed-vault/, src/, ios/,
-   tests/, tools/).
-3. Deferred, unchanged: `\citefile` BibDesk attachments; third-party
-   notices surface (note: chart.umd.js MIT now ships inside seed-vault);
-   native CJK font download; the 17 MB Excalidraw asset set (12 MB CJK
-   face prune candidate); kanban ```kanban-fence touch drag; "Move to
-   folder…" long-press; empty folders in explorer; iCloud conflict
-   surfacing; TikZ preamble-hash reuse (would turn the demo TikZ misses
-   into hits); stale recents pruning.
-4. Upstream candidates from this sync: none new — the two fixes in §3
-   are genuinely iOS-only. Existing candidates list lives in PORT-PLAN.
-5. **Post-sync, from the owner's iPad testing** (branch
-   `canvas-delete-button`, on top of the 0.9 tip): the canvas toolbar
-   gained a trash-icon "Delete selection" button — on touch there was NO
-   way to delete shapes (the eraser is ink-only by the owner's explicit
-   call, Delete/Backspace needs a keyboard, and Pencil long-press never
-   synthesizes contextmenu). Implemented in the GOLDEN MASTER
-   (clew-canvas-view.js, canvas.css, generate-icons.js + regenerated
-   icons.js) and vendored surgically — **the upstream copies are
-   UNCOMMITTED in ../Clew-app** (the owner has other work in flight
-   there; they live-test and commit). Verified in the sim end-to-end:
-   disabled ↔ selection tracking and a select-all + tap deleting shapes
-   AND strokes from the .canvas file on disk. Canvas toolbar undo/redo
-   are still keyboard-only (Cmd+Z) — the remaining half of PORT-PLAN
-   touch item 6.
+1. **Device verification, then merge + push** = TestFlight release,
+   covering both syncs and the delete button. Owner has started (they
+   created a drawing, embedded it in a canvas, and drove the eraser on
+   an iPad — that testing is where the delete button came from).
+   Still specifically worth hardware: Pencil finger-pan feel, Excalidraw
+   with Pencil, per-scene Pdfium memory on many-PDF canvases, element
+   fullscreen on small canvas PDF nodes, markdown table editing +
+   Cmd+[ / Cmd+] + chord forwarding with a hardware keyboard.
+2. **Decide sequencing**: ship the current stack first, or fold in the
+   next sync (§3)? The EmbedPDF vendoring makes the next sync
+   substantial; the current stack is coherent and shippable on its own.
+3. Possible follow-ups the owner has seen but not requested: canvas
+   toolbar undo/redo buttons (the remaining half of PORT-PLAN touch
+   item 6 — Cmd+Z is still keyboard-only); Pencil long-press →
+   contextmenu in select/pan tools (`ios-ui.js` gate; today only finger
+   long-press synthesizes); "New drawing" in the explorer #rootMenu
+   (upstream omission — palette and folder long-press are the only
+   touch routes today).
+4. Deferred, unchanged: `\citefile` BibDesk attachments; third-party
+   notices surface (chart.umd.js MIT ships in seed-vault; EmbedPDF OCG
+   build will change the notices story again); native CJK font
+   download; 12 MB Xiaolai CJK face prune; ```kanban fence touch drag;
+   "Move to folder…" long-press; empty folders in explorer; iCloud
+   conflict surfacing; TikZ preamble-hash reuse; stale recents pruning.
 
 ## 5. Verification kit (works, use it)
 
-- `npm test` — 240 green. `npm run build` then xcodebuild (see §6).
-- `node tools/render-note.mjs <vault> <note> [--fragment]` — now reads
-  the vault's vault-settings by default; `--vault-options '<json>'`
-  replaces them (needed for gate-off tests).
+- `npm test` — 240 green. `node tools/render-note.mjs <vault> <note>
+  [--fragment]` — reads the vault's own vault-settings by default;
+  `--vault-options '<json>'` REPLACES them (needed for gate-off tests).
 - Smoke: `xcrun simctl launch <sim> org.jmckalex.clew.ios -ClewSmokeJS
   '<js>'` — **terminate the app first or the script won't run**; read via
-  `xcrun simctl spawn <sim> log show --last 40s --predicate 'eventMessage
-  CONTAINS "CLEWJS"'` (sim's own store; `--start` wants LOCAL time — use
-  `--last`). iPad sim 90DCB612-1B85-4E1A-A17A-DBEB98F6C36D.
+  `xcrun simctl spawn <sim> log show --last 40s --predicate
+  'eventMessage CONTAINS "CLEWJS"'` (sim's own store; `--start` wants
+  LOCAL time — use `--last`).
 - App-page surface: `__clew` = workspaceStore/vaultStore/editorPool/
   settingsStore/ipc/actions/registry; `__clewNative` =
-  **renderNote/renderFragment/externalDiff/flush/sessionId** (NOT
-  `render` — an older note said otherwise). `renderNote(rel)` returns the
-  full rendered HTML: the fastest way to assert engine output in-app.
-- Open a note: `__clew.actions.openWikilink(name, { mode: "reading" })`
-  (mode option beats the old two-step). Open a DRAWING or PDF:
-  `__clew.workspaceStore.openFile("path/File.excalidraw.md", {})` — a
-  wikilink to a drawing needs the `.excalidraw`-inclusive name, and an
-  unresolved openWikilink CREATES the note (it did; the stray was
-  deleted).
-- **Probe plugin recipe** (cross-origin preview iframes are unreachable
-  from the app page): temporary vault plugin with a `preview` surface
-  painting counts on a fixed banner — MUST carry `data-clew-keep` or the
-  morph strips it. It can also DRIVE the document (it toggled the Meta
-  Bind checkbox). Removed from the sim vault after the sweep, as always.
+  renderNote/renderFragment/externalDiff/flush/sessionId.
+  `renderNote(rel)` returns full rendered HTML — fastest in-app engine
+  assertion.
+- Opening things from smoke: notes via
+  `__clew.actions.openWikilink(name, { mode: "reading" })`; drawings and
+  PDFs via `workspaceStore.openFile(path, {})`; **canvases via
+  `workspaceStore.openCanvas(path, {})`** — openFile makes a generic
+  file tab with no canvas viewer. **Same-path tabs are REUSED**: a stale
+  wrong-kind tab from a previous run persists in the workspace and wins
+  — walk `workspaceStore.state.root` and `closeTab(id)` first.
+- Probe plugin recipe for inside preview iframes (unreachable from the
+  app page): temporary vault plugin with a `preview` surface painting
+  counts on a `data-clew-keep` banner; it can also DRIVE the document
+  (it toggled a Meta Bind checkbox; assert on the file on disk).
+  Remove it from the sim vault afterwards.
 - Gotchas: every `simctl install` rotates the data container (re-run
-  `get_app_container`); a failed xcodebuild leaves the previous build
-  installed (grep `BUILD SUCCEEDED`); uninstall+reinstall to reseed the
-  demo vault; smoke `message` listeners never fire from
-  callAsyncJavaScript closures.
+  `get_app_container` — and re-resolve BEFORE writing test files);
+  a failed xcodebuild leaves the previous build installed (grep
+  `BUILD SUCCEEDED`); uninstall+reinstall to reseed the demo vault;
+  smoke `message` listeners never fire from callAsyncJavaScript
+  closures.
 
 ## 6. Build
 
@@ -160,13 +160,14 @@ lesson again: the battery must run the config the app runs.
 (xcode-select points at CLT). `npm run build`, then
 `xcodebuild -project ios/Clew.xcodeproj -scheme Clew -destination
 'id=<sim>' -derivedDataPath build/DerivedData build` (build/ is
-gitignored now). The one esbuild warning — duplicate "Highlight theme"
-key — is in vendor/jmarkdown's config files, pre-existing, upstream's.
+gitignored). The one esbuild warning — duplicate "Highlight theme" key —
+comes from vendor/jmarkdown's config files; upstream just touched
+config-manager.js, so it may look different after the next sync.
 
-`npm run sync-upstream` currently REPRODUCES the vendor tree (upstream
-main = 8422a45 = our sync point, checked 2026-08-26) — but it regenerates
-`AppIcon.png` non-deterministically; `git checkout --` it unless the
-upstream icon actually changed. When upstream moves again, the same
-drill: guarded patch anchors fail the build loudly if a patched line
-drifted; check `shared/channels.js` and `main/render-service.js` diffs
-first; npm deps do NOT auto-merge.
+`sync-upstream` regenerates `AppIcon.png` non-deterministically —
+`git checkout --` it unless the upstream icon actually changed. On the
+next sync: guarded patches fail the build loudly if an anchor drifted
+(pre-checked fine at de45fe7, §3); check `shared/channels.js` and
+`main/render-service.js` diffs for new shim/engine work; npm deps do
+NOT auto-merge — and this time EmbedPDF moves from npm to upstream's
+vendor tree (§3.1).
