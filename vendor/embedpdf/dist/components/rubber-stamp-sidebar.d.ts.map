@@ -1,0 +1,1 @@
+{"version":3,"file":"rubber-stamp-sidebar.d.ts","sourceRoot":"","sources":["../../src/components/rubber-stamp-sidebar.tsx"],"names":[],"mappings":"AAAA,OAAO,EAAE,CAAC,EAAE,MAAM,QAAQ,CAAC;AAc3B,MAAM,WAAW,uBAAuB;IACtC,UAAU,EAAE,MAAM,CAAC;IACnB,iBAAiB,CAAC,EAAE,MAAM,CAAC;CAC5B;AAID,wBAAgB,kBAAkB,CAAC,EACjC,UAAU,EACV,iBAAiB,EAAE,qBAAqB,GACzC,EAAE,uBAAuB,iBAoIzB"}

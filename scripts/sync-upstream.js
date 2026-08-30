@@ -6,6 +6,7 @@
 //
 // Copied:
 //   ../Clew-app/vendor/jmarkdown/{src,package.json}  -> vendor/jmarkdown/
+//   ../Clew-app/vendor/embedpdf -> vendor/embedpdf/  (the owner's OCG viewer build)
 //   ../Clew-app/src/{renderer,shared,preview-client,engine,main,excalidraw} -> vendor/clew/
 //   ../Clew-app/demo-vault -> seed-vault/   (the bundled starter vault)
 import fs from 'node:fs';
@@ -37,6 +38,13 @@ copyDir(path.join(upstream, 'vendor', 'jmarkdown', 'src'), path.join(root, 'vend
 fs.copyFileSync(
 	path.join(upstream, 'vendor', 'jmarkdown', 'package.json'),
 	path.join(root, 'vendor', 'jmarkdown', 'package.json'));
+
+// The owner's EmbedPDF OCG build (layers fork; wasm carries FPDF*OCG*).
+// Upstream's vendor/embedpdf is itself a dumb mirror of the built viewer
+// from ~/Source/EmbedPDF/v2 — this hop just extends the chain. .gitignore
+// carries !vendor/embedpdf/dist/ exceptions: the blanket dist/ and *.map
+// rules silently eat the mirror otherwise.
+copyDir(path.join(upstream, 'vendor', 'embedpdf'), path.join(root, 'vendor', 'embedpdf'));
 
 for (const dir of ['renderer', 'shared', 'preview-client', 'engine', 'main', 'excalidraw']) {
 	copyDir(path.join(upstream, 'src', dir), path.join(root, 'vendor', 'clew', dir));

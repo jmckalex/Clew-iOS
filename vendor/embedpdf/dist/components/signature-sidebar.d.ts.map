@@ -1,0 +1,1 @@
+{"version":3,"file":"signature-sidebar.d.ts","sourceRoot":"","sources":["../../src/components/signature-sidebar.tsx"],"names":[],"mappings":"AAAA,OAAO,EAAE,CAAC,EAAE,MAAM,QAAQ,CAAC;AAc3B,MAAM,WAAW,qBAAqB;IACpC,UAAU,EAAE,MAAM,CAAC;CACpB;AAED,wBAAgB,gBAAgB,CAAC,EAAE,UAAU,EAAE,EAAE,qBAAqB,iBAiJrE"}

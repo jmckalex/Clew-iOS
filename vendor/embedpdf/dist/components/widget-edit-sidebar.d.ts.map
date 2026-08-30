@@ -1,0 +1,1 @@
+{"version":3,"file":"widget-edit-sidebar.d.ts","sourceRoot":"","sources":["../../src/components/widget-edit-sidebar.tsx"],"names":[],"mappings":"AAAA,8BAA8B;AAC9B,OAAO,EAAE,CAAC,EAAE,MAAM,QAAQ,CAAC;AAmB3B,MAAM,WAAW,sBAAsB;IACrC,UAAU,EAAE,MAAM,CAAC;CACpB;AAqBD,eAAO,MAAM,iBAAiB,GAAI,gBAAgB,sBAAsB,yBA4GvE,CAAC"}

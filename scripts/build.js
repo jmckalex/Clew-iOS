@@ -392,9 +392,11 @@ export function stageStatic() {
 	};
 	// EmbedPDF (MIT) — Pdfium-in-wasm viewer with the full annotation suite,
 	// and now the ONLY PDF stack in the app: one ESM bundle + hashed chunks +
-	// pdfium.wasm, all inside the snippet's dist; staged whole, then pruned of
-	// demo PDFs / maps / types the app should not ship.
-	assets['embedpdf'] = 'node_modules/@embedpdf/snippet/dist';
+	// pdfium.wasm, all inside the viewer's dist; staged whole, then pruned of
+	// maps / types the app should not ship. Since upstream de45fe7 this is
+	// the owner's OCG build (layers fork) from the committed vendor mirror,
+	// not the @embedpdf/snippet npm package.
+	assets['embedpdf'] = 'vendor/embedpdf/dist';
 
 	for (const [to, from] of Object.entries(assets)) {
 		copy(path.join(root, from), path.join(webroot, 'preview-assets', to));
