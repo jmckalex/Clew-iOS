@@ -1,4 +1,4 @@
-# Handover — 2026-08-30 (0.9 sync + canvas delete button done; upstream moved again)
+# Handover — 2026-08-30 (0.9 sync, canvas delete button, EmbedPDF OCG build all done)
 
 Session-rollover state, upstream-style: rewritten each session, kept short.
 Durable architecture and build docs live in **README.md** and
@@ -15,14 +15,15 @@ first. (Also in Claude's memory.)
 
 ## 1. Where things stand
 
-Three layers of finished, unpushed work, each green on its own tip
+Four layers of finished, unpushed work, each green on its own tip
 (`npm test` 240, build + xcodebuild clean):
 
 ```
 main                6f75e34   (10 ahead of origin, UNPUSHED, deliberately not moved)
  └ …0.8 chain… sync-p1-vendor … sync-p5-verify (edcd261)
     └ …0.9 chain… sync09-p1-vendor … sync09-p5-verify (322224e)
-       └ canvas-delete-button  e618a00   ← TIP: review and merge
+       └ canvas-delete-button  e618a00
+          └ embedpdf-vendor  8fc7011   ← TIP: review and merge
 ```
 
 - **0.8 sync** — EmbedPDF everywhere, Excalidraw, Dataview/Bases,
@@ -40,6 +41,20 @@ main                6f75e34   (10 ahead of origin, UNPUSHED, deliberately not mo
   a keyboard, and a Pencil long-press never synthesizes contextmenu.
   Sim-verified end-to-end (disabled↔selection tracking; select-all + tap
   emptied shapes AND strokes from the .canvas file on disk).
+- **embedpdf-vendor** — the owner's EmbedPDF OCG build (layers fork;
+  wasm carries FPDF*OCG*), vendored from upstream de45fe7's TIP COMMIT
+  ONLY — the other 13 pending commits deliberately not pulled.
+  `vendor/embedpdf/` is the committed mirror (sync-upstream.js now
+  copies it; .gitignore needed exceptions for BOTH dist/ and *.map),
+  build.js stages from it instead of node_modules, `@embedpdf/snippet`
+  dropped from deps (models/pdfium kept — upstream: "the owner's; ask
+  before pruning"). Sim-verified by content, upstream's own smoke shape:
+  OCG chunk 200 + stock npm chunk 404 fetched over
+  `clew-preview://vault/__clew_assets__/embedpdf/`, served pdfium.wasm
+  carries 24 FPDF*OCG symbols, and sample.pdf renders in the viewer.
+  The layers tab itself is inside the cross-origin viewer page (smoke
+  can't reach it) — eyeball it on hardware: sidebar, third icon-only
+  tab, empty state on sample.pdf.
 
 The iPad sim (90DCB612…) has the tip build installed. Working tree clean.
 
@@ -68,14 +83,11 @@ do not let them silently vanish in an upstream `git checkout --`.
 (402 files, +4136/−1445, checked 2026-08-30). Do not run
 `npm run sync-upstream` casually — it pulls all of this. Highlights:
 
-1. **The owner's custom EmbedPDF OCG build is now VENDORED upstream**
-   (`vendor/embedpdf/` + `scripts/vendor-embedpdf.js`). iOS currently
-   stages EmbedPDF from `node_modules/@embedpdf/snippet/dist`
-   (scripts/build.js assets map), and **our sync-upstream.js does NOT
-   copy upstream's vendor/embedpdf** — the next sync must extend the
-   sync script, switch the asset staging to the vendored build, and
-   probably drop the three npm @embedpdf deps. This is the biggest and
-   most iOS-relevant item: it changes the wasm/viewer we ship.
+1. ~~The owner's custom EmbedPDF OCG build vendored upstream~~ —
+   **DONE, cherry-vendored as `embedpdf-vendor` (§1)**: the biggest and
+   most iOS-relevant item is retired ahead of the full sync, and
+   sync-upstream.js already copies vendor/embedpdf. When the full sync
+   runs, the mirror re-copies from upstream — convergent, no conflict.
 2. File explorer: "folders anchor the hierarchy" (+ a phantom-token
    trap noted in their HANDOVER).
 3. Demo vault: Dashboards page, a "marking vault" recipe, Note Headers
@@ -96,7 +108,9 @@ never `git add -A` or checkout over them.
 ## 4. Open items
 
 1. **Device verification, then merge + push** = TestFlight release,
-   covering both syncs and the delete button. Owner has started (they
+   covering both syncs, the delete button, and the OCG PDF viewer
+   (layers sidebar tab + per-annotation layer assignment — the piece
+   the sim smoke can't see, §1). Owner has started (they
    created a drawing, embedded it in a canvas, and drove the eraser on
    an iPad — that testing is where the delete button came from).
    Still specifically worth hardware: Pencil finger-pan feel, Excalidraw
@@ -104,8 +118,9 @@ never `git add -A` or checkout over them.
    fullscreen on small canvas PDF nodes, markdown table editing +
    Cmd+[ / Cmd+] + chord forwarding with a hardware keyboard.
 2. **Decide sequencing**: ship the current stack first, or fold in the
-   next sync (§3)? The EmbedPDF vendoring makes the next sync
-   substantial; the current stack is coherent and shippable on its own.
+   next sync (§3)? With EmbedPDF done the remaining sync is much
+   lighter (explorer hierarchy, demo vault, canvas trap fix, jmarkdown
+   moves); the current stack is coherent and shippable on its own.
 3. Possible follow-ups the owner has seen but not requested: canvas
    toolbar undo/redo buttons (the remaining half of PORT-PLAN touch
    item 6 — Cmd+Z is still keyboard-only); Pencil long-press →
@@ -129,7 +144,13 @@ never `git add -A` or checkout over them.
   '<js>'` — **terminate the app first or the script won't run**; read via
   `xcrun simctl spawn <sim> log show --last 40s --predicate
   'eventMessage CONTAINS "CLEWJS"'` (sim's own store; `--start` wants
-  LOCAL time — use `--last`).
+  LOCAL time — use `--last`). The script is a FUNCTION BODY: `return`
+  an async IIFE and the resolved value prints as `CLEWJS smoke ok:
+  <value>` — that line is the ONLY channel (page console.log never
+  reaches oslog). Asset fetches from the app page need the absolute
+  `clew-preview://vault/__clew_assets__/<root>/…` URL (CSP allows
+  connect-src clew-preview:); root-relative paths 404 on the clew-app
+  origin.
 - App-page surface: `__clew` = workspaceStore/vaultStore/editorPool/
   settingsStore/ipc/actions/registry; `__clewNative` =
   renderNote/renderFragment/externalDiff/flush/sessionId.
@@ -169,5 +190,5 @@ config-manager.js, so it may look different after the next sync.
 next sync: guarded patches fail the build loudly if an anchor drifted
 (pre-checked fine at de45fe7, §3); check `shared/channels.js` and
 `main/render-service.js` diffs for new shim/engine work; npm deps do
-NOT auto-merge — and this time EmbedPDF moves from npm to upstream's
-vendor tree (§3.1).
+NOT auto-merge. EmbedPDF already stages from `vendor/embedpdf/dist`
+(§1) — the sync just refreshes that mirror now.
