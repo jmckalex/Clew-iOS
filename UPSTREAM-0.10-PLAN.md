@@ -188,10 +188,20 @@ renames a temp over its target. Rather than patch three call sites:
 - **`sync10-p2-office`** — §2.1: stubs, QuickLook routing, settings
   patch, offer-panel decision, VAULT_CREATE/OPEN_DEMO handlers.
 - **`sync10-p3-features`** — simulator verification of what rides the
-  drop: history modal list/preview/restore against Arc A's channels,
-  the settings history toggle, Welcome greeting on a clean install,
-  fill-paragraph, explorer anchoring, `.docx` tap → Quick Look, office
-  embed placeholder in a note and a canvas.
+  drop. DONE 2026-09-02, all by content or screenshot on a clean
+  install: history modal lists a fresh snapshot with Restore; settings
+  carry the history row and the fill-column controls, no PDF-viewer or
+  office sections; Welcome greeting on first launch; fill-paragraph
+  wrapped a 60-word line to six lines ≤ 69 columns on disk; explorer
+  folders bold and anchored; a `.docx` tab shows the iOS sentence and
+  "Open in Quick Look", which presents the document; an office embed
+  in a note and a canvas office node both show the Quick Look
+  thumbnail (600×980, cached at upstream's path); the Widgets guide
+  renders thirteen kinds of `wa-*` element (wa.js through the closed
+  set); Dashboards renders queries + widgets + charts with no errors;
+  an `https://` target handed to openWikilink creates no note;
+  VAULT_OPEN_DEMO answers the seeded vault and VAULT_CREATE_DIALOG
+  presents the native name sheet.
 - **`sync10-p4-tests`** — port `atomic-write`, `fill`, and the office
   additions to `workspace-tree`; re-diff every ported suite.
 - **`sync10-p5-verify`** — clean-install sweep + regressions; PORT-PLAN
