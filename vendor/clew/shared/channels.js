@@ -17,6 +17,8 @@ export const CH = {
 	VAULT_CURRENT: 'clew:vault-current',
 	VAULT_RECENT: 'clew:vault-recent',
 	VAULT_TREE: 'clew:vault-tree',
+	VAULT_CREATE_DIALOG: 'clew:vault-create-dialog',
+	VAULT_OPEN_DEMO: 'clew:vault-open-demo',
 
 	// invoke: file operations (paths are vault-relative)
 	NOTE_READ: 'clew:note-read',
@@ -27,6 +29,11 @@ export const CH = {
 	FS_TRASH: 'clew:fs-trash',
 	ATTACH_SAVE: 'clew:attach-save',
 	FS_REVEAL: 'clew:fs-reveal',
+
+	// invoke: note history (.clew/history/ snapshots)
+	HISTORY_LIST: 'clew:history-list',
+	HISTORY_READ: 'clew:history-read',
+	HISTORY_RESTORE: 'clew:history-restore',
 
 	// invoke: persistence
 	WORKSPACE_LOAD: 'clew:workspace-load',
@@ -62,6 +69,21 @@ export const CH = {
 	RENDER_UNSUBSCRIBE: 'clew:render-unsubscribe',
 	RENDER_HTML: 'clew:render-html',
 	PDF_WRITE: 'clew:pdf-write',
+	OFFICE_WRITE: 'clew:office-write',
+
+	// invoke: office tabs (ZetaOffice). The slot is the app-global
+	// one-LibreOffice-at-a-time guard; the engine channels manage the
+	// downloaded wasm bundle; convert/open-external are the no-engine rung.
+	OFFICE_SLOT_ACQUIRE: 'clew:office-slot-acquire',
+	OFFICE_SLOT_RELEASE: 'clew:office-slot-release',
+	OFFICE_ENGINE_STATUS: 'clew:office-engine-status',
+	OFFICE_ENGINE_DOWNLOAD: 'clew:office-engine-download',
+	OFFICE_ENGINE_REMOVE: 'clew:office-engine-remove',
+	OFFICE_CONVERT_PDF: 'clew:office-convert-pdf',
+	OFFICE_OPEN_EXTERNAL: 'clew:office-open-external',
+	OFFICE_THUMBNAIL: 'clew:office-thumbnail',
+	CONFIRM_DISCARD: 'clew:confirm-discard',
+	WINDOW_CLOSE_RESOLVED: 'clew:window-close-resolved',
 	EXCALIDRAW_LIB_GET: 'clew:excalidraw-lib-get',
 	EXCALIDRAW_LIB_SET: 'clew:excalidraw-lib-set',
 	PDF_FONTS_STATUS: 'clew:pdf-fonts-status',
@@ -82,6 +104,8 @@ export const CH = {
 	EV_INDEX_PATCH: 'clew:ev-index-patch',
 	EV_MENU_COMMAND: 'clew:ev-menu-command',
 	EV_KV_CHANGED: 'clew:ev-kv-changed',
+	EV_OFFICE_SLOT: 'clew:ev-office-slot',
+	EV_CLOSE_REQUESTED: 'clew:ev-close-requested',
 };
 
 // Notes are what Clew opens in an editor.

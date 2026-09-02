@@ -86,6 +86,16 @@ final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 			guard let rel = params["rel"] as? String else { throw ClewError.badPayload }
 			performIO(reply) { try self.vaults.trash(rel: rel); return nil }
 
+		case "setMtime":
+			guard let rel = params["rel"] as? String, let mtimeMs = params["mtimeMs"] as? Double else {
+				throw ClewError.badPayload
+			}
+			performIO(reply) { try self.vaults.setMtime(rel: rel, mtimeMs: mtimeMs); return nil }
+
+		case "remove":
+			guard let rel = params["rel"] as? String else { throw ClewError.badPayload }
+			performIO(reply) { try self.vaults.remove(rel: rel); return nil }
+
 		case "rescan":
 			vaults.rescan { diff in reply(diff ?? [:], nil) }
 

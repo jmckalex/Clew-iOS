@@ -11,6 +11,7 @@ import { KvStore, KV_FILE } from '../../vendor/clew/main/kv-store.js';
 import { propagateRename } from '../../vendor/clew/main/rename-links.js';
 import { listPlugins } from '../../vendor/clew/main/plugins.js';
 import { direntKind, shouldRecurse, walkGuard } from '../../vendor/clew/main/fs-utils.js';
+import { listSnapshots, readSnapshot } from '../../vendor/clew/main/history.js';
 import fs from 'node:fs';
 import nodePath from 'node:path';
 import { vfs } from '../worker/shims/vfs.js';
@@ -144,6 +145,28 @@ export function createClewShim({ workerFactory, assetLoader } = {}) {
 			return result;
 		},
 		[CH.FS_TRASH]: ({ path }) => vaults.trash(path),
+
+		// Note history: list/read snapshots, and restore one — upstream's
+		// ipc.js shape (resolve() validates the path, history.js the id).
+		// Restore force-snapshots the text it displaces, writes through
+		// writeNote, and then ripples like NOTE_WRITE: on iOS a write is
+		// renderer-originated, so the open editor learns of it from here,
+		// not from a watcher.
+		[CH.HISTORY_LIST]: ({ path }) => {
+			vaults.resolve(path);
+			return listSnapshots(VAULT_ROOT, path);
+		},
+		[CH.HISTORY_READ]: ({ path, id }) => {
+			vaults.resolve(path);
+			return readSnapshot(VAULT_ROOT, path, id);
+		},
+		[CH.HISTORY_RESTORE]: ({ path, id }) => {
+			vaults.resolve(path);
+			const text = readSnapshot(VAULT_ROOT, path, id);
+			vaults.snapshotHistory(path, { force: true });
+			vaults.writeNote(path, text);
+			fileChanged(path);
+		},
 		[CH.FS_REVEAL]: () => {},
 		[CH.ATTACH_SAVE]: ({ name, data }) =>
 			vaults.saveAttachment(name, data, settings.get('attachmentFolder') || 'Attachments'),

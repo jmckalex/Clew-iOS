@@ -294,6 +294,47 @@ final class VaultStore {
 		let to = try resolve(newRel)
 		try FileManager.default.createDirectory(at: to.deletingLastPathComponent(), withIntermediateDirectories: true)
 		try FileManager.default.moveItem(at: try resolve(rel), to: to)
+		// Carry the rescan baseline along, or the next pass reports the move
+		// as a removal plus a fresh change of the same bytes.
+		for (key, mtime) in knownMtimes where key == rel || key.hasPrefix(rel + "/") {
+			knownMtimes.removeValue(forKey: key)
+			knownMtimes[newRel + key.dropFirst(rel.count)] = mtime
+		}
+	}
+
+	/// Stamp a file's modification time: note-history snapshots carry the
+	/// time their content was written, not the time they were copied.
+	/// Metadata-only coordination, so providers don't see a content change.
+	func setMtime(rel: String, mtimeMs: Double) throws {
+		let url = try resolve(rel)
+		let date = Date(timeIntervalSince1970: mtimeMs / 1000)
+		try coordinated(url, options: .contentIndependentMetadataOnly) {
+			try FileManager.default.setAttributes([.modificationDate: date], ofItemAtPath: $0.path)
+		}
+		knownMtimes[rel] = currentMtimeMs(url)
+	}
+
+	/// Hard delete — the mirror's only deletion path, used by note-history
+	/// pruning. User files never come through here (they go to trash()),
+	/// and anything outside .clew/history/ is refused so a bug upstream of
+	/// this call cannot become data loss.
+	func remove(rel: String) throws {
+		guard rel.hasPrefix(".clew/history/") else { throw ClewError.refused(rel) }
+		let url = try resolve(rel)
+		try coordinated(url, options: .forDeleting) { try FileManager.default.removeItem(at: $0) }
+		knownMtimes.removeValue(forKey: rel)
+		for key in knownMtimes.keys where key.hasPrefix(rel + "/") { knownMtimes.removeValue(forKey: key) }
+	}
+
+	private func coordinated(_ url: URL, options: NSFileCoordinator.WritingOptions,
+		_ body: (URL) throws -> Void) throws {
+		var coordinationError: NSError?
+		var bodyError: Error?
+		NSFileCoordinator().coordinate(writingItemAt: url, options: options, error: &coordinationError) { target in
+			do { try body(target) } catch { bodyError = error }
+		}
+		if let error = coordinationError { throw error }
+		if let error = bodyError { throw error }
 	}
 
 	func trash(rel: String) throws {
@@ -351,6 +392,7 @@ enum ClewError: Error, LocalizedError {
 	case unknownMethod(String)
 	case vaultUnreachable(String)
 	case notFound(String)
+	case refused(String)
 
 	var errorDescription: String? {
 		switch self {
@@ -360,6 +402,7 @@ enum ClewError: Error, LocalizedError {
 		case .unknownMethod(let name): return "Unknown bridge method: \(name)"
 		case .notFound(let rel): return "No such vault file: \(rel)"
 		case .vaultUnreachable(let path): return "Cannot access vault at \(path) — re-pick the folder to renew access"
+		case .refused(let rel): return "Refused: \(rel) is not a note-history snapshot"
 		}
 	}
 }

@@ -1,5 +1,5 @@
-// Injected globals for the engine worker bundle: `process`, `Buffer`, and
-// `global`. esbuild's `inject` substitutes these exports for the free
+// Injected globals for the engine worker bundle: `process`, `Buffer` (see
+// buffer.js), and `global`. esbuild's `inject` substitutes these exports for the free
 // identifiers throughout the bundle.
 //
 // process.exit is the engine's error-path escape hatch — in the worker it
@@ -48,50 +48,7 @@ const processShim = {
 	},
 };
 
-const textEncoder = new TextEncoder();
-const textDecoder = new TextDecoder();
-
-class BufferShim extends Uint8Array {
-	toString(encoding = 'utf8') {
-		if (encoding === 'base64') {
-			let binary = '';
-			for (const b of this) binary += String.fromCharCode(b);
-			return btoa(binary);
-		}
-		if (encoding === 'hex') return [...this].map((b) => b.toString(16).padStart(2, '0')).join('');
-		return textDecoder.decode(this);
-	}
-
-	static from(value, encoding) {
-		if (typeof value === 'string') {
-			if (encoding === 'base64') {
-				const binary = atob(value);
-				const bytes = new BufferShim(binary.length);
-				for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-				return bytes;
-			}
-			const encoded = textEncoder.encode(value);
-			const out = new BufferShim(encoded.length);
-			out.set(encoded);
-			return out;
-		}
-		const source = value instanceof ArrayBuffer ? new Uint8Array(value) : value;
-		const out = new BufferShim(source.length ?? 0);
-		if (source.length) out.set(source);
-		return out;
-	}
-
-	static concat(list) {
-		const total = list.reduce((n, b) => n + b.length, 0);
-		const out = new BufferShim(total);
-		let offset = 0;
-		for (const b of list) { out.set(b, offset); offset += b.length; }
-		return out;
-	}
-
-	static isBuffer(value) { return value instanceof BufferShim; }
-	static alloc(n) { return new BufferShim(n); }
-}
+import { BufferShim } from './buffer.js';
 
 // `global` must be the worker's real global object: the engine deliberately
 // hangs shared state (cheerio, require, isLatex, script-block exports) on it.

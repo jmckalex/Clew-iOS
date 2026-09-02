@@ -68,6 +68,16 @@ const fakeBridge = {
 			case 'trash':
 				fs.rmSync(path.join(params.vault, params.rel), { recursive: true, force: true });
 				return null;
+			case 'setMtime': {
+				const date = new Date(params.mtimeMs);
+				fs.utimesSync(path.join(params.vault, params.rel), date, date);
+				return null;
+			}
+			case 'remove':
+				// VaultStore.remove's refusal: only history pruning hard-deletes.
+				if (!params.rel.startsWith('.clew/history/')) throw new Error(`Refused: ${params.rel}`);
+				fs.rmSync(path.join(params.vault, params.rel), { recursive: true, force: true });
+				return null;
 			// Overwrite-in-place, like VaultStore.updateBinary: never creates,
 			// never dedupes a name. The shim's own guards are what the tests
 			// below exercise, but this mirrors the native refusal too.
@@ -121,6 +131,10 @@ const CH = {
 	PDF_FONTS_DOWNLOAD: 'clew:pdf-fonts-download',
 	EXCALIDRAW_LIB_GET: 'clew:excalidraw-lib-get',
 	EXCALIDRAW_LIB_SET: 'clew:excalidraw-lib-set',
+	VAULT_SETTINGS_SET: 'clew:vault-settings-set',
+	HISTORY_LIST: 'clew:history-list',
+	HISTORY_READ: 'clew:history-read',
+	HISTORY_RESTORE: 'clew:history-restore',
 };
 
 // A byte-for-byte valid, one-page PDF — small enough to inline, real enough
@@ -133,10 +147,15 @@ const MINIMAL_PDF = Buffer.from(
 
 let clew, native, services;
 const settle = () => new Promise((resolve) => setTimeout(resolve, 10));
+// A note whose disk mtime is well in the past when the vault opens, so the
+// history tests can see the interval gate and the content-time stamp.
+const BACKDATED_NOTE = 'Colosseum.md';
+const backdatedMs = Date.now() - 90 * 60_000;
 
 before(async () => {
 	vaultDir = fs.mkdtempSync(path.join(os.tmpdir(), 'clew-ios-test-'));
 	fs.cpSync(path.join(root, 'seed-vault'), vaultDir, { recursive: true });
+	fs.utimesSync(path.join(vaultDir, BACKDATED_NOTE), new Date(backdatedMs), new Date(backdatedMs));
 	// A PDF for the annotation-save path, in place before the vault opens so
 	// the mirror carries it as a binary stub, exactly as a real one would be.
 	fs.mkdirSync(path.join(vaultDir, 'Attachments'), { recursive: true });
@@ -318,4 +337,74 @@ test('atomic writes: no .clew-tmp survives, and none is ever requested', async (
 	assert.deepEqual(temps, [], 'every bridge write renamed its temp into place');
 	const requested = fakeBridge.calls.filter(([m, p]) => m === 'write' && /\.clew-tmp$/.test(p.rel));
 	assert.deepEqual(requested, [], 'the mirror never sends a temp path to the bridge');
+});
+
+const historyDir = (rel) => path.join(vaultDir, '.clew', 'history', rel);
+
+test('history: overwriting a note snapshots the pre-image, stamped with its content time', async () => {
+	const original = fs.readFileSync(path.join(vaultDir, BACKDATED_NOTE), 'utf8');
+	await clew.invoke(CH.NOTE_WRITE, { path: BACKDATED_NOTE, content: original + '\nEdited on iOS.\n' });
+	await native.flush();
+	const names = fs.readdirSync(historyDir(BACKDATED_NOTE));
+	assert.equal(names.length, 1);
+	assert.match(names[0], /^\d{4}-\d{2}-\d{2} \d{2}\.\d{2}\.\d{2}\.md$/, "upstream's stamp shape");
+	assert.equal(fs.readFileSync(path.join(historyDir(BACKDATED_NOTE), names[0]), 'utf8'), original,
+		'the PRE-write content, byte for byte');
+	const mtime = fs.statSync(path.join(historyDir(BACKDATED_NOTE), names[0])).mtimeMs;
+	assert.ok(Math.abs(mtime - backdatedMs) < 2000, `stamped for the content time on disk (${mtime} vs ${backdatedMs})`);
+	const listed = await clew.invoke(CH.HISTORY_LIST, { path: BACKDATED_NOTE });
+	assert.equal(listed.length, 1);
+	assert.equal(listed[0].id, names[0]);
+	assert.equal(await clew.invoke(CH.HISTORY_READ, { path: BACKDATED_NOTE, id: listed[0].id }), original);
+});
+
+test('history: restore writes the snapshot back and keeps what it displaced', async () => {
+	const [snap] = await clew.invoke(CH.HISTORY_LIST, { path: BACKDATED_NOTE });
+	const original = await clew.invoke(CH.HISTORY_READ, { path: BACKDATED_NOTE, id: snap.id });
+	await clew.invoke(CH.HISTORY_RESTORE, { path: BACKDATED_NOTE, id: snap.id });
+	await native.flush();
+	assert.equal(fs.readFileSync(path.join(vaultDir, BACKDATED_NOTE), 'utf8'), original, 'restored on disk');
+	const listed = await clew.invoke(CH.HISTORY_LIST, { path: BACKDATED_NOTE });
+	assert.equal(listed.length, 2, 'the displaced edit was snapshotted despite the interval (force)');
+	assert.match(await clew.invoke(CH.HISTORY_READ, { path: BACKDATED_NOTE, id: listed[0].id }), /Edited on iOS/);
+	await assert.rejects(() => clew.invoke(CH.HISTORY_READ, { path: BACKDATED_NOTE, id: '../../Welcome.md' }),
+		/Not a snapshot id/);
+});
+
+test('history: a rename carries the snapshots along', async () => {
+	const moved = 'Projects/Colosseum Notes.md';
+	await clew.invoke(CH.FS_RENAME, { path: BACKDATED_NOTE, newPath: moved });
+	await native.flush();
+	assert.ok(!fs.existsSync(historyDir(BACKDATED_NOTE)), 'old history directory gone');
+	assert.equal(fs.readdirSync(historyDir(moved)).length, 2, 'both snapshots under the new name');
+	assert.equal((await clew.invoke(CH.HISTORY_LIST, { path: moved })).length, 2);
+});
+
+test('history: pruning removes old snapshots from disk, never the newest', async () => {
+	const rel = 'Projects/Colosseum Notes.md';
+	await clew.invoke(CH.VAULT_SETTINGS_SET, { key: 'history', value: { minIntervalMinutes: 0, maxVersions: 2 } });
+	for (const n of [1, 2, 3]) {
+		await clew.invoke(CH.NOTE_WRITE, { path: rel, content: `version ${n}\n` });
+	}
+	await native.flush();
+	assert.equal(fs.readdirSync(historyDir(rel)).length, 2, 'count cap enforced on disk');
+	// Three saves inside one second share a stamp and differ by counter; a
+	// name freed by pruning is reused, so order WITHIN the second is not
+	// recency (upstream's semantics, run verbatim). Assert the survivors.
+	const listed = await clew.invoke(CH.HISTORY_LIST, { path: rel });
+	const survivors = await Promise.all(listed.map((s) => clew.invoke(CH.HISTORY_READ, { path: rel, id: s.id })));
+	assert.deepEqual(survivors.sort(), ['version 1\n', 'version 2\n'], 'the two most recent pre-images, the rest pruned');
+	const removes = fakeBridge.calls.filter(([m]) => m === 'remove');
+	assert.ok(removes.length >= 3, `pruning reached the bridge (${removes.length} removes)`);
+	assert.ok(removes.every(([, p]) => p.rel.startsWith('.clew/history/')), 'only ever history paths');
+});
+
+test('history: false in vault-settings disables snapshots', async () => {
+	const rel = 'Projects/Colosseum Notes.md';
+	await clew.invoke(CH.VAULT_SETTINGS_SET, { key: 'history', value: false });
+	const before = fs.readdirSync(historyDir(rel));
+	await clew.invoke(CH.NOTE_WRITE, { path: rel, content: 'version 4\n' });
+	await native.flush();
+	assert.deepEqual(fs.readdirSync(historyDir(rel)), before, 'nothing new on disk');
+	assert.equal(fs.readFileSync(path.join(vaultDir, rel), 'utf8'), 'version 4\n', 'the write itself still landed');
 });

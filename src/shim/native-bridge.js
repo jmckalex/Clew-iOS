@@ -15,6 +15,8 @@
 //   mkdir({vault, rel})              -> null
 //   rename({vault, rel, newRel})     -> null
 //   trash({vault, rel})              -> null
+//   setMtime({vault, rel, mtimeMs})  -> null (history snapshots carry their content time)
+//   remove({vault, rel})             -> null (hard delete; .clew/history/ only — pruning)
 //   openExternal({url})              -> null
 //   shareText({name, text})         -> null (share sheet)
 //   shareBase64({name, base64})     -> null

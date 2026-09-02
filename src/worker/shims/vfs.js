@@ -31,6 +31,8 @@ class Vfs {
 	onWrite = null; // (absPath, data) => void
 	onRemove = null; // (absPath, wasDir) => void
 	onMkdir = null; // (absPath) => void
+	onRename = null; // (fromAbs, toAbs) => void
+	onUtimes = null; // (absPath, mtimeMs) => void
 
 	reset() {
 		this.files.clear();
@@ -95,6 +97,55 @@ class Vfs {
 		const abs = norm(p);
 		this.files.delete(abs);
 		this.dirs.delete(abs);
+	}
+
+	/** Set a file's mtime (history snapshots carry their content's time). */
+	utimes(p, mtimeMs) {
+		const abs = norm(p);
+		const entry = this.files.get(abs);
+		if (!entry) {
+			const err = new Error(`ENOENT: no such file or directory, utime '${p}'`);
+			err.code = 'ENOENT';
+			throw err;
+		}
+		entry.mtimeMs = mtimeMs;
+		this.onUtimes?.(abs, mtimeMs);
+	}
+
+	/** Move a file or a whole directory subtree; one hook call either way. */
+	rename(from, to) {
+		const src = norm(from);
+		const dst = norm(to);
+		const file = this.files.get(src);
+		if (file) {
+			this.files.delete(src);
+			this.files.set(dst, file);
+			if (this.writes.has(src)) {
+				this.writes.set(dst, this.writes.get(src));
+				this.writes.delete(src);
+			}
+			this.#addParents(dst);
+		} else if (this.dirs.has(src)) {
+			const prefix = src + '/';
+			for (const [abs, entry] of [...this.files]) {
+				if (abs.startsWith(prefix)) {
+					this.files.delete(abs);
+					this.files.set(dst + abs.slice(src.length), entry);
+				}
+			}
+			for (const dir of [...this.dirs]) {
+				if (dir === src || dir.startsWith(prefix)) {
+					this.dirs.delete(dir);
+					this.dirs.add(dst + dir.slice(src.length));
+				}
+			}
+			this.#addParents(dst);
+		} else {
+			const err = new Error(`ENOENT: no such file or directory, rename '${from}' -> '${to}'`);
+			err.code = 'ENOENT';
+			throw err;
+		}
+		this.onRename?.(src, dst);
 	}
 
 	append(p, data) {

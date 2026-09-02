@@ -2,20 +2,16 @@
 // sync throughout); the callback/promise forms exist so incidental library
 // code (chokidar's module graph, never actually run on iOS) can import.
 import { vfs } from './vfs.js';
+import { BufferShim } from './buffer.js';
 import * as fsPromises from './fs-promises.js';
-
-const encode = (data, encoding) => {
-	if (encoding === undefined || encoding === null) {
-		if (typeof data === 'string') return new TextEncoder().encode(data);
-		return data;
-	}
-	if (typeof data === 'string') return data;
-	return new TextDecoder().decode(data);
-};
 
 export function readFileSync(p, options) {
 	const encoding = typeof options === 'string' ? options : options?.encoding;
-	return encode(vfs.read(p), encoding ?? null) ?? vfs.read(p);
+	const data = vfs.read(p);
+	if (encoding) return typeof data === 'string' ? data : new TextDecoder().decode(data);
+	// No encoding: a Buffer, as Node returns — vendored code compares
+	// snapshots with .equals() (history.js). A view over the same bytes.
+	return BufferShim.view(data);
 }
 
 export function writeFileSync(p, data) {
@@ -67,8 +63,13 @@ export function copyFileSync(src, dest) {
 }
 
 export function renameSync(src, dest) {
-	vfs.write(dest, vfs.read(src));
-	vfs.rm(src);
+	vfs.rename(src, dest);
+}
+
+// Node accepts Dates, epoch SECONDS, or numeric strings; the vfs keeps ms.
+const toMs = (t) => (t instanceof Date ? t.getTime() : Number(t) * 1000);
+export function utimesSync(p, atime, mtime) {
+	vfs.utimes(p, toMs(mtime));
 }
 
 export function accessSync(p) {
@@ -120,7 +121,7 @@ export const promises = fsPromises;
 export default {
 	readFileSync, writeFileSync, appendFileSync, existsSync, statSync, lstatSync,
 	mkdirSync, readdirSync, rmSync, rmdirSync, unlinkSync, copyFileSync,
-	renameSync, accessSync, realpathSync, Stats, readFile, writeFile, stat,
+	renameSync, utimesSync, accessSync, realpathSync, Stats, readFile, writeFile, stat,
 	lstat, readdir, watch, watchFile, unwatchFile, createReadStream,
 	createWriteStream, constants, promises,
 };

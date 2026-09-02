@@ -10,7 +10,13 @@
 //
 // External changes (Files app, iCloud sync) arrive as native rescan diffs
 // through applyExternalDiff — the chokidar replacement.
+//
+// Note history (.clew/history/ snapshots) is upstream's history.js run
+// VERBATIM over the mirror, like the indexer and kv-store: the on-disk
+// format is identical by construction, and its fs calls (copy, utimes, rm,
+// rename) reach the device through the same write-through hooks.
 import { vfs } from '../worker/shims/vfs.js';
+import { snapshotBeforeWrite, renameHistory } from '../../vendor/clew/main/history.js';
 import { bridgeCall, toBase64 } from './native-bridge.js';
 import { settings } from './settings.js';
 import { isTextPath } from './engine-config.js';
@@ -69,9 +75,23 @@ export class VaultManager {
 			const rel = this.#relOf(abs);
 			if (rel) this.#enqueue(() => bridgeCall('mkdir', { vault: this.realPath, rel }));
 		};
+		vfs.onRename = (fromAbs, toAbs) => {
+			const rel = this.#relOf(fromAbs);
+			const newRel = this.#relOf(toAbs);
+			if (rel && newRel) this.#enqueue(() => bridgeCall('rename', { vault: this.realPath, rel, newRel }));
+		};
+		vfs.onUtimes = (abs, mtimeMs) => {
+			const rel = this.#relOf(abs);
+			if (rel) this.#enqueue(() => bridgeCall('setMtime', { vault: this.realPath, rel, mtimeMs }));
+		};
 		vfs.onRemove = (abs) => {
-			// Deletions go through trash() explicitly; the hook covers only
-			// incidental removals (e.g. rename via write+rm in fs shims).
+			// User files are deleted through trash() only. The one thing that
+			// deletes through the mirror is history pruning, so that is the
+			// one thing allowed to reach the device (Swift refuses the rest).
+			const rel = this.#relOf(abs);
+			if (rel?.startsWith('.clew/history/')) {
+				this.#enqueue(() => bridgeCall('remove', { vault: this.realPath, rel }));
+			}
 		};
 		settings.rememberVault(realPath);
 		this.hooks.onOpen?.(VAULT_ROOT);
@@ -82,7 +102,7 @@ export class VaultManager {
 	close() {
 		if (!this.isOpen) return;
 		this.hooks.onClose?.();
-		vfs.onWrite = vfs.onMkdir = vfs.onRemove = null;
+		vfs.onWrite = vfs.onMkdir = vfs.onRemove = vfs.onRename = vfs.onUtimes = null;
 		vfs.reset();
 		this.realPath = null;
 		this.name = null;
@@ -151,7 +171,20 @@ export class VaultManager {
 	}
 
 	writeNote(rel, content) {
-		vfs.write(this.resolve(rel), content);
+		const abs = this.resolve(rel);
+		this.snapshotHistory(rel);
+		vfs.write(abs, content);
+	}
+
+	/**
+	 * Preserve the note's current content in .clew/history/ before it is
+	 * displaced (rate-limited inside; `force` for restore, where the
+	 * displaced text must survive regardless of the interval). Same call,
+	 * same options source as upstream's VaultManager.
+	 */
+	snapshotHistory(rel, { force = false } = {}) {
+		const options = this.loadState('vault-settings.json')?.history;
+		return snapshotBeforeWrite(VAULT_ROOT, rel, options, { force });
 	}
 
 	createNote(rel) {
@@ -195,24 +228,12 @@ export class VaultManager {
 		const from = this.resolve(rel);
 		const to = this.resolve(newRel);
 		if (vfs.has(to)) throw new Error(`Already exists: ${newRel}`);
-		// Mirror first (synchronously — the indexer re-walk depends on it),
-		// then the device, preserving binary content natively.
-		if (vfs.isDir(from)) {
-			const prefix = from + '/';
-			for (const [abs, entry] of [...vfs.files]) {
-				if (abs.startsWith(prefix)) {
-					vfs.patch(to + abs.slice(from.length), entry.data, entry.mtimeMs);
-					vfs.remove(abs);
-				}
-			}
-			vfs.remove(from);
-			vfs.dirs.add(to);
-		} else {
-			const entry = vfs.files.get(from);
-			vfs.patch(to, entry?.data ?? '', entry?.mtimeMs);
-			vfs.remove(from);
-		}
-		this.#enqueue(() => bridgeCall('rename', { vault: this.realPath, rel, newRel }));
+		// Mirror first (synchronously — the indexer re-walk depends on it);
+		// the onRename hook carries it to the device, where binary content
+		// moves natively. The note's history moves with it (upstream's
+		// renameHistory, whose fs.renameSync lands on the same hook).
+		vfs.rename(from, to);
+		renameHistory(VAULT_ROOT, rel, newRel);
 	}
 
 	async trash(rel) {
