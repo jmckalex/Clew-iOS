@@ -32,6 +32,16 @@ const listFiles = (dir, rel = '') => {
 	return out;
 };
 
+// The contract's atomic shape, exactly as VaultStore's AtomicFile produces
+// it on the device: a FIXED dot-temp beside the target, then a rename —
+// so the suite can assert that no write path ever leaves a `.clew-tmp`
+// behind, and that the JS side never asks the bridge to write one.
+const writeAtomic = (abs, data) => {
+	const temp = path.join(path.dirname(abs), `.${path.basename(abs)}.clew-tmp`);
+	fs.writeFileSync(temp, data);
+	fs.renameSync(temp, abs);
+};
+
 const fakeBridge = {
 	calls: [],
 	async call(method, params) {
@@ -43,7 +53,7 @@ const fakeBridge = {
 			case 'write': {
 				const abs = path.join(params.vault, params.rel);
 				fs.mkdirSync(path.dirname(abs), { recursive: true });
-				fs.writeFileSync(abs, params.text);
+				writeAtomic(abs, params.text);
 				return null;
 			}
 			case 'mkdir':
@@ -64,7 +74,7 @@ const fakeBridge = {
 			case 'updateBinary': {
 				const abs = path.join(vaultDir, params.rel);
 				if (!fs.existsSync(abs)) throw new Error(`No such file: ${params.rel}`);
-				fs.writeFileSync(abs, Buffer.from(params.base64, 'base64'));
+				writeAtomic(abs, Buffer.from(params.base64, 'base64'));
 				return null;
 			}
 			default:
@@ -289,4 +299,23 @@ test('builds carry the CURRENT vault, not the standby snapshot', async () => {
 	assert.ok(build, 'a build ran for the edited note');
 	assert.equal(build.replaceVault, true);
 	assert.match(String(build.files['/vault/Welcome.md']?.data ?? ''), /Freshness marker/);
+});
+
+// ---- on-disk contracts shared with desktop --------------------------------
+
+test('atomic writes: no .clew-tmp survives, and none is ever requested', async () => {
+	await clew.invoke(CH.NOTE_WRITE, { path: 'Inbox.md', content: '# Written again\n' });
+	await native.flush();
+	const temps = [];
+	const walk = (dir) => {
+		for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+			const abs = path.join(dir, entry.name);
+			if (entry.isDirectory()) walk(abs);
+			else if (entry.name.endsWith('.clew-tmp')) temps.push(path.relative(vaultDir, abs));
+		}
+	};
+	walk(vaultDir);
+	assert.deepEqual(temps, [], 'every bridge write renamed its temp into place');
+	const requested = fakeBridge.calls.filter(([m, p]) => m === 'write' && /\.clew-tmp$/.test(p.rel));
+	assert.deepEqual(requested, [], 'the mirror never sends a temp path to the bridge');
 });

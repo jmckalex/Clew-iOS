@@ -225,7 +225,10 @@ final class VaultStore {
 	}
 
 	/// Coordinated write — iCloud/file-provider folders need file
-	/// coordination for other participants to see changes promptly.
+	/// coordination for other participants to see changes promptly. Every
+	/// body below writes through AtomicFile, so the provider sees exactly
+	/// one replacement of a complete file (the .forReplacing scope covers
+	/// the temp's rename into place).
 	private func coordinatedWrite(to url: URL, _ body: (URL) throws -> Void) throws {
 		try FileManager.default.createDirectory(
 			at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -241,7 +244,7 @@ final class VaultStore {
 
 	func write(rel: String, text: String) throws {
 		let url = try resolve(rel)
-		try coordinatedWrite(to: url) { try text.write(to: $0, atomically: true, encoding: .utf8) }
+		try coordinatedWrite(to: url) { try AtomicFile.write(Data(text.utf8), to: $0) }
 		knownMtimes[rel] = currentMtimeMs(url)
 	}
 
@@ -267,7 +270,7 @@ final class VaultStore {
 			counter += 1
 		}
 		let payload = data
-		try coordinatedWrite(to: candidate) { try payload.write(to: $0) }
+		try coordinatedWrite(to: candidate) { try AtomicFile.write(payload, to: $0) }
 		let vaultBase = URL(fileURLWithPath: currentVaultPath!, isDirectory: true).standardizedFileURL.path
 		let outRel = String(candidate.standardizedFileURL.path.dropFirst(vaultBase.count + 1))
 		return ["rel": outRel, "size": data.count]
@@ -280,7 +283,7 @@ final class VaultStore {
 		guard let data = Data(base64Encoded: base64) else { throw ClewError.badPayload }
 		let file = try resolve(rel)
 		guard FileManager.default.fileExists(atPath: file.path) else { throw ClewError.notFound(rel) }
-		try coordinatedWrite(to: file) { try data.write(to: $0) }
+		try coordinatedWrite(to: file) { try AtomicFile.write(data, to: $0) }
 	}
 
 	func mkdir(rel: String) throws {
