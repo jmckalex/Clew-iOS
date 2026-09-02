@@ -81,7 +81,7 @@ function producedFiles(dir, hash, ext) {
 // re-reporting the error. cleanupAux only removes the "<hash>." aux files, so the
 // produced (hyphen-suffixed) outputs need this explicit sweep.
 function deleteProduced(dir, hash) {
-	for (const ext of ['svg', 'pdf']) {
+	for (const ext of ['svg', 'pdf', 'mps']) {
 		for (const f of producedFiles(dir, hash, ext)) {
 			try { fs.unlinkSync(path.join(dir, f)); } catch { /* ignore */ }
 		}
@@ -138,13 +138,22 @@ function imgTag(dir, svgName, attrs) {
 	return `<img src='${MP_DIR_NAME}/${svgName}'${styleAttr}>`;
 }
 
-// HTML: compile the source to SVG via mpost (cached), return the <img>(s).
+// HTML: compile the source to SVG (cached), return the <img>(s).
+//
+// NOT via mpost's own SVG backend: that emits <text> elements referencing
+// TeX fonts (cmr10 and friends) with no usable font-family, so every
+// browser substitutes its default and the TeX-metric letter positions read
+// as garbled kerning ("empt y"). Instead `prologues := 3` embeds the Type 1
+// fonts in mpost's EPS output and dvisvgm --no-fonts converts every glyph
+// to SVG PATHS — labels then render identically everywhere, exactly as the
+// TikZ pipeline's do (same dvisvgm, same libgs configuration). If dvisvgm
+// is unavailable, the old backend still runs, with a warning.
 function renderMetapostHTML(source, attrs) {
 	const dir = metapostDir();
 	if (attrs?.['empty-cache']) emptyCache(dir);
 
 	const body = wrapMetapost(source);
-	const fileContents = `outputformat := "svg";\noutputtemplate := "%j-%c.svg";\n${body}\n`;
+	const fileContents = `prologues := 3;\noutputtemplate := "%j-%c.mps";\n${body}\n`;
 	const hash = generateHash(fileContents);
 
 	let svgs = producedFiles(dir, hash, 'svg');
@@ -153,6 +162,27 @@ function renderMetapostHTML(source, attrs) {
 		try {
 			fs.writeFileSync(mpFile, fileContents);
 			execSync(`mpost -interaction=nonstopmode "${hash}.mp"`, { cwd: dir, stdio: 'ignore' });
+			const figures = producedFiles(dir, hash, 'mps');
+			if (figures.length === 0) throw new Error('mpost produced no figures');
+			try {
+				// A stale configured path (ghostscript upgrades rotate the
+				// versioned Cellar dir) must not scuttle the conversion.
+				const libgs = configManager.get('TiKZ libgs');
+				const gs = libgs && fs.existsSync(libgs) ? ` --libgs=${libgs}` : '';
+				for (const figure of figures) {
+					const svgName = figure.replace(/\.mps$/, '.svg');
+					execSync(`dvisvgm --eps --bbox=min${gs} --no-fonts=1 "${figure}" -o "${svgName}"`,
+						{ cwd: dir, stdio: 'ignore' });
+				}
+			} catch {
+				addWarning('dvisvgm unavailable — MetaPost labels may render with substituted fonts');
+				const legacy = `outputformat := "svg";\noutputtemplate := "%j-%c.svg";\n${body}\n`;
+				fs.writeFileSync(mpFile, legacy);
+				execSync(`mpost -interaction=nonstopmode "${hash}.mp"`, { cwd: dir, stdio: 'ignore' });
+			}
+			for (const figure of producedFiles(dir, hash, 'mps')) {
+				try { fs.unlinkSync(path.join(dir, figure)); } catch { /* converted or gone */ }
+			}
 			svgs = producedFiles(dir, hash, 'svg');
 			cleanupAux(dir, hash);
 		} catch (error) {

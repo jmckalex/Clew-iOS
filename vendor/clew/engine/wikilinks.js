@@ -40,6 +40,11 @@ const MEDIA_KIND = {
 	'.canvas': 'canvas',
 	'.excalidraw': 'excalidraw',
 	'.base': 'base',
+	// Office documents embed as a cached static thumbnail by default, or as
+	// a full live LibreOffice with the `|live` alias — the user's explicit
+	// opt-in to a ~1.6 GB editor per embed (owner's decision, 2026-09-01).
+	'.docx': 'office', '.xlsx': 'office', '.pptx': 'office',
+	'.odt': 'office', '.ods': 'office', '.odp': 'office',
 };
 // An Obsidian drawing is `name.excalidraw.md` — a .md by extension, which the
 // note path would otherwise claim and transclude as prose. The compound suffix
@@ -262,13 +267,26 @@ export const wikiembed = {
 			if (noteRel && /\.excalidraw\.md$/i.test(noteRel)) fileRel = noteRel;
 		}
 		if (fileRel && mediaKind(fileRel)) {
-			const { alt, width, height } = parseMediaAlias(link.alias);
-			token.media = { rel: fileRel, kind: mediaKind(fileRel), width, height };
+			let alias = link.alias;
+			token.media = { rel: fileRel, kind: mediaKind(fileRel) };
+			// Office embeds: a `live` alias segment picks the live editor over
+			// the default thumbnail, and is consumed before the caption/size
+			// parse so it never becomes alt text.
+			if (token.media.kind === 'office' && alias) {
+				const parts = alias.split('|').map((s) => s.trim());
+				token.media.live = parts.some((p) => p.toLowerCase() === 'live');
+				alias = parts.filter((p) => p.toLowerCase() !== 'live').join('|') || null;
+				// An alias that was ONLY the mode is not a caption.
+				if (!alias) token.label = link.target;
+			}
+			const { alt, width, height } = parseMediaAlias(alias);
+			token.media.width = width;
+			token.media.height = height;
 			// `![[Trips.base#Location]]` names a VIEW, not a heading — the one
 			// embed whose fragment means something other than a place to scroll.
 			if (token.media.kind === 'base') token.media.view = link.heading ?? null;
 			// A pure-size alias ("300") is not a caption — fall back to the name.
-			if (link.alias) token.label = alt ?? link.target;
+			if (alias) token.label = alt ?? link.target;
 			return token;
 		}
 
@@ -356,6 +374,35 @@ export const wikiembed = {
 					return `<div class="internal-embed base-embed" data-href="${escapeAttr(token.full)}">`
 						+ `<div class="embed-title"><a class="internal-link" href="#" data-href="${escapeAttr(token.full)}">${baseName}</a></div>`
 						+ html + '</div>\n';
+				}
+				case 'office': {
+					// Thumbnail by default (a cached PNG the preview client asks
+					// the app to render — office-thumbs.js), or the |live editor:
+					// the SAME ZetaOffice page the office tabs run, nested in the
+					// preview. The iframe carries a stable id so morphdom matches
+					// it across re-renders (a booted LibreOffice must not reload
+					// because a paragraph above it changed) while a genuinely
+					// deleted embed is still discarded. It dies with the preview
+					// document itself (tab switch, mode toggle) — save first.
+					if (SITE_EXPORT) {
+						return `<div class="internal-embed office-embed-box"><div class="embed-title">${alt} (office document)</div></div>\n`;
+					}
+					if (token.media.live) {
+						const h = token.media.height ?? 520;
+						const frameId = 'office-live-' + token.media.rel.replace(/[^a-zA-Z0-9]+/g, '-');
+						const pageUrl = '/__clew_assets__/clewzeta/zeta-page.html'
+							+ `?src=${encodeURIComponent(src)}&path=${encodeURIComponent(token.media.rel)}`;
+						return `<div class="internal-embed office-embed-box is-live">`
+							+ `<div class="embed-title"><a class="internal-link" href="#" data-href="${escapeAttr(token.full)}">${alt}</a></div>`
+							+ `<iframe class="office-embed-live" id="${escapeAttr(frameId)}"`
+							+ ` allow="clipboard-read; clipboard-write"`
+							+ ` style="height:${h}px" src="${escapeAttr(pageUrl)}"></iframe></div>\n`;
+					}
+					const style = token.media.height ? ` style="max-height:${token.media.height}px"` : '';
+					return `<div class="internal-embed office-embed-box">`
+						+ `<div class="embed-title"><a class="internal-link" href="#" data-href="${escapeAttr(token.full)}">${alt}</a></div>`
+						+ `<a class="internal-link office-embed-thumb" href="#" data-href="${escapeAttr(token.full)}"`
+						+ ` data-office-path="${escapeAttr(token.media.rel)}"${style}></a></div>\n`;
 				}
 				case 'canvas':
 					// A live, read-only canvas view — the preview client fetches

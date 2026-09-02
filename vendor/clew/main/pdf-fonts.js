@@ -30,6 +30,7 @@ import { app } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import MANIFEST from '../shared/pdf-fonts.json' with { type: 'json' };
+import { writeFileAtomic } from './fs-utils.js';
 
 const CDN = 'https://cdn.jsdelivr.net/npm';
 
@@ -70,8 +71,8 @@ export function status() {
 /**
  * Fetch whatever is missing. Safe to call again: files already on disk are
  * skipped, so an interrupted download resumes rather than starting over.
- * Each file lands under a .part name and is renamed only once complete, so a
- * kill mid-write can never leave a truncated font that looks installed.
+ * Each file lands atomically (temp + rename), so a kill mid-write can never
+ * leave a truncated font that looks installed.
  */
 export async function download() {
 	if (progress) return status();
@@ -92,10 +93,7 @@ export async function download() {
 				if (!response.ok) throw new Error(`HTTP ${response.status}`);
 				const bytes = Buffer.from(await response.arrayBuffer());
 				fs.mkdirSync(packDir(pack.id), { recursive: true });
-				const target = fileFor(pack, font);
-				const temp = `${target}.part`;
-				fs.writeFileSync(temp, bytes);
-				fs.renameSync(temp, target);
+				writeFileAtomic(fileFor(pack, font), bytes);
 			} catch (err) {
 				console.warn(`[clew] PDF font download failed (${font.file}):`, err?.message ?? err);
 				progress.failed.push(font.file);

@@ -33,6 +33,8 @@ import { citationCompletions } from './complete/citations.js';
 import { jmdOverlay } from './jmd/overlay.js';
 import { jmdFolding } from './jmd/folding.js';
 import { tableKeymap } from './tables.js';
+import { autoFillHandler } from './fill.js';
+import { settingsStore } from '../state/settings-store.js';
 
 /**
  * Build an EditorState for a note. `handlerRef` is a mutable `{fn}` box the
@@ -65,6 +67,12 @@ export function makeNoteState(doc, handlerRef) {
 			autocompletion({ override: [wikilinkCompletions, tagCompletions, citationCompletions] }),
 			wikilinkClick(),
 			attachments(),
+			// Reads the settings per keystroke: the toggle applies live and
+			// cached EditorStates (pool undo cache) need no rebuild.
+			autoFillHandler(() => ({
+				enabled: settingsStore.get('autoFill') === true,
+				column: settingsStore.get('fillColumn') ?? 72,
+			})),
 			search({ top: true }),
 			// Before the general keymap: Tab has to reach a table before
 			// indentWithTab claims it. Every handler declines when the cursor

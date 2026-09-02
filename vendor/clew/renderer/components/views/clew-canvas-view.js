@@ -24,7 +24,7 @@ import { vaultStore, isNotePath } from '../../state/vault-store.js';
 import { settingsStore } from '../../state/settings-store.js';
 import { ipc, CH } from '../../ipc.js';
 import { debounce } from '../../lib/debounce.js';
-import { isViewablePath } from '../../lib/file-types.js';
+import { isViewablePath, fileKind } from '../../lib/file-types.js';
 import { openExternal } from '../../lib/external-links.js';
 import * as actions from '../../commands/actions.js';
 import * as model from '../../canvas/canvas-model.js';
@@ -103,6 +103,20 @@ class ClewCanvasView extends ClewElement {
 		});
 		this.listen({ on: ipc.on }, CH.EV_FILE_CHANGED, ({ path }) => {
 			if (path === this.path) this.#externalChange();
+			// Office THUMBNAIL nodes go stale when their document changes on
+			// disk: drop the content element and let the sync rebuild it (the
+			// thumbnailer re-renders off the new mtime). Live nodes are left
+			// alone — a booted editor is not rebooted from under the user.
+			let staleThumbs = false;
+			for (const node of this.#doc?.nodes ?? []) {
+				if (node.type === 'file' && node.file === path
+					&& fileKind(node.file) === 'office'
+					&& this.#doc.nodeStyles[node.id]?.office !== 'live') {
+					this.#removeNodeEl(node.id);
+					staleThumbs = true;
+				}
+			}
+			if (staleThumbs) this.#syncNodes();
 			// Note embeds on this canvas may contain ![[X.canvas]] embeds,
 			// and portal nodes show other canvases directly.
 			if (path.toLowerCase().endsWith('.canvas')) {
@@ -582,7 +596,8 @@ class ClewCanvasView extends ClewElement {
 		for (const node of ordered) {
 			seen.add(node.id);
 			let el = this.#nodeEls.get(node.id);
-			if (el && el.dataset.contentKey !== contentKey(node)) {
+			const key = contentKey(node, this.#doc.nodeStyles[node.id]);
+			if (el && el.dataset.contentKey !== key) {
 				this.#removeNodeEl(node.id);
 				el = null;
 			}
@@ -590,8 +605,8 @@ class ClewCanvasView extends ClewElement {
 				el = document.createElement('div');
 				el.className = `canvas-node canvas-node-${node.type}`;
 				el.dataset.id = node.id;
-				el.dataset.contentKey = contentKey(node);
-				el.append(buildNodeContent(node, { register: this.#registerEmbed }));
+				el.dataset.contentKey = key;
+				el.append(buildNodeContent(node, { register: this.#registerEmbed }, this.#doc.nodeStyles[node.id]));
 				this.#nodeEls.set(node.id, el);
 			}
 			// Keep DOM order aligned with paint order.
@@ -2010,6 +2025,18 @@ class ClewCanvasView extends ClewElement {
 			items.push({ label: 'Enclose in frame', click: () => this.#frameSelection() });
 		}
 		const nstyle = this.#doc.nodeStyles[node.id] ?? {};
+		if (node.type === 'file' && fileKind(node.file ?? '') === 'office') {
+			// Thumbnail vs live editor. Live boots a LibreOffice PER NODE
+			// (~1.6 GB) — an explicit, per-node opt-in, stored under the clew
+			// key so Obsidian ignores it.
+			items.push(
+				{ separator: true },
+				{ choices: true, label: 'Office', current: nstyle.office ?? null, options: [
+					{ value: null, label: 'Thumb', title: 'static thumbnail (refreshes when the file changes)' },
+					{ value: 'live', label: 'Live', title: 'live LibreOffice editor (boots one per node, ~1.6 GB)' },
+				], onPick: (v) => this.#applyNodeStyle({ office: v }) },
+			);
+		}
 		if (node.type !== 'group') {
 			items.push(
 				{ separator: true },

@@ -1,0 +1,9 @@
+/* Web Awesome DESIGN TOKENS ONLY, bundled to one file for the preview
+ * documents (esbuild resolves the imports). Deliberately NOT the full
+ * webawesome.css: its native-styles layer repaints html/body (surface
+ * color, typography) — right for a page built on Web Awesome, wrong for
+ * components embedded in a Clew preview, where it showed up as dark
+ * margins on exactly the notes that carry widgets. Components style
+ * themselves in shadow DOM from these tokens; Clew's token overrides
+ * live in src/engine/preview.css, which loads after this. */
+@import '@awesome.me/webawesome/dist/styles/themes/default.css';

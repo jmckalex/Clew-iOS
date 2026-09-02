@@ -14,6 +14,7 @@ import { registerCommand, buildContext, allCommands, isEnabled, effectiveKeymap 
 import { openSearchPanel } from '@codemirror/search';
 import { registerFormatCommands, activeEditorView, needsEditor } from './format.js';
 import { formatTableAtCursor } from '../editor/tables.js';
+import { fillAtCursor } from '../editor/fill.js';
 import { blockRefEdit, blockRefLink } from '../editor/block-ids.js';
 import { openDiaryDay } from './diary.js';
 import { notice } from '../plugins.js';
@@ -26,6 +27,7 @@ import { bookmarkStore } from '../state/bookmark-store.js';
 import { editorPool } from '../editor/pool.js';
 import { openQuickSwitcher } from '../components/modals/clew-quick-switcher.js';
 import { openListModal } from '../components/modals/list-modal.js';
+import { openHistoryModal } from '../components/modals/clew-history-modal.js';
 import { ipc, CH } from '../ipc.js';
 
 const needsVault = (ctx) => ctx.vaultOpen;
@@ -126,6 +128,12 @@ export function registerBuiltinCommands() {
 				const view = activeEditorView();
 				if (view) formatTableAtCursor(view);
 			} },
+		{ id: 'editor:fill-paragraph', name: 'Fill paragraph (hard-wrap)', hotkeys: ['Alt-q'],
+			when: needsEditor,
+			run: () => {
+				const view = activeEditorView();
+				if (view) fillAtCursor(view, settingsStore.get('fillColumn') ?? 72);
+			} },
 		{ id: 'file:save', name: 'Save note', hotkeys: ['Mod-s'], when: needsNote,
 			run: (ctx) => editorPool.flush(ctx.activeTab.id) },
 		{ id: 'file:open-vault', name: 'Open another vault…',
@@ -134,6 +142,13 @@ export function registerBuiltinCommands() {
 			run: (ctx) => ipc.invoke(CH.FS_REVEAL, { path: ctx.notePath }) },
 		{ id: 'file:bookmark', name: 'Bookmark / unbookmark active note', when: needsNote,
 			run: (ctx) => bookmarkStore.toggle(ctx.notePath) },
+		// Flush first: the newest snapshot comparison and any restore should
+		// see the note as it is on screen, not as of the last auto-save.
+		{ id: 'file:history', name: 'View note history…', when: needsNote,
+			run: (ctx) => {
+				editorPool.flush(ctx.activeTab.id);
+				openHistoryModal(ctx.notePath);
+			} },
 
 		// navigation
 		{ id: 'nav:quick-switcher', name: 'Open quick switcher', hotkeys: ['Mod-o'], when: needsVault,

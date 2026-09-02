@@ -17,7 +17,7 @@ import path from 'node:path';
 import { extractNoteMetadata, extractDrawingMetadata } from '../shared/note-metadata.js';
 import { isExcalidrawPath } from '../shared/excalidraw-file.js';
 import { CH, NOTE_EXTENSIONS } from '../shared/channels.js';
-import { direntKind, shouldRecurse, walkGuard } from './fs-utils.js';
+import { direntKind, shouldRecurse, walkGuard, writeFileAtomic } from './fs-utils.js';
 
 const IGNORED_DIRS = new Set(['.obsidian', '.clew', '.git', 'node_modules', '.trash']);
 const CACHE_VERSION = 1;
@@ -202,7 +202,7 @@ export class Indexer {
 		this.#saveTimer = setTimeout(() => {
 			if (!this.root) return;
 			try {
-				fs.writeFileSync(this.#cacheFile(),
+				writeFileAtomic(this.#cacheFile(),
 					JSON.stringify({ version: CACHE_VERSION, ...this.snapshot() }));
 			} catch (err) {
 				console.error('Index cache save failed:', err);

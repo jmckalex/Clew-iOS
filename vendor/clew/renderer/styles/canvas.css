@@ -115,13 +115,34 @@
 	display: flex;
 	flex-direction: column;
 }
-.canvas-note-frame, .canvas-pdf-frame, .canvas-excalidraw-frame, .canvas-webview {
+.canvas-note-frame, .canvas-pdf-frame, .canvas-excalidraw-frame, .canvas-office-frame, .canvas-webview {
 	flex: 1;
 	width: 100%;
 	border: none;
 	background: var(--clew-bg-primary);
 }
-.canvas-webview { background: #fff; }
+.canvas-webview, .canvas-office-frame { background: #fff; }
+.canvas-office-thumb {
+	flex: 1;
+	min-height: 0;
+	overflow: hidden;
+	display: flex;
+	align-items: flex-start;
+	justify-content: center;
+}
+.canvas-office-thumb img {
+	width: 100%;
+	object-fit: cover;
+	object-position: top;
+	display: block;
+}
+.canvas-office-missing {
+	align-self: center;
+	padding: 14px;
+	font-size: 12px;
+	color: var(--clew-text-muted);
+	text-align: center;
+}
 .canvas-image {
 	width: 100%;
 	height: 100%;
@@ -503,31 +524,51 @@
 .canvas-text a[href^='http'] { color: var(--clew-link); cursor: pointer; }
 .canvas-text img.internal-media { max-width: 100%; border-radius: 4px; }
 .canvas-text .equation { text-align: center; margin: 0.4em 0; }
-.canvas-text mjx-container { color: var(--clew-text-primary); }
+.canvas-text mjx-container { color: var(--clew-text-normal); }
 .canvas-text table { border-collapse: collapse; margin: 0 0 0.55em; }
 .canvas-text th, .canvas-text td { border: 1px solid var(--clew-border); padding: 2px 8px; }
 
-/* GFM alerts (same palette as preview.css, compact) */
-.canvas-text .markdown-alert {
-	color: var(--clew-text-primary);
-	border-left: 3px solid;
-	border-radius: 0 6px 6px 0;
-	padding: 6px 10px;
+/* Callouts (src/engine/callouts.js — it renders GFM alerts too, so the
+   wrapper carries both class families; these are the compact card cousins
+   of preview.css's rules, same palette). */
+.canvas-text .callout {
+	--callout: #6b7785;
 	margin: 0 0 0.55em;
+	padding: 6px 10px;
+	border-left: 3px solid var(--callout);
+	border-radius: 0 6px 6px 0;
+	background: color-mix(in srgb, var(--callout) 12%, transparent);
+	color: var(--clew-text-normal);
 }
-.canvas-text .markdown-alert p { margin: 0; }
-.canvas-text .markdown-alert .markdown-alert-title { font-weight: 600; display: flex; gap: 6px; align-items: center; }
-.canvas-text .markdown-alert svg.octicon { fill: currentColor; }
-.canvas-text .markdown-alert-note { background: rgba(68, 147, 248, 0.12); border-color: #4493f8; }
-.canvas-text .markdown-alert-note .markdown-alert-title { color: #4493f8; }
-.canvas-text .markdown-alert-tip { background: rgba(63, 185, 80, 0.12); border-color: #3fb950; }
-.canvas-text .markdown-alert-tip .markdown-alert-title { color: #3fb950; }
-.canvas-text .markdown-alert-warning { background: rgba(210, 153, 34, 0.12); border-color: #d29922; }
-.canvas-text .markdown-alert-warning .markdown-alert-title { color: #d29922; }
-.canvas-text .markdown-alert-important { background: rgba(248, 81, 73, 0.12); border-color: #f85149; }
-.canvas-text .markdown-alert-important .markdown-alert-title { color: #f85149; }
-.canvas-text .markdown-alert-caution { background: rgba(248, 81, 73, 0.12); border-color: #f85149; }
-.canvas-text .markdown-alert-caution .markdown-alert-title { color: #f85149; }
+.canvas-text .callout-title {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin: 0;
+	font-weight: 600;
+	color: var(--callout);
+}
+.canvas-text .callout-icon { width: 1em; height: 1em; flex: none; fill: currentColor; }
+.canvas-text .callout-content { margin-top: 4px; }
+.canvas-text .callout-content > :last-child { margin-bottom: 0; }
+.canvas-text .callout-content:empty { display: none; }
+.canvas-text details.callout > summary { cursor: pointer; list-style: none; }
+.canvas-text details.callout > summary::-webkit-details-marker { display: none; }
+.canvas-text .callout[data-callout='note']          { --callout: #5b8def; }
+.canvas-text .callout[data-callout='abstract']      { --callout: #00b8a3; }
+.canvas-text .callout[data-callout='info']          { --callout: #3b9dd8; }
+.canvas-text .callout[data-callout='todo']          { --callout: #3b9dd8; }
+.canvas-text .callout[data-callout='tip']           { --callout: #00b8a3; }
+.canvas-text .callout[data-callout='success']       { --callout: #3fb950; }
+.canvas-text .callout[data-callout='question']      { --callout: #d9a441; }
+.canvas-text .callout[data-callout='warning']       { --callout: #e08c3c; }
+.canvas-text .callout[data-callout='failure']       { --callout: #e5534b; }
+.canvas-text .callout[data-callout='danger']        { --callout: #e5534b; }
+.canvas-text .callout[data-callout='bug']           { --callout: #e5534b; }
+.canvas-text .callout[data-callout='example']       { --callout: #a371f7; }
+.canvas-text .callout[data-callout='quote']         { --callout: #8b949e; }
+.canvas-text .callout[data-callout='important']     { --callout: #a371f7; }
+.canvas-text .callout[data-callout='caution']       { --callout: #e5534b; }
 
 /* ---- style bar (stroke / sloppiness / fill / opacity / text font) -------- */
 .canvas-stylebar {

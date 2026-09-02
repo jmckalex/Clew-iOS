@@ -53,6 +53,17 @@ export function excalidrawUrl(path) {
 		+ `?src=${encodeURIComponent(vaultFileUrl(path))}&path=${encodeURIComponent(path)}`;
 }
 
+/**
+ * The ZetaOffice (LibreOffice wasm) viewer page, wrapping an office
+ * document. Same shape as excalidrawUrl: the page is an ASSET, the
+ * document a vault path — src is fetched as bytes, path names the
+ * save-back target.
+ */
+export function zetaOfficeUrl(path) {
+	return 'clew-preview://vault/__clew_assets__/clewzeta/zeta-page.html'
+		+ `?src=${encodeURIComponent(vaultFileUrl(path))}&path=${encodeURIComponent(path)}`;
+}
+
 /** Engine fragment-render endpoint (canvas cards; POST markdown → HTML). */
 export function fragmentUrl() {
 	return `clew-preview://vault/${sessionId}/__clew_fragment__`;

@@ -17,6 +17,7 @@ import { createTab } from '../../workspace/tree.js';
 import { startTabDrag } from '../../workspace/tab-drag.js';
 import { showMenu } from '../chrome/menu.js';
 import { icon } from '../../lib/icons.js';
+import { officeDock } from '../../office-dock.js';
 
 export function tabTitle(tab) {
 	if (tab.kind === 'note' && tab.path) {
@@ -41,6 +42,12 @@ class ClewTabBar extends ClewElement {
 		this.listen(editorPool, 'dirty-changed', ({ tabId, dirty }) => {
 			this.querySelector(`.tab[data-tab-id="${tabId}"]`)
 				?.classList.toggle('is-dirty', dirty);
+		});
+		// Office tabs dirty the same dot: LibreOffice edits are NOT
+		// auto-saved, so the dot is real information there, not decoration.
+		this.listen(officeDock, 'dirty-changed', ({ tabId }) => {
+			this.querySelector(`.tab[data-tab-id="${tabId}"]`)
+				?.classList.toggle('is-dirty', officeDock.isDirty(tabId));
 		});
 	}
 
@@ -87,7 +94,7 @@ class ClewTabBar extends ClewElement {
 		el.dataset.tabId = tab.id;
 		el.classList.toggle('is-active', isActive);
 		el.classList.toggle('is-pinned', !!tab.pinned);
-		el.classList.toggle('is-dirty', editorPool.isDirty(tab.id));
+		el.classList.toggle('is-dirty', editorPool.isDirty(tab.id) || officeDock.isDirty(tab.id));
 
 		const title = document.createElement('span');
 		title.className = 'tab-title';

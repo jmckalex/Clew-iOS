@@ -34,9 +34,13 @@ rendered; **⌘O** finds any note; **⌘P** lists every command.
   backgrounds
 - [[Charts]] — bar, line and pie charts from a fenced block of YAML,
   or from a dataviewjs script
+- [[Widgets]] — live controls in rendered notes: toggles, sliders,
+  star ratings and more, bound to a note's properties — or to its text
+- [[Dashboards]] — queries, widgets and charts combined into live
+  views of the vault, with a worked essay-marking recipe
 - [[Obsidian Compatibility]] — what an Obsidian vault gets here:
-  Dataview, Bases, boards, tasks, admonitions, live widgets — and
-  where the line is drawn
+  Dataview, Bases, boards, tasks, admonitions, widgets — and where the
+  line is drawn
 - [[Search]] — full-text search and its operators
 - [[Graph View]] — the vault as a graph
 - [[Daily Notes and Templates]] — the diary calendar, per-day or

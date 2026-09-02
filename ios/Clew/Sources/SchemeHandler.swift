@@ -124,7 +124,12 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 
 		if rel.hasPrefix("__clew_preview__/") {
 			guard let webRoot = webRootURL else { return fail(task, "WebRoot missing") }
-			let file = rel.hasSuffix("/api.js") ? "api.js" : "client.js"
+			// A closed set, as upstream's protocol.js: nothing else under
+			// dist/preview-client is servable here. wa.{js,css} are the Web
+			// Awesome widgets, fetched lazily by meta-bind.js.
+			let known: Set<String> = ["api.js", "client.js", "wa.js", "wa.css"]
+			let name = rel.split(separator: "/").last.map(String.init) ?? ""
+			let file = known.contains(name) ? name : "client.js"
 			return respondFile(task, fileURL: webRoot.appendingPathComponent("preview-client/\(file)"), rangeHeader: nil)
 		}
 

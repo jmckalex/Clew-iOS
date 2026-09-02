@@ -184,11 +184,23 @@ class ClewApp extends ClewElement {
 				<h1>Clew</h1>
 				<p class="welcome-tagline">A thread through your notes.</p>
 				<button class="welcome-open">Open vault…</button>
+				<div class="welcome-actions">
+					<button class="welcome-create">Create new vault…</button>
+					<button class="welcome-demo">Explore the demo vault</button>
+				</div>
+				<p class="welcome-hint">New here? The demo vault is the guided
+				tour — every feature, documented in notes you can edit.</p>
 				<div class="welcome-recent"></div>
 			</div>
 		`;
 		this.querySelector('.welcome-open').addEventListener('click', () => {
 			ipc.invoke(CH.VAULT_OPEN_DIALOG).catch((err) => console.error(err));
+		});
+		this.querySelector('.welcome-create').addEventListener('click', () => {
+			ipc.invoke(CH.VAULT_CREATE_DIALOG).catch((err) => console.error(err));
+		});
+		this.querySelector('.welcome-demo').addEventListener('click', () => {
+			ipc.invoke(CH.VAULT_OPEN_DEMO).catch((err) => console.error(err));
 		});
 
 		const recent = await ipc.invoke(CH.VAULT_RECENT).catch(() => []);

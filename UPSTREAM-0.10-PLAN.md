@@ -110,7 +110,10 @@ tab and does nothing.
 | Note history UI | `clew-history-modal.js`, builtin command, settings toggle, panels.css | none — rides the vendor drop onto Arc A's channels |
 | Atomic writes in vendored modules | indexer cache, kv-store, rename-links now call `writeFileAtomic` | **fd-based fs shim** (`openSync`/`writeSync`/`fsyncSync`/`closeSync`/`fchmodSync`), `Buffer` injected into the app bundle, and VaultManager collapsing temp-write + rename-over-target into one bridge write (Swift is already atomic) — see §2.2 |
 | First-run | welcome-screen Create/Demo buttons, `VAULT_CREATE_DIALOG`/`VAULT_OPEN_DEMO` | two handlers: create = mkdir in Documents, demo = the seeded vault (Swift already seeds it) |
+| Meta Bind widgets are Web Awesome | `29e3a3b` + `8e2fe7d` + `8317184`: engine emits `wa-*` elements, `preview-client/wa-bundle.js` + `wa-styles.css` build to `wa.{js,css}`, fetched lazily from `/__clew_preview__/` by `meta-bind.js`; new npm dep `@awesome.me/webawesome` | **new dep + two preview bundles** in build.js; SchemeHandler's `__clew_preview__/` route becomes the same closed set (api, client, wa.js, wa.css) |
 | Editor fill-paragraph / auto-fill | `editor/fill.js`, settings, registry | none (vendored); port `fill.test.js` |
+| Engine: MetaPost labels as glyph paths, libgs detection | `dfec137`, jmarkdown `config-manager.js` + `metapost.js` | none (desktop-cached SVGs in the seed vault re-hashed; TikZ/MetaPost still cannot run here) |
+| `openWikilink`: a URL is not a note name | `9be1252` | none (vendored) |
 | Explorer folders anchor hierarchy, demo content, canvas-cards trap fix | renderer + demo-vault | none (vendored + seed) |
 | Engine re-sync | jmarkdown at `at-migration@748bd70` | watch the duplicate-key esbuild warning; re-run engine tests |
 | `smoke/` committed | desktop scenarios | not copied; mined for iOS smoke ideas |

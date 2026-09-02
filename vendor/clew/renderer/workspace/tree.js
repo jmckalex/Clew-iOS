@@ -22,6 +22,13 @@ const nextId = (prefix) => `${prefix}${idCounter++}`;
 
 const HISTORY_LIMIT = 50;
 
+// Office documents get one-tab-per-document treatment in openPath; the
+// extension list is file-types' (the single definition), imported here so
+// the layout model and the viewer can never disagree about what counts.
+import { OFFICE_EXT } from '../lib/file-types.js';
+const isOfficePath = (path, kind) => kind === 'file'
+	&& OFFICE_EXT.some((ext) => String(path ?? '').toLowerCase().endsWith(ext));
+
 export function createTab(kind, path = null) {
 	return {
 		id: nextId('t'),
@@ -124,15 +131,28 @@ export function openCanvasFile(state, path, opts = {}) {
 
 function openPath(state, path, kind, { newTab = false, defaultMode = null } = {}) {
 	const group = activeGroup(state);
-	const existing = group.tabs.find((t) => t.kind === kind && t.path === path);
+	// An office document lives in its own tab, workspace-wide — like a canvas
+	// tab it never navigates and is never navigated into, because behind it
+	// stands ONE booted LibreOffice whose teardown must only ever go through
+	// the close guard (unsaved edits get their prompt; nothing 1.6 GB dies as
+	// a side effect of clicking a note). Reuse is app-wide, not per-group:
+	// the same document twice would just be a "one office tab" notice.
+	const office = isOfficePath(path, kind);
+	const existing = office
+		? allGroups(state.root).flatMap((g) => g.tabs).find((t) => t.kind === kind && t.path === path)
+		: group.tabs.find((t) => t.kind === kind && t.path === path);
 	if (existing) {
-		group.activeTabId = existing.id;
-		state.activeGroupId = group.id;
+		const home = findTab(state.root, existing.id).group;
+		home.activeTabId = existing.id;
+		state.activeGroupId = home.id;
 		return existing;
 	}
 	const current = activeTab(state);
-	// A pinned tab never navigates away from its path.
-	if (!newTab && (current?.kind === 'note' || current?.kind === 'file') && !current.pinned) {
+	// A pinned tab never navigates away from its path; office tabs neither
+	// navigate nor get navigated over (see above).
+	if (!newTab && !office && (current?.kind === 'note'
+			|| (current?.kind === 'file' && !isOfficePath(current.path, 'file')))
+		&& !current.pinned) {
 		navigateTab(state, current.id, path, kind);
 		return current;
 	}
@@ -243,6 +263,12 @@ export function splitWithClone(state, targetGroupId, edge, tabId) {
 	const found = findTab(state.root, tabId);
 	if (!found) return null;
 	const source = found.tab;
+	// An office document is a singleton (one LibreOffice behind it) — a
+	// clone could only ever show the "one at a time" notice, so the split
+	// MOVES the tab instead.
+	if (isOfficePath(source.path, source.kind)) {
+		return splitWithTab(state, targetGroupId, edge, tabId);
+	}
 	const clone = createTab(source.kind, source.path);
 	clone.view = { ...clone.view, mode: source.view?.mode ?? clone.view.mode };
 	const newGroup = splitGroup(state, targetGroupId, edge, clone);

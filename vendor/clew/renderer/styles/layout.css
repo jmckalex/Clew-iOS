@@ -279,6 +279,25 @@ clew-tab-group[data-drop='bottom'] .drop-overlay { inset: 50% 0 0 0; }
 	font-size: 14px;
 }
 .welcome-open:hover { background: var(--clew-accent-hover); }
+.welcome-actions { display: flex; gap: 8px; }
+.welcome-create,
+.welcome-demo {
+	background: var(--clew-bg-tertiary);
+	color: var(--clew-text-normal);
+	border: 1px solid var(--clew-border);
+	padding: 6px 14px;
+	border-radius: 8px;
+	font-size: 13px;
+}
+.welcome-create:hover,
+.welcome-demo:hover { background: var(--clew-hover); border-color: var(--clew-accent); }
+.welcome-hint {
+	color: var(--clew-text-faint);
+	font-size: 12px;
+	margin: 2px 0 0;
+	max-width: 380px;
+	text-align: center;
+}
 .welcome-recent {
 	display: flex;
 	flex-direction: column;
@@ -319,7 +338,80 @@ clew-status-bar {
 .file-view img { max-width: 95%; max-height: 95%; object-fit: contain; }
 .file-view .pdf-frame { width: 100%; height: 100%; border: none; align-self: stretch; }
 .file-view .excalidraw-frame { width: 100%; height: 100%; border: none; align-self: stretch; }
+.file-view .office-frame { width: 100%; height: 100%; border: none; align-self: stretch; }
 .file-view video { max-width: 95%; max-height: 95%; }
+
+/* ---- office dock ----
+   The LibreOffice iframe lives in this fixed overlay (owned by
+   office-dock.js), tracked to the .office-host rectangle of the visible
+   office tab — reparenting an iframe reloads it, so it must never live in
+   the tab body a tab switch replaceChildren()s. Below every popover layer
+   (menus and modals use 100+/1000). */
+.office-dock {
+	position: fixed;
+	z-index: 60;
+	display: flex;
+	flex-direction: column;
+	background: var(--clew-bg-primary);
+}
+.office-dock .office-frame { flex: 1; width: 100%; border: none; min-height: 0; }
+/* Tab-drag hit-testing uses elementFromPoint: get out of the way, and show
+   the drop regions through. */
+body.is-tab-dragging .office-dock { pointer-events: none; opacity: 0.35; }
+.file-view .office-host { width: 100%; height: 100%; align-self: stretch; }
+
+.office-download {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 10px;
+	max-width: 46em;
+	margin: 0 auto;
+	font-size: 13.5px;
+}
+.office-download button {
+	font-size: 13px;
+	border: 1px solid var(--clew-border);
+	border-radius: 6px;
+	padding: 6px 14px;
+	color: var(--clew-text-normal);
+}
+.office-download button:hover { background: var(--clew-hover); }
+.office-download .office-download-detail { color: var(--clew-text-muted); font-size: 12.5px; }
+
+/* The desktop-LibreOffice rung: convert-to-PDF preview + open externally. */
+.office-fallback { display: flex; gap: 8px; align-items: center; justify-content: center; margin-top: 10px; flex-wrap: wrap; }
+.office-fallback button {
+	font-size: 12.5px;
+	border: 1px solid var(--clew-border);
+	border-radius: 6px;
+	padding: 5px 12px;
+	color: var(--clew-text-normal);
+}
+.office-fallback button:hover { background: var(--clew-hover); }
+.office-fallback-error { flex-basis: 100%; color: var(--clew-danger); font-size: 12px; }
+.office-pdf-preview { display: flex; flex-direction: column; width: 100%; height: 100%; align-self: stretch; min-height: 0; }
+.office-preview-banner {
+	flex: none;
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 6px 14px;
+	background: var(--clew-bg-secondary);
+	border-bottom: 1px solid var(--clew-border);
+	font-size: 12px;
+	color: var(--clew-text-muted);
+}
+.office-preview-banner span { flex: 1; }
+.office-preview-banner button {
+	font-size: 12px;
+	border: 1px solid var(--clew-border);
+	border-radius: 5px;
+	padding: 2px 10px;
+	color: var(--clew-text-normal);
+}
+.office-preview-banner button:hover { background: var(--clew-hover); }
+.office-pdf-preview .pdf-frame { flex: 1; min-height: 0; }
 
 /* ---- external-change conflict banner ---- */
 .editor-host { flex-direction: column; }

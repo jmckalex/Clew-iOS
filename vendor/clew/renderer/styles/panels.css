@@ -75,7 +75,7 @@ clew-file-explorer {
 	outline-offset: -1px;
 }
 .file-tree.drop-into-root { background: var(--clew-selection); border-radius: 6px; }
-.tree-item.is-folder { color: var(--clew-text-muted); font-weight: 500; }
+.tree-item.is-folder { color: var(--clew-text-normal); font-weight: 600; }
 .tree-chevron {
 	flex: none;
 	width: 12px;
@@ -298,6 +298,58 @@ clew-search-panel .search-results { flex: 1; }
 	border-top: 1px solid var(--clew-border);
 	text-align: right;
 }
+
+/* Note history browser (clew-history-modal.js) */
+.history-box { width: min(840px, 92vw); height: min(560px, 80vh); }
+.history-title {
+	padding: 12px 14px;
+	font-size: 14px;
+	font-weight: 600;
+	color: var(--clew-text-normal);
+	border-bottom: 1px solid var(--clew-border);
+}
+.history-body { display: flex; flex: 1; min-height: 0; }
+.history-versions {
+	width: 250px;
+	flex-shrink: 0;
+	overflow-y: auto;
+	padding: 6px;
+	border-right: 1px solid var(--clew-border);
+}
+/* Two lines per version: the full timestamp above, age + size below. */
+.history-versions .modal-result { flex-direction: column; align-items: stretch; gap: 1px; }
+.history-versions .result-label { font-size: 12.5px; }
+.history-versions .result-hint { font-size: 11px; color: var(--clew-text-faint); }
+.history-preview {
+	flex: 1;
+	margin: 0;
+	padding: 12px 14px;
+	overflow: auto;
+	font-size: 12.5px;
+	line-height: 1.5;
+	color: var(--clew-text-normal);
+	white-space: pre-wrap;
+	word-break: break-word;
+}
+.history-footer {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px;
+	padding: 10px 14px;
+	border-top: 1px solid var(--clew-border);
+}
+.history-hint { font-size: 11.5px; color: var(--clew-text-faint); }
+.history-restore {
+	font-size: 12px;
+	color: var(--clew-text-normal);
+	background: var(--clew-bg-tertiary);
+	border: 1px solid var(--clew-border);
+	border-radius: 5px;
+	padding: 4px 12px;
+}
+.history-restore:hover:not(:disabled) { background: var(--clew-hover); border-color: var(--clew-accent); }
+.history-restore:disabled { opacity: 0.4; cursor: default; }
 
 /* ---- context menu ---- */
 .clew-menu {

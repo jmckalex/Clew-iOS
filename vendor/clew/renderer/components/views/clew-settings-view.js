@@ -57,6 +57,8 @@ class ClewSettingsView extends ClewElement {
 					[['new-tab', 'In a new tab'], ['replace', 'In the current tab (Obsidian-style)']]),
 				this.#numberRow('Editor font size (px)', 'editorFontSize', 16, 10, 28),
 				this.#numberRow('Editor line width (em)', 'editorLineWidth', 44, 20, 120),
+				this.#numberRow('Fill column (hard-wrap)', 'fillColumn', 72, 40, 120),
+				this.#checkRow('Auto-fill while typing', 'autoFill'),
 			]),
 			this.#section('Diary', [
 				this.#selectRow('Mode', 'diaryMode',
@@ -67,6 +69,7 @@ class ClewSettingsView extends ClewElement {
 				this.#textRow('Template note (optional)', 'dailyNoteTemplate', ''),
 			]),
 			this.#section('PDF viewer', [...this.#cjkFontRow()]),
+			this.#section('Office documents', [...this.#officeEngineRow()]),
 			this.#section('Files', [
 				this.#textRow('Attachment folder', 'attachmentFolder', 'Attachments'),
 				this.#textRow('Templates folder', 'templatesFolder', 'Templates'),
@@ -102,6 +105,15 @@ class ClewSettingsView extends ClewElement {
 				+ 'state in clewdata.json (which travels with the vault). Notes are code '
 				+ 'with this on — enable it only for vaults you trust. See the Note API '
 				+ 'guide note.'),
+			...this.#vaultToggle('history',
+				'Note history: keep snapshots of notes as they change',
+				'Before a save displaces an existing note (or canvas), the old text '
+				+ 'is copied into .clew/history/ — at most one snapshot per five '
+				+ 'minutes of editing, capped per note at 40 versions and 60 days '
+				+ '(the newest always survives). Browse and restore with "View note '
+				+ 'history…" in the palette or the File menu; the snapshots are '
+				+ 'plain files you could also recover by hand.',
+				{ defaultOn: true }),
 		);
 		section.append(
 			...this.#vaultTextRow('bibliography',
@@ -236,7 +248,7 @@ class ClewSettingsView extends ClewElement {
 		return [row, hint];
 	}
 
-	#vaultToggle(key, label, hintText) {
+	#vaultToggle(key, label, hintText, { defaultOn = false } = {}) {
 		const box = document.createElement('input');
 		box.type = 'checkbox';
 		box.disabled = true;
@@ -245,7 +257,9 @@ class ClewSettingsView extends ClewElement {
 		hint.className = 'settings-hint';
 		hint.textContent = hintText;
 		ipc.invoke(CH.VAULT_SETTINGS_GET).then((vaultSettings) => {
-			box.checked = vaultSettings?.[key] === true;
+			box.checked = defaultOn
+				? vaultSettings?.[key] !== false
+				: vaultSettings?.[key] === true;
 			box.disabled = false;
 		}).catch(() => {});
 		box.addEventListener('change', () => {
@@ -334,6 +348,63 @@ class ClewSettingsView extends ClewElement {
 		return [this.#row('Chinese, Japanese and Korean fonts', button), hint];
 	}
 
+	/**
+	 * The LibreOffice engine download — the same shape as the CJK fonts:
+	 * off the installer, fetched once by explicit choice, removable. The
+	 * pin-verification story lives in src/main/zeta-assets.js.
+	 */
+	#officeEngineRow() {
+		const button = document.createElement('button');
+		const hint = document.createElement('p');
+		hint.className = 'settings-hint';
+
+		const EXPLAIN = 'Word, Excel and PowerPoint documents open and edit in tabs using '
+			+ 'LibreOffice (ZetaOffice), downloaded once and verified against pinned '
+			+ 'checksums — nothing is fetched while you work.';
+		const mb = (bytes) => `${Math.round((bytes ?? 0) / 1048576)} MB`;
+		let polling = null;
+
+		const paint = (status) => {
+			if (status.downloading) {
+				const p = status.progress ?? {};
+				button.textContent = 'Downloading…';
+				button.disabled = true;
+				hint.textContent = `Downloading ${p.file ?? ''} — ${mb(p.received)}`
+					+ `${p.expected ? ` of ${mb(p.expected)}` : ''} (file ${Math.min(p.done + 1, p.total)} of ${p.total}). `
+					+ 'You can leave this screen; it continues in the background.';
+			} else if (status.installed) {
+				button.textContent = status.managed ? 'Remove' : 'Installed';
+				button.disabled = !status.managed; // dev tree: hand-installed
+				hint.textContent = `Installed (${mb(status.bytesOnDisk)} on disk). ` + EXPLAIN;
+			} else {
+				button.textContent = `Download (${mb(status.wireBytes)})`;
+				button.disabled = false;
+				hint.textContent = (status.lastError
+					? `The last download did not finish: ${status.lastError} `
+					: 'Not downloaded — office documents show a download offer when opened. ') + EXPLAIN;
+			}
+			if (status.downloading && !polling) polling = setInterval(refresh, 700);
+			if (!status.downloading && polling) { clearInterval(polling); polling = null; }
+		};
+
+		const refresh = () => ipc.invoke(CH.OFFICE_ENGINE_STATUS).then(paint).catch(() => {});
+
+		button.addEventListener('click', async () => {
+			const status = await ipc.invoke(CH.OFFICE_ENGINE_STATUS);
+			if (status.installed && status.managed) {
+				paint(await ipc.invoke(CH.OFFICE_ENGINE_REMOVE));
+				return;
+			}
+			button.disabled = true;
+			button.textContent = 'Downloading…';
+			polling ??= setInterval(refresh, 700);
+			paint(await ipc.invoke(CH.OFFICE_ENGINE_DOWNLOAD));
+		});
+
+		refresh();
+		return [this.#row('LibreOffice engine', button), hint];
+	}
+
 	#row(label, control) {
 		const row = document.createElement('div');
 		row.className = 'settings-row';
@@ -368,6 +439,14 @@ class ClewSettingsView extends ClewElement {
 		});
 		input.addEventListener('keydown', (e) => e.stopPropagation());
 		return this.#row(label, input);
+	}
+
+	#checkRow(label, key) {
+		const box = document.createElement('input');
+		box.type = 'checkbox';
+		box.checked = settingsStore.get(key) === true;
+		box.addEventListener('change', () => settingsStore.set(key, box.checked));
+		return this.#row(label, box);
 	}
 
 	#selectRow(label, key, options) {

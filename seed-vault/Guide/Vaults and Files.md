@@ -40,4 +40,17 @@ changes on disk, a banner appears and auto-save pauses until you choose
 **Keep my version** or **Load disk version** — nothing is clobbered
 silently.
 
+## Note history
+
+Auto-save can never eat your paragraphs: before a save displaces an
+existing note (or canvas), the old text is snapshotted into
+`.clew/history/` — at most one version per five minutes of editing,
+pruned per note by count and age. Run **View note history…** from the
+palette (⌘P) or the File menu to browse the versions of the current
+note and restore one; the text a restore replaces is snapshotted first,
+so restores are reversible. The snapshots are plain files you could
+also recover by hand. Try it on this very note: make an edit, wait a
+moment, and open the history. (Per-vault switch and tuning:
+`history` in `.clew/vault-settings.json`.)
+
 See also: [[Attachments and Files]], [[Navigation]].

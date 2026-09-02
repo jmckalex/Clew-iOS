@@ -71,7 +71,9 @@ export const DEFAULT_CONFIG = {
 	},
 	"Optionals": [],
 	'Template': 'default',
-	'TiKZ libgs': '/opt/homebrew/Cellar/ghostscript/10.05.0_1/lib/libgs.10.05.dylib',
+	// The stable Homebrew symlink, not a versioned Cellar path — ghostscript
+	// upgrades rotate those out from under a hardcoded default.
+	'TiKZ libgs': '/opt/homebrew/opt/ghostscript/lib/libgs.dylib',
 	'TiKZ optimise': 'group-attributes,collapse-groups',
 	'Code language': 'text',
 	// How @video renders in LaTeX (src/media.js), since a PDF cannot play one:

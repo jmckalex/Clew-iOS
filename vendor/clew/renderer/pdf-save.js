@@ -25,6 +25,7 @@ import { ipc } from './ipc.js';
 import { CH } from '../shared/channels.js';
 import { isExcalidrawPath } from '../shared/excalidraw-file.js';
 import { vaultStore } from './state/vault-store.js';
+import { vaultFileUrl } from './lib/preview-url.js';
 
 /**
  * Excalidraw saves, app-page side. The editor runs in an iframe under
@@ -97,6 +98,50 @@ export function installExcalidrawResolveBridge() {
 		}
 		event.source?.postMessage(
 			{ source: 'clew-excalidraw-host', type: 'excalidraw-resolve-result', id: msg.id, paths }, '*');
+	});
+}
+
+/**
+ * ZetaOffice saves, app-page side. Like the PDF bridge: the viewer runs in
+ * an iframe under __clew_assets__, posts bytes here, and main-side
+ * vault.writeOffice refuses anything that is not an existing office
+ * document inside the vault.
+ */
+export function installOfficeSaveBridge() {
+	window.addEventListener('message', async (event) => {
+		const msg = event.data;
+		if (!msg || msg.source !== 'clew-zeta' || msg.type !== 'office-save') return;
+		const reply = (ok, error) => event.source?.postMessage(
+			{ source: 'clew-zeta-host', type: 'office-save-result', id: msg.id, ok, error }, '*');
+		try {
+			await ipc.invoke(CH.OFFICE_WRITE, { path: msg.path, bytes: msg.bytes });
+			reply(true);
+		} catch (err) {
+			console.warn('[clew] office save failed:', err);
+			reply(false, String(err?.message ?? err));
+		}
+	});
+}
+
+/**
+ * Office thumbnail requests, app-page side. Preview documents ask for the
+ * cached thumbnail of an office embed (rendering it on demand is main's
+ * job — an offscreen ZetaOffice, see main/office-thumbs.js); the reply
+ * carries a ready-to-use preview URL. Read-only and idempotent.
+ */
+export function installOfficeThumbBridge() {
+	window.addEventListener('message', async (event) => {
+		const msg = event.data;
+		if (!msg || msg.source !== 'clew-office-embed' || msg.type !== 'office-thumb') return;
+		const reply = (payload) => event.source?.postMessage(
+			{ source: 'clew-office-embed-host', id: msg.id, ...payload }, '*');
+		try {
+			const res = await ipc.invoke(CH.OFFICE_THUMBNAIL, { path: msg.path });
+			if (res?.ok) reply({ ok: true, url: `${vaultFileUrl(res.path)}?v=${res.stamp}` });
+			else reply({ ok: false, reason: res?.reason ?? 'unavailable' });
+		} catch (err) {
+			reply({ ok: false, reason: String(err?.message ?? err) });
+		}
 	});
 }
 

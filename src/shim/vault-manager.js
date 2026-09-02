@@ -23,6 +23,9 @@ import { isTextPath } from './engine-config.js';
 
 const IGNORED_DIRS = new Set(['.obsidian', '.clew', '.git', 'node_modules', '.trash']);
 
+/** Desktop's atomic-write temp beside its target: `.<basename>.clew-tmp`. */
+const isAtomicTemp = (rel) => /(^|\/)\.[^/]+\.clew-tmp$/.test(rel);
+
 export const VAULT_ROOT = '/vault';
 
 // Which files are text lives with the engine config — the Node harness needs
@@ -66,9 +69,15 @@ export class VaultManager {
 		// Persist mirror writes to the device vault. Only text files under
 		// /vault flow through here; render-worker output never does (separate
 		// bundle, separate vfs instance).
+		// Vendored modules (indexer, kv-store, rename-links) save through
+		// upstream's writeFileAtomic: a `.<name>.clew-tmp` beside the target,
+		// then a rename over it. The mirror sees both steps; the device sees
+		// ONE write of the target — Swift's AtomicFile already gives every
+		// bridge write exactly that shape, and a temp file must never leave
+		// the mirror (the walks that skip it are the point of the name).
 		vfs.onWrite = (abs, data) => {
 			const rel = this.#relOf(abs);
-			if (rel === null || typeof data !== 'string') return;
+			if (rel === null || typeof data !== 'string' || isAtomicTemp(rel)) return;
 			this.#enqueue(() => bridgeCall('write', { vault: this.realPath, rel, text: data }));
 		};
 		vfs.onMkdir = (abs) => {
@@ -78,7 +87,24 @@ export class VaultManager {
 		vfs.onRename = (fromAbs, toAbs) => {
 			const rel = this.#relOf(fromAbs);
 			const newRel = this.#relOf(toAbs);
-			if (rel && newRel) this.#enqueue(() => bridgeCall('rename', { vault: this.realPath, rel, newRel }));
+			if (!rel || !newRel) return;
+			if (isAtomicTemp(rel)) {
+				// The commit step of writeFileAtomic: the target now holds the
+				// bytes. Text files live in the mirror as strings — normalise
+				// so readers and the rescan diff see one representation.
+				const entry = vfs.files.get(toAbs);
+				if (entry && typeof entry.data !== 'string' && isTextPath(newRel)) {
+					entry.data = new TextDecoder().decode(entry.data);
+				}
+				if (typeof entry?.data !== 'string') {
+					console.error(`[clew-ios] atomic write of a non-text file is not supported: ${newRel}`);
+					return;
+				}
+				const text = entry.data;
+				this.#enqueue(() => bridgeCall('write', { vault: this.realPath, rel: newRel, text }));
+				return;
+			}
+			this.#enqueue(() => bridgeCall('rename', { vault: this.realPath, rel, newRel }));
 		};
 		vfs.onUtimes = (abs, mtimeMs) => {
 			const rel = this.#relOf(abs);

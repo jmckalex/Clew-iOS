@@ -72,6 +72,48 @@ export function utimesSync(p, atime, mtime) {
 	vfs.utimes(p, toMs(mtime));
 }
 
+// File descriptors, exactly as far as upstream's fs-utils.js#writeFileAtomic
+// uses them: open for writing, write chunks, fsync, close. The bytes reach
+// the vfs as ONE write on close, so a write-through hook sees a complete
+// file — the temp-then-rename dance above it is what makes desktop's save
+// atomic; here the mirror's own persistence (Swift's AtomicFile) already is.
+const fds = new Map(); // fd -> { path, chunks }
+let nextFd = 20;
+export function openSync(p, flags = 'r') {
+	if (!/^[wa]/.test(String(flags))) {
+		const err = new Error(`[clew-ios] fs.openSync supports write modes only (got '${flags}' for ${p})`);
+		err.code = 'EINVAL';
+		throw err;
+	}
+	const fd = nextFd++;
+	fds.set(fd, { path: p, chunks: String(flags).startsWith('a') && vfs.isFile(p) ? [BufferShim.view(vfs.read(p))] : [] });
+	return fd;
+}
+const openFd = (fd) => {
+	const entry = fds.get(fd);
+	if (!entry) {
+		const err = new Error(`EBADF: bad file descriptor, fd ${fd}`);
+		err.code = 'EBADF';
+		throw err;
+	}
+	return entry;
+};
+export function writeSync(fd, buffer, offset, length) {
+	const entry = openFd(fd);
+	if (typeof buffer === 'string') buffer = BufferShim.from(buffer);
+	const start = offset ?? 0;
+	const chunk = buffer.subarray(start, length == null ? undefined : start + length);
+	entry.chunks.push(Uint8Array.from(chunk));
+	return chunk.length;
+}
+export function fsyncSync() {}
+export function fchmodSync() {}
+export function closeSync(fd) {
+	const entry = openFd(fd);
+	fds.delete(fd);
+	vfs.write(entry.path, BufferShim.concat(entry.chunks));
+}
+
 export function accessSync(p) {
 	if (!vfs.has(p)) {
 		const err = new Error(`ENOENT: no such file or directory, access '${p}'`);
@@ -121,7 +163,8 @@ export const promises = fsPromises;
 export default {
 	readFileSync, writeFileSync, appendFileSync, existsSync, statSync, lstatSync,
 	mkdirSync, readdirSync, rmSync, rmdirSync, unlinkSync, copyFileSync,
-	renameSync, utimesSync, accessSync, realpathSync, Stats, readFile, writeFile, stat,
+	renameSync, utimesSync, openSync, writeSync, fsyncSync, fchmodSync, closeSync,
+	accessSync, realpathSync, Stats, readFile, writeFile, stat,
 	lstat, readdir, watch, watchFile, unwatchFile, createReadStream,
 	createWriteStream, constants, promises,
 };

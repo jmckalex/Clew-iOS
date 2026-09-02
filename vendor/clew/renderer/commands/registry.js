@@ -82,6 +82,15 @@ export function chordOf(event) {
 	if (event.altKey) parts.push('Alt');
 	if (event.shiftKey) parts.push('Shift');
 	let key = event.key;
+	// On mac, Option transforms the typed character (Alt-q is œ), which
+	// would make every bare Alt chord unmatchable — recover the base key
+	// from the physical code. QWERTY-positional for letters and digits,
+	// the trade every editor makes here, and only for chords actually
+	// bound: an unbound Option combination still types its character.
+	if (isMac && event.altKey) {
+		const m = /^(?:Key([A-Z])|Digit([0-9]))$/.exec(event.code);
+		if (m) key = m[1] ?? m[2];
+	}
 	if (key === ' ') key = 'Space';
 	if (key.length === 1) key = key.toLowerCase();
 	if (['Meta', 'Control', 'Alt', 'Shift'].includes(key)) return null;

@@ -13,7 +13,7 @@
 // its content interactive. Note embeds are live jmarkdown previews — the
 // canvas view drives their render subscription and postMessage traffic.
 import { fileKind } from '../lib/file-types.js';
-import { vaultFileUrl, pdfViewerUrl, excalidrawUrl } from '../lib/preview-url.js';
+import { vaultFileUrl, pdfViewerUrl, excalidrawUrl, zetaOfficeUrl } from '../lib/preview-url.js';
 import { isNotePath } from '../state/vault-store.js';
 import { previewUrl, fragmentUrl, previewOrigin } from '../lib/preview-url.js';
 import { renderCardHtml } from './card-markdown.js';
@@ -70,8 +70,10 @@ export function nodeTitle(node) {
 /**
  * Build the content element for a node. For note embeds, `embedHooks.register`
  * is called with (nodeId, iframe, path) so the view can wire live rendering.
+ * `nstyle` is the node's clew style extras (doc.nodeStyles[id]) — office
+ * nodes read their thumbnail-vs-live mode from it.
  */
-export function buildNodeContent(node, embedHooks) {
+export function buildNodeContent(node, embedHooks, nstyle) {
 	if (node.type === 'text') {
 		const el = document.createElement('div');
 		el.className = 'canvas-text';
@@ -197,6 +199,22 @@ export function buildNodeContent(node, embedHooks) {
 		iframe.allow = 'fullscreen';
 		iframe.src = pdfViewerUrl(url);
 		wrap.append(iframe, titleBar(node));
+	} else if (kind === 'office') {
+		// Office documents: a cached static thumbnail by default; the node's
+		// context menu can flip it to a LIVE LibreOffice (nstyle.office ===
+		// 'live') — the user's explicit opt-in to a booted editor per node.
+		if (nstyle?.office === 'live') {
+			const iframe = document.createElement('iframe');
+			iframe.className = 'canvas-office-frame';
+			iframe.allow = 'clipboard-read; clipboard-write';
+			iframe.src = zetaOfficeUrl(path);
+			wrap.append(iframe, titleBar(node));
+		} else {
+			const holder = document.createElement('div');
+			holder.className = 'canvas-office-thumb';
+			fillOfficeThumb(holder, path);
+			wrap.append(holder, titleBar(node));
+		}
 	} else if (kind === 'audio') {
 		const audio = document.createElement('audio');
 		audio.controls = true;
@@ -224,8 +242,37 @@ function titleBar(node) {
 }
 
 /** A stable content identity — when this changes, content must be rebuilt. */
-export function contentKey(node) {
-	if (node.type === 'file') return `file:${node.file}`;
+export function contentKey(node, nstyle) {
+	// The office mode is part of the key: flipping thumbnail ↔ live editor
+	// must rebuild the node's content element.
+	if (node.type === 'file') return `file:${node.file}${nstyle?.office === 'live' ? ':live' : ''}`;
 	if (node.type === 'link') return `link:${node.url}`;
 	return node.type;
+}
+
+/** Ask main for the cached office thumbnail (rendered on demand) and fill
+ *  the holder with the image, or with the reason there isn't one. */
+async function fillOfficeThumb(holder, path) {
+	let res;
+	try {
+		res = await ipc.invoke(CH.OFFICE_THUMBNAIL, { path });
+	} catch (err) {
+		res = { ok: false, reason: String(err?.message ?? err) };
+	}
+	if (!holder.isConnected) return;
+	holder.replaceChildren();
+	if (res.ok) {
+		const img = document.createElement('img');
+		img.draggable = false;
+		img.alt = '';
+		img.src = `${vaultFileUrl(res.path)}?v=${res.stamp}`;
+		holder.append(img);
+	} else {
+		const note = document.createElement('div');
+		note.className = 'canvas-office-missing';
+		note.textContent = res.reason === 'no-engine'
+			? 'No office engine — download it in Settings → Office documents'
+			: `No thumbnail: ${res.reason}`;
+		holder.append(note);
+	}
 }

@@ -91,7 +91,7 @@ class ClewFileExplorer extends ClewElement {
 			const row = document.createElement('div');
 			row.className = `tree-item is-${entry.type}`;
 			row.dataset.path = entry.path;
-			row.style.paddingLeft = `${10 + depth * 14}px`;
+			row.style.paddingLeft = `${10 + depth * 18}px`;
 
 			if (entry.type === 'folder') {
 				const chevron = document.createElement('span');

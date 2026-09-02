@@ -13,7 +13,7 @@
 // Runs after the filesystem rename, using the pre-rename index state.
 import fs from 'node:fs';
 import path from 'node:path';
-import { direntKind, shouldRecurse, walkGuard } from './fs-utils.js';
+import { direntKind, shouldRecurse, walkGuard, writeFileAtomic } from './fs-utils.js';
 
 const stripExt = (p) => p.replace(/\.(md|jmd)$/i, '');
 const baseName = (relPath) => stripExt(relPath.split('/').pop());
@@ -73,7 +73,7 @@ export function propagateRename({ oldRel, newRel, indexer, vaults }) {
 		}
 
 		if (changed) {
-			fs.writeFileSync(abs, text);
+			writeFileAtomic(abs, text);
 			rewrittenFiles++;
 		}
 	}
@@ -118,7 +118,7 @@ function rewriteCanvasRefs({ oldRel, newRel, vaults }) {
 				}
 			}
 			if (changed) {
-				fs.writeFileSync(abs, JSON.stringify(json, null, '\t'));
+				writeFileAtomic(abs, JSON.stringify(json, null, '\t'));
 				rewritten++;
 			}
 		}

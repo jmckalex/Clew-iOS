@@ -210,6 +210,12 @@ const rendererPatches = {
 	},
 };
 
+// The vendored main-process modules the app bundle runs (indexer, kv-store,
+// rename-links) write through fs-utils.js#writeFileAtomic, which spells
+// `Buffer`. Only that identifier is injected — the worker's globals.js also
+// installs process/global, which the app page must never see.
+const bufferInject = [path.join(shims, 'buffer-inject.js')];
+
 export async function buildAppBundle({ minify = true } = {}) {
 	// The renderer runs unmodified; the entry evaluates the shim first. The
 	// vendored main-process services (indexer, search, kv-store, …) resolve
@@ -222,6 +228,7 @@ export async function buildAppBundle({ minify = true } = {}) {
 		target: 'safari16',
 		outfile: path.join(webroot, 'bundle.js'),
 		alias: builtinAlias,
+		inject: bufferInject,
 		plugins: [rendererPatches],
 		minify,
 		sourcemap: false,
@@ -310,6 +317,29 @@ export async function buildPreviewClients({ minify = true } = {}) {
 			metafile: true,
 		}));
 	}
+	// Web Awesome components for Meta Bind widgets, plus their design
+	// tokens: served as /__clew_preview__/wa.{js,css} (SchemeHandler's
+	// closed set) and loaded LAZILY by preview-client/meta-bind.js only
+	// when a rendered note contains a widget. Always minified, like
+	// upstream: 650 KB of library nobody debugs here.
+	results.push(await build({
+		entryPoints: [path.join(root, 'vendor', 'clew', 'preview-client', 'wa-bundle.js')],
+		bundle: true,
+		format: 'iife',
+		target: 'safari16',
+		outfile: path.join(webroot, 'preview-client', 'wa.js'),
+		minify: true,
+		logLevel: 'warning',
+		metafile: true,
+	}));
+	results.push(await build({
+		entryPoints: [path.join(root, 'vendor', 'clew', 'preview-client', 'wa-styles.css')],
+		bundle: true,
+		outfile: path.join(webroot, 'preview-client', 'wa.css'),
+		minify: true,
+		logLevel: 'warning',
+		metafile: true,
+	}));
 	return results;
 }
 
@@ -430,6 +460,7 @@ export async function buildServicesTestBundle() {
 		format: 'esm',
 		outfile: path.join(dist, 'test', 'services.js'),
 		alias: builtinAlias,
+		inject: bufferInject,
 		logLevel: 'warning',
 		metafile: true,
 	});

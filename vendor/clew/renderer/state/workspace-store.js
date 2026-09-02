@@ -18,9 +18,31 @@ import { settingsStore } from './settings-store.js';
 
 class WorkspaceStore extends Emitter {
 	state = tree.createInitialState();
+	#closeGuards = [];
 	#persist = debounce(() => {
 		ipc.invoke(CH.WORKSPACE_SAVE, tree.serialize(this.state)).catch(() => {});
 	}, 500);
+
+	/**
+	 * Close guards let a tab owner intercept its close (the office dock uses
+	 * this for its Save / Discard / Cancel moment — nothing else auto-saves
+	 * too late to matter). A guard returns null to wave the close through,
+	 * or a Promise<boolean> to take it over: the close is abandoned NOW and
+	 * re-issued with force once the promise says the user chose to proceed.
+	 */
+	registerCloseGuard(fn) {
+		this.#closeGuards.push(fn);
+	}
+
+	#guardClose(tabs) {
+		for (const tab of tabs) {
+			for (const guard of this.#closeGuards) {
+				const claim = guard(tab);
+				if (claim) return claim;
+			}
+		}
+		return null;
+	}
 
 	// ---- queries ----
 	get root() { return this.state.root; }
@@ -78,7 +100,17 @@ class WorkspaceStore extends Emitter {
 		return tab;
 	}
 
-	closeTab(tabId) {
+	closeTab(tabId, { force = false } = {}) {
+		if (!force) {
+			const found = this.findTab(tabId);
+			const claim = found && this.#guardClose([found.tab]);
+			if (claim) {
+				claim.then((proceed) => {
+					if (proceed) this.closeTab(tabId, { force: true });
+				});
+				return;
+			}
+		}
 		tree.closeTab(this.state, tabId);
 		this.#commit();
 	}
@@ -117,8 +149,19 @@ class WorkspaceStore extends Emitter {
 		return group;
 	}
 
-	/** Close a whole split pane; returns the closed tab ids. */
-	closeGroup(groupId) {
+	/** Close a whole split pane; returns the closed tab ids ([] when a close
+	 *  guard deferred the close — orphaned editors are reaped either way). */
+	closeGroup(groupId, { force = false } = {}) {
+		if (!force) {
+			const group = this.allGroups().find((g) => g.id === groupId);
+			const claim = group && this.#guardClose(group.tabs);
+			if (claim) {
+				claim.then((proceed) => {
+					if (proceed) this.closeGroup(groupId, { force: true });
+				});
+				return [];
+			}
+		}
 		const closed = tree.closeGroup(this.state, groupId);
 		this.#commit();
 		return closed;

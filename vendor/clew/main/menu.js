@@ -25,7 +25,7 @@ import { CH } from '../shared/channels.js';
 import { FORMAT_MENU } from '../shared/format-spec.js';
 import { settings } from './settings.js';
 import { allSessions, focusedSession, sessionForVault } from './session.js';
-import { createWindow, openVaultAnywhere, openVaultDialog } from './main.js';
+import { createWindow, openVaultAnywhere, openVaultDialog, createVaultDialog, openDemoVault } from './main.js';
 
 const isMac = process.platform === 'darwin';
 
@@ -208,9 +208,14 @@ class AppMenu {
 					accelerator: 'CmdOrCtrl+Shift+O',
 					click: () => openVaultDialog(focusedSession()),
 				},
+				{
+					label: 'New Vault…',
+					click: () => createVaultDialog(focusedSession()),
+				},
 				{ label: 'Open Recent Vault', submenu: this.#recentSubmenu() },
 				{ type: 'separator' },
 				c('file:save', 'Save', { chord: 'Mod-s', needs: 'note' }),
+				c('file:history', 'View Note History…', { needs: 'note' }),
 				{ type: 'separator' },
 				c('file:bookmark', 'Bookmark This Note', { needs: 'note', type: 'checkbox', checked: s.bookmarked }),
 				c('file:reveal', isMac ? 'Reveal in Finder' : 'Show in File Manager', { needs: 'note' }),
@@ -330,15 +335,14 @@ class AppMenu {
 			],
 		};
 
-		// In dev the repo's demo-vault is the documentation; open it as a vault.
-		const demoVault = this.#rootDir ? path.join(this.#rootDir, 'demo-vault') : null;
+		// The demo vault is the documentation: bundled when packaged (opened
+		// as the user's own copy in Documents), the repo's in dev.
 		const helpMenu = {
 			role: 'help',
 			submenu: [
 				{
-					label: 'Clew Documentation',
-					enabled: !!demoVault && fs.existsSync(demoVault),
-					click: () => this.#openVault(demoVault),
+					label: 'Clew Documentation (Demo Vault)',
+					click: () => openDemoVault(focusedSession()),
 				},
 				{
 					// Licences have to REACH the reader to mean anything. The

@@ -20,6 +20,7 @@ import { initQueryInteract } from './query-interact.js';
 import { initMetaBind } from './meta-bind.js';
 import { initPdfEmbeds } from './pdf-embed.js';
 import { initExcalidrawEmbeds } from './excalidraw-embed.js';
+import { initOfficeEmbeds } from './office-embed.js';
 
 const HOST_SOURCE = 'clew-preview-host';
 const post = (msg) => window.parent.postMessage({ source: 'clew-preview', ...msg }, '*');
@@ -33,6 +34,9 @@ window.addEventListener('message', (event) => {
 	else if (msg.type === 'scroll-to-line') scrollToLine(msg.line, msg.behavior ?? 'auto');
 	else if (msg.type === 'theme') {
 		document.documentElement.dataset.theme = msg.theme;
+		// Web Awesome widgets pick their palette from these classes.
+		document.documentElement.classList.toggle('wa-dark', msg.theme !== 'light');
+		document.documentElement.classList.toggle('wa-light', msg.theme === 'light');
 		configureMermaid(msg.theme);
 		broadcastThemeToNested(msg.theme);
 	}
@@ -85,10 +89,28 @@ function applyRender(html) {
 				// to the on-disk value by an unrelated re-render.
 				if (fromEl.classList?.contains('clew-mb') && fromEl === document.activeElement) return false;
 				if (fromEl.classList?.contains('canvas-embed-scene')) return false;
+				// Hydrated office thumbnails are client-rendered (the incoming
+				// HTML carries an empty shell) — keep them unless the embed now
+				// points at a different document.
+				if (fromEl.classList?.contains('office-embed-thumb') && fromEl.dataset.officeRequested
+					&& fromEl.dataset.officePath === toEl.dataset?.officePath) return false;
 				// Custom elements (vault scripts / Script: metadata) render
 				// their own content, which the incoming HTML doesn't carry —
 				// morphing their subtree would wipe it. Keep the element and
 				// sync attributes instead, so attributeChangedCallback fires.
+				// Web Awesome elements are the exception: their light DOM IS
+				// the incoming HTML (a wa-badge's text, a wa-select's
+				// options), so they take the normal morph — the focused-widget
+				// guard above already protects mid-interaction state. But the
+				// component owns its host inline style (wa-progress-bar keeps
+				// --percentage there), which the incoming HTML never carries —
+				// hand it across so the attribute sync doesn't strip it.
+				if (fromEl.tagName.startsWith('WA-')) {
+					if (fromEl.hasAttribute('style') && !toEl.hasAttribute('style')) {
+						toEl.setAttribute('style', fromEl.getAttribute('style'));
+					}
+					return !fromEl.isEqualNode(toEl);
+				}
 				if (fromEl.tagName.includes('-') && fromEl.tagName === toEl.tagName) {
 					for (const attr of [...toEl.attributes]) {
 						if (fromEl.getAttribute(attr.name) !== attr.value) {
@@ -109,6 +131,18 @@ function applyRender(html) {
 				}
 				return !fromEl.isEqualNode(toEl);
 			},
+			onBeforeNodeAdded(node) {
+				// Incoming live office iframes never boot in the flow: the
+				// hoisted holder (office-embed.js) owns the real editor, and a
+				// flow iframe would start a second LibreOffice just for the
+				// post-morph hydration to throw away. Neutralized, it becomes
+				// the placeholder marker hydration expects.
+				if (node.nodeType === 1 && node.classList?.contains('office-embed-live')) {
+					node.dataset.liveSrc = node.getAttribute('src') ?? '';
+					node.removeAttribute('src');
+				}
+				return node;
+			},
 			onBeforeNodeDiscarded(node) {
 				if (node.tagName === 'SCRIPT') return false;
 				if (node.id === '__clew_err') return false;
@@ -127,6 +161,7 @@ function applyRender(html) {
 		initLeafletMaps();
 		initPdfEmbeds();
 		initExcalidrawEmbeds();
+		initOfficeEmbeds();
 		retypeset();
 		// Morphs never re-execute scripts; note-API controls re-bind on this.
 		document.dispatchEvent(new CustomEvent('clew:render'));
@@ -349,6 +384,9 @@ initCanvasEmbeds();
 initLeafletMaps();
 initPdfEmbeds();
 initExcalidrawEmbeds();
+initOfficeEmbeds();
 initQueryInteract();
+// Previews start dark until the host says otherwise (preview.css defaults).
+document.documentElement.classList.add('wa-dark');
 initMetaBind();
 post({ type: 'ready' });

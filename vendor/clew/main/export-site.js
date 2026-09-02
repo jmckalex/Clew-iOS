@@ -164,10 +164,18 @@ function finishPage(html, rel, vaultRoot, vaultOptions) {
 		.map((p) => `<script src="${prefix || './'}assets/plugins/${p.split('/').slice(2)
 			.map(encodeURIComponent).join('/')}"></script>`)
 		.join('');
+	// Web Awesome widgets (Meta Bind) render disabled on a static page, but
+	// they still need their definitions to LOOK like anything.
+	const usesWa = /<wa-[a-z]/.test(out);
+	const waRuntime = usesWa
+		? `<link rel="stylesheet" href="${prefix || './'}assets/wa.css">`
+			+ `<script src="${prefix || './'}assets/wa.js"></script>`
+			+ `<script>document.documentElement.classList.add('wa-dark')</script>`
+		: '';
 	const runtime = `<script>window.__clewAssetBase=${JSON.stringify((prefix || './') + 'assets')}</script>`
 		+ vaultScripts
 		+ `<script src="${prefix || './'}assets/site-client.js"></script>`
-		+ pluginScripts;
+		+ pluginScripts + waRuntime;
 	return out.replace(/<\/body>/i, `${runtime}</body>`);
 }
 
@@ -196,6 +204,12 @@ function copyAssets(outDir, vaultRoot, distDir, vaultOptions) {
 	// the asar in packaged apps because this runs in the main process).
 	const siteClient = path.join(distDir, 'preview-client', 'site-client.js');
 	if (fs.existsSync(siteClient)) fs.copyFileSync(siteClient, path.join(assets, 'site-client.js'));
+	// Web Awesome bundle for Meta Bind widgets (finishPage links it only on
+	// pages that carry a widget).
+	for (const name of ['wa.js', 'wa.css']) {
+		const from = path.join(distDir, 'preview-client', name);
+		if (fs.existsSync(from)) fs.copyFileSync(from, path.join(assets, name));
+	}
 	// Vault scripts.
 	const scriptsDir = path.join(vaultRoot, '.clew', 'scripts');
 	if (fs.existsSync(scriptsDir)) {

@@ -43,6 +43,47 @@ test('openNote navigates the active tab in place and records history', () => {
 	assert.equal(tab.path, 'b.md');
 });
 
+test('office documents open in their own tab, never by navigation', () => {
+	// Behind an office tab stands one booted LibreOffice; its teardown must
+	// only ever go through the close guard, so nothing navigates over it and
+	// it navigates over nothing.
+	const state = stateWithNotes('a.md');
+	const noteTab = tree.activeTab(state);
+	const officeTab = tree.openFile(state, 'Report.docx');
+	assert.notEqual(officeTab.id, noteTab.id, 'the note tab did not navigate');
+	assert.equal(noteTab.path, 'a.md', 'the note tab is untouched');
+	// …and with the office tab active, opening a note leaves it alone.
+	const other = tree.openNote(state, 'b.md');
+	assert.notEqual(other.id, officeTab.id, 'the office tab did not navigate');
+	assert.equal(officeTab.path, 'Report.docx');
+	// A plain file tab (non-office) still navigates as before.
+	tree.openFile(state, 'photo.png');
+	const photoTab = tree.activeTab(state);
+	tree.openFile(state, 'scan.pdf');
+	assert.equal(tree.activeTab(state).id, photoTab.id, 'plain file tabs navigate in place');
+});
+
+test('an office document open in another pane is activated, not duplicated', () => {
+	const state = stateWithNotes('a.md');
+	const officeTab = tree.openFile(state, 'Report.docx');
+	const group2 = tree.splitGroup(state, tree.activeGroup(state).id, 'right',
+		tree.createTab('note', 'b.md'));
+	state.activeGroupId = group2.id;
+	const again = tree.openFile(state, 'Report.docx');
+	assert.equal(again.id, officeTab.id, 'the existing office tab is reused across panes');
+	assert.equal(tree.activeTab(state).id, officeTab.id, 'and focus moved to it');
+});
+
+test('splitting an office tab moves it — a clone could only show a notice', () => {
+	const state = stateWithNotes('a.md');
+	const officeTab = tree.openFile(state, 'Report.docx');
+	tree.splitWithClone(state, tree.activeGroup(state).id, 'right', officeTab.id);
+	const all = tree.allGroups(state.root).flatMap((g) => g.tabs)
+		.filter((t) => t.path === 'Report.docx');
+	assert.equal(all.length, 1, 'still exactly one office tab');
+	assert.equal(all[0].id, officeTab.id, 'and it is the original, relocated');
+});
+
 test('anchor jumps are history too, browser-style', () => {
 	const state = stateWithNotes('a.md');
 	const tab = tree.activeTab(state);

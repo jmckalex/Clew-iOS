@@ -78,6 +78,35 @@ const HEADING_RE = /^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$/;
 // superscript (`x^2`) from being read as an identifier — the same rule the
 // engine extension uses (src/engine/block-refs.js).
 const BLOCK_ID_RE = /(?:^[ \t]*|[ \t])\^([A-Za-z0-9-]{1,128})[ \t]*$/;
+
+/**
+ * Replace the TEXT of the block a `^id` marker names, keeping the marker.
+ *
+ * This is the write half of block-bound widgets (`INPUT[text:^id]`): the
+ * marker line's content is replaced wholesale, the ` ^id` tail survives
+ * byte-for-byte, and nothing else in the note is touched. Fenced lines are
+ * skipped the same way the indexer skips them, so a marker-shaped string
+ * inside a code block can never be edited by accident. Multi-line values
+ * are flattened to one line — a block marker names one block, and letting
+ * a widget split it would detach the marker from the text it names.
+ *
+ * Returns the new note text, or null when the note has no such marker.
+ */
+export function rewriteBlockText(text, id, value) {
+	const lines = String(text).split('\n');
+	const flat = String(value).replace(/\s*\n\s*/g, ' ').trimEnd();
+	const re = new RegExp(`^(.*?)([ \\t]+\\^${id})([ \\t]*)$`);
+	let inFence = false;
+	for (let i = 0; i < lines.length; i++) {
+		if (/^\s*(```|~~~)/.test(lines[i])) { inFence = !inFence; continue; }
+		if (inFence) continue;
+		const m = re.exec(lines[i]);
+		if (!m) continue;
+		lines[i] = flat + m[2];
+		return lines.join('\n');
+	}
+	return null;
+}
 const LINK_RE = /(!?)\[\[([^\[\]|#\n]*)(?:#([^\[\]|\n]+))?(?:\|([^\[\]\n]+))?\]\]/g;
 // #tag with nesting; must not match the ### of headings (require non-# before)
 // or pure numbers ("bug #123" style is still a tag in Obsidian — keep it).

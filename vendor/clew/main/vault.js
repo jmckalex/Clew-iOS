@@ -19,7 +19,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { settings } from './settings.js';
-import { direntKind, shouldRecurse, walkGuard } from './fs-utils.js';
+import { direntKind, shouldRecurse, walkGuard, writeFileAtomic } from './fs-utils.js';
+import { snapshotBeforeWrite, renameHistory } from './history.js';
 
 // Never shown in the explorer, never indexed.
 const IGNORED_DIRS = new Set(['.obsidian', '.clew', '.git', 'node_modules', '.trash']);
@@ -116,7 +117,18 @@ export class VaultManager {
 	writeNote(rel, content) {
 		const abs = this.resolve(rel);
 		fs.mkdirSync(path.dirname(abs), { recursive: true });
-		fs.writeFileSync(abs, content);
+		this.snapshotHistory(rel);
+		writeFileAtomic(abs, content);
+	}
+
+	/**
+	 * Preserve the note's current disk content in .clew/history/ before it
+	 * is displaced (rate-limited inside; `force` for restore, where the
+	 * displaced text must survive regardless of the interval).
+	 */
+	snapshotHistory(rel, { force = false } = {}) {
+		const options = this.loadState('vault-settings.json')?.history;
+		return snapshotBeforeWrite(this.root, rel, options, { force });
 	}
 
 	/**
@@ -132,11 +144,24 @@ export class VaultManager {
 		if (!/\.pdf$/i.test(rel)) throw new Error(`Not a PDF: ${rel}`);
 		const abs = this.resolve(rel);
 		if (!fs.existsSync(abs)) throw new Error(`No such PDF: ${rel}`);
-		fs.writeFileSync(abs, Buffer.from(data));
+		writeFileAtomic(abs, Buffer.from(data));
+	}
+
+	// The ZetaOffice viewer's save path, guarded like writePdf: only an
+	// office document that already exists inside the vault may be
+	// overwritten — the viewer edits documents, it does not create them.
+	writeOffice(rel, data) {
+		if (!/\.(odt|ods|odp|docx|xlsx|pptx)$/i.test(rel)) throw new Error(`Not an office document: ${rel}`);
+		const abs = this.resolve(rel);
+		if (!fs.existsSync(abs)) throw new Error(`No such document: ${rel}`);
+		writeFileAtomic(abs, Buffer.from(data));
 	}
 
 	/** Create a new note; appends " 1", " 2", … if the name is taken. Returns the rel path. */
 	createNote(rel) {
+		// "Tasks.md" typed into a create box arrives as "Tasks.md.md" once
+		// the caller appends the extension — collapse it; nobody means that.
+		rel = rel.replace(/(\.md)+$/i, '.md');
 		let abs = this.resolve(rel);
 		const dir = path.dirname(abs);
 		const ext = path.extname(abs) || '.md';
@@ -186,7 +211,7 @@ export class VaultManager {
 				fs.rmSync(tmp, { force: true });
 			}
 		}
-		fs.writeFileSync(candidate, Buffer.from(data));
+		writeFileAtomic(candidate, Buffer.from(data));
 		return path.relative(this.root, candidate);
 	}
 
@@ -196,6 +221,7 @@ export class VaultManager {
 		if (fs.existsSync(to)) throw new Error(`Already exists: ${newRel}`);
 		fs.mkdirSync(path.dirname(to), { recursive: true });
 		fs.renameSync(from, to);
+		renameHistory(this.root, rel, newRel);
 	}
 
 	async trash(rel) {
@@ -219,7 +245,7 @@ export class VaultManager {
 
 	saveState(name, data) {
 		if (!this.root) return;
-		fs.writeFileSync(path.join(this.root, '.clew', name), JSON.stringify(data, null, 2));
+		writeFileAtomic(path.join(this.root, '.clew', name), JSON.stringify(data, null, 2));
 	}
 
 	// ---- watching ---------------------------------------------------------

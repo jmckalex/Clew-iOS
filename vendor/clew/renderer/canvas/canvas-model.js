@@ -169,6 +169,8 @@ export function parseCanvas(text) {
 			if (st.bg === 'transparent') style.bg = 'transparent';
 			const o = num(st.opacity, 1);
 			if (o > 0 && o < 1) style.opacity = o;
+			// Office file nodes: thumbnail (default, no entry) or live editor.
+			if (st.office === 'live') style.office = 'live';
 			if (Object.keys(style).length) doc.nodeStyles[id] = style;
 		}
 	}

@@ -337,6 +337,21 @@ test('atomic writes: no .clew-tmp survives, and none is ever requested', async (
 	assert.deepEqual(temps, [], 'every bridge write renamed its temp into place');
 	const requested = fakeBridge.calls.filter(([m, p]) => m === 'write' && /\.clew-tmp$/.test(p.rel));
 	assert.deepEqual(requested, [], 'the mirror never sends a temp path to the bridge');
+	// The vendored modules (kv-store here) save through upstream's
+	// writeFileAtomic — temp + rename inside the mirror — and that must
+	// collapse to ONE bridge write of the target: Swift's AtomicFile already
+	// gives every write that shape, and a temp must never leave the mirror.
+	const mark = fakeBridge.calls.length;
+	await clew.invoke(CH.KV_SET, { key: 'test/atomic', value: 'through writeFileAtomic' });
+	await new Promise((resolve) => setTimeout(resolve, 400)); // kv debounce
+	await native.flush();
+	const since = fakeBridge.calls.slice(mark);
+	const kvWrites = since.filter(([m, p]) => m === 'write' && p.rel === 'clewdata.json');
+	assert.equal(kvWrites.length, 1, 'exactly one bridge write of the target');
+	assert.match(kvWrites[0][1].text, /through writeFileAtomic/, 'carrying the committed bytes as text');
+	assert.deepEqual(since.filter(([m]) => m === 'rename'), [], 'the temp→target rename never reaches the bridge');
+	assert.equal(JSON.parse(fs.readFileSync(path.join(vaultDir, 'clewdata.json'), 'utf8'))['test/atomic'],
+		'through writeFileAtomic');
 });
 
 const historyDir = (rel) => path.join(vaultDir, '.clew', 'history', rel);

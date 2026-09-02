@@ -22,7 +22,8 @@ import { registerBuiltinCommands } from './commands/builtin.js';
 import { installMenuBridge } from './commands/menu-bridge.js';
 import { installHotkeys } from './commands/registry.js';
 import { initPlugins } from './plugins.js';
-import { installPdfSaveBridge, installExcalidrawSaveBridge, installExcalidrawLibraryBridge, installExcalidrawResolveBridge } from './pdf-save.js';
+import { installPdfSaveBridge, installOfficeSaveBridge, installOfficeThumbBridge, installExcalidrawSaveBridge, installExcalidrawLibraryBridge, installExcalidrawResolveBridge } from './pdf-save.js';
+import { officeDock } from './office-dock.js';
 import './components/chrome/clew-app.js';
 
 // ---- IPC events → stores --------------------------------------------------
@@ -33,6 +34,12 @@ ipc.on(CH.EV_VAULT_OPENED, async ({ vault, tree }) => {
 	vaultStore.setVault(vault);
 	vaultStore.setTree(tree);
 	await workspaceStore.restore((path) => vaultStore.pathExists(path));
+	// A vault opening for the first time (no saved workspace) greets with
+	// its own Welcome note when it has one, instead of an empty pane —
+	// what makes the demo vault a tutorial from the very first screen.
+	if (workspaceStore.openTabIds().size === 0 && vaultStore.pathExists('Welcome.md')) {
+		workspaceStore.openNote('Welcome.md');
+	}
 	editorPool.reap(workspaceStore.openTabIds());
 	bookmarkStore.load();
 	applySnippets();
@@ -78,15 +85,18 @@ registerBuiltinCommands();
 initPlugins();
 installHotkeys();
 installPdfSaveBridge();
+installOfficeSaveBridge();
+installOfficeThumbBridge();
 installExcalidrawSaveBridge();
 installExcalidrawLibraryBridge();
 installExcalidrawResolveBridge();
 installMenuBridge();
+officeDock.init();
 
 // ---- dev hook -------------------------------------------------------------
 
 // Exposed for dev-tools poking and the CLEW_SMOKE scenario scripts.
-window.__clew = { workspaceStore, vaultStore, editorPool, settingsStore, ipc, actions };
+window.__clew = { workspaceStore, vaultStore, editorPool, settingsStore, ipc, actions, officeDock };
 import('./commands/registry.js').then((registry) => { window.__clew.registry = registry; });
 
 // ---- boot -----------------------------------------------------------------

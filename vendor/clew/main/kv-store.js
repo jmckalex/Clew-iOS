@@ -17,6 +17,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { CH } from '../shared/channels.js';
+import { writeFileAtomic } from './fs-utils.js';
 
 export const KV_FILE = 'clewdata.json';
 const SAVE_DEBOUNCE_MS = 300;
@@ -85,7 +86,7 @@ export class KvStore {
 		if (text === this.#lastWritten) return;
 		this.#lastWritten = text;
 		try {
-			fs.writeFileSync(path.join(this.root, KV_FILE), text);
+			writeFileAtomic(path.join(this.root, KV_FILE), text);
 		} catch (err) {
 			console.error('kv store save failed:', err);
 		}

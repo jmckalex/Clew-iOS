@@ -24,6 +24,7 @@ import path from 'node:path';
 import { CH } from '../shared/channels.js';
 import { paths } from './paths.js';
 import { engineExtensionEntries, previewPluginPaths } from './plugins.js';
+import { writeFileAtomic } from './fs-utils.js';
 
 const WORKER_PATH = paths.engineWorker;
 
@@ -164,12 +165,20 @@ export class RenderService {
 				...engineExtensionEntries(this.vaultRoot, this.#vaultOptions),
 			],
 			...this.#biblifyConfig(),
+			// dvisvgm needs ghostscript to convert MetaPost EPS output (and
+			// PS specials in TikZ). Homebrew's stable opt symlink survives
+			// upgrades; the engine's own default is only a fallback.
+			...(() => {
+				const libgs = ['/opt/homebrew/opt/ghostscript/lib/libgs.dylib',
+					'/usr/local/opt/ghostscript/lib/libgs.dylib'].find((p) => fs.existsSync(p));
+				return libgs ? { 'TiKZ libgs': libgs } : {};
+			})(),
 			'MathJax': { 'src': '/__clew_assets__/mathjax/tex-svg.js' },
 			'Mermaid': '/__clew_assets__/mermaid/mermaid.min.js',
 			'Fontawesome': '/__clew_assets__/fontawesome/all.min.js',
 			'Highlight src': '/__clew_assets__/highlight/atom-one-dark.min.css',
 		};
-		fs.writeFileSync(
+		writeFileAtomic(
 			path.join(this.engineDir, '.jmarkdown', 'config.json'),
 			JSON.stringify(config, null, 2),
 		);

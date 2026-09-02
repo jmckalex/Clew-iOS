@@ -27,6 +27,7 @@ const SID = location.pathname.replace(/^\/+/, '').split('/')[0];
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|avif|svg|bmp)$/i;
 const AUDIO_EXT = /\.(mp3|m4a|wav|ogg|flac)$/i;
 const VIDEO_EXT = /\.(mp4|webm|mov)$/i;
+const OFFICE_EXT = /\.(odt|ods|odp|docx|xlsx|pptx)$/i;
 const NOTE_EXT = /\.(md|jmd)$/i;
 
 const sitePath = (rel) => `/${SID}/` + rel.split('/').map(encodeURIComponent).join('/');
@@ -244,6 +245,20 @@ function nodeEl(node, nstyle) {
 			el.innerHTML = `<video controls src="${src}"></video>`;
 		} else if (AUDIO_EXT.test(node.file)) {
 			el.innerHTML = `<audio controls src="${src}"></audio>`;
+		} else if (OFFICE_EXT.test(node.file)) {
+			// Read-only scene: the cached thumbnail if one has been rendered
+			// (the mirrored cache path is client-constructible on purpose —
+			// office-thumbs.js), else the filename chip. Scenes never boot a
+			// LibreOffice and never trigger thumbnail generation; opening the
+			// real canvas does that.
+			const img = document.createElement('img');
+			img.alt = '';
+			img.src = sitePath('.clew/cache/office-thumbs/' + node.file + '.png') + `?t=${Date.now()}`;
+			img.addEventListener('error', () => {
+				el.classList.add('is-chip');
+				el.innerHTML = `<span>${escapeXml(node.file.split('/').pop())}</span>`;
+			});
+			el.replaceChildren(img);
 		} else if (NOTE_EXT.test(node.file)) {
 			// A live nested note preview; cdepth breaks embed cycles. The
 			// class marks it trusted for the message relay below — external

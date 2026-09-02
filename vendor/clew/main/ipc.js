@@ -14,16 +14,21 @@
 // session-free; everything vault-shaped routes through the session.
 import { app, dialog, ipcMain, shell } from 'electron';
 import * as pdfFonts from './pdf-fonts.js';
+import * as officeSlot from './office-slot.js';
+import * as zetaAssets from './zeta-assets.js';
+import * as officeConvert from './office-convert.js';
+import * as officeThumbs from './office-thumbs.js';
 import { CH } from '../shared/channels.js';
 import { settings } from './settings.js';
 import { appMenu } from './menu.js';
 import { sessionFor } from './session.js';
-import { openVaultAnywhere, openVaultDialog } from './main.js';
+import { openVaultAnywhere, openVaultDialog, createVaultDialog, openDemoVault } from './main.js';
 import { propagateRename } from './rename-links.js';
 import { exportNote } from './export.js';
 import { exportSite } from './export-site.js';
 import { parseBib } from '../shared/bib.js';
-import { direntKind, shouldRecurse, walkGuard } from './fs-utils.js';
+import { direntKind, shouldRecurse, walkGuard, writeFileAtomic } from './fs-utils.js';
+import { listSnapshots, readSnapshot } from './history.js';
 import { listPlugins } from './plugins.js';
 import fs from 'node:fs';
 import nodePath from 'node:path';
@@ -47,6 +52,8 @@ export function registerIpc() {
 	const handleGlobal = (channel, fn) => ipcMain.handle(channel, (event, payload) => fn(payload, event));
 
 	handle(CH.VAULT_OPEN_DIALOG, (s) => openVaultDialog(s));
+	handle(CH.VAULT_CREATE_DIALOG, (s) => createVaultDialog(s));
+	handle(CH.VAULT_OPEN_DEMO, (s) => openDemoVault(s));
 	handle(CH.VAULT_OPEN_PATH, async (s, { path }) => {
 		const target = openVaultAnywhere(path, { preferSession: s });
 		await target.opened; // new windows open their vault after load
@@ -65,6 +72,26 @@ export function registerIpc() {
 		// Rewrite [[links]] pointing at the renamed note(s), using the
 		// pre-rename index state (the watcher re-indexes right after).
 		return propagateRename({ oldRel: path, newRel: newPath, indexer: s.indexer, vaults: s.vaults });
+	});
+
+	// Note history: list/read snapshots, and restore one. The path is
+	// validated by resolve() (must stay inside the vault); the snapshot id
+	// is validated by history.js itself. Restore force-snapshots the text
+	// it displaces first, then writes through writeNote — the open editor
+	// picks the change up over the normal external-change path.
+	handle(CH.HISTORY_LIST, (s, { path }) => {
+		s.vaults.resolve(path);
+		return listSnapshots(s.vaults.root, path);
+	});
+	handle(CH.HISTORY_READ, (s, { path, id }) => {
+		s.vaults.resolve(path);
+		return readSnapshot(s.vaults.root, path, id);
+	});
+	handle(CH.HISTORY_RESTORE, (s, { path, id }) => {
+		s.vaults.resolve(path);
+		const text = readSnapshot(s.vaults.root, path, id);
+		s.vaults.snapshotHistory(path, { force: true });
+		s.vaults.writeNote(path, text);
 	});
 
 	handle(CH.INDEX_GET, (s) => (s.vaults.isOpen ? s.indexer.snapshot() : null));
@@ -118,6 +145,7 @@ export function registerIpc() {
 	handle(CH.RENDER_UNSUBSCRIBE, (s, { path }) => s.renderService.unsubscribe(path));
 	handle(CH.RENDER_HTML, (s, { path }) => s.renderService.renderedHtml(path));
 	handle(CH.PDF_WRITE, (s, { path, bytes }) => s.vaults.writePdf(path, bytes));
+	handle(CH.OFFICE_WRITE, (s, { path, bytes }) => s.vaults.writeOffice(path, bytes));
 	// The Excalidraw shape library, per vault: it is a working set that belongs
 	// with the notes it illustrates, so a vault carries its own.
 	handle(CH.EXCALIDRAW_LIB_GET, (s) => s.vaults.loadState('excalidraw-library.json') ?? []);
@@ -128,6 +156,34 @@ export function registerIpc() {
 	handleGlobal(CH.PDF_FONTS_STATUS, () => pdfFonts.status());
 	handleGlobal(CH.PDF_FONTS_DOWNLOAD, () => pdfFonts.download());
 	handleGlobal(CH.PDF_FONTS_REMOVE, () => pdfFonts.remove());
+
+	// Office tabs: the app-global one-LibreOffice slot, the engine bundle,
+	// and the close-guard plumbing (see office-dock.js on the renderer side).
+	handleGlobal(CH.OFFICE_SLOT_ACQUIRE, (payload, event) => officeSlot.acquire(event.sender, payload ?? {}));
+	handleGlobal(CH.OFFICE_SLOT_RELEASE, (_payload, event) => officeSlot.release(event.sender));
+	// `soffice` rides along so the offer panel knows whether the desktop-
+	// LibreOffice fallback (PDF preview, edit externally) is worth showing.
+	handleGlobal(CH.OFFICE_ENGINE_STATUS, () => ({ ...zetaAssets.status(), soffice: officeConvert.available() }));
+	handleGlobal(CH.OFFICE_ENGINE_DOWNLOAD, () => zetaAssets.download());
+	handleGlobal(CH.OFFICE_ENGINE_REMOVE, () => zetaAssets.remove());
+	handle(CH.OFFICE_CONVERT_PDF, (s, { path }) => officeConvert.convertToPdf(s.vaults, path));
+	handle(CH.OFFICE_OPEN_EXTERNAL, (s, { path }) => officeConvert.openExternally(s.vaults, path));
+	handle(CH.OFFICE_THUMBNAIL, (s, { path }) => officeThumbs.thumbnail(s, path));
+	handle(CH.WINDOW_CLOSE_RESOLVED, (s, { proceed }) => s.resolveClose?.(proceed));
+	// Save / Discard / Cancel, as a native sheet. CLEW_SMOKE_CONFIRM answers
+	// it without UI so the harness can drive every branch of a close flow.
+	handle(CH.CONFIRM_DISCARD, async (s, { message, detail }) => {
+		if (process.env.CLEW_SMOKE_CONFIRM) return process.env.CLEW_SMOKE_CONFIRM;
+		const { response } = await dialog.showMessageBox(s.win, {
+			type: 'warning',
+			buttons: ['Save', 'Discard Changes', 'Cancel'],
+			defaultId: 0,
+			cancelId: 2,
+			message: String(message ?? 'Unsaved changes'),
+			detail: String(detail ?? ''),
+		});
+		return ['save', 'discard', 'cancel'][response];
+	});
 	handleGlobal(CH.SHELL_OPEN_EXTERNAL, ({ url }) => {
 		if (/^https?:|^mailto:/i.test(url)) shell.openExternal(url);
 	});
@@ -209,7 +265,7 @@ export function registerIpc() {
 			if (canceled || !chosen) return null;
 			target = chosen;
 		}
-		fs.writeFileSync(target, Buffer.from(data, 'base64'));
+		writeFileAtomic(target, Buffer.from(data, 'base64'));
 		return target;
 	});
 

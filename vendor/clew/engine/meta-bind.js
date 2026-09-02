@@ -29,13 +29,20 @@
 // property and the whole button system (buttons run commands — behavior,
 // not data). Cosmetic arguments (addLabels, class, …) are tolerated.
 // In a site export widgets render disabled: a static page has no write path.
-import { display } from './dv-expr.js';
+import { display, coerceDate } from './dv-expr.js';
 import { currentPage, scanPages, resolvePath } from './vault-model.js';
+import { ID as BLOCK_ID } from './block-refs.js';
 
 const esc = (s) => String(s)
 	.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
-const SUPPORTED = new Set(['toggle', 'slider', 'text', 'number', 'inlineselect', 'select']);
+// Widgets render as Web Awesome elements (MIT, bundled, lazily loaded by
+// the preview client). The first six are Meta Bind's own vocabulary; the
+// dated/textArea/progressBar group closes types Clew previously refused;
+// `rating` and `color` are CLEW-NATIVE extensions — Obsidian's plugin
+// will show its unknown-type error for those, which the manual says.
+const SUPPORTED = new Set(['toggle', 'slider', 'text', 'number', 'inlineselect', 'select',
+	'textarea', 'datepicker', 'date', 'time', 'progressbar', 'rating', 'color']);
 
 // ---- parsing ----------------------------------------------------------------
 
@@ -81,7 +88,7 @@ export function parseInputDeclaration(inner) {
 			const [v, label] = splitArgs(value);
 			decl.options.push({ value: v ?? '', label: label ?? v ?? '' });
 		} else if (name === 'minValue') decl.min = Number(value) || 0;
-		else if (name === 'maxValue') decl.max = Number(value) || 100;
+		else if (name === 'maxValue') { decl.max = Number(value) || 100; decl.maxSet = true; }
 		else if (name === 'stepSize') decl.step = Number(value) || 1;
 		else if (name === 'defaultValue') decl.defaultValue = value;
 		// anything else is the plugin's cosmetics; the widget works without it
@@ -92,10 +99,32 @@ export function parseInputDeclaration(inner) {
 	const hash = bind.lastIndexOf('#');
 	if (hash > 0) { file = bind.slice(0, hash).trim(); prop = bind.slice(hash + 1); }
 	prop = prop.trim();
-	if (!/^[A-Za-z_][\w-]*$/.test(prop)) return { error: `bind target “${bind}” (nested paths are not supported)` };
+	// `^block-id` binds the widget to TEXT — the block the marker names —
+	// rather than to a property. Only the text widgets can hold prose.
+	if (new RegExp(`^\\^${BLOCK_ID}$`).test(prop)) {
+		if (decl.type !== 'text' && decl.type !== 'textarea') {
+			return { error: `only text and textArea bind to a ^block (INPUT[${type}:${prop}])` };
+		}
+		decl.block = true;
+	} else if (!/^[A-Za-z_][\w-]*$/.test(prop)) {
+		return { error: `bind target “${bind}” (nested paths are not supported)` };
+	}
 	decl.file = file;
 	decl.prop = prop;
 	return decl;
+}
+
+/** The text a `^id` marker names: its line, marker stripped, fences masked. */
+export function blockTextOf(text, id) {
+	const re = new RegExp(`^(.*?)[ \\t]+\\^${id}[ \\t]*$`);
+	let inFence = false;
+	for (const line of String(text).split('\n')) {
+		if (/^\s*(```|~~~)/.test(line)) { inFence = !inFence; continue; }
+		if (inFence) continue;
+		const m = re.exec(line);
+		if (m) return m[1];
+	}
+	return null;
 }
 
 // ---- rendering --------------------------------------------------------------
@@ -114,8 +143,13 @@ export function inputHtml(inner) {
 	if (decl.error) return refusal(`INPUT[${inner}] — ${decl.error}`);
 	const page = boundPage(decl.file);
 	if (!page) return refusal(`INPUT[${inner}] — “${decl.file}” is not in this vault`);
-	const value = page.fields?.[decl.prop] ?? decl.defaultValue;
-	const source = page.sources?.[decl.prop] ?? 'fm';
+	const value = decl.block
+		? blockTextOf(page.text ?? '', decl.prop.slice(1))
+		: page.fields?.[decl.prop] ?? decl.defaultValue;
+	if (decl.block && value === null) {
+		return refusal(`INPUT[${inner}] — no ${decl.prop} block in “${page.path}”`);
+	}
+	const source = decl.block ? 'block' : page.sources?.[decl.prop] ?? 'fm';
 	const disabled = process.env.CLEW_SITE_EXPORT === '1' ? ' disabled' : '';
 	const data = `class="clew-mb" data-edit-path="${esc(page.path)}"`
 		+ ` data-edit-field="${esc(decl.prop)}" data-edit-source="${esc(source)}"`;
@@ -124,41 +158,94 @@ export function inputHtml(inner) {
 
 	switch (decl.type) {
 		case 'toggle':
-			return `<input type="checkbox" ${data}${value === true || value === 'true' ? ' checked' : ''}${disabled}>`;
+			return `<wa-switch ${data}${value === true || value === 'true' ? ' checked' : ''}${disabled}></wa-switch>`;
 		case 'slider': {
 			const n = Number(value);
 			const now = Number.isFinite(n) ? n : decl.min;
-			return `<span class="clew-mb-slider"><input type="range" ${data}`
-				+ ` min="${decl.min}" max="${decl.max}" step="${decl.step}" value="${now}"${disabled}>`
+			return `<span class="clew-mb-slider"><wa-slider ${data}`
+				+ ` min="${decl.min}" max="${decl.max}" step="${decl.step}" value="${now}"${disabled}></wa-slider>`
 				+ `<span class="clew-mb-value">${now}</span></span>`;
 		}
 		case 'number':
-			return `<input type="number" ${data} value="${esc(value ?? '')}"${disabled}>`;
+			return `<wa-number-input ${data} value="${esc(value ?? '')}"${disabled}></wa-number-input>`;
 		case 'text':
-			return `<input type="text" ${data} value="${esc(value ?? '')}"${disabled}>`;
+			return `<wa-input type="text" ${data} value="${esc(value ?? '')}"${disabled}></wa-input>`;
+		case 'textarea':
+			return `<wa-textarea ${data} value="${esc(value ?? '')}" rows="3" resize="vertical"${disabled}></wa-textarea>`;
+		case 'datepicker':
+		case 'date':
+			return `<wa-input type="date" ${data} value="${esc(display(value ?? ''))}"${disabled}></wa-input>`;
+		case 'time':
+			return `<wa-time-input ${data} value="${esc(value ?? '')}"${disabled}></wa-time-input>`;
+		case 'rating': {
+			const n = Number(value);
+			return `<wa-rating ${data} value="${Number.isFinite(n) ? n : 0}"`
+				+ ` max="${decl.maxSet ? decl.max : 5}" precision="${decl.step}"${disabled}></wa-rating>`;
+		}
+		case 'color':
+			return `<wa-color-picker ${data} value="${esc(value ?? '#888888')}" size="small"${disabled}></wa-color-picker>`;
+		case 'progressbar': {
+			// Read-only: a bound DISPLAY of a number, scaled to min/max.
+			const n = Number(value);
+			const pct = Number.isFinite(n)
+				? Math.max(0, Math.min(100, ((n - decl.min) / (decl.max - decl.min || 1)) * 100)) : 0;
+			return `<wa-progress-bar class="clew-mb-display" value="${pct}"></wa-progress-bar>`;
+		}
 		case 'inlineselect':
 		case 'select': {
 			const current = String(value ?? '');
 			const options = decl.options.map((option) =>
-				`<option value="${esc(option.value)}"${option.value === current ? ' selected' : ''}>${esc(option.label)}</option>`);
+				`<wa-option value="${esc(option.value)}"${option.value === current ? ' selected' : ''}>${esc(option.label)}</wa-option>`);
 			if (!decl.options.some((o) => o.value === current)) {
-				options.unshift(`<option value="${esc(current)}" selected>${esc(current || '—')}</option>`);
+				options.unshift(`<wa-option value="${esc(current)}" selected>${esc(current || '—')}</wa-option>`);
 			}
-			return `<select ${data}${disabled}>${options.join('')}</select>`;
+			return `<wa-select ${data} value="${esc(current)}"${disabled}>${options.join('')}</wa-select>`;
 		}
 		default:
 			return refusal(`INPUT[${inner}]`);
 	}
 }
 
+const VIEW_KINDS = new Set(['relativetime', 'formatdate', 'formatnumber', 'formatbytes', 'badge', 'qr']);
+
+/** Local-component ISO (no Z): a date-only property is LOCAL midnight, and
+ *  a UTC-flavoured string would show yesterday west of Greenwich. */
+function localIso(date) {
+	const pad = (n) => String(n).padStart(2, '0');
+	return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+		+ `T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
+/**
+ * `VIEW[{prop}]` displays a bound value; `VIEW[kind:{prop}]` formats it —
+ * relativeTime, formatDate, formatNumber, formatBytes, badge, qr. The
+ * kinds are CLEW-NATIVE (Meta Bind's own VIEW takes expressions, which
+ * are refused here by name).
+ */
 export function viewHtml(inner) {
-	const single = /^\{\s*([A-Za-z_][\w-]*)\s*\}$/.exec(inner.trim());
-	if (!single) return refusal(`VIEW[${inner}] — only a single {property} is supported`);
+	const match = /^(?:([A-Za-z]+)\s*:)?\s*\{\s*([A-Za-z_][\w-]*)\s*\}$/.exec(inner.trim());
+	if (!match) return refusal(`VIEW[${inner}] — only {property}, optionally kind:{property}`);
+	const kind = match[1]?.toLowerCase() ?? null;
+	if (kind && !VIEW_KINDS.has(kind)) return refusal(`VIEW[${inner}] — no “${match[1]}” view`);
 	const page = currentPage();
-	const value = page?.fields?.[single[1]];
+	const value = page?.fields?.[match[2]];
 	const text = esc(display(value ?? ''));
-	if (global.isLatex) return text;
-	return `<span class="clew-mb-view">${text}</span>`;
+	if (global.isLatex || !kind) {
+		return global.isLatex ? text : `<span class="clew-mb-view">${text}</span>`;
+	}
+	if (kind === 'badge') return `<wa-badge variant="brand">${text}</wa-badge>`;
+	if (kind === 'qr') {
+		return value === undefined || value === ''
+			? refusal(`VIEW[${inner}] — nothing to encode`)
+			: `<wa-qr-code value="${esc(String(value))}" size="128"></wa-qr-code>`;
+	}
+	if (kind === 'formatnumber') return `<wa-format-number value="${Number(value) || 0}"></wa-format-number>`;
+	if (kind === 'formatbytes') return `<wa-format-bytes value="${Number(value) || 0}"></wa-format-bytes>`;
+	const date = coerceDate(value);
+	if (!date) return `<span class="clew-mb-view">${text}</span>`;
+	return kind === 'relativetime'
+		? `<wa-relative-time date="${localIso(date)}" sync></wa-relative-time>`
+		: `<wa-format-date date="${localIso(date)}" year="numeric" month="short" day="numeric"></wa-format-date>`;
 }
 
 // ---- the extensions ---------------------------------------------------------

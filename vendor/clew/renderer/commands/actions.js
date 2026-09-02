@@ -18,6 +18,7 @@ import { isCanvasPath } from '../lib/file-types.js';
 import { scrollSyncBus } from '../preview/scroll-sync.js';
 import { ipc, CH } from '../ipc.js';
 import { parseProperties, applyProperties } from '../../shared/frontmatter.js';
+import { rewriteBlockText } from '../../shared/note-metadata.js';
 import { notice } from '../plugins.js';
 
 export function closeActiveTab() {
@@ -102,6 +103,13 @@ export function historyForward() {
  * (Obsidian-style, in the vault root) when unresolved.
  */
 export async function openWikilink(target, { newTab = false, mode } = {}) {
+	// A URL is not a note name. Whatever routed it here (a pasted link in
+	// the switcher, a stray href), creating "https:/…/.md" directories in
+	// someone's vault is never the right reading of it.
+	if (/^[a-z][a-z0-9+.-]*:\/\//i.test(String(target ?? ''))) {
+		ipc.invoke(CH.SHELL_OPEN_EXTERNAL, { url: String(target) }).catch(() => {});
+		return;
+	}
 	const { name, heading } = splitTarget(target);
 	if (!name) {
 		// [[#Heading]]: jump within the active note.
@@ -211,7 +219,12 @@ export async function editNoteField(path, field, value, source = 'fm') {
 	try {
 		const text = await ipc.invoke(CH.NOTE_READ, { path });
 		let next;
-		if (source.startsWith('line:')) {
+		if (source === 'block') {
+			// `field` is '^id': a block-bound widget rewrites the marker
+			// line's TEXT, marker kept — prose editing with an address.
+			next = rewriteBlockText(text, field.replace(/^\^/, ''), value);
+			if (next === null) throw new Error(`no ${field} block in the note`);
+		} else if (source.startsWith('line:')) {
 			const lineNo = Number(source.slice(5));
 			const lines = text.split('\n');
 			if (!(lineNo >= 1 && lineNo <= lines.length)) throw new Error('stale line');

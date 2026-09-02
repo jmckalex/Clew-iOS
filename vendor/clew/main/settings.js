@@ -13,6 +13,7 @@
 import { app } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
+import { writeFileAtomic } from './fs-utils.js';
 
 const DEFAULTS = {
 	recentVaults: [],
@@ -73,7 +74,7 @@ class Settings {
 	#save() {
 		try {
 			fs.mkdirSync(path.dirname(this.#file), { recursive: true });
-			fs.writeFileSync(this.#file, JSON.stringify(this.#data, null, 2));
+			writeFileAtomic(this.#file, JSON.stringify(this.#data, null, 2));
 		} catch (err) {
 			console.error('Failed to save settings:', err);
 		}
