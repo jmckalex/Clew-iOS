@@ -1,8 +1,11 @@
 # Upstream 0.10 Sync + On-Disk Contract Parity — Plan for Clew-iOS
 
-**STATUS: in progress (started 2026-09-02).** Two arcs, executed in order:
-first the on-disk contracts both apps must share, then a sync that pulls
-everything upstream has except the ZetaOffice subsystem. Read `README.md`
+**STATUS: executed in full on 2026-09-02, the day it was written.** Like
+the 0.8 and 0.9 plans this is now history — read it for the reasoning
+behind a decision, not as a work list; results are in PORT-PLAN.md and
+HANDOVER.md. Two arcs, executed in order: first the on-disk contracts
+both apps must share, then a sync that pulls everything upstream has
+except the ZetaOffice subsystem. Read `README.md`
 and `PORT-PLAN.md` for architecture, `HANDOVER.md` for session state.
 `UPSTREAM-0.9-PLAN.md` §0's ground rules apply verbatim: never push
 without the owner's OK; never edit `vendor/`; non-iOS improvements go
@@ -202,10 +205,13 @@ renames a temp over its target. Rather than patch three call sites:
   an `https://` target handed to openWikilink creates no note;
   VAULT_OPEN_DEMO answers the seeded vault and VAULT_CREATE_DIALOG
   presents the native name sheet.
-- **`sync10-p4-tests`** — port `atomic-write`, `fill`, and the office
-  additions to `workspace-tree`; re-diff every ported suite.
-- **`sync10-p5-verify`** — clean-install sweep + regressions; PORT-PLAN
-  milestone; README gaps; HANDOVER rewrite; memory.
+- **`sync10-p4-tests`** — DONE: `atomic-write` and `fill` ported (path
+  rewrite only); `workspace-tree` and `meta-bind` were refreshed in p1;
+  every other ported suite diffs clean against upstream. 291 green.
+- **`sync10-p5-verify`** — DONE: regression sweep on the clean install
+  (search, index, plugins, five renders incl. MathJax/mermaid/charts/
+  kanban, EmbedPDF + pdf-page + wa.{js,css} routes, Excalidraw tab);
+  PORT-PLAN milestone; README; HANDOVER rewrite; memory.
 
 ## 3. Seam-shaped questions (answered during the phases)
 

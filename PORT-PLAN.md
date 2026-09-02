@@ -226,6 +226,21 @@ Ranked; items 1–5 are in scope for the first working build, 6–10 tracked:
   `EV_VAULT_OPENED` handler, which iOS's boot never fires (it takes the
   VAULT_CURRENT "reload" branch), so `ios-ui.js` applies it after each
   restore commit; a clean install now opens on Welcome. Tests 240 → 255.
+- **Upstream 0.10 sync (minus ZetaOffice)** ✅ vendored at `e64cf06`, 39
+  commits on. One new npm dep (`@awesome.me/webawesome`) and two new
+  preview bundles (`wa.{js,css}`, lazily fetched through the scheme
+  handler's now-closed `__clew_preview__/` set) for Meta Bind widgets as
+  Web Awesome components; note-history modal + settings toggle riding
+  onto the contract arc's channels; fill-paragraph / auto-fill; explorer
+  folder anchoring; the demo vault's Dashboards and Widgets guides;
+  first-run Create/Demo channels (native name sheet; the seeded vault);
+  the openWikilink URL guard; engine re-sync (MetaPost glyph labels).
+  Vendored modules now save through `writeFileAtomic`: the fs shim grew
+  fd APIs, `Buffer` is injected into the app bundle, and VaultManager
+  collapses temp-write + rename into the one bridge write Swift already
+  makes atomic. The ZetaOffice runtime is deliberately unported — its
+  surfaces are backed by Quick Look (see Decisions). Simulator-verified
+  across every arc on a clean install; tests 255 → 291.
 
 ### Upstream candidates (iOS-owned today, worth pushing to ../Clew-app)
 

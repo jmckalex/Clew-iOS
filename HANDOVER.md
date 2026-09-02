@@ -1,9 +1,10 @@
-# Handover — 2026-09-02 (EmbedPDF OCG done; upstream surged: office suite, history, atomic writes)
+# Handover — 2026-09-02 (contract parity + 0.10 sync minus office: DONE, unpushed)
 
 Session-rollover state, upstream-style: rewritten each session, kept
 short. Durable architecture and build docs live in **README.md** and
-**PORT-PLAN.md** — trust those first. The `UPSTREAM-0.8-PLAN.md` and
-`UPSTREAM-0.9-PLAN.md` files are **history**: executed in full.
+**PORT-PLAN.md** — trust those first. `UPSTREAM-0.8-PLAN.md`,
+`UPSTREAM-0.9-PLAN.md` and now `UPSTREAM-0.10-PLAN.md` are **history**:
+executed in full; read them for the reasoning behind a decision.
 
 ## 0. THE ONE RULE
 
@@ -14,175 +15,179 @@ first. (Also in Claude's memory.)
 
 ## 1. Where things stand
 
-Four layers of finished, unpushed work, each green on its own tip
-(`npm test` 240, build + xcodebuild clean):
+Six layers of finished, unpushed work, every phase tip green on its own
+(`npm test` 291, `npm run build`, xcodebuild clean):
 
 ```
 main                6f75e34   (10 ahead of origin, UNPUSHED, deliberately not moved)
- └ …0.8 chain… sync-p1-vendor … sync-p5-verify (edcd261)
-    └ …0.9 chain… sync09-p1-vendor … sync09-p5-verify (322224e)
+ └ …0.8 chain… sync-p5-verify (edcd261)
+    └ …0.9 chain… sync09-p5-verify (322224e)
        └ canvas-delete-button  e618a00
-          └ embedpdf-vendor  13c22ff   ← TIP: review and merge
+          └ embedpdf-vendor  d2e7beb
+             └ contracts-p1-atomic 195fd96 → contracts-p2-history 48b4c1f → contracts-p3-welcome fe4cb2c
+                └ sync10-p1-vendor c7ae103 → sync10-p2-office f4896a2 → sync10-p3-features 4c6d084
+                   → sync10-p4-tests a28b17c → sync10-p5-verify   ← TIP: review and merge
 ```
 
-- **0.8 sync** — EmbedPDF everywhere, Excalidraw, Dataview/Bases,
-  callouts, block refs, tables. Simulator-verified 2026-08-25.
-- **0.9 sync** — vendored at upstream `8422a45`: kanban, Tasks dialect,
-  DQL FLATTEN/GROUP BY/lambdas, admonitions, Meta Bind, Bases map
-  views, obsidian:// links, Back-able anchors, chord forwarding, and
-  engine-surface vault plugins. Simulator-verified 2026-08-26.
-- **canvas-delete-button** — trash-icon Delete-selection in the canvas
-  toolbar (touch had no delete route for shapes). Sim-verified.
-- **embedpdf-vendor** (`8fc7011`) — the owner's EmbedPDF OCG build
-  (layers fork; wasm carries FPDF*OCG*), cherry-vendored from what was
-  then upstream's tip. `vendor/embedpdf/` is the committed mirror
-  (sync-upstream.js copies it; .gitignore needed exceptions for BOTH
-  `dist/` and `*.map`), build.js stages from it, `@embedpdf/snippet`
-  dropped from deps (models/pdfium kept — the owner's; ask before
-  pruning). Sim-verified by content: OCG chunk 200 + stock npm chunk
-  404 over `clew-preview://vault/__clew_assets__/embedpdf/`, served
-  wasm carries 24 FPDF*OCG symbols, sample.pdf renders. The layers tab
-  itself is inside the cross-origin viewer page (smoke can't reach) —
-  eyeball on hardware: sidebar, third icon-only tab, empty state.
+- **0.8 / 0.9 syncs, delete button, EmbedPDF OCG** — unchanged from
+  the previous handover; all simulator-verified.
+- **On-disk contract parity** (`contracts-p1…p3`, 2026-09-02) — the
+  three things desktop changed about what a vault looks like on disk,
+  matched exactly because both apps write the same iCloud vaults:
+  1. *Atomic writes*: every Swift write path is temp + `F_FULLFSYNC` +
+     rename with desktop's own temp name `.<basename>.clew-tmp` beside
+     the target (`AtomicFile.swift`). Proven standalone on macOS and
+     by content in the sim (zero temps after every scenario).
+  2. *Note history*: `.clew/history/<note path>/<stamp><ext>` — produced
+     by upstream's `history.js` run VERBATIM over the vault mirror (like
+     the indexer/kv-store), so the format is identical by construction
+     and upstream's nine unit tests port with a path rewrite. The
+     mirror grew what that needed: Buffer-returning encoding-less
+     reads, `vfs.utimes`/`vfs.rename` with hooks, bridge ops `setMtime`
+     and `remove` (`.clew/history/` only, refused elsewhere on both
+     sides). Sim-verified by content: interval gate, pre-image, forced
+     restore, rename carrying the dir, pruning with `-N` counters, a
+     backdated note's snapshot mtime'd 2025-09-01 on disk.
+  3. *Welcome.md on first open*: `ios-ui.js` applies upstream's rule
+     after each restore commit, because iOS boots through the
+     `VAULT_CURRENT` branch that never fires `EV_VAULT_OPENED`. Clean
+     install opens on Welcome.
+- **0.10 sync minus office** (`sync10-p1…p5`) — `vendor/` + `seed-vault/`
+  at upstream **`e64cf06`** (39 commits on from 8422a45). New dep
+  `@awesome.me/webawesome` + two preview bundles `wa.{js,css}` (Meta
+  Bind widgets are Web Awesome components; SchemeHandler's
+  `__clew_preview__/` route is now upstream's closed set); the vendored
+  modules' `writeFileAtomic` runs over the mirror (fd APIs in the fs
+  shim, `Buffer` injected into the app bundle, VaultManager collapses
+  temp+rename into the one bridge write Swift already makes atomic);
+  history modal + settings toggle, fill-paragraph/auto-fill, explorer
+  anchoring, Dashboards/Widgets guides, first-run Create/Demo channels
+  (native name sheet; the seeded vault), the openWikilink URL guard,
+  engine re-sync. **ZetaOffice runtime NOT ported — Quick Look stands
+  in** (§2). All nine + three guarded patches anchored.
 
-The iPad sim (90DCB612…) has the tip build installed. Working tree clean.
+The iPad sim (90DCB612…) has the tip's build installed (p3–p5 changed
+no code). The sim's Demo Vault carries test residue (`Memo.docx`,
+`Office Embed Test.md`, `Office Canvas.canvas`, `Fill Test.md`,
+`.clew/history/…`) — uninstall + reinstall to reseed. Working tree clean
+after this commit.
 
-## 2. The old split-brain is RESOLVED
+## 2. Decisions the owner should know about (all reversible)
 
-The trash button is now **committed upstream** (`bff8410`) and the
-upstream tree is CLEAN — the owner also committed their demo-vault
-edits. The next `sync-upstream` overwrites our vendored copies with
-their committed versions and everything converges. No dangling state.
+1. **Office = Quick Look.** Upstream's LibreOffice-in-wasm (~1.6 GB
+   resident) is not ported and the decision to spike it is yours. Every
+   office surface upstream draws stays truthful: engine status "not
+   installed, no desktop LibreOffice"; the office tab shows one
+   sentence + **"Open in Quick Look"** (read-only system viewer);
+   **`OFFICE_THUMBNAIL` is real** — `QLThumbnailGenerator` renders
+   Word/Excel/PowerPoint and the PNG is cached at upstream's own path
+   (`.clew/cache/office-thumbs/<rel>.png`, by mtime) so note embeds and
+   canvas office nodes show a picture and iCloud vaults reuse either
+   side's; download/remove/convert/save/slot answer with a reason.
+   Three guarded patches drop controls that would lie: the settings
+   office section, the tab's download offer (upstream's button would
+   spin forever — `downloadEngine` never repaints a rejected download;
+   upstream candidate in PORT-PLAN), the canvas node's Live choice.
+   Residue: `![[x.docx|live]]` in a note still emits a live iframe →
+   blank box (engine-emitted; not patchable here); ODT/ODS/ODP have no
+   Quick Look previewer (embed shows the reason). QL thumbnails are
+   sim-proven (1.1 s for a docx) — worth a device timing check.
+2. **History runs upstream's module over the mirror**, so
+   `.clew/history/` is mirrored in memory like the rest of `.clew/`
+   (pruning caps it at 40 versions per edited note). Measure on the 5k
+   stress shape before worrying; the alternative (Swift reimplementation)
+   was rejected for bytes-by-re-derivation with no unit harness.
+3. **First-run Create/Demo**: implemented (native sheet; seeded vault)
+   but the welcome screen is practically unreachable on iOS — boot
+   always opens the last vault or the seeded demo. The manual's
+   first-launch text needs an iOS caveat (§4).
 
-## 3. Upstream SURGED — next sync is now a major undertaking
+## 3. Upstream state
 
-`../Clew-app` main is **`dbe8348`, 38 commits / 463 files / +8738
-past our vendored `8422a45`** (checked 2026-09-02; 24 of those commits
-are NEW since the last check at de45fe7). Do not run
-`npm run sync-upstream` casually. **Their HANDOVER.md §1 is addressed
-directly to this iOS session — read it first.** Highlights:
-
-1. **A whole office suite**: ZetaOffice / LibreOffice-in-wasm. Office
-   documents edit in tabs; office embeds in notes and canvases
-   (thumbnails by default, live by choice); new main-process files
-   (office-convert/office-slot/office-thumbs/zeta-assets/zeta-icons),
-   `shared/channels.js` gained channels, `shared/zeta-manifest.json`,
-   a CDN engine download, a vendored Sifr icon zip. This is a NEW
-   SUBSYSTEM with unknown WKWebView feasibility (wasm size, memory) —
-   scope it as its own arc, maybe its own decision to defer.
-2. **Note history — an on-disk vault contract** (`22c59b4`):
-   `.clew/history/<note path>/<stamp><ext>` snapshots, per-vault
-   `history` setting. Reference: `src/main/history.js` + unit tests.
-   **iOS writes notes, so iOS should produce/respect the same
-   snapshots or the shared manual needs an iOS caveat** — parity is
-   candidate work even before/without the full sync.
-3. **Atomic vault writes — an on-disk convention** (`5b70193`): temp
-   `.<basename>.clew-tmp` beside the target + fsync + rename, behind
-   every durable write. Same argument: iOS should adopt the same shape
-   so each app ignores the other's temps. Exemplar:
-   `src/main/fs-utils.js#writeFileAtomic`.
-4. **First-run/welcome** (`dd703e7`): desktop now ships + copies out
-   the demo vault (iOS already does this); a vault with NO saved
-   workspace opens its root `Welcome.md` — cheap parity win.
-5. Editor: fill-paragraph / auto-fill-mode (Emacs M-q; true Alt-Q).
-6. **Engine mirror re-synced** at `at-migration@748bd70` — the next
-   sync pulls a new jmarkdown too (config-manager.js moved earlier;
-   the duplicate-key esbuild warning may change shape).
-7. `smoke/` is now committed upstream (reusable scenarios + 5k-vault
-   stress kit with baselines) — mine it for iOS smoke ideas.
-8. Plus the earlier de45fe7 batch still unpulled: explorer "folders
-   anchor the hierarchy", demo-vault content, the canvas-cards trap
-   fix. (Its EmbedPDF item is DONE here — §1.)
-9. The shared manual (`../Clew-docs`) now documents desktop truths
-   (note-history, first-launch, `.clew/` table, ninth per-vault key
-   `history`) — check against iOS reality, caveat where needed.
-
-**Pre-checked at dbe8348:** of the files build.js patches, only three
-changed upstream since the last anchor check (client.js,
-node-content.js, clew-settings-view.js) and **all three anchors still
-match — all 9 guarded patches will apply.** package.json changed
-upstream; npm deps do NOT auto-merge.
+`../Clew-app` main = **`e64cf06`, tree CLEAN** (checked at the end of
+this session) — exactly what we vendored; nothing pending. `../Clew-docs`
+at `e618ed9`. The next sync will overwrite `vendor/clew/main/history.js`
+and `shared/channels.js` with identical bytes (they were cherry-vendored
+early for Arc A). `vendor/embedpdf` unchanged since de45fe7.
 
 ## 4. Open items
 
-1. **Device verification, then merge + push** = TestFlight release,
-   covering both syncs, the delete button, and the OCG PDF viewer
-   (layers sidebar + per-annotation layer assignment — the piece the
-   sim can't show). Still specifically worth hardware: Pencil
-   finger-pan feel, Excalidraw with Pencil, per-scene Pdfium memory on
-   many-PDF canvases, element fullscreen on small canvas PDF nodes,
-   markdown table editing + Cmd+[ / Cmd+] + chord forwarding with a
-   hardware keyboard.
-2. **Decide sequencing.** The current stack is coherent and shippable.
-   The pending sync now contains a big office arc — plausible shape:
-   ship the stack, then a "0.10 sync" that pulls everything BUT defers
-   office to its own feasibility spike.
-3. **On-disk contract parity** (§3.2–3.4): note history, atomic
-   writes, Welcome.md-on-first-open. These matter independent of the
-   sync because both apps write the same vaults (iCloud).
+1. **Device verification, then merge + push** = a TestFlight release
+   covering everything in §1. Hardware-specific: Pencil finger-pan feel,
+   Excalidraw with Pencil, per-scene Pdfium memory, hardware-keyboard
+   chords + **Alt-Q fill-paragraph**, Quick Look + QL thumbnail timing,
+   the history modal on the iPad, Web Awesome widgets on touch (sliders,
+   colour picker). Suggested merge: fast-forward `main` to
+   `sync10-p5-verify`.
+2. **Manual caveats to write in `../Clew-docs`** (not touched here — the
+   shared manual is the owner's): `note-history.html` — iOS matches the
+   format fully, both apps snapshot the same vault; `getting-started
+   .html` #first-launch — iOS seeds and opens the demo vault itself,
+   no welcome screen; new vaults are folders in Files/Documents or
+   "Open another vault…"; `vaults-and-files.html` `.clew/` table — iOS
+   also writes `cache/office-thumbs/`; the office chapter — iOS is
+   read-only Quick Look, thumbnails via Quick Look, no editing;
+   `settings-and-hotkeys.html` — the `history` key is honoured on iOS.
+3. **`alert()` is silent on iOS**: the renderer's export-failure
+   `alert(...)` (builtin.js) needs a `WKUIDelegate`
+   `runJavaScriptAlertPanel` to show; WebHost has none, so an export
+   failure (LaTeX export on iOS always fails) shows nothing. ~10 lines
+   of Swift; pre-existing, not a sync regression.
 4. Possible follow-ups the owner has seen but not requested: canvas
-   toolbar undo/redo buttons (remaining half of PORT-PLAN touch item
-   6); Pencil long-press → contextmenu in select/pan tools; "New
-   drawing" in the explorer #rootMenu.
-5. Deferred, unchanged: `\citefile` BibDesk attachments; third-party
-   notices surface (now also the OCG build; office would add
-   LibreOffice/Sifr); native CJK font download; 12 MB Xiaolai CJK
-   prune; ```kanban fence touch drag; "Move to folder…" long-press;
-   empty folders in explorer; iCloud conflict surfacing; TikZ
-   preamble-hash reuse; stale recents pruning.
+   toolbar undo/redo buttons (PORT-PLAN touch item 6, remaining half);
+   Pencil long-press → contextmenu in select/pan tools; "New drawing" in
+   the explorer #rootMenu; a THIRD-PARTY-NOTICES surface (upstream now
+   has one; ours would add Web Awesome, the OCG build, chart.js).
+5. Deferred, unchanged: `\citefile` BibDesk attachments; native CJK
+   font download; 12 MB Xiaolai CJK prune; ```kanban fence touch drag;
+   "Move to folder…" long-press; empty folders in explorer; iCloud
+   conflict surfacing; TikZ preamble-hash reuse; stale recents pruning.
 
 ## 5. Verification kit (works, use it)
 
-- `npm test` — 240 green. `node tools/render-note.mjs <vault> <note>
-  [--fragment]` — reads the vault's own vault-settings by default;
-  `--vault-options '<json>'` REPLACES them (needed for gate-off tests).
+- `npm test` — 291 green. `node tools/render-note.mjs <vault> <note>
+  [--fragment]` reads the vault's own vault-settings by default;
+  `--vault-options '<json>'` REPLACES them.
 - Smoke: `xcrun simctl launch <sim> org.jmckalex.clew.ios -ClewSmokeJS
-  '<js>'` — **terminate the app first or the script won't run**; read
-  via `xcrun simctl spawn <sim> log show --last 40s --predicate
-  'eventMessage CONTAINS "CLEWJS"'` (sim's own store; `--start` wants
-  LOCAL time — use `--last`). The script is a FUNCTION BODY: `return`
-  an async IIFE and the resolved value prints as `CLEWJS smoke ok:
-  <value>` — that line is the ONLY channel (page console.log never
-  reaches oslog). Asset fetches from the app page need the absolute
-  `clew-preview://vault/__clew_assets__/<root>/…` URL; root-relative
-  paths 404 on the clew-app origin.
+  '<js>'` — **terminate the app first**; read via `xcrun simctl spawn
+  <sim> log show --last 40s --predicate 'eventMessage CONTAINS
+  "CLEWJS"'`. The script is a FUNCTION BODY: `return` an async IIFE; the
+  resolved value prints as `CLEWJS smoke ok: <value>` — the ONLY channel.
+  **No backslashes in the smoke JS** (regex escapes get eaten by the
+  quoting — use character classes); a stray `"` inside a `-m` commit
+  message likewise breaks the shell — use `git commit -F file`.
 - App-page surface: `__clew` = workspaceStore/vaultStore/editorPool/
-  settingsStore/ipc/actions/registry; `__clewNative` =
+  settingsStore/ipc/actions/registry/officeDock; `__clewNative` =
   renderNote/renderFragment/externalDiff/flush/sessionId.
-  `renderNote(rel)` returns full rendered HTML — fastest in-app engine
-  assertion.
-- Opening things from smoke: notes via
-  `__clew.actions.openWikilink(name, { mode: "reading" })`; drawings
-  and PDFs via `workspaceStore.openFile(path, {})`; **canvases via
-  `workspaceStore.openCanvas(path, {})`**. **Same-path tabs are
-  REUSED**: a stale wrong-kind tab persists in the workspace and wins
-  — walk `workspaceStore.state.root` and `closeTab(id)` first.
-- Probe plugin recipe for inside preview iframes (unreachable from the
-  app page): temporary vault plugin with a `preview` surface painting
-  counts on a `data-clew-keep` banner; it can also DRIVE the document.
-  Remove it from the sim vault afterwards. (The PDF viewer page is a
-  different, also-unreachable origin — and ALL shadow DOM, per
-  upstream's traps: walk shadowRoots, never querySelector.)
-- Gotchas: every `simctl install` rotates the data container (re-run
-  `get_app_container` — and re-resolve BEFORE writing test files);
-  a failed xcodebuild leaves the previous build installed (grep
-  `BUILD SUCCEEDED`); uninstall+reinstall to reseed the demo vault;
-  smoke `message` listeners never fire from callAsyncJavaScript
-  closures.
+  `renderNote(rel)` is the fastest engine assertion; `registry.
+  runCommand('file:history' | 'app:settings' | 'editor:fill-paragraph')`
+  drives UI. Notes via `actions.openWikilink(name, { mode })`; drawings
+  need the FULL name `X.excalidraw.md` (the explorer hides `.md`);
+  PDFs/office via `workspaceStore.openFile(path, {})`; canvases via
+  `openCanvas`. Same-path tabs are REUSED — `closeTab` first.
+- On-disk checks: `xcrun simctl get_app_container <sim> <bundle> data`
+  (rotates on every install); `ls` in this shell is GNU — use
+  `/usr/bin/stat -f "%Sm %N" -t "%Y-%m-%d %H.%M.%S"` for mtimes.
+  `textutil -convert docx` makes a real Word file for office probes.
+- Preview iframes and the PDF viewer page are unreachable from the app
+  page (probe-plugin recipe in the previous handover still applies; all
+  PDF viewer DOM is shadow DOM). Canvas nodes ARE app-page DOM
+  (`.canvas-office-thumb img` etc.).
 
 ## 6. Build
 
-`export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` first
-(xcode-select points at CLT). `npm run build`, then
-`xcodebuild -project ios/Clew.xcodeproj -scheme Clew -destination
-'id=<sim>' -derivedDataPath build/DerivedData build` (build/ is
-gitignored). EmbedPDF stages from `vendor/embedpdf/dist` (§1) — the
-sync refreshes that mirror along with vendor/clew and vendor/jmarkdown.
-The one esbuild warning — duplicate "Highlight theme" key — comes from
-vendor/jmarkdown's config files and may change after the engine
-re-sync. `sync-upstream` regenerates `AppIcon.png` non-deterministically
-— `git checkout --` it unless the upstream icon actually changed. On
-the next sync: guarded patches fail the build loudly if an anchor
-drifted (pre-checked fine at dbe8348, §3); diff `shared/channels.js`
-and `src/main/` for the office subsystem's new shim surface before
-assuming the app boots; npm deps do NOT auto-merge.
+`export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` first.
+`npm run build`, then `xcodebuild -project ios/Clew.xcodeproj -scheme
+Clew -destination 'id=<sim>' -derivedDataPath build/DerivedData build`.
+Twelve guarded patches in scripts/build.js fail the build loudly on
+drift (editor autofocus, explorer/tab touch drags, canvas webview,
+settings PDF-viewer + office sections, preview iframe rebuild, preview
+client ready/pageshow + pdf-core handles, office tab offer + button
+label, canvas node Live choice). `buildPreviewClients` also emits
+`wa.js`/`wa.css`; the app and services bundles inject `Buffer` from
+`shims/buffer-inject.js` (never the worker's globals). Office files are
+vendored but `zeta-page.js`/`zeta-thread.js` are NOT built and no
+`clewzeta`/`zeta` asset root exists. `sync-upstream` regenerates
+`AppIcon.png` non-deterministically — `git checkout --` it. npm deps do
+NOT auto-merge (`@awesome.me/webawesome` was added by hand; the lockfile
+matters for Xcode Cloud's `npm ci`).
