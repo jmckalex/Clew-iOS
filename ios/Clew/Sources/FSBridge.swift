@@ -134,6 +134,45 @@ final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 				}
 			}
 
+		case "demoVaultPath":
+			performIO(reply) { ["path": self.vaults.demoVaultPath()] }
+
+		case "createVault":
+			// The welcome screen's "Create new vault…". A native sheet asks
+			// the name (WKWebView has no prompt() without a UI delegate for
+			// it); the folder lands in Documents, like desktop's default of
+			// ~/Documents/My Vault.
+			guard let root = webView?.window?.rootViewController else {
+				return reply(nil, "no view controller to present from")
+			}
+			let alert = UIAlertController(title: "Create a new vault",
+				message: "A folder in this app's Documents, visible in the Files app.", preferredStyle: .alert)
+			alert.addTextField { field in
+				field.placeholder = "Vault name"
+				field.text = "My Vault"
+				field.clearButtonMode = .whileEditing
+			}
+			alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in reply(nil, nil) })
+			alert.addAction(UIAlertAction(title: "Create Vault", style: .default) { _ in
+				let name = alert.textFields?.first?.text ?? ""
+				do {
+					reply(["path": try self.vaults.createVault(named: name)], nil)
+				} catch {
+					reply(nil, error.localizedDescription)
+				}
+			})
+			root.present(alert, animated: true)
+
+		case "officeThumbnail":
+			// Quick Look renders the thumbnail; may wait on an evicted iCloud
+			// document first, so off main; QL completes on its own queue.
+			guard let rel = params["rel"] as? String else { throw ClewError.badPayload }
+			vaults.ioQueue.async {
+				OfficeThumbs.thumbnail(rel: rel, in: self.vaults) { result in
+					DispatchQueue.main.async { reply(result, nil) }
+				}
+			}
+
 		case "pickFolder":
 			// Anywhere Files can reach: iCloud Drive, Working Copy, other
 			// providers, or the app's own Documents. External folders get a

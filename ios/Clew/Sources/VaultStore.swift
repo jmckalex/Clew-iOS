@@ -93,20 +93,44 @@ final class VaultStore {
 	// MARK: - Bootstrap
 
 	/// The vault to auto-open at launch: the last-open one if it is still
-	/// reachable, else the seeded demo vault (copied from the bundle on
-	/// first run).
+	/// reachable, else the seeded demo vault.
 	func bootstrapVaultPath() -> String {
+		let demo = demoVaultPath()
+		if let last = UserDefaults.standard.string(forKey: "lastVaultPath"),
+			let resolved = resolveAccess(last) {
+			return resolved
+		}
+		return demo
+	}
+
+	/// The demo vault — the de-facto tutorial. The bundle's copy is read-only
+	/// payload and a vault must be writable, so the user gets their own copy
+	/// in Documents: created on first use, reopened (never overwritten)
+	/// after that — the same rule as desktop's ~/Documents/Clew Demo Vault.
+	func demoVaultPath() -> String {
 		let fm = FileManager.default
 		let demo = documentsURL.appendingPathComponent("Demo Vault", isDirectory: true)
 		if !fm.fileExists(atPath: demo.path),
 			let seed = Bundle.main.url(forResource: "SeedVault", withExtension: nil) {
 			try? fm.copyItem(at: seed, to: demo)
 		}
-		if let last = UserDefaults.standard.string(forKey: "lastVaultPath"),
-			let resolved = resolveAccess(last) {
-			return resolved
-		}
 		return demo.path
+	}
+
+	/// A new, empty vault in Documents (visible in the Files app), its name
+	/// deduped like a new note's. Returns the path.
+	func createVault(named raw: String) throws -> String {
+		let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+			.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
+		let base = name.isEmpty ? "My Vault" : name
+		var candidate = documentsURL.appendingPathComponent(base, isDirectory: true)
+		var counter = 2
+		while FileManager.default.fileExists(atPath: candidate.path) {
+			candidate = documentsURL.appendingPathComponent("\(base) \(counter)", isDirectory: true)
+			counter += 1
+		}
+		try FileManager.default.createDirectory(at: candidate, withIntermediateDirectories: true)
+		return candidate.path
 	}
 
 	// MARK: - Snapshot

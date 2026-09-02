@@ -16,6 +16,7 @@
 		C1E0000000000000000000A8 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C1F0000000000000000000A8 /* Assets.xcassets */; };
 		C1E0000000000000000000A9 /* QuickLookPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F0000000000000000000A9 /* QuickLookPresenter.swift */; };
 		C1E0000000000000000000AA /* AtomicFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F0000000000000000000AA /* AtomicFile.swift */; };
+		C1E0000000000000000000AB /* OfficeThumbs.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F0000000000000000000AB /* OfficeThumbs.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -30,6 +31,7 @@
 		C1F0000000000000000000A8 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		C1F0000000000000000000A9 /* QuickLookPresenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickLookPresenter.swift; sourceTree = "<group>"; };
 		C1F0000000000000000000AA /* AtomicFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AtomicFile.swift; sourceTree = "<group>"; };
+		C1F0000000000000000000AB /* OfficeThumbs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfficeThumbs.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -80,6 +82,7 @@
 				C1F0000000000000000000A6 /* HEICConverter.swift */,
 				C1F0000000000000000000A9 /* QuickLookPresenter.swift */,
 				C1F0000000000000000000AA /* AtomicFile.swift */,
+				C1F0000000000000000000AB /* OfficeThumbs.swift */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -180,6 +183,7 @@
 				C1E0000000000000000000A6 /* HEICConverter.swift in Sources */,
 				C1E0000000000000000000A9 /* QuickLookPresenter.swift in Sources */,
 				C1E0000000000000000000AA /* AtomicFile.swift in Sources */,
+				C1E0000000000000000000AB /* OfficeThumbs.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

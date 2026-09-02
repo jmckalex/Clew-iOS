@@ -36,9 +36,12 @@ xcrun simctl spawn booted log stream --predicate 'eventMessage CONTAINS "CLEWJS"
 ## Layout
 
 - `vendor/` — committed mirrors of upstream (`../Clew-app` src + its
-  vendored jmarkdown). Never edited by hand; `npm run sync-upstream`
-  overwrites wholesale. Behavior changes are build-time patches in
-  `scripts/build.js`, each an upstream candidate.
+  vendored jmarkdown, and the owner's EmbedPDF build). Never edited by
+  hand; `npm run sync-upstream` overwrites wholesale. Behavior changes
+  are build-time patches in `scripts/build.js`, each an upstream
+  candidate. Pure fs+path modules from upstream's main process (indexer,
+  search, kv-store, rename-links, plugins, history) run verbatim over
+  the vault mirror.
 - `src/worker/` — the engine Web Worker entry + Node-builtin shims
   (in-memory vfs, posix path, process/Buffer, md5/sha1, throwing
   child_process).
@@ -56,8 +59,10 @@ xcrun simctl spawn booted log stream --predicate 'eventMessage CONTAINS "CLEWJS"
 
 TikZ/MetaPost/Mathematica compile (cached SVGs from desktop display when
 the hash inputs match — MetaPost verified), LaTeX/PDF export, site export,
-vault plugins (engine/app surfaces), kanban drag on touch, touch-only
-file move (drag-to-move is pointer-only; no Move menu item yet), iCloud
-conflict-version surfacing (sync Phase 2), CJK fallback fonts for PDFs
-(upstream's 139 MB pack has no iOS downloader), `\citefile` BibDesk
-attachments (BufferShim gaps), and a third-party-notices surface.
+the ZetaOffice runtime (office documents open read-only in Quick Look,
+and embeds show Quick Look thumbnails; editing them needs the desktop
+app), kanban drag on touch, touch-only file move (drag-to-move is
+pointer-only; no Move menu item yet), iCloud conflict-version surfacing
+(sync Phase 2), CJK fallback fonts for PDFs (upstream's 139 MB pack has
+no iOS downloader), `\citefile` BibDesk attachments (BufferShim gaps),
+and a third-party-notices surface.

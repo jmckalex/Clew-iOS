@@ -174,16 +174,63 @@ const rendererPatches = {
 				+ "\t\twebview.addEventListener('error', () => webview.dispatchEvent(new Event('did-fail-load')));"),
 			loader: 'js',
 		}));
-		// The "PDF viewer" settings section offers a 139 MB CJK fallback-font
-		// download, which on iOS has nothing behind it (the three
-		// CH.PDF_FONTS_* channels answer "not available" — see src/shim/ipc.js)
-		// and would dead-end at a button that never finishes. Drop the section
-		// rather than ship a control that lies. A native URLSession downloader
-		// is a possible later feature; until then PDFs simply render without
-		// CJK fallback fonts, exactly as upstream does with the pack absent.
+		// Two settings sections offer downloads with nothing behind them on
+		// iOS: "PDF viewer" (a 139 MB CJK fallback-font pack) and "Office
+		// documents" (the LibreOffice-in-wasm engine). The channels answer
+		// "not available" (src/shim/ipc.js) and each would dead-end at a
+		// button that never finishes. Drop both sections rather than ship a
+		// control that lies. A native URLSession font downloader is a
+		// possible later feature; the office engine is the owner's call.
 		builder.onLoad({ filter: /vendor\/clew\/renderer\/components\/views\/clew-settings-view\.js$/ }, (args) => ({
-			contents: patched('clew-settings-view.js', fs.readFileSync(args.path, 'utf8'),
-				"\t\t\tthis.#section('PDF viewer', [...this.#cjkFontRow()]),\n",
+			contents: patched('clew-settings-view.js',
+				patched('clew-settings-view.js', fs.readFileSync(args.path, 'utf8'),
+					"\t\t\tthis.#section('PDF viewer', [...this.#cjkFontRow()]),\n",
+					''),
+				"\t\t\tthis.#section('Office documents', [...this.#officeEngineRow()]),\n",
+				''),
+			loader: 'js',
+		}));
+		// An office document's tab: upstream offers the LibreOffice download
+		// (and, with a desktop LibreOffice, a PDF preview); iOS has neither,
+		// and the download button would spin forever on an engine that never
+		// arrives. Say what iOS does instead — Quick Look — and label the
+		// "open externally" button for what it opens.
+		builder.onLoad({ filter: /vendor\/clew\/renderer\/components\/views\/clew-file-view\.js$/ }, (args) => ({
+			contents: patched('clew-file-view.js',
+				patched('clew-file-view.js', fs.readFileSync(args.path, 'utf8'),
+					"\t\ttext.textContent = 'Editing Word, Excel and PowerPoint documents in Clew uses LibreOffice, '\n"
+					+ "\t\t\t+ `a one-time ${mb(engine.wireBytes)} download. Nothing is fetched until you ask.`;\n"
+					+ "\t\tif (engine.lastError) {\n"
+					+ "\t\t\tdetail.textContent = `The last download did not finish: ${engine.lastError}`;\n"
+					+ "\t\t}\n"
+					+ "\t\tconst button = document.createElement('button');\n"
+					+ "\t\tbutton.textContent = `Download LibreOffice (${mb(engine.wireBytes)})`;\n"
+					+ "\t\tbutton.addEventListener('click', () => officeDock.downloadEngine());\n"
+					+ "\t\tpanel.append(button);\n",
+					"\t\ttext.textContent = 'Word, Excel and PowerPoint documents open read-only in Quick Look on iOS; '\n"
+					+ "\t\t\t+ 'editing them in place needs the desktop app.';\n"),
+				"external.textContent = engine.soffice ? 'Open in LibreOffice' : 'Open in default app';",
+				"external.textContent = engine.soffice ? 'Open in LibreOffice' : 'Open in Quick Look';"),
+			loader: 'js',
+		}));
+		// A canvas office node's context menu offers a LIVE LibreOffice per
+		// node; with no engine that is a blank frame. Drop the choice (the
+		// node stays a Quick Look thumbnail; a `live` flag set on desktop is
+		// simply not honoured here).
+		builder.onLoad({ filter: /vendor\/clew\/renderer\/components\/views\/clew-canvas-view\.js$/ }, (args) => ({
+			contents: patched('clew-canvas-view.js', fs.readFileSync(args.path, 'utf8'),
+				"\t\tif (node.type === 'file' && fileKind(node.file ?? '') === 'office') {\n"
+				+ "\t\t\t// Thumbnail vs live editor. Live boots a LibreOffice PER NODE\n"
+				+ "\t\t\t// (~1.6 GB) — an explicit, per-node opt-in, stored under the clew\n"
+				+ "\t\t\t// key so Obsidian ignores it.\n"
+				+ "\t\t\titems.push(\n"
+				+ "\t\t\t\t{ separator: true },\n"
+				+ "\t\t\t\t{ choices: true, label: 'Office', current: nstyle.office ?? null, options: [\n"
+				+ "\t\t\t\t\t{ value: null, label: 'Thumb', title: 'static thumbnail (refreshes when the file changes)' },\n"
+				+ "\t\t\t\t\t{ value: 'live', label: 'Live', title: 'live LibreOffice editor (boots one per node, ~1.6 GB)' },\n"
+				+ "\t\t\t\t], onPick: (v) => this.#applyNodeStyle({ office: v }) },\n"
+				+ "\t\t\t);\n"
+				+ "\t\t}\n",
 				''),
 			loader: 'js',
 		}));

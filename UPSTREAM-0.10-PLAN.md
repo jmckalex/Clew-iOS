@@ -143,11 +143,21 @@ So the office surface degrades honestly instead of dead-ending:
   reachable with a dirty office document, which cannot exist here).
 - `OFFICE_OPEN_EXTERNAL` → the `quickLook` bridge: iOS's native
   read-only office viewer IS the "open externally" rung.
-- The settings view's office section is patched out (guarded patch, like
-  the CJK font section): a download button with nothing behind it lies.
-- The offer panel in `clew-file-view.js` for a `.docx` tab: read in p2,
-  then decide between a guarded patch that leaves only "Open in Quick
-  Look" and living with the honest failure messages.
+- **`OFFICE_THUMBNAIL` is real** (decided in p2): `QLThumbnailGenerator`
+  renders Word/Excel/PowerPoint with the system's own previewers, and
+  the PNG is cached exactly where desktop caches its own —
+  `.clew/cache/office-thumbs/<rel>.png`, by mtime — so a vault shared
+  over iCloud reuses either side's thumbnails. OpenDocument formats have
+  no previewer and report the reason. Office embeds in notes and canvas
+  office nodes therefore show a picture, not an error string.
+- Three guarded patches: the settings view's office section is dropped
+  (like the CJK font section); the office tab's download offer says
+  what iOS does instead and its button reads "Open in Quick Look" (the
+  upstream offer's download button would spin forever, since
+  `downloadEngine` never repaints after a rejected download); the canvas
+  node's Thumb/Live choice is dropped (Live would be a blank frame).
+- `VAULT_CREATE_DIALOG` asks the name in a native sheet and makes the
+  folder in Documents; `VAULT_OPEN_DEMO` opens the seeded vault.
 
 ### 2.2 `writeFileAtomic` over the vfs
 

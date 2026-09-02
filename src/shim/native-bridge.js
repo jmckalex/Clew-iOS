@@ -9,6 +9,10 @@
 //                                       maps rel path -> {text?, size, mtimeMs}
 //                                       (text present for text files only)
 //   pickFolder()                     -> { path } | null (document picker)
+//   createVault()                    -> { path } | null (name sheet; folder in Documents)
+//   demoVaultPath()                  -> { path } of the seeded demo vault (seeds it if missing)
+//   officeThumbnail({rel})           -> { ok, path, stamp } | { ok: false, reason } (Quick Look)
+//   quickLook({rel})                 -> null (system viewer for a vault file)
 //   write({vault, rel, text})        -> null
 //   writeBinary({vault, rel, base64})-> {rel, size} (attachments; dedupes name)
 //   updateBinary({rel, base64})      -> null (overwrite existing file in place)

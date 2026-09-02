@@ -255,6 +255,12 @@ the golden master than forked here:
   cap the listing's order within that second (and `newest`, which gates
   the identical-content check) no longer tracks recency. Cosmetic in
   practice; a services test here asserts on the surviving set instead.
+- **`officeDock.downloadEngine` never repaints a rejected download.** It
+  sets `downloading: true` optimistically, and if `OFFICE_ENGINE_DOWNLOAD`
+  rejects before the 700 ms status poll fires, the cached status stays
+  "downloading" forever — the offer panel shows "Starting…" with no way
+  back. A `catch` that refreshes the status would fix it on desktop too
+  (a failed download is reachable there: offline, a bad pin).
 - **`dataviewJs` in the VAULT_SETTINGS_SET reconfigure list.** Upstream
   reconfigures on `jmarkdownProject`/`normalSyntax`/`pandocCitations` but
   leaves `dataviewJs` to take effect at the next vault open, which looks
@@ -275,6 +281,26 @@ the golden master than forked here:
   annotation. The `quickLook` Swift bridge stays available as a fallback.
 - **PDF.js is gone.** EmbedPDF is the only PDF stack; canvas-embed scenes
   use `pdf-page.html` like everything else.
+- **The ZetaOffice runtime is not ported; Quick Look stands in.** Desktop
+  (0.10) edits Word/Excel/PowerPoint in tabs with LibreOffice-in-wasm
+  (~1.6 GB resident) and thumbnails office embeds by booting the same
+  offscreen. The iPad content process is killed well short of that, and
+  whether to spike it at all is the owner's call. Upstream's surfaces
+  all ride the vendor drop; on iOS they are backed by what the system
+  has: `OFFICE_ENGINE_STATUS` says "not installed, no desktop
+  LibreOffice"; "Open in Quick Look" (the relabelled open-externally
+  button) presents the read-only system viewer; `OFFICE_THUMBNAIL` is
+  REAL — `QLThumbnailGenerator` renders the document and the PNG is
+  cached where desktop caches its own (`.clew/cache/office-thumbs/
+  <rel>.png`, by mtime), so embeds and canvas nodes show a picture and
+  a vault shared over iCloud reuses either side's; download/remove/
+  convert/save/slot answer with a reason. Three guarded patches drop
+  the controls that would lie: the settings section, the tab's download
+  offer (whose button would spin forever — `downloadEngine` never
+  repaints after a rejected download; upstream candidate), and the
+  canvas node's Live choice. `![[doc.docx|live]]` in a note still emits
+  a live iframe, which 404s here (blank box) — the one office surface
+  that cannot be made honest without touching the engine.
 - **CJK PDF fallback fonts are stubbed off.** Upstream downloads a 139 MB
   Noto pack on demand; iOS has no downloader, so the three `CH.PDF_FONTS_*`
   channels answer "not available", the settings section is patched out, and

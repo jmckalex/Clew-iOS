@@ -102,6 +102,17 @@ export function createClewShim({ workerFactory, assetLoader } = {}) {
 		return openInflight;
 	};
 
+	// Office paths are reachable from preview documents (vault-authored
+	// content) through the app page's office bridges, so as narrow as
+	// upstream's writeOffice: an office extension, no '..', inside the vault.
+	const officeRel = (path) => {
+		const rel = typeof path === 'string' ? path : '';
+		if (!/\.(odt|ods|odp|docx|xlsx|pptx)$/i.test(rel)) throw new Error(`Not an office document: ${rel}`);
+		if (rel.split('/').some((seg) => seg === '..' || seg === '')) throw new Error(`Bad office path: ${rel}`);
+		vaults.resolve(rel);
+		return rel;
+	};
+
 	const sanitizeStateName = (name) => {
 		if (!/^[\w-]+\.json$/.test(name)) throw new Error(`Bad state name: ${name}`);
 		return name;
@@ -115,6 +126,19 @@ export function createClewShim({ workerFactory, assetLoader } = {}) {
 			return openVault(picked.path);
 		},
 		[CH.VAULT_OPEN_PATH]: ({ path }) => openVault(path),
+		// The welcome screen's other two ways in (upstream dd703e7). Create
+		// asks the name in a native sheet and makes the folder in Documents;
+		// the demo vault is the one Swift seeds on first launch anyway.
+		[CH.VAULT_CREATE_DIALOG]: async () => {
+			const created = await bridgeCall('createVault');
+			if (!created?.path) return null;
+			return openVault(created.path);
+		},
+		[CH.VAULT_OPEN_DEMO]: async () => {
+			const demo = await bridgeCall('demoVaultPath');
+			if (!demo?.path) return null;
+			return openVault(demo.path);
+		},
 		[CH.VAULT_CURRENT]: async () => {
 			if (vaults.isOpen) return vaults.info;
 			const boot = await bridgeCall('vaultBootstrap');
@@ -273,6 +297,49 @@ export function createClewShim({ workerFactory, assetLoader } = {}) {
 		[CH.PDF_FONTS_REMOVE]: () => {
 			throw new Error('CJK PDF fonts are not available on iOS');
 		},
+		// Office documents. Upstream edits Word/Excel/PowerPoint in tabs with
+		// LibreOffice-in-wasm (~1.6 GB resident) and thumbnails embeds by
+		// booting the same offscreen. Neither is ported: the iPad content
+		// process is killed well short of that, and whether to spike it at
+		// all is the owner's call. What iOS has natively is Quick Look — a
+		// read-only viewer for the same formats and a thumbnail generator —
+		// so upstream's surfaces stay truthful instead of dead-ending: the
+		// engine reports "not installed, no desktop LibreOffice" (the file
+		// view's download offer is patched to say so in scripts/build.js);
+		// "open externally" IS Quick Look; embeds and canvas nodes get real
+		// thumbnails from QLThumbnailGenerator, cached where upstream caches
+		// its own (.clew/cache/office-thumbs/<rel>.png, by mtime) so a vault
+		// shared with desktop reuses either side's; and the download/remove/
+		// convert/save/slot channels say why rather than fail as unknown.
+		[CH.OFFICE_ENGINE_STATUS]: () => ({
+			installed: false, downloading: false, managed: false, progress: null,
+			lastError: null, wireBytes: 0, bytesOnDisk: 0, soffice: false,
+		}),
+		[CH.OFFICE_ENGINE_DOWNLOAD]: () => {
+			throw new Error('The office engine (LibreOffice) is not available on iOS');
+		},
+		[CH.OFFICE_ENGINE_REMOVE]: () => {
+			throw new Error('The office engine (LibreOffice) is not available on iOS');
+		},
+		[CH.OFFICE_SLOT_ACQUIRE]: () => ({ ok: false, path: null }),
+		[CH.OFFICE_SLOT_RELEASE]: () => {},
+		[CH.OFFICE_CONVERT_PDF]: () => ({ ok: false, reason: 'PDF conversion needs a desktop LibreOffice' }),
+		[CH.OFFICE_WRITE]: () => {
+			throw new Error('Office documents are read-only on iOS (no office engine)');
+		},
+		[CH.OFFICE_OPEN_EXTERNAL]: ({ path }) => {
+			const rel = officeRel(path);
+			bridgeCall('quickLook', { rel }).catch((err) => console.warn('[clew-ios] Quick Look failed:', err));
+		},
+		[CH.OFFICE_THUMBNAIL]: async ({ path }) => {
+			const rel = officeRel(path);
+			if (!vfs.has(vaults.resolve(rel))) return { ok: false, reason: 'missing document' };
+			return bridgeCall('officeThumbnail', { rel });
+		},
+		// Only reachable with a dirty office document, which cannot exist
+		// here; the safe answer is the one that never loses anything.
+		[CH.CONFIRM_DISCARD]: () => 'cancel',
+		[CH.WINDOW_CLOSE_RESOLVED]: () => {},
 		[CH.SHELL_OPEN_EXTERNAL]: ({ url }) => {
 			if (/^https?:|^mailto:/i.test(url)) bridgeCall('openExternal', { url }).catch(() => {});
 		},

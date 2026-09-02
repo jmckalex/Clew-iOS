@@ -73,6 +73,17 @@ const fakeBridge = {
 				fs.utimesSync(path.join(params.vault, params.rel), date, date);
 				return null;
 			}
+			case 'quickLook':
+				return null;
+			case 'officeThumbnail':
+				return { ok: false, reason: 'no Quick Look under Node' };
+			case 'demoVaultPath':
+				return { path: vaultDir };
+			case 'createVault': {
+				const dir = path.join(os.tmpdir(), `clew-ios-test-created-${process.pid}`, 'My Vault');
+				fs.mkdirSync(dir, { recursive: true });
+				return { path: dir };
+			}
 			case 'remove':
 				// VaultStore.remove's refusal: only history pruning hard-deletes.
 				if (!params.rel.startsWith('.clew/history/')) throw new Error(`Refused: ${params.rel}`);
@@ -135,6 +146,15 @@ const CH = {
 	HISTORY_LIST: 'clew:history-list',
 	HISTORY_READ: 'clew:history-read',
 	HISTORY_RESTORE: 'clew:history-restore',
+	OFFICE_ENGINE_STATUS: 'clew:office-engine-status',
+	OFFICE_ENGINE_DOWNLOAD: 'clew:office-engine-download',
+	OFFICE_SLOT_ACQUIRE: 'clew:office-slot-acquire',
+	OFFICE_WRITE: 'clew:office-write',
+	OFFICE_OPEN_EXTERNAL: 'clew:office-open-external',
+	OFFICE_THUMBNAIL: 'clew:office-thumbnail',
+	CONFIRM_DISCARD: 'clew:confirm-discard',
+	VAULT_CREATE_DIALOG: 'clew:vault-create-dialog',
+	VAULT_OPEN_DEMO: 'clew:vault-open-demo',
 };
 
 // A byte-for-byte valid, one-page PDF — small enough to inline, real enough
@@ -422,4 +442,48 @@ test('history: false in vault-settings disables snapshots', async () => {
 	await native.flush();
 	assert.deepEqual(fs.readdirSync(historyDir(rel)), before, 'nothing new on disk');
 	assert.equal(fs.readFileSync(path.join(vaultDir, rel), 'utf8'), 'version 4\n', 'the write itself still landed');
+});
+
+// ---- upstream 0.10: the office surfaces, without the office engine -------
+
+test('office: the engine reports not installed and every office channel answers', async () => {
+	const status = await clew.invoke(CH.OFFICE_ENGINE_STATUS);
+	assert.equal(status.installed, false);
+	assert.equal(status.downloading, false);
+	assert.equal(status.soffice, false, 'no desktop LibreOffice rung either');
+	await assert.rejects(() => clew.invoke(CH.OFFICE_ENGINE_DOWNLOAD), /not available on iOS/);
+	await assert.rejects(() => clew.invoke(CH.OFFICE_WRITE, { path: 'Doc.docx', bytes: new Uint8Array(1) }),
+		/read-only on iOS/);
+	assert.deepEqual(await clew.invoke(CH.OFFICE_SLOT_ACQUIRE, { tabId: 't1', path: 'Doc.docx' }),
+		{ ok: false, path: null });
+	assert.equal(await clew.invoke(CH.CONFIRM_DISCARD, { message: 'Unsaved changes' }), 'cancel');
+});
+
+test('office: open-externally is Quick Look and thumbnails come from the bridge, both narrow', async () => {
+	// A document that arrived from outside (Files app): the rescan diff
+	// carries binaries as size-only stubs, exactly as the device does.
+	fs.writeFileSync(path.join(vaultDir, 'Attachments', 'Memo.docx'), 'not really a docx');
+	native.externalDiff({ changed: { 'Attachments/Memo.docx': { size: 17, mtimeMs: Date.now() } }, removed: [] });
+	await clew.invoke(CH.OFFICE_OPEN_EXTERNAL, { path: 'Attachments/Memo.docx' });
+	await settle();
+	assert.ok(fakeBridge.calls.some(([m, p]) => m === 'quickLook' && p.rel === 'Attachments/Memo.docx'),
+		'Quick Look was asked for the document');
+	await assert.rejects(() => clew.invoke(CH.OFFICE_OPEN_EXTERNAL, { path: 'Welcome.md' }), /Not an office document/);
+	await assert.rejects(() => clew.invoke(CH.OFFICE_THUMBNAIL, { path: '../Escape.docx' }), /Bad office path/);
+	assert.deepEqual(await clew.invoke(CH.OFFICE_THUMBNAIL, { path: 'Attachments/Nope.docx' }),
+		{ ok: false, reason: 'missing document' }, 'never asks native for a file the mirror lacks');
+	const thumb = await clew.invoke(CH.OFFICE_THUMBNAIL, { path: 'Attachments/Memo.docx' });
+	assert.equal(thumb.ok, false);
+	assert.match(thumb.reason, /Quick Look/, "the bridge's answer passes through");
+	assert.ok(fakeBridge.calls.some(([m, p]) => m === 'officeThumbnail' && p.rel === 'Attachments/Memo.docx'));
+});
+
+// Last: these swap the open vault.
+test('first-run: create-vault and open-demo go through the bridge and open the result', async () => {
+	const created = await clew.invoke(CH.VAULT_CREATE_DIALOG);
+	assert.equal(created.name, 'My Vault');
+	assert.ok(fs.existsSync(created.path), 'the folder exists on disk');
+	const demo = await clew.invoke(CH.VAULT_OPEN_DEMO);
+	assert.equal(demo.path, vaultDir);
+	assert.equal(demo.name, path.basename(vaultDir));
 });
