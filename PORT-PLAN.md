@@ -200,6 +200,32 @@ Ranked; items 1–5 are in scope for the first working build, 6–10 tracked:
   Swift manifest parser's whole-dictionary `[String: String]` cast
   silently dropped every surface of any plugin with a dict-form surface.
   Tests 160 → 240.
+- **On-disk contract parity** ✅ (2026-09-02, before the 0.10 sync —
+  both apps write the same iCloud vaults). Three things desktop changed
+  about what a vault looks like on disk, matched exactly: (1) **atomic
+  writes** — every Swift write path goes temp + `F_FULLFSYNC` + rename
+  with desktop's own temp name, `.<basename>.clew-tmp` beside the
+  target, so each app's walks skip the other's temps and a crash-orphaned
+  temp is swept by the next save (`AtomicFile.swift`; proven standalone
+  on macOS incl. orphan sweep, mode preservation, through-symlink, and the
+  failure path). (2) **Note history** — `.clew/history/<note path>/
+  <stamp><ext>` snapshots, produced by upstream's `history.js` run
+  VERBATIM over the vault mirror like the indexer and kv-store, so the
+  format is identical by construction and upstream's nine unit tests port
+  with a path rewrite. The mirror grew what that needed: Buffer-returning
+  encoding-less reads (`shims/buffer.js`, with `.equals`), `utimes` and a
+  real directory-capable `rename` in the vfs with write-through hooks,
+  and two bridge ops — `setMtime` (snapshots are mtime'd for their
+  content time) and `remove` (pruning; `.clew/history/` only, refused
+  elsewhere on both sides). `HISTORY_LIST/READ/RESTORE` take upstream's
+  ipc shape; restore ripples `fileChanged` because on iOS a write is
+  renderer-originated. Simulator-verified by content: interval gate,
+  pre-image, forced restore, rename carrying the directory, pruning with
+  `-N` counters, snapshot mtime = content time on disk, zero temps.
+  (3) **Welcome.md on first open** — upstream's rule lives in the
+  `EV_VAULT_OPENED` handler, which iOS's boot never fires (it takes the
+  VAULT_CURRENT "reload" branch), so `ios-ui.js` applies it after each
+  restore commit; a clean install now opens on Welcome. Tests 240 → 255.
 
 ### Upstream candidates (iOS-owned today, worth pushing to ../Clew-app)
 
@@ -218,6 +244,17 @@ the golden master than forked here:
   `window.__clewPdfViewers`, but `pdf-page.js` keeps its handle private, so
   anything wanting all three surfaces (the touch layer) needs a build patch.
   The smoke hooks already there exist for the same reason.
+- **The boot path should greet too.** `renderer/main.js` applies the
+  Welcome.md-on-first-open rule only in the `EV_VAULT_OPENED` handler;
+  the `VAULT_CURRENT` boot branch — which is every iOS launch, and a
+  desktop reload — restores the workspace without it. A four-line
+  duplication upstream would let `ios-ui.js` drop its copy.
+- **Same-second snapshot ordering.** `history.js#entriesIn` sorts
+  same-stamp entries by counter, but a counter freed by pruning is reused
+  by the next snapshot, so after three saves in one second under a small
+  cap the listing's order within that second (and `newest`, which gates
+  the identical-content check) no longer tracks recency. Cosmetic in
+  practice; a services test here asserts on the surviving set instead.
 - **`dataviewJs` in the VAULT_SETTINGS_SET reconfigure list.** Upstream
   reconfigures on `jmarkdownProject`/`normalSyntax`/`pandocCitations` but
   leaves `dataviewJs` to take effect at the next vault open, which looks

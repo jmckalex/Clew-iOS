@@ -4,6 +4,7 @@
 import { EditorView } from '@codemirror/view';
 import { runCommand } from '../../vendor/clew/renderer/commands/registry.js';
 import { workspaceStore } from '../../vendor/clew/renderer/state/workspace-store.js';
+import { vaultStore } from '../../vendor/clew/renderer/state/vault-store.js';
 import * as actions from '../../vendor/clew/renderer/commands/actions.js';
 // PDFs are no longer special-cased on iOS. Every PDF surface — note embeds,
 // file tabs, canvas nodes, and canvas-embed scenes — is upstream's EmbedPDF
@@ -316,6 +317,25 @@ for (const event of ['layout-changed', 'active-changed']) {
 	workspaceStore.on(event, syncModeButton);
 }
 syncModeButton();
+
+// ---- first-open greeting --------------------------------------------------
+// Upstream opens a vault's root Welcome.md when the vault opens with no
+// saved workspace — in the renderer's EV_VAULT_OPENED handler, which is
+// what a desktop launch goes through. iOS boots through the VAULT_CURRENT
+// branch instead (desktop's "window reload" path), which never fires that
+// event, so the seeded demo vault came up on an empty pane the first time.
+// Apply the same rule after every restore commit: the boot one, and each
+// vault switch. Idempotent with the upstream handler — whichever runs
+// first opens the note; the other sees a tab and does nothing.
+let greetPending = true;
+window.clew.on('clew:ev-vault-opened', () => { greetPending = true; });
+workspaceStore.on('layout-changed', () => {
+	if (!greetPending) return;
+	greetPending = false;
+	if (workspaceStore.openTabIds().size === 0 && vaultStore.pathExists('Welcome.md')) {
+		workspaceStore.openNote('Welcome.md');
+	}
+});
 
 // ---- compact-mode sidebar behavior ---------------------------------------
 // Sidebars overlay the workspace on phones (ios.css); tapping the workspace
