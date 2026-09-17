@@ -171,6 +171,130 @@ const LATEX_PACKAGES = ['amsmath', 'amssymb'];
 
 const isLatexDocument = (source) => /\\documentclass/.test(source);
 
+// ---- font=note: the note's own typeface ------------------------------------
+// `font=note` on a ```tikz, ```latex or ```tex block (and on the directive
+// and the environments) typesets the figure's text in the face the note is
+// read in. The faces arrive as files: main/note-fonts.js extracts them from
+// the machine's font folder and tells this worker their names through
+// CLEW_NOTE_FONTS (face → file name); the preview hands the same files to
+// the TeX engine (preview-client/figures.js#ensureLoader, mpTikzWasm
+// .addFiles) and loads mp-tikz-wasm's `opentype` bundle, which is what
+// carries fontspec and luaotfload. So the wrapper's job is the preamble:
+// fontspec under LaTeX, luaotfload's own `\font` syntax under plain TeX,
+// naming the files with `Path=./` — luaotfload's name database only
+// indexes the bundled fonts, so a system face cannot be asked for by
+// family. The engine has to be a Lua one, so `font=note` moves a pdfTeX
+// figure onto lualatex; `fonts` becomes `woff2` unless the author said
+// otherwise, which is what makes the SVG carry real <text> in an embedded
+// subset of the same file rather than glyph outlines. A machine with no
+// note face (main/note-fonts.js found nothing) gets fontspec's own
+// defaults, Latin Modern — the figure still typesets.
+//
+// Plain TeX has no fontspec: luaotfload is `\input` directly and the faces
+// are `\font` lines in its bracket-file syntax, `\let` over plain's
+// \tenrm/\tenbf/\tenit so {\bf …} and {\it …} switch faces (the idiom the
+// library verified natively; `+tlig` gives TeX's -- and --- ligatures, which
+// a raw \font does not get). This needed a library-side fix: luaotfload's
+// DVI module registers on `pre_shipout_filter`, which only the LaTeX kernel
+// creates, so under the plain format it died with "Module luatexbase Error:
+// Unable to register callback" and the face was "not loadable" (measured
+// here 2026-09-17, both the `file:` and the bracket syntax) — the
+// opentype-fonts branch patches luaotfload.sty to create it. A build
+// without that patch fails a plain font=note figure with exactly those two
+// lines. The maths stays on Computer Modern either way: no OpenType face
+// goes into a math family.
+//
+// Every figure that will need the bundle — font=note, or a complete
+// document that loads fontspec, unicode-math or luaotfload itself — is
+// marked data-opentype, and that mark is the whole of what the preview
+// client keys on: it asks for the bundle only when a marked figure is on
+// the page, because a findable luaotfload costs every LuaTeX run ~180 ms
+// whether or not the document uses it (measured upstream).
+
+/**
+ * Face → file name, as main/note-fonts.js prepared them; {} when nothing was
+ * found (or outside the worker). The desktop hands them over as the JSON
+ * env var; a host that runs this file without a process environment (the
+ * iOS shim runs the engine in a JS context) may set `globalThis.
+ * CLEW_NOTE_FONTS` instead, as the object or the same JSON.
+ */
+export function noteFontFaces() {
+	try {
+		const raw = globalThis.CLEW_NOTE_FONTS ?? globalThis.process?.env?.CLEW_NOTE_FONTS;
+		const faces = typeof raw === 'string' ? JSON.parse(raw || 'null') : raw;
+		return faces && typeof faces === 'object' ? faces : {};
+	} catch { return {}; }
+}
+
+/** Does this source load OpenType machinery itself (a complete document written for fontspec)? */
+export const wantsOpenType = (source) =>
+	/\\usepackage(?:\[[^\]]*\])?\{(?:[^}]*,)?\s*(?:fontspec|unicode-math)\s*(?:,[^}]*)?\}|luaotfload/.test(source);
+
+/**
+ * The preamble lines that put the note's face on: fontspec for LaTeX
+ * (`kind` tikz or latex), luaotfload's `\font` for plain TeX. Both main and
+ * sans are set, so `\sffamily` and the default face agree — the note's face
+ * IS a sans.
+ */
+export function noteFontPreamble(kind, faces = noteFontFaces()) {
+	const regular = faces.Regular;
+	if (kind === 'tex') {
+		// Nothing to switch to: leave plain TeX in Computer Modern.
+		if (!regular) return '';
+		const font = (name, file) => `\\font\\${name}="[${file}]:mode=node;+liga;+kern;+tlig" at 10pt`;
+		const lines = ['\\input luaotfload.sty', font('notefont', regular)];
+		const lets = ['\\let\\tenrm\\notefont'];
+		if (faces.Bold) { lines.push(font('notefontbf', faces.Bold)); lets.push('\\let\\tenbf\\notefontbf'); }
+		if (faces.Italic) { lines.push(font('notefontit', faces.Italic)); lets.push('\\let\\tenit\\notefontit'); }
+		lines.push(`${lets.join(' ')} \\rm`);
+		return lines.join('\n');
+	}
+	const lines = ['\\usepackage{fontspec}'];
+	if (regular) {
+		const options = ['Path=./'];
+		if (faces.Bold) options.push(`BoldFont=${faces.Bold}`);
+		if (faces.Italic) options.push(`ItalicFont=${faces.Italic}`);
+		if (faces.BoldItalic) options.push(`BoldItalicFont=${faces.BoldItalic}`);
+		lines.push(`\\setmainfont{${regular}}[${options.join(',')}]`, `\\setsansfont{${regular}}[${options.join(',')}]`);
+	}
+	return lines.join('\n');
+}
+
+const LUA_ENGINES = new Set(['lualatex', 'luatex']);
+
+/** Put `lines` into a complete document's preamble, right after its \documentclass. */
+function afterDocumentclass(source, lines) {
+	return source.replace(/\\documentclass(?:\[[^\]]*\])?\{[^}]*\}/, (m) => `${m}\n${lines}`);
+}
+
+/**
+ * Apply `font=note` to a figure: the preamble, the Lua engine, the woff2
+ * output. Returns the (possibly rewritten) source and attrs; `font` itself
+ * is consumed. For a kind Clew wraps (latex, tex) the caller's wrapper has
+ * already run, so the source is a complete document by now and the block
+ * goes in after its \documentclass; for tikz the library wraps, so the
+ * block rides in `preamble` — unless the body is already a complete
+ * document, which is treated like the others.
+ */
+function applyNoteFont(kind, source, attrs) {
+	const { font, ...rest } = attrs;
+	if (String(font ?? '').toLowerCase() !== 'note' || kind === 'metapost') return { source, attrs: rest, applied: false };
+	const latex = isLatexDocument(source);
+	const plain = kind === 'tex' && !latex;
+	const block = noteFontPreamble(plain ? 'tex' : 'latex');
+	// Plain TeX with no note face on the machine: nothing to do at all.
+	if (plain && !block) return { source, attrs: rest, applied: false };
+	const out = { ...rest };
+	if (!LUA_ENGINES.has(String(out.engine ?? '').toLowerCase())) out.engine = plain ? 'luatex' : 'lualatex';
+	out.fonts ??= 'woff2';
+	if (plain) return { source: `${block}\n${source}`, attrs: out, applied: true };
+	if (latex) return { source: afterDocumentclass(source, block), attrs: out, applied: true };
+	// A tikz body the library will wrap: its preamble attribute is where our
+	// lines go — which is why the mark below cannot be read off the source.
+	out.preamble = [block, out.preamble].filter(Boolean).join('\n');
+	return { source, attrs: out, applied: true };
+}
+
 /**
  * A ```latex body: a complete document (it says \documentclass) is typeset
  * as written — page numbers included: an article's folio at the page foot
@@ -256,8 +380,15 @@ export function figureElement(kind, rawSource, rawAttrs = {}) {
 		// The kind's engine, unless the author named one (or the wrapper did).
 		attrs.engine ??= spec.engine;
 	}
+	let applied = false;
+	({ source, attrs, applied } = applyNoteFont(kind, source, attrs));
+	// Marked when font=note put a block somewhere (source or preamble), or
+	// the author's own document loads the machinery. MetaPost never is; a
+	// plain figure on a machine with no note face was left untouched.
+	const opentype = applied || (kind !== 'metapost' && wantsOpenType(source));
 
 	const data = [];
+	if (opentype) data.push(' data-opentype="1"');
 	const styles = [];
 	for (const [key, value] of Object.entries(attrs)) {
 		if (value === undefined || value === null || value === '') continue;

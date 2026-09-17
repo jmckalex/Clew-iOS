@@ -48,6 +48,10 @@ export const paths = app.isPackaged
 		// ZetaOffice wasm bundle: downloaded on demand into userData like
 		// the CJK PDF fonts (zeta-assets.js owns download/verify/remove).
 		zetaAssets: path.join(app.getPath('userData'), 'zeta-assets'),
+		// The note's typeface as font files a TeX run can load (main/
+		// note-fonts.js): extracted from the machine's own font folder at
+		// launch — Apple's and Microsoft's faces cannot ship — into userData.
+		noteFonts: path.join(app.getPath('userData'), 'note-fonts'),
 		// The bundled demo vault (read-only app payload; main.js copies it
 		// into Documents before opening — a vault must be writable).
 		demoVault: path.join(process.resourcesPath, 'demo-vault'),
@@ -79,6 +83,7 @@ export const paths = app.isPackaged
 		// The override is also what marks the directory writable/removable
 		// (zeta-assets.js#managed): the repo's own zeta-assets/ never is.
 		zetaAssets: process.env.CLEW_ZETA_DIR ?? path.join(rootDir, 'zeta-assets'),
+		noteFonts: path.join(app.getPath('userData'), 'note-fonts'),
 		// In dev the repo's demo-vault IS the working documentation corpus;
 		// it opens in place, no copy.
 		demoVault: path.join(rootDir, 'demo-vault'),

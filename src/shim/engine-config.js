@@ -133,11 +133,20 @@ export function engineConfig({ vaultRoot = '/vault', vaultOptions = {}, engineEx
  * The env every engine worker spawns with. `CLEW_DATAVIEW_JS` is safe as
  * spawn-time env because reconfigure() discards the warm standby whenever
  * vault options change.
+ *
+ * `noteFonts` is the face → file map behind `font=note` figures
+ * (vendor/clew/engine/figures.js#noteFontFaces reads it from
+ * process.env.CLEW_NOTE_FONTS, upstream's own fallback for a worker with
+ * no globals): the names must be exactly what the scheme handler serves
+ * under __clew_assets__/notefonts/, because they land verbatim in the
+ * figure's \setmainfont / \font lines. On iOS the bridge builds them from
+ * CoreText (NoteFonts.swift); an empty map means fontspec's Latin Modern.
  */
-export function engineEnv({ vaultRoot = '/vault', sessionId = '', vaultOptions = {} } = {}) {
+export function engineEnv({ vaultRoot = '/vault', sessionId = '', vaultOptions = {}, noteFonts = null } = {}) {
 	return {
 		CLEW_VAULT_ROOT: vaultRoot,
 		CLEW_SESSION_ID: sessionId ?? '',
 		CLEW_DATAVIEW_JS: vaultOptions.dataviewJs === true ? '1' : '',
+		CLEW_NOTE_FONTS: noteFonts && Object.keys(noteFonts).length ? JSON.stringify(noteFonts) : '',
 	};
 }

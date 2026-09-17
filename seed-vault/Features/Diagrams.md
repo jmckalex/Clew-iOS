@@ -266,6 +266,27 @@ a snippet wants `\nopagenumbers`:
   $\displaystyle\sum_{n=1}^\infty {1 \over n^2} = {\pi^2 \over 6}$}
 ```
 
+## In the note's own typeface
+
+A figure's text is normally Latin Modern, TeX's own face. `font=note` sets
+it in the face this note is read in instead — Avenir Next on a Mac — and
+the SVG carries real, selectable text in an embedded subset of that font
+rather than glyph outlines. It works on ` ```tikz `, ` ```latex ` and
+` ```tex ` (the figure moves to LuaTeX, which is what loads OpenType fonts),
+and needs the `opentype` bundle of the wasm TeX, so it is a little slower
+the first time:
+
+```latex font=note
+A paragraph set in the note's face: regular, \textbf{bold},
+\textit{italic} --- with maths, $e^{i\pi} + 1 = 0$, still in Latin Modern.
+```
+
+```tikz font=note
+\node[draw,rounded corners,fill=blue!8] (a) at (0,0) {a labelled node};
+\node[draw,rounded corners,fill=orange!12] (b) at (4.2,0) {in the same face};
+\draw[->,thick] (a) -- node[above] {\textit{as the prose}} (b);
+```
+
 Exports part company here, on purpose. A **LaTeX or PDF export** runs
 your own jmarkdown configuration, where `@begin(TiKZ)` becomes a native
 `tikzpicture` in the document — a true vector figure in the document's

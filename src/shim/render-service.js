@@ -46,6 +46,10 @@ export class RenderService {
 	 *  default that claims nothing rather than a hard dependency. Mirrors
 	 *  desktop's render-service.js. */
 	embeddersOf = () => [];
+	/** Face → file map behind `font=note` figures, set by the session once the
+	 *  bridge has built the faces (engine-config.js#engineEnv says how it is
+	 *  used); null until then, which the engine treats as "no note fonts". */
+	noteFonts = null;
 	#notes = new Map(); // rel -> {mtimeMs, html, hasQueries, inflight, dirty}
 	#fragments = new Map();
 	#fragmentInflight = new Map();
@@ -173,6 +177,7 @@ export class RenderService {
 			files: this.#snapshot(),
 			cwd: ENGINE_CWD,
 			env: engineEnv({
+				noteFonts: this.noteFonts,
 				vaultRoot: VAULT_ROOT,
 				sessionId: this.sessionId,
 				vaultOptions: this.#vaultOptions,

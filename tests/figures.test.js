@@ -244,6 +244,71 @@ test('plain tex gets its \\bye and plain LuaTeX; a \\documentclass body is LaTeX
 	assert.equal(wrapTex(doc, { engine: 'latex' }).attrs.engine, 'latex');
 });
 
+test('font=note: the fontspec block, a Lua engine, woff2 output and the data-opentype mark', () => {
+	process.env.CLEW_NOTE_FONTS = JSON.stringify({
+		Regular: 'NoteFont-Regular.ttf', Bold: 'NoteFont-Bold.ttf', Italic: 'NoteFont-Italic.ttf', BoldItalic: 'NoteFont-BoldItalic.ttf',
+	});
+	try {
+		// A wrapped ```latex snippet: the block goes in right after \documentclass.
+		const latex = figureElement('latex', 'Hello', { font: 'note' });
+		assert.match(latex, /\\documentclass\[varwidth,border=2pt\]\{standalone\}\n\\usepackage\{fontspec\}\n\\setmainfont\{NoteFont-Regular\.ttf\}\[Path=\.\/,BoldFont=NoteFont-Bold\.ttf,ItalicFont=NoteFont-Italic\.ttf,BoldItalicFont=NoteFont-BoldItalic\.ttf\]\n\\setsansfont\{NoteFont-Regular\.ttf\}\[[^\]]*\]\n\\usepackage\{amsmath,amssymb\}/);
+		assert.equal(attrOf(latex, 'data-engine'), 'lualatex');
+		assert.equal(attrOf(latex, 'data-fonts'), 'woff2', 'real <text> in an embedded subset, not outlines');
+		assert.equal(attrOf(latex, 'data-opentype'), '1', 'the mark the preview keys the bundle on');
+		assert.doesNotMatch(latex, /data-font=/, 'font itself is consumed');
+		// A tikz body: the library wraps, so the block rides in preamble — and pdfTeX becomes LuaLaTeX.
+		const tikz = figureElement('tikz', '\\draw (0,0) -- (1,1);', { font: 'note', engine: 'latex' });
+		assert.match(attrOf(tikz, 'data-preamble'), /^\\usepackage\{fontspec\}\n\\setmainfont/);
+		assert.equal(attrOf(tikz, 'data-engine'), 'lualatex');
+		assert.equal(attrOf(tikz, 'data-opentype'), '1', 'marked though the block is in the preamble attribute, not the source — a note with only this figure must still fetch the bundle');
+		assert.equal(attrOf(figureElement('tikz', 'x', { font: 'note', engine: 'luatex' }), 'data-engine'), 'luatex', 'a Lua engine the author chose stands');
+		// The author's own preamble follows ours.
+		const both = figureElement('tikz', 'x', { font: 'note', preamble: '\\usetikzlibrary{calc}' });
+		assert.match(attrOf(both, 'data-preamble'), /\\setsansfont[^\n]*\n\\usetikzlibrary\{calc\}$/);
+		// Plain TeX: luaotfload input directly, one \font per face in the bracket-file
+		// form, \let over plain's tenrm/tenbf/tenit so {\bf …} and {\it …} switch.
+		const tex = figureElement('tex', '\\centerline{Hi}', { font: 'note' });
+		assert.match(tex, /\n\\input luaotfload\.sty\n\\font\\notefont="\[NoteFont-Regular\.ttf\]:mode=node;\+liga;\+kern;\+tlig" at 10pt\n\\font\\notefontbf="\[NoteFont-Bold\.ttf\][^"]*" at 10pt\n\\font\\notefontit="\[NoteFont-Italic\.ttf\][^"]*" at 10pt\n\\let\\tenrm\\notefont \\let\\tenbf\\notefontbf \\let\\tenit\\notefontit \\rm\n\\centerline\{Hi\}\n\\bye\n/);
+		assert.equal(attrOf(tex, 'data-engine'), 'luatex');
+		assert.equal(attrOf(tex, 'data-fonts'), 'woff2');
+		assert.equal(attrOf(tex, 'data-opentype'), '1');
+		// …but a ```tex body that is really LaTeX gets the LaTeX treatment.
+		const texDoc = figureElement('tex', '\\documentclass{article}\\begin{document}x\\end{document}', { font: 'note' });
+		assert.match(texDoc, /\\documentclass\{article\}\n\\usepackage\{fontspec\}/);
+		assert.equal(attrOf(texDoc, 'data-opentype'), '1');
+		// fonts=paths is the author's to keep.
+		assert.equal(attrOf(figureElement('latex', 'x', { font: 'note', fonts: 'paths' }), 'data-fonts'), 'paths');
+		// A complete document with font=note: the block after ITS \documentclass, nothing else touched.
+		const doc = figureElement('latex', '\\documentclass[12pt]{article}\n\\begin{document}x\\end{document}', { font: 'note' });
+		assert.match(doc, /\\documentclass\[12pt\]\{article\}\n\\usepackage\{fontspec\}\n\\setmainfont/);
+		assert.match(doc, /\\setsansfont[^\n]*\n\\begin\{document\}x/);
+		// MetaPost has no LaTeX preamble to put it in: ignored, unmarked.
+		const mp = figureElement('metapost', 'draw origin;', { font: 'note' });
+		assert.doesNotMatch(mp, /data-opentype|fontspec|data-font/);
+	} finally {
+		delete process.env.CLEW_NOTE_FONTS;
+	}
+});
+
+test('a document that loads fontspec itself is marked for the bundle; one that does not is not', () => {
+	const own = figureElement('latex', '\\documentclass{article}\\usepackage[no-math]{fontspec}\\begin{document}x\\end{document}');
+	assert.equal(attrOf(own, 'data-opentype'), '1');
+	assert.doesNotMatch(own, /NoteFont|setmainfont/, 'the author’s fontspec block is theirs; nothing is added');
+	assert.equal(attrOf(figureElement('latex', '\\documentclass{article}\\usepackage{amsmath,unicode-math}\\begin{document}x\\end{document}'), 'data-opentype'), '1');
+	assert.doesNotMatch(figureElement('latex', 'x'), /data-opentype/);
+	assert.doesNotMatch(figureElement('tikz', '\\draw (0,0) circle (1);'), /data-opentype/);
+});
+
+test('with no note face on the machine, font=note still asks for fontspec and typesets in its defaults', () => {
+	delete process.env.CLEW_NOTE_FONTS;
+	const html = figureElement('latex', 'x', { font: 'note' });
+	assert.match(html, /\\documentclass\[[^\]]*\]\{standalone\}\n\\usepackage\{fontspec\}\n\\usepackage\{amsmath,amssymb\}/, 'no \\setmainfont naming a file that is not there');
+	assert.equal(attrOf(html, 'data-opentype'), '1');
+	const tex = figureElement('tex', 'x', { font: 'note' });
+	assert.match(tex, /<tikz-diagram[^>]*>\nx\n\\bye\n/, 'plain TeX has no default OpenType face to fall back to: left in Computer Modern, untouched');
+	assert.doesNotMatch(tex, /data-opentype|luaotfload|data-fonts/, 'and no bundle is fetched for it');
+});
+
 test('the new fences bound their language names', () => {
 	assert.equal(texFence.start('```text\nnot ours\n```\n'), undefined, '```text is somebody else’s');
 	assert.equal(texFence.tokenizer('```text\nnot ours\n```\n'), undefined);

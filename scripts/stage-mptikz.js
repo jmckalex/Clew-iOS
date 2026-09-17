@@ -4,13 +4,16 @@
 // IN the preview document (vendor/clew/preview-client/figures.js loads the
 // library's auto.js from /__clew_assets__/mptikz/).
 //
-// The iOS twin of upstream's scripts/stage-mptikz.js, with one more source
-// in front: the tree upstream itself just staged. Sources, in order —
+// The iOS twin of upstream's scripts/stage-mptikz.js, with one more source:
+// the tree upstream itself staged. Sources, in order — the master build
+// first, as upstream's own paths.js prefers it in dev, because that is
+// where work done upstream (the `opentype` bundle, a luaotfload patch)
+// lands first, and upstream's staged copy can lag it by a day —
 //
 //   1. MPTIKZ_SRC, when set (a staging test, or a machine laid out differently)
-//   2. ../Clew-app/mptikz-assets   — what upstream staged (the master's build
+//   2. ~/Source/mp-tikz-wasm/dist  — the owner's master build
+//   3. ../Clew-app/mptikz-assets   — what upstream staged (the master's build
 //                                    or the pin, whichever it found)
-//   3. ~/Source/mp-tikz-wasm/dist  — the owner's master build
 //   4. the SHA256-pinned GitHub release named in the VENDORED
 //      vendor/clew/shared/mptikz-manifest.json — so the pin is upstream's,
 //      never a second copy that could drift
@@ -44,8 +47,8 @@ const isBuild = (dir) => fs.existsSync(path.join(dir, 'index.js')) && fs.existsS
 
 const candidates = [
 	process.env.MPTIKZ_SRC,
-	path.resolve(root, '..', 'Clew-app', 'mptikz-assets'),
 	path.join(os.homedir(), 'Source', 'mp-tikz-wasm', 'dist'),
+	path.resolve(root, '..', 'Clew-app', 'mptikz-assets'),
 ].filter((dir) => dir && isBuild(dir));
 
 function staged() {
@@ -59,6 +62,8 @@ function staged() {
  * "already current" here (upstream's lesson with spath3).
  */
 function identityOf(from) {
+	// bundles/index.json is in the list because bundles are rebuilt separately
+	// from the engines upstream (adding `opentype` was exactly that).
 	const mtimes = ['index.js', 'mplib.wasm', 'tex.wasm', 'dvisvgm.wasm', 'luatex.wasm',
 		path.join('bundles', 'index.json'), path.join('bundles', 'hot.json')]
 		.map((f) => { try { return fs.statSync(path.join(from, f)).mtimeMs; } catch { return 0; } });

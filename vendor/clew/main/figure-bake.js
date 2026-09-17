@@ -35,6 +35,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { noteFontFiles } from './note-fonts.js';
 
 // Clew's own emission is always one of these two elements (engine/figures.js).
 // A hand-written <script type="text/tikz"> in a note's raw HTML is the
@@ -67,6 +68,11 @@ export function figureEngineAvailable(assetsDir) {
 		&& fs.existsSync(path.join(assetsDir, 'index.js'));
 }
 
+/** Does the staged build carry the `opentype` bundle (fontspec, luaotfload)? The pinned 0.2.1 does not. */
+export function openTypeAvailable(assetsDir) {
+	return fs.existsSync(path.join(assetsDir, 'bundles', 'opentype', 'manifest.json'));
+}
+
 const load = (assetsDir, name) => import(pathToFileURL(path.join(assetsDir, name)).href);
 
 /**
@@ -75,13 +81,24 @@ const load = (assetsDir, name) => import(pathToFileURL(path.join(assetsDir, name
  * Identical figures across pages are rendered once (the library's content
  * hash is the key), and one engine serves the whole export.
  *
+ * A figure marked data-opentype (`font=note`, or a document loading
+ * fontspec — engine/figures.js) needs the `opentype` bundle and the note's
+ * faces (main/note-fonts.js, `noteFontsDir`), exactly as the preview gives
+ * them; without the bundle such figures are refused by name rather than
+ * failing on a missing fontspec.sty. And they are baked as OUTLINES,
+ * whatever the note asked for: `woff2` would embed a subset of Apple's or
+ * Microsoft's face in a published page, while outlines are what a PDF
+ * carries — and they render the same on a visitor's machine without the
+ * face installed.
+ *
  * @param {string[]} files absolute paths of already-written pages
  * @param {string} assetsDir the staged mp-tikz-wasm build (paths.js#mptikzAssets)
  * @param {(p: {done: number, total: number}) => void} onProgress
+ * @param {{noteFontsDir?: string|null}} [options]
  * @returns {Promise<{figures: number, rendered: number, failed: number}>}
  */
-export async function bakeFigures(files, assetsDir, onProgress = () => {}) {
-	const { MetaPost } = await load(assetsDir, 'index.js');
+export async function bakeFigures(files, assetsDir, onProgress = () => {}, { noteFontsDir = null } = {}) {
+	const { MetaPost, DEFAULT_BUNDLES } = await load(assetsDir, 'index.js');
 	const { figureHash, renderFigure, parseAttributes, decodeEntities } = await load(assetsDir, 'figures.js');
 
 	// Pass one: what is on the pages, and which of them need work.
@@ -103,10 +120,27 @@ export async function bakeFigures(files, assetsDir, onProgress = () => {}) {
 	const exitCode = process.exitCode;
 	const results = new Map(); // hash → { svg, ok, diagnostics }
 	let failed = 0;
-	const mp = await MetaPost.create({ logLevel: 'warn' });
+	const wantsOpenType = [...requests.values()].some((r) => r.opentype);
+	const opentype = wantsOpenType && openTypeAvailable(assetsDir);
+	const mp = await MetaPost.create({
+		logLevel: 'warn',
+		...(opentype ? { bundles: [...DEFAULT_BUNDLES, 'opentype'] } : {}),
+	});
 	try {
+		if (opentype && noteFontsDir) {
+			const fonts = noteFontFiles(noteFontsDir);
+			if (Object.keys(fonts).length) await mp.addFiles(fonts);
+		}
 		let done = 0;
 		for (const [hash, request] of requests) {
+			if (request.opentype && !opentype) {
+				results.set(hash, { svg: '', ok: false, diagnostics: [{ severity: 'error',
+					message: 'This figure asks for OpenType fonts (font=note, or fontspec), which the '
+						+ 'installed TeX engines do not carry: mp-tikz-wasm\'s opentype bundle is not staged.' }] });
+				failed += 1;
+				onProgress({ done: ++done, total: requests.size });
+				continue;
+			}
 			try {
 				const result = await renderFigure(mp, request, hash);
 				results.set(hash, result);
@@ -140,12 +174,16 @@ export async function bakeFigures(files, assetsDir, onProgress = () => {}) {
 }
 
 function requestFrom([, tag, attrText, body], parseAttributes, decodeEntities) {
+	const attrs = parseAttributes(attrText);
+	// Outlines for a published page (see bakeFigures).
+	if (attrs.fonts === 'woff2') attrs.fonts = 'paths';
 	return {
 		kind: tag.toLowerCase() === 'metapost-diagram' ? 'metapost' : 'tikz',
 		// As the browser reads it: an HTML parser decodes the entities, and the
 		// tags trim the leading newline and trailing space (auto.js#sourceOf).
 		source: decodeEntities(body).replace(/^\s*\n/, '').replace(/\s+$/, ''),
-		attrs: parseAttributes(attrText),
+		attrs,
+		opentype: /\bdata-opentype=/.test(attrText),
 	};
 }
 

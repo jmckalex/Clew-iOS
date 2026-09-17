@@ -23,6 +23,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { CH } from '../shared/channels.js';
 import { paths } from './paths.js';
+import { readNoteFonts } from './note-fonts.js';
 import { engineExtensionEntries } from './plugins.js';
 import { writeFileAtomic } from './fs-utils.js';
 
@@ -252,6 +253,10 @@ export class RenderService {
 				// env because reconfigure() discards the warm standby whenever
 				// vault options change.
 				CLEW_DATAVIEW_JS: this.#vaultOptions.dataviewJs === true ? '1' : '',
+				// The note's typeface, face → file name, for the `font=note`
+				// wrapper (engine/figures.js#noteFontPreamble). App-global
+				// (main/note-fonts.js prepared it before any vault opened).
+				CLEW_NOTE_FONTS: JSON.stringify(readNoteFonts(paths.noteFonts)?.faces ?? {}),
 				// Engine console chatter goes to the pipes; keep them from filling.
 			},
 		});

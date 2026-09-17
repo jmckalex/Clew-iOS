@@ -142,7 +142,7 @@ export async function exportSite({ vaultRoot, engineDir, outDir, distDir, vaultO
 			try {
 				const baked = await bakeFigures(figurePages, paths.mptikzAssets, ({ done, total }) => {
 					onProgress({ done: notes.length, total: notes.length, note: `figure ${done} of ${total}…` });
-				});
+				}, { noteFontsDir: paths.noteFonts });
 				if (baked.failed) {
 					failures.push({ note: `${baked.failed} figure(s)`, message: 'did not typeset; the page shows the error log instead' });
 				}

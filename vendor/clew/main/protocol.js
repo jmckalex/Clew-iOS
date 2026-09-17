@@ -68,7 +68,7 @@ export function registerPreviewScheme() {
 const RENDERED_SUFFIX = new RegExp(`(${NOTE_EXTENSIONS.map((e) => e.replace('.', '\\.')).join('|')})\\.html$`, 'i');
 
 /** After app.whenReady(). */
-export function installPreviewProtocol({ distDir, nodeModulesDir, engineAssetsDir, embedpdfDir, mptikzDir, zetaDir, globalPluginsDir = null }) {
+export function installPreviewProtocol({ distDir, nodeModulesDir, engineAssetsDir, embedpdfDir, mptikzDir, zetaDir, noteFontsDir = null, globalPluginsDir = null }) {
 	const assetRoots = {
 		mathjax: path.join(nodeModulesDir, 'mathjax', 'es5'),
 		mermaid: path.join(nodeModulesDir, 'mermaid', 'dist'),
@@ -84,6 +84,10 @@ export function installPreviewProtocol({ distDir, nodeModulesDir, engineAssetsDi
 		// through kpathsea, so the whole tree is servable rather than a
 		// closed set — it is read-only app payload, like embedpdf.
 		mptikz: mptikzDir,
+		// The note's typeface as font files, for `font=note` figures (main/
+		// note-fonts.js): index.json plus one file per face, fetched by the
+		// preview and handed to the TeX engine as bytes.
+		...(noteFontsDir ? { notefonts: noteFontsDir } : {}),
 		// Our own PDF viewer page + its bundle (pdf-page.html/.js).
 		clewpdf: path.join(distDir, 'preview-client'),
 		// ZetaOffice (LibreOffice wasm) bundle: soffice.{js,wasm,data,…} +
