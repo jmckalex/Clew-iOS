@@ -478,6 +478,23 @@ export function stageStatic() {
 	for (const [to, from] of Object.entries(assets)) {
 		copy(path.join(root, from), path.join(webroot, 'preview-assets', to));
 	}
+	// mp-tikz-wasm — the wasm MetaPost/TeX engines and their TeX bundles
+	// (74 MB, 3,600 files), staged into the gitignored mptikz-assets/ by
+	// scripts/stage-mptikz.js and served whole as the `mptikz` asset root:
+	// a first figure reads the bundles by the dozen through kpathsea, so the
+	// tree must stay unpacked and complete, exactly as upstream ships it
+	// under Resources/mptikz. A missing tree is a warning here and a refusal
+	// in CI (stage-mptikz --require), never a silent build: without it every
+	// figure shows "No TikZ/MetaPost engine installed" in its own place.
+	const mptikzSrc = path.join(root, 'mptikz-assets');
+	if (fs.existsSync(path.join(mptikzSrc, 'index.js'))) {
+		fs.cpSync(mptikzSrc, path.join(webroot, 'preview-assets', 'mptikz'), {
+			recursive: true,
+			filter: (src) => !/\.(js\.map|d\.ts)$/.test(src) && path.basename(src) !== '.cache',
+		});
+	} else {
+		console.warn('[build] mptikz-assets/ is not staged (node scripts/stage-mptikz.js) — figures will not typeset in this build');
+	}
 	const embedPdfDir = path.join(webroot, 'preview-assets', 'embedpdf');
 	for (const name of fs.readdirSync(embedPdfDir)) {
 		if (/\.(pdf|map|d\.ts)$/.test(name) || name === 'index.html') {

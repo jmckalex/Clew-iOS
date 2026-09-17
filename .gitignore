@@ -16,5 +16,10 @@ xcuserdata/
 # Staged web bundle inside the app (built by scripts/build.js)
 ios/Clew/WebRoot/
 
+# The wasm TikZ/MetaPost engines: 74 MB staged by scripts/stage-mptikz.js
+# from upstream's staged tree, the master build or the pinned release.
+# Never committed; ships in the app via dist/webroot/preview-assets/mptikz.
+mptikz-assets/
+
 # xcodebuild -derivedDataPath used by CLI builds
 build/

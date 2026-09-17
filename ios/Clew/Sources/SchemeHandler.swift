@@ -49,6 +49,12 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 		"preview": "engine-assets",
 		// The EmbedPDF bundle + pdfium.wasm (the only PDF stack in the app).
 		"embedpdf": "preview-assets/embedpdf",
+		// mp-tikz-wasm: the MetaPost/TeX engines and their TeX bundles, staged
+		// by scripts/stage-mptikz.js. A first figure reads ~90 of these files
+		// through kpathsea, so the whole tree is servable — read-only app
+		// payload, like embedpdf. Served `immutable` (below): the one exception
+		// to no-store, as in upstream's protocol.js.
+		"mptikz": "preview-assets/mptikz",
 		// Our own PDF viewer page + its bundle (pdf-page.html/.js), which the
 		// file tab, canvas PDF nodes and canvas-embed scenes load in an iframe.
 		"clewpdf": "preview-client",
@@ -119,7 +125,12 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 			}
 			let file = webRoot.appendingPathComponent(base).appendingPathComponent(parts[1]).standardizedFileURL
 			guard file.path.hasPrefix(webRoot.standardizedFileURL.path) else { return fail(task, "forbidden") }
-			return respondFile(task, fileURL: file, rangeHeader: task.request.value(forHTTPHeaderField: "Range"))
+			// Everything else is no-store, which is right for anything that can
+			// change under the app. The TeX engines are a pinned, read-only
+			// build whose bundles a figure re-reads by the dozen, and whose
+			// wasm WebKit may only code-cache if it is allowed to store it.
+			let extra = parts[0] == "mptikz" ? ["Cache-Control": "public, max-age=31536000, immutable"] : [:]
+			return respondFile(task, fileURL: file, rangeHeader: task.request.value(forHTTPHeaderField: "Range"), extra: extra)
 		}
 
 		if rel.hasPrefix("__clew_preview__/") {
@@ -306,7 +317,7 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 		return headers
 	}
 
-	private func respondFile(_ task: WKURLSchemeTask, fileURL: URL, rangeHeader: String?) {
+	private func respondFile(_ task: WKURLSchemeTask, fileURL: URL, rangeHeader: String?, extra: [String: String] = [:]) {
 		DispatchQueue.global(qos: .userInitiated).async {
 			guard let data = try? Data(contentsOf: fileURL, options: .mappedIfSafe) else {
 				return DispatchQueue.main.async { self.fail(task, "Not found", status: 404) }
@@ -337,13 +348,13 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 						"Content-Length": String(chunk.count),
 					]))
 				}
-				self.respondData(task, data: data, mime: mime)
+				self.respondData(task, data: data, mime: mime, extra: extra)
 			}
 		}
 	}
 
-	private func respondData(_ task: WKURLSchemeTask, data: Data, mime: String) {
-		respond(task, status: 200, data: data, headers: baseHeaders(mime: mime))
+	private func respondData(_ task: WKURLSchemeTask, data: Data, mime: String, extra: [String: String] = [:]) {
+		respond(task, status: 200, data: data, headers: baseHeaders(mime: mime, extra: extra))
 	}
 
 	private func respond(_ task: WKURLSchemeTask, status: Int, data: Data, headers: [String: String]) {

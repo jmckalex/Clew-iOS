@@ -10,10 +10,13 @@ iOS-specific code. GPL-3.0-or-later, same as upstream.
 
 Everything that shells out to external toolchains dies with `child_process`:
 
-- **TikZ, MetaPost, Mathematica blocks** (lualatex/dvisvgm/mpost/
-  wolframscript). The engine reaches `execSync` only inside those features'
-  tokenizers — a shim that throws turns them into per-block build errors,
-  and every other document renders untouched.
+- **Mathematica blocks** (wolframscript). The engine reaches `execSync`
+  only inside that tokenizer — a shim that throws turns each block into a
+  per-block build error, and every other document renders untouched.
+  (TikZ, MetaPost, LaTeX and plain TeX figures stopped being a loss in the
+  0.11 sync: upstream typesets them IN the preview document with
+  mp-tikz-wasm, and the engines ship in the app bundle — see the milestone
+  and `scripts/stage-mptikz.js`.)
 - **LaTeX/PDF export** (`jmarkdown --to latex` + compile). `.tex` emission
   itself is portable but useless without TeX; deferred.
 - **Electron-isms**: multi-window (one vault open at a time on iOS),
@@ -335,9 +338,15 @@ the golden master than forked here:
 - `message` listeners registered from `callAsyncJavaScript` closures do
   not fire in WKWebView — instrument via real page code, not smoke
   closures.
-- TikZ cache keys hash the LaTeX preamble config: cross-device SVG reuse
-  works only when desktop and iOS resolve the same preamble (MetaPost
-  hashes source only and reuses cleanly).
+- IndexedDB IS available to `clew-preview://` documents (probed
+  2026-09-17: `indexedDB.open` succeeds), which is what makes
+  mp-tikz-wasm's figure cache work — a reopened note shows its figures in
+  ~250 ms with no engine boot. And a synchronous XHR issued inside a
+  MODULE worker of a preview document reaches `WKURLSchemeHandler` and
+  returns: the library's kpathsea reads go through the scheme handler file
+  by file (a cold Diagrams note, seven figures, LuaLaTeX included: 2.3 s in
+  the simulator). Heavy wasm in a preview document, worker engine — the
+  rule of thumb below held for the fourth wasm engine too.
 - WebAssembly compilation is CSP-gated: the app page's script-src needs
   `'wasm-unsafe-eval'` or `WebAssembly.compile` fails (EmbedPDF's Pdfium
   engine spun forever on "Initializing"). Preview documents carry no such

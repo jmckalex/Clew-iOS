@@ -10,4 +10,8 @@ brew install node
 cd "$CI_PRIMARY_REPOSITORY_PATH"
 node --version
 npm ci
+# The wasm TikZ/MetaPost engines (74 MB) are never committed: fetched from
+# the SHA256-pinned release named in vendor/clew/shared/mptikz-manifest.json.
+# --require: fail here rather than ship an app whose figures cannot render.
+node scripts/stage-mptikz.js --require
 npm run build

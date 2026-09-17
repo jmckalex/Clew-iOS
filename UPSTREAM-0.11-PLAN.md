@@ -1,6 +1,6 @@
 # Upstream 0.11 Sync — Plan for Clew-iOS
 
-**STATUS: in progress, started 2026-09-17.** Written the way the 0.8, 0.9
+**STATUS: in progress, started 2026-09-17 — p1 and p2 done and simulator-verified; p3 next.** Written the way the 0.8, 0.9
 and 0.10 plans were: one branch per phase, chained off the previous tip
 (`sync10-p5-verify`, add3a49), so a bad phase falls back cleanly. Read
 `README.md` and `PORT-PLAN.md` for architecture, `HANDOVER.md` for session
@@ -123,17 +123,24 @@ tree: every one still matches.
 ## 4. Seam questions (answered during the phases)
 
 1. Does a synchronous XHR issued inside a module worker reach
-   `WKURLSchemeHandler` and return, under `clew-preview://`? If not,
-   the library prefetches whole bundles into worker memory — measure
-   before deciding whether that is acceptable or whether an iOS `bundleIO`
-   is needed.
+   `WKURLSchemeHandler` and return, under `clew-preview://`? **YES**
+   (p2, 2026-09-17): the probe saw the library's own "fetching
+   pgfmoduleoo.code.tex… / dviluatex.fmt…" status lines, which only the
+   sync-XHR path emits, and every figure typeset. No prefetch-all, no
+   iOS `bundleIO`.
 2. Is IndexedDB available to `clew-preview://` documents in WKWebView?
-   (`auto.js#openDb` resolves `null` when `indexedDB` is undefined, but a
-   synchronous `SecurityError` from `open()` would reject instead — check
-   the failure shape, not just the happy path.)
-3. Memory and time for the first LuaLaTeX figure in the simulator; the
-   device number is the owner's (§5).
-4. `.clew/cache/figures/` — only if §4.2 says no.
+   **YES**: `indexedDB.open` succeeds (`idb=ok`), and it is load-bearing —
+   a closed-and-reopened Diagrams note shows all seven figures in 251 ms
+   with no engine status at all (cache hit), against 2.3 s cold.
+3. Time in the simulator (iPad Pro 11-inch M4 sim, clean install): the
+   Diagrams note's seven figures — two TikZ fences, MetaPost, a LuaLaTeX
+   snippet with `\frac`, plain LuaTeX, `@begin(TiKZ)`, `@begin(metapost)`
+   — all `mpw-ok` **2.3 s** after the document loaded, engines cold;
+   editing one fence re-typeset exactly that figure in **0.5 s** while the
+   other six SVGs were kept (the morph guard: 6 of 7 marked nodes
+   survived, one `data-fig-key` changed). Memory is not observable from
+   the page in WebKit; the device number is the owner's (§5).
+4. `.clew/cache/figures/` — not needed (§4.2 said yes).
 5. `UIPrintPageRenderer` over a `WKWebView` that is attached but hidden:
    does it paginate the whole document, or does it need the view on
    screen? Fallback: `createPDF(configuration:)`, one tall page.

@@ -6,8 +6,8 @@ note app built on the **jmarkdown** engine. GPL-3.0-or-later.
 The entire desktop renderer (web components + CodeMirror 6) runs unmodified
 in a WKWebView; the jmarkdown engine runs in a Web Worker over an in-memory
 filesystem; Swift provides what Electron's main process provided natively.
-See `PORT-PLAN.md` for the architecture, what could not be ported (LaTeX/
-TikZ/MetaPost/Mathematica shell-outs), and the milestone log.
+See `PORT-PLAN.md` for the architecture, what could not be ported (the
+LaTeX export and Mathematica shell-outs), and the milestone log.
 
 ## Building
 
@@ -18,6 +18,7 @@ is only needed when re-syncing from upstream.
 ```sh
 npm install                 # legacy-peer-deps is set in .npmrc
 npm run sync-upstream       # refresh vendor/ + seed-vault from ../Clew-app (optional)
+npm run sync-mptikz         # stage the wasm TeX engines (74 MB, gitignored) — figures need them
 npm run build               # engine worker, app bundle, preview clients, webroot
 npm test                    # engine renders + services suites (node --test)
 open ios/Clew.xcodeproj     # build & run the Clew target (iOS 17+)
@@ -57,8 +58,7 @@ xcrun simctl spawn booted log stream --predicate 'eventMessage CONTAINS "CLEWJS"
 
 ## Known gaps (tracked in PORT-PLAN.md)
 
-TikZ/MetaPost/Mathematica compile (cached SVGs from desktop display when
-the hash inputs match — MetaPost verified), LaTeX/PDF export, site export,
+Mathematica blocks (wolframscript), LaTeX/PDF export, site export,
 the ZetaOffice runtime (office documents open read-only in Quick Look,
 and embeds show Quick Look thumbnails; editing them needs the desktop
 app), kanban drag on touch, touch-only file move (drag-to-move is
