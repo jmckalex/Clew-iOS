@@ -273,7 +273,18 @@ Ranked; items 1–5 are in scope for the first working build, 6–10 tracked:
   iOS gaps closed on the way: `alert()` shows (own window on the app's
   scene) and the share sheet actually presents on iPad. Upstream's demo
   note used `\frac` in plain TeX (the engine's honest error found it;
-  fixed in the upstream working tree, uncommitted). Tests 291 → 388.
+  fixed, now upstream's f92c7ea). Tests 291 → 388.
+- **`font=note`** ✅ (2026-09-17 evening, `fontnote-p1…p3`) vendored at
+  upstream `4eae005`. Figures set in the note's own face (upstream
+  3339969): the engines restaged from the mp-tikz-wasm master build,
+  which carries the `opentype` bundle (fontspec, luaotfload, 13.9 MB)
+  and the plain-LuaTeX patch — unreleased upstream, so the CI build
+  still gets v0.2.1 and refuses such figures by name until a release is
+  pinned; the face → file map through the worker env; and
+  `NoteFonts.swift` (see Decisions). Simulator: nine figures incl. two
+  font=note in 5.1 s cold, real text runs with embedded faces, Avenir
+  Next on screen; no stale WebKit cache when installing over the old
+  build. Tests 388 → 392.
 
 ### Upstream candidates (iOS-owned today, worth pushing to ../Clew-app)
 
@@ -370,6 +381,19 @@ the golden master than forked here:
   use. A `file://` link can only reach the open vault (nothing outside the
   sandbox is reachable), and a folder has no viewer; both refuse with a
   reason the renderer shows as a notice.
+- **The note's typeface is built from CoreText, not read from a file**
+  (`font=note`). Desktop slices the four Avenir Next faces out of the
+  system's `.ttc`; the iPad never opens Apple's font file — it asks
+  CoreText for each face's tables and writes one sfnt per face (sorted
+  directory, aligned tables, checksums, `head.checkSumAdjustment`) into
+  Application Support, keyed on the iOS version, the first time a
+  figure asks; the scheme handler serves them under
+  `__clew_assets__/notefonts/` in desktop's URL shape. Proven byte-for-
+  byte against desktop's extractor on the same faces (the one differing
+  field is `head`'s checksum, where the Swift value is the spec's). The
+  engines come from the library's MASTER build in preference to
+  upstream's staged copy (`scripts/stage-mptikz.js`), as upstream's own
+  dev path does — that is where a new bundle lands first.
 - **"Export as PDF (reading view)" prints from a hidden `WKWebView`**
   (0.11 sync). Upstream prints the note's own `clew-preview://` document
   from a hidden BrowserWindow once the page says it has settled; here

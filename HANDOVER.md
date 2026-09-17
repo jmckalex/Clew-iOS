@@ -1,4 +1,4 @@
-# Handover — 2026-09-17 (upstream 0.11 sync: DONE, PUSHED, cloud build succeeded; device verification next)
+# Handover — 2026-09-17, late (0.11 on TestFlight and device-proven; font=note ported on top, unpushed)
 
 Session-rollover state, upstream-style: rewritten each session, kept
 short. Durable architecture and build docs live in **README.md** and
@@ -28,12 +28,26 @@ of which had been on a device before. Every phase tip was green on its
 own (`npm test` 388, `npm run build`, xcodebuild clean):
 
 ```
-origin/main = main = sync11-p5-verify = e46a5ce   (+ this handover commit, [ci skip], local)
- …0.8 chain… → …0.9 chain… → canvas-delete-button → embedpdf-vendor
-  → contracts-p1…p3 → sync10-p1…p5 (add3a49)
-  → sync11-p1-vendor 09e59e3 → sync11-p2-figures b5d3bf5 → sync11-p3-platform aa7b6bf
-  → sync11-p4-print 04e1d13 → sync11-p5-verify e46a5ce
+origin/main = sync11-p5-verify = e46a5ce      (the TestFlight build 0.1.0 (6), device-proven)
+ main = e46a5ce + six docs commits ([ci skip], local, unpushed)
+  └ fontnote-p1-vendor 4ee243d → fontnote-p2-fonts edcad8c → fontnote-p3-docs   ← TIP: review and merge
 ```
+
+**On top, unpushed — `font=note` (`fontnote-p1…p3`, the evening of
+2026-09-17):** vendor at upstream 4eae005; engines restaged from the
+mp-tikz-wasm MASTER build (the `opentype` bundle + plain-LuaTeX patch
+live on its unreleased `opentype-fonts` branch, 41d3ea4; 109 MB
+staged); `NoteFonts.swift` builds the four Avenir Next faces from
+CoreText and the scheme handler serves them under
+`__clew_assets__/notefonts/`; the face map reaches every engine worker's
+env before the first standby. Sim-verified: nine Diagrams figures incl.
+two font=note in 5.1 s cold, real text with embedded faces, Avenir Next
+on screen; install-over-old served the new bundle index (no stale
+WebKit cache). Tests 392. **CI caveat: Xcode Cloud can only fetch the
+pinned v0.2.1 release, which has no `opentype` bundle, so a TestFlight
+build made from this tip refuses font=note figures by name (honestly,
+in their own place) until mp-tikz-wasm publishes 0.3.0 and upstream
+re-pins its manifest — then `npm run sync-upstream` + a push is all.**
 
 The phase branches still exist locally and can be deleted once the
 TestFlight build is judged good.
@@ -182,39 +196,17 @@ cef2e0f/6c97f5b); still not deployed. `~/Source/mp-tikz-wasm` at
    attribute set at load is stripped by the first morph (body attrs are
    synced from the incoming HTML); an attribute set later survives. The
    global plugin's sibling fetch proved the route.
-4b. **Next upstream delta, NOT ported (received from the Clew-app session
-   on 2026-09-17 evening, uncommitted upstream, library unreleased):
-   `font=note`** — a figure's text set in the note's own face (Avenir
-   Next) by the wasm TeX. What the iPad will need when it lands:
-   (a) an mp-tikz-wasm build with the `opentype` bundle (+14 MB; the
-   library's `opentype-fonts` branch, plus a luaotfload.sty patch for
-   ```tex) — the pinned 0.2.1 has none, and `preview-client/figures.js`
-   then refuses marked figures by name, so shipping without it is
-   honest but needs an "On iPad" sentence in `diagrams.html#note-font`;
-   (b) a `notefonts/index.json` + four `NoteFont-*.ttf` files served
-   under `__clew_assets__/notefonts/` — build each face from CoreText
-   (`CTFontCreateWithName("AvenirNext-Regular"…)`, `CTFontCopyTable` per
-   table, write an sfnt with recomputed `head.checkSumAdjustment`; the
-   desktop's `main/note-fonts.js#extractFace` is the 40-line reference,
-   unit-tested) — one file per face, never the .ttc (garbled under
-   woff2); cache in Application Support keyed on the OS version;
-   (c) the face map: `figures.js#noteFontFaces` reads
-   `globalThis.CLEW_NOTE_FONTS` OR `process.env.CLEW_NOTE_FONTS` — on
-   iOS the env route already exists (`engine-config.js#engineEnv`), so
-   add the JSON there; (d) **cache headers**: SchemeHandler serves the
-   `mptikz` root immutable for a year; the desktop found a restaged
-   build served STALE from Chromium's cache. Whether WebKit disk-caches
-   custom-scheme responses across app updates is UNVERIFIED — if a
-   restaged engine ever misbehaves after an update, drop `immutable`
-   (or clear `WKWebsiteDataStore` when the bundle's identity changes,
-   as desktop's `main/asset-stamp.js` does); (e) exports: the
-   reading-view PDF prints the preview, so a `font=note` figure would
-   carry an Avenir Next subset into the PDF — the desktop's does too,
-   deliberately (a PDF embedding subsetted glyphs is what every PDF
-   does; only a published web page bakes outlines), so no change
-   expected; flagged for the owner all the same. Verification recipe:
-   upstream `smoke/make-figures-vault.mjs` writes a Fonts.md; assertions
-   in its README.
+4b. **font=note is ported** (§1). What remains is not code: the
+   release. mp-tikz-wasm's `opentype-fonts` branch (41d3ea4) is
+   unreleased; when v0.3.0 exists and upstream re-pins
+   `shared/mptikz-manifest.json`, the vendored manifest follows on the
+   next sync and CI builds carry the bundle. Until then the local build
+   has it (staged from the master dist) and the TestFlight build does
+   not. Also noted: the `otf-fonts` bundle (7 MB) rides along but only
+   unicode-math needs it — a prune candidate in `stage-mptikz.js`
+   copyTree if size matters. Desktop's `asset-stamp.js` cache clearing
+   is NOT needed here: measured, WebKit served the restaged bundle
+   index on an install-over-old.
 5. Possible follow-ups, unchanged: canvas toolbar undo/redo; Pencil
    long-press → contextmenu; "New drawing" in the explorer root menu; a
    THIRD-PARTY-NOTICES surface (now also mp-tikz-wasm's TeX bundles).
@@ -252,11 +244,22 @@ cef2e0f/6c97f5b); still not deployed. `~/Source/mp-tikz-wasm` at
 - Upstream's `smoke/make-global-plugin.mjs <dir>` builds a three-surface
   plugin fixture; copy `userdata/plugins/hello-global` into the sim's
   `Documents/Plugins/` and add it to the vault's `plugins` array.
+- Fonts: a vault-script probe per figure — `data-opentype`, `svg text`
+  count, `@font-face` count in the SVG's `<style>` — is the
+  font=note assertion (upstream's smoke README: text>0 + embedded faces
+  on marked figures, text=0 on controls). The Swift sfnt writer can be
+  checked on the Mac: compile its pure functions with `xcrun swiftc`,
+  build `AvenirNext-Regular`, and `cmp` against
+  `../Clew-app/src/main/note-fonts.js#extractFace` on the system .ttc —
+  identical bar `head`'s checksum field. The device's faces land in
+  `<container>/Library/Application Support/notefonts/<iOS>/`.
 
 ## 6. Build
 
 `export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` first.
-`npm run sync-mptikz` (once; re-run when upstream restages), `npm run
+`npm run sync-mptikz` (prefers `~/Source/mp-tikz-wasm/dist`, then
+upstream's staged tree, then the pinned release; `MPTIKZ_SRC` overrides;
+`--force` restages; re-run after the library rebuilds), `npm run
 build`, then `xcodebuild -project ios/Clew.xcodeproj -scheme Clew
 -destination 'id=<sim>' -derivedDataPath build/DerivedData build`. A
 missing `mptikz-assets/` is a build warning here and a refusal in CI.
