@@ -28,6 +28,15 @@ const isAtomicTemp = (rel) => /(^|\/)\.[^/]+\.clew-tmp$/.test(rel);
 
 export const VAULT_ROOT = '/vault';
 
+// Globally installed plugins — Documents/Plugins on iOS, the one place a
+// user can put files from the Files app (desktop's <userData>/plugins would
+// be unreachable here) — are mirrored READ-ONLY under a second root at
+// vault open, so upstream's plugins.js discovers them over the same fs
+// alias as the vault's own. Nothing under here ever reaches the bridge
+// (#relOf maps /vault only), and no rescan diffs it: a plugin dropped in
+// mid-session is picked up at the next vault open.
+export const GLOBAL_PLUGINS_ROOT = '/global-plugins';
+
 // Which files are text lives with the engine config — the Node harness needs
 // both without dragging the bridge in. Re-exported here for existing callers.
 export { isTextPath };
@@ -36,6 +45,8 @@ export class VaultManager {
 	/** Real on-device path of the open vault (bridge-side), or null. */
 	realPath = null;
 	name = null;
+	/** Real on-device path of the global plugin folder (bridge-side), or null. */
+	globalPluginsPath = null;
 	sessionId = null;
 	/** @type {(channel: string, payload: any) => void} */
 	send = () => {};
@@ -58,7 +69,7 @@ export class VaultManager {
 
 	async open(vaultPath) {
 		this.close();
-		const { name, path: realPath, files } = await bridgeCall('vaultOpen', { path: vaultPath });
+		const { name, path: realPath, files, globalPlugins } = await bridgeCall('vaultOpen', { path: vaultPath });
 		this.realPath = realPath;
 		this.name = name;
 		vfs.mkdir(VAULT_ROOT);
@@ -66,6 +77,13 @@ export class VaultManager {
 			vfs.patch(`${VAULT_ROOT}/${rel}`, entry.text ?? '', entry.mtimeMs);
 		}
 		vfs.mkdir(`${VAULT_ROOT}/.clew`);
+		this.globalPluginsPath = globalPlugins?.path ?? null;
+		if (globalPlugins?.files) {
+			vfs.mkdir(GLOBAL_PLUGINS_ROOT);
+			for (const [rel, entry] of Object.entries(globalPlugins.files)) {
+				vfs.patch(`${GLOBAL_PLUGINS_ROOT}/${rel}`, entry.text ?? '', entry.mtimeMs);
+			}
+		}
 		// Persist mirror writes to the device vault. Only text files under
 		// /vault flow through here; render-worker output never does (separate
 		// bundle, separate vfs instance).
@@ -132,6 +150,7 @@ export class VaultManager {
 		vfs.reset();
 		this.realPath = null;
 		this.name = null;
+		this.globalPluginsPath = null;
 	}
 
 	#relOf(abs) {

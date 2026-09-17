@@ -14,6 +14,9 @@ const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
 const TEXT_EXT = /\.(md|jmd|bib|canvas|json|css|js|txt)$/i;
 let vaultDir;
+// The global plugin folder (Documents/Plugins on the device), snapshotted
+// by the bridge beside the vault at open — see VaultStore.openVault.
+let globalDir;
 
 const listFiles = (dir, rel = '') => {
 	const out = {};
@@ -49,7 +52,14 @@ const fakeBridge = {
 		switch (method) {
 			case 'vaultBootstrap': return { path: vaultDir };
 			case 'vaultOpen':
-				return { name: path.basename(params.path), path: params.path, files: listFiles(params.path) };
+				return {
+					name: path.basename(params.path), path: params.path, files: listFiles(params.path),
+					...(globalDir && fs.existsSync(globalDir)
+						? { globalPlugins: { path: globalDir, files: listFiles(globalDir) } } : {}),
+				};
+			case 'revealGlobalPlugins':
+				fs.mkdirSync(globalDir, { recursive: true });
+				return { path: globalDir };
 			case 'write': {
 				const abs = path.join(params.vault, params.rel);
 				fs.mkdirSync(path.dirname(abs), { recursive: true });
@@ -180,6 +190,19 @@ before(async () => {
 	// the mirror carries it as a binary stub, exactly as a real one would be.
 	fs.mkdirSync(path.join(vaultDir, 'Attachments'), { recursive: true });
 	fs.writeFileSync(path.join(vaultDir, 'Attachments', 'Paper.pdf'), MINIMAL_PDF);
+	// Two global plugins: one of its own, and a decoy sharing the id of a
+	// vault plugin (the vault's must win).
+	globalDir = fs.mkdtempSync(path.join(os.tmpdir(), 'clew-ios-test-global-'));
+	for (const [id, name] of [['hello-global', 'Hello Global'], ['header', 'Header (global decoy)']]) {
+		const dir = path.join(globalDir, id);
+		fs.mkdirSync(dir, { recursive: true });
+		fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({
+			id, name, version: '1.0.0', apiVersion: 1,
+			surfaces: { engine: { file: 'engine.js', extensions: 'helloFence' }, preview: 'preview.js' },
+		}));
+		fs.writeFileSync(path.join(dir, 'engine.js'), 'export const helloFence = { name: "helloFence", level: "block" };\n');
+		fs.writeFileSync(path.join(dir, 'preview.js'), 'document.body.dataset.helloGlobal = "loaded";\n');
+	}
 	globalThis.__clewBridgeImpl = fakeBridge;
 	const { createClewShim } = await import(path.join(root, 'dist', 'test', 'services.js'));
 	({ clew, native, services } = createClewShim({
@@ -486,4 +509,48 @@ test('first-run: create-vault and open-demo go through the bridge and open the r
 	const demo = await clew.invoke(CH.VAULT_OPEN_DEMO);
 	assert.equal(demo.path, vaultDir);
 	assert.equal(demo.name, path.basename(vaultDir));
+});
+
+// ---- 0.11: global plugins, open externally ----------------------------------
+
+test('global plugins: discovered beside the vault\'s own, shadowed by it, enabled per vault; reveal goes through the bridge', async () => {
+	await clew.invoke('clew:vault-open-path', { path: vaultDir });
+	const { plugins, enabled, globalDir: dir } = await clew.invoke('clew:plugins-list');
+	const byId = Object.fromEntries(plugins.map((p) => [p.id, p]));
+	assert.equal(byId['hello-global']?.scope, 'global', 'the global plugin is listed, and says so');
+	assert.equal(byId['hello-global'].dir, '/global-plugins/hello-global', 'its dir is the mirror root, where plugins.js resolves surfaces');
+	assert.equal(byId.header?.scope, 'vault', 'a vault plugin shadows a global one of the same id');
+	assert.equal(plugins.filter((p) => p.id === 'header').length, 1, 'one id is one plugin');
+	assert.ok(!enabled.includes('hello-global'), 'installing globally does not enable');
+	assert.equal(dir, globalDir, 'the device path of the folder, for the settings row');
+	const mark = fakeBridge.calls.length;
+	assert.equal(await clew.invoke('clew:plugins-reveal-global'), globalDir);
+	assert.ok(fakeBridge.calls.slice(mark).some(([m]) => m === 'revealGlobalPlugins'), 'reveal is the bridge\'s (the Files app)');
+});
+
+test('open externally: planOpen over the mirror, then Quick Look; refusals by name, by place and by kind', async () => {
+	await clew.invoke('clew:vault-open-path', { path: vaultDir });
+	const mark = fakeBridge.calls.length;
+	assert.deepEqual(await clew.invoke('clew:shell-open-path', { path: 'Attachments/Paper.pdf' }), { ok: true });
+	assert.ok(fakeBridge.calls.slice(mark).some(([m, p]) => m === 'quickLook' && p.rel === 'Attachments/Paper.pdf'),
+		'a vault file opens in Quick Look — the iOS default app');
+	const exe = await clew.invoke('clew:shell-open-path', { path: '.clew/plugins/word-count/app.js' });
+	assert.equal(exe.ok, false);
+	assert.match(exe.reason, /\.js/, 'executables are refused by name (upstream open-file.js)');
+	const missing = await clew.invoke('clew:shell-open-path', { path: 'Nope.pdf' });
+	assert.equal(missing.ok, false);
+	assert.match(missing.reason, /Not found/);
+	assert.equal((await clew.invoke('clew:shell-open-path', { path: '../outside.pdf' })).ok, false, 'clamped inside the vault');
+	const folder = await clew.invoke('clew:shell-open-path', { path: 'Attachments' });
+	assert.equal(folder.ok, false);
+	assert.match(folder.reason, /Folders/, 'a folder has no viewer here');
+	// file:// links: inside the open vault they are that vault file; anywhere
+	// else is unreachable from the sandbox and says so.
+	assert.deepEqual(await clew.invoke('clew:shell-open-path', { url: 'file://' + path.join(vaultDir, 'Attachments/Paper.pdf') }), { ok: true });
+	const outside = await clew.invoke('clew:shell-open-path', { url: 'file:///etc/hosts' });
+	assert.equal(outside.ok, false);
+	assert.match(outside.reason, /inside the open vault/);
+	assert.equal((await clew.invoke('clew:shell-open-path', { url: 'https://example.com/x.pdf' })).ok, false, 'not a file:// link');
+	const quickLooks = fakeBridge.calls.slice(mark).filter(([m]) => m === 'quickLook').length;
+	assert.equal(quickLooks, 2, 'exactly the two permitted opens reached the bridge');
 });

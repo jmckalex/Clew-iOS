@@ -154,16 +154,35 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 				return fail(task, "bad plugin path", status: 404)
 			}
 			let id = String(parts[2].dropLast(3))
+			// plugin.dir is the plugin's own folder, vault-local or global.
 			guard let plugin = enabledPlugins().first(where: { $0.id == id }),
 				let appFile = plugin.surfaces["app"],
-				let vault = vaults.currentVaultPath,
-				let code = try? String(contentsOf: URL(fileURLWithPath: vault)
-					.appendingPathComponent(".clew/plugins/\(id)/\(appFile)"), encoding: .utf8) else {
+				let code = try? String(contentsOf: plugin.dir.appendingPathComponent(appFile), encoding: .utf8) else {
 				return fail(task, "not an enabled plugin", status: 403)
 			}
 			let idJson = String(data: try! JSONEncoder().encode(id), encoding: .utf8)!
 			let wrapped = "(function (clew) {\n'use strict';\n\(code)\n})(window.__clewPluginApi?.[\(idJson)]);"
 			return respondData(task, data: Data(wrapped.utf8), mime: "text/javascript")
+		}
+
+		if rel.hasPrefix("__clew_plugin_file__/") {
+			// Files inside a GLOBAL plugin's folder: /__clew_plugin_file__/<sid>/
+			// <id>/<path>. A vault plugin's files are ordinary vault content; a
+			// global plugin lives outside every vault, so its preview surface —
+			// and any sibling it fetches — is served from here, gated on the
+			// plugin being enabled in this vault and clamped inside its own
+			// folder (port of protocol.js).
+			let parts = rel.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
+			guard parts.count >= 4 else { return fail(task, "bad plugin file path", status: 404) }
+			let id = parts[2]
+			guard let plugin = enabledPlugins().first(where: { $0.id == id && $0.scope == "global" }) else {
+				return fail(task, "not an enabled global plugin", status: 403)
+			}
+			let file = plugin.dir.appendingPathComponent(parts[3...].joined(separator: "/")).standardizedFileURL
+			guard file.path.hasPrefix(plugin.dir.standardizedFileURL.path + "/") else {
+				return fail(task, "path escapes plugin", status: 403)
+			}
+			return respondFile(task, fileURL: file, rangeHeader: nil)
 		}
 
 		// Everything else: /<sid>/<vault path>.
@@ -244,33 +263,54 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 	}
 
 	/// Enabled plugins (vault-settings.json `plugins` array) with their
-	/// manifest surfaces — the Swift twin of main/plugins.js.
-	private func enabledPlugins() -> [(id: String, surfaces: [String: String])] {
+	/// folder and manifest surfaces — the Swift twin of main/plugins.js,
+	/// including its two roots: the vault's .clew/plugins/<id>/ first, then
+	/// the global Documents/Plugins/<id>/ (a vault plugin SHADOWS a global
+	/// one of the same id). Installing is global; enabling is per vault.
+	private func enabledPlugins() -> [(id: String, scope: String, dir: URL, surfaces: [String: String])] {
 		guard let vault = vaults.currentVaultPath else { return [] }
 		let base = URL(fileURLWithPath: vault)
 		guard let settingsData = try? Data(contentsOf: base.appendingPathComponent(".clew/vault-settings.json")),
 			let settings = try? JSONSerialization.jsonObject(with: settingsData) as? [String: Any],
 			let enabled = settings["plugins"] as? [String] else { return [] }
 		return enabled.compactMap { id in
-			guard id.range(of: #"^[a-z0-9][a-z0-9-]{0,63}$"#, options: .regularExpression) != nil,
-				let manifestData = try? Data(contentsOf: base.appendingPathComponent(".clew/plugins/\(id)/manifest.json")),
-				let manifest = try? JSONSerialization.jsonObject(with: manifestData) as? [String: Any],
-				let rawSurfaces = manifest["surfaces"] as? [String: Any] else { return nil }
-			// A surface is either "file.js" or { "file": "file.js", … } — the
-			// engine surface uses the dict form (plugins.js accepts both for
-			// any surface), so a per-key cast is required: a whole-dictionary
-			// [String: String] cast dies on the FIRST dict-form surface and
-			// silently drops every surface the plugin has.
-			var surfaces: [String: String] = [:]
-			for (key, value) in rawSurfaces {
-				if let file = value as? String {
-					surfaces[key] = file
-				} else if let spec = value as? [String: Any], let file = spec["file"] as? String {
-					surfaces[key] = file
-				}
+			guard id.range(of: #"^[a-z0-9][a-z0-9-]{0,63}$"#, options: .regularExpression) != nil else { return nil }
+			let roots: [(scope: String, dir: URL)] = [
+				("vault", base.appendingPathComponent(".clew/plugins/\(id)", isDirectory: true)),
+				("global", vaults.globalPluginsURL.appendingPathComponent(id, isDirectory: true)),
+			]
+			for root in roots {
+				guard let surfaces = Self.manifestSurfaces(at: root.dir), !surfaces.isEmpty else { continue }
+				return (id: id, scope: root.scope, dir: root.dir, surfaces: surfaces)
 			}
-			return surfaces.isEmpty ? nil : (id: id, surfaces: surfaces)
+			return nil
 		}
+	}
+
+	/// A plugin folder's manifest surfaces as {surface: file}, or nil when
+	/// there is no readable manifest there. A surface is either "file.js" or
+	/// { "file": "file.js", … } — the engine surface uses the dict form
+	/// (plugins.js accepts both for any surface), so a per-key cast is
+	/// required: a whole-dictionary [String: String] cast dies on the FIRST
+	/// dict-form surface and silently drops every surface the plugin has.
+	/// Files with a path in them are refused, as plugins.js refuses them.
+	private static func manifestSurfaces(at dir: URL) -> [String: String]? {
+		guard let manifestData = try? Data(contentsOf: dir.appendingPathComponent("manifest.json")),
+			let manifest = try? JSONSerialization.jsonObject(with: manifestData) as? [String: Any],
+			let rawSurfaces = manifest["surfaces"] as? [String: Any] else { return nil }
+		var surfaces: [String: String] = [:]
+		for (key, value) in rawSurfaces {
+			let file: String?
+			if let name = value as? String {
+				file = name
+			} else if let spec = value as? [String: Any], let name = spec["file"] as? String {
+				file = name
+			} else {
+				file = nil
+			}
+			if let file, !file.contains("/"), !file.contains("..") { surfaces[key] = file }
+		}
+		return surfaces
 	}
 
 	/// Port of protocol.js script injection: the note API into <head>, the
@@ -293,7 +333,13 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 		}
 		for plugin in enabledPlugins() {
 			if let previewFile = plugin.surfaces["preview"] {
-				tags += "<script src=\"/\(sid)/.clew/plugins/\(plugin.id)/\(previewFile)\"></script>"
+				// A vault plugin loads as ordinary vault content; a global one
+				// from the __clew_plugin_file__ namespace. Either way the
+				// script's own URL sits in its plugin folder, so a sibling
+				// loaded relative to document.currentScript.src works in both.
+				tags += plugin.scope == "global"
+					? "<script src=\"/__clew_plugin_file__/\(sid)/\(plugin.id)/\(previewFile)\"></script>"
+					: "<script src=\"/\(sid)/.clew/plugins/\(plugin.id)/\(previewFile)\"></script>"
 			}
 		}
 		if let bodyRange = out.range(of: "</body>", options: [.caseInsensitive, .backwards]) {

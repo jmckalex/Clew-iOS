@@ -40,6 +40,22 @@ final class VaultStore {
 		FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
 	}
 
+	/// Globally installed plugins: Documents/Plugins — the one place a user
+	/// can put files from the Files app (desktop's <userData>/plugins would
+	/// be unreachable here). Installed by the USER, never by Clew or a
+	/// vault; enabling stays per vault, exactly as upstream (main/plugins.js).
+	var globalPluginsURL: URL {
+		documentsURL.appendingPathComponent("Plugins", isDirectory: true)
+	}
+
+	/// Documents/Plugins, created if missing — the target of "Open global
+	/// plugin folder". Returns the path.
+	func ensureGlobalPluginsFolder() throws -> String {
+		let url = globalPluginsURL
+		try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+		return url.path
+	}
+
 	// MARK: - External-vault bookmarks
 
 	private var bookmarks: [String: Data] {
@@ -157,11 +173,33 @@ final class VaultStore {
 				files[rel] = ["size": size, "mtimeMs": mtimeMs]
 			}
 		}
-		return [
+		var result: [String: Any] = [
 			"name": root.lastPathComponent,
 			"path": real,
 			"files": files,
 		]
+		if let global = globalPluginsSnapshot() { result["globalPlugins"] = global }
+		return result
+	}
+
+	/// The global plugin folder as a mirror snapshot ({rel: {text?, size,
+	/// mtimeMs}} under its own root), or nil when there is none. Read-only
+	/// from the app's side: no mtimes are remembered, no rescan diffs it —
+	/// a plugin dropped in mid-session is picked up at the next vault open.
+	private func globalPluginsSnapshot() -> [String: Any]? {
+		let url = globalPluginsURL
+		var isDir: ObjCBool = false
+		guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue else { return nil }
+		var files: [String: Any] = [:]
+		walk(url, rel: "", downloadDeadline: Date().addingTimeInterval(5)) { rel, fileURL, mtimeMs, size in
+			if Self.isText(rel) {
+				let text = (try? String(contentsOf: fileURL, encoding: .utf8)) ?? ""
+				files[rel] = ["text": text, "size": size, "mtimeMs": mtimeMs]
+			} else {
+				files[rel] = ["size": size, "mtimeMs": mtimeMs]
+			}
+		}
+		return ["path": url.path, "files": files]
 	}
 
 	static func isText(_ rel: String) -> Bool {

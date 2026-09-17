@@ -8,7 +8,7 @@
 // vfs snapshot + engine import), consumed per build, terminated after its
 // single result, while the replacement warms in the background.
 import { vfs } from '../worker/shims/vfs.js';
-import { VAULT_ROOT } from './vault-manager.js';
+import { VAULT_ROOT, GLOBAL_PLUGINS_ROOT } from './vault-manager.js';
 import { engineConfig, engineEnv, isTextPath } from './engine-config.js';
 import { engineExtensionEntries } from '../../vendor/clew/main/plugins.js';
 
@@ -139,11 +139,12 @@ export class RenderService {
 				: '';
 		}
 		// Enabled plugins' engine surfaces: the config names them by absolute
-		// vault path, so the snapshot must carry exactly those .clew files
-		// (the loop above excludes .clew/ wholesale — the worker never needs
-		// the rest of it, e.g. the charts plugin's ~200 KB chart.umd.js,
-		// which belongs to the PREVIEW surface).
-		const engineExtensions = engineExtensionEntries(VAULT_ROOT, this.#vaultOptions);
+		// mirror path — the vault's .clew/plugins/<id>/ or the global root —
+		// so the snapshot must carry exactly those files (the loop above
+		// excludes .clew/ wholesale and never sees the global root — the
+		// worker never needs the rest of either, e.g. the charts plugin's
+		// ~200 KB chart.umd.js, which belongs to the PREVIEW surface).
+		const engineExtensions = engineExtensionEntries(VAULT_ROOT, this.#vaultOptions, GLOBAL_PLUGINS_ROOT);
 		for (const entry of engineExtensions) {
 			const abs = entry.slice(entry.indexOf(' from ') + ' from '.length);
 			const source = vfs.files.get(abs);

@@ -9,6 +9,9 @@ final class WebHost: NSObject, ObservableObject {
 	let vaults = VaultStore()
 	private(set) var webView: WKWebView!
 	private var schemeHandler: SchemeHandler!
+	/// The window a JavaScript alert() is shown in: its own, above everything
+	/// (see runJavaScriptAlertPanelWithMessage), alive until OK.
+	fileprivate var alertWindow: UIWindow?
 
 	override init() {
 		super.init()
@@ -121,6 +124,35 @@ extension WebHost: WKUIDelegate, WKNavigationDelegate {
 			}
 		}
 		#endif
+	}
+
+	// alert() from the renderer (builtin.js's export-failure message) was
+	// silent: WKWebView shows no JavaScript dialogs without a UI delegate
+	// method for each. Nothing in the renderer calls confirm() or prompt().
+	func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String,
+		initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
+		// In a window of its own, above everything, on the app's scene rather
+		// than the web view's window: while Quick Look (or any full-screen
+		// presentation) covers the app, UIKit detaches the covered view
+		// hierarchy and webView.window is NIL — measured — so anything routed
+		// through it would swallow the alert and leave the page's JavaScript
+		// blocked in alert() until the dialog it never showed was dismissed.
+		let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+		let scene = webView.window?.windowScene
+			?? scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+		guard alertWindow == nil, let scene else { return completionHandler() }
+		let window = UIWindow(windowScene: scene)
+		window.windowLevel = .alert + 1
+		window.rootViewController = UIViewController()
+		window.makeKeyAndVisible()
+		alertWindow = window
+		let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
+		alert.addAction(UIAlertAction(title: "OK", style: .default) { [weak self] _ in
+			self?.alertWindow?.isHidden = true
+			self?.alertWindow = nil
+			completionHandler()
+		})
+		window.rootViewController?.present(alert, animated: true)
 	}
 
 	func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration,

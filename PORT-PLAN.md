@@ -319,6 +319,27 @@ the golden master than forked here:
   canvas node's Live choice. `![[doc.docx|live]]` in a note still emits
   a live iframe, which 404s here (blank box) — the one office surface
   that cannot be made honest without touching the engine.
+- **Global plugins live in `Documents/Plugins`** (0.11 sync). Upstream's
+  second discovery root is `<userData>/plugins`, which on iOS would be
+  unreachable to the user; Documents is the one place the Files app can
+  put a folder. The Swift store snapshots that folder beside the vault at
+  open and the mirror carries it read-only under a second root
+  (`/global-plugins`), so upstream's `plugins.js` — vault plugin shadows
+  global, installing never enables — runs verbatim over both; the worker
+  snapshot carries an enabled global engine surface, the scheme handler
+  serves a global preview surface and its siblings from
+  `__clew_plugin_file__/<sid>/<id>/…` exactly as `protocol.js` does, and
+  "Open global plugin folder" opens the Files app there
+  (`shareddocuments://`). No rescan watches that folder: a plugin dropped
+  in mid-session is discovered at the next vault open.
+- **"Open in the OS default app" is Quick Look** (0.11 sync).
+  `[[paper.pdf|external]]` and `file://` links run upstream's electron-free
+  `planOpen` over the mirror (vault clamp, missing file, executables
+  refused by name) and then present the system's read-only viewer, which
+  carries its own share / open-in sheet — the same rung office documents
+  use. A `file://` link can only reach the open vault (nothing outside the
+  sandbox is reachable), and a folder has no viewer; both refuse with a
+  reason the renderer shows as a notice.
 - **CJK PDF fallback fonts are stubbed off.** Upstream downloads a 139 MB
   Noto pack on demand; iOS has no downloader, so the three `CH.PDF_FONTS_*`
   channels answer "not available", the settings section is patched out, and

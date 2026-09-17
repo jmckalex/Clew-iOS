@@ -137,6 +137,17 @@ final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 		case "demoVaultPath":
 			performIO(reply) { ["path": self.vaults.demoVaultPath()] }
 
+		case "revealGlobalPlugins":
+			// "Open global plugin folder": Documents/Plugins in the Files app —
+			// the iOS reveal (shell.openPath upstream), created on the way as
+			// upstream does. The Files app's own URL scheme opens a folder.
+			let folder = try vaults.ensureGlobalPluginsFolder()
+			let encoded = folder.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? folder
+			if let url = URL(string: "shareddocuments://" + encoded) {
+				UIApplication.shared.open(url)
+			}
+			reply(["path": folder], nil)
+
 		case "createVault":
 			// The welcome screen's "Create new vault…". A native sheet asks
 			// the name (WKWebView has no prompt() without a UI delegate for

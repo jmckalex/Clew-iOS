@@ -10,12 +10,13 @@ import { SearchService } from '../../vendor/clew/main/search.js';
 import { KvStore, KV_FILE } from '../../vendor/clew/main/kv-store.js';
 import { propagateRename } from '../../vendor/clew/main/rename-links.js';
 import { listPlugins } from '../../vendor/clew/main/plugins.js';
+import { planOpen, pathFromFileUrl } from '../../vendor/clew/main/open-file.js';
 import { direntKind, shouldRecurse, walkGuard } from '../../vendor/clew/main/fs-utils.js';
 import { listSnapshots, readSnapshot } from '../../vendor/clew/main/history.js';
 import fs from 'node:fs';
 import nodePath from 'node:path';
 import { vfs } from '../worker/shims/vfs.js';
-import { VaultManager, VAULT_ROOT } from './vault-manager.js';
+import { VaultManager, VAULT_ROOT, GLOBAL_PLUGINS_ROOT } from './vault-manager.js';
 import { RenderService } from './render-service.js';
 import { settings } from './settings.js';
 import { bridgeCall, toBase64 } from './native-bridge.js';
@@ -347,9 +348,32 @@ export function createClewShim({ workerFactory, assetLoader } = {}) {
 		[CH.SHELL_OPEN_EXTERNAL]: ({ url }) => {
 			if (/^https?:|^mailto:/i.test(url)) bridgeCall('openExternal', { url }).catch(() => {});
 		},
-		// `[[x.pdf|external]]` / file:// links — answered in sync11-p3 (Quick
-		// Look); registered now so the renderer never reaches an unknown channel.
-		[CH.SHELL_OPEN_PATH]: () => ({ ok: false, reason: 'Opening a file outside Clew is not available on iOS yet' }),
+		// `[[x.pdf|external]]` (a vault-relative path) and file:// links (an
+		// absolute path). Upstream's planOpen decides — vault clamp, missing
+		// file, executables refused BY NAME — over the mirror, and iOS's
+		// "default app" is Quick Look, as for office documents: the system's
+		// read-only viewer with its own share / open-in sheet. A file:// link
+		// can only reach the open vault here (nothing outside the sandbox is
+		// reachable), and a folder has no viewer.
+		[CH.SHELL_OPEN_PATH]: ({ path, url }) => {
+			let rel;
+			if (url) {
+				const abs = pathFromFileUrl(url);
+				if (!abs) return { ok: false, reason: 'Not a local file:// link' };
+				const root = vaults.realPath?.replace(/\/+$/, '');
+				if (!root || !abs.startsWith(root + '/')) {
+					return { ok: false, reason: 'On iOS a file:// link can only open a file inside the open vault' };
+				}
+				rel = abs.slice(root.length + 1);
+			} else {
+				rel = String(path ?? '');
+			}
+			const plan = planOpen(vaults, { rel });
+			if (!plan.ok) return plan;
+			if (vfs.isDir(plan.target)) return { ok: false, reason: `Folders cannot be opened on iOS: ${rel}` };
+			bridgeCall('quickLook', { rel }).catch((err) => console.warn('[clew-ios] Quick Look failed:', err));
+			return { ok: true };
+		},
 
 		[CH.WORKSPACE_LOAD]: () => vaults.loadState('workspace.json'),
 		[CH.WORKSPACE_SAVE]: (state) => vaults.saveState('workspace.json', state),
@@ -379,18 +403,27 @@ export function createClewShim({ workerFactory, assetLoader } = {}) {
 			return current;
 		},
 
+		// Both roots, exactly as upstream: the vault's own .clew/plugins/ and
+		// the global folder (Documents/Plugins here), mirrored under
+		// GLOBAL_PLUGINS_ROOT at vault open; a vault plugin shadows a global
+		// one of the same id, and enabling stays per vault. globalDir is the
+		// device path, which the settings row shows as its tooltip.
 		[CH.PLUGINS_LIST]: () => {
-			// globalDir: the global plugin root lands in sync11-p3.
-			if (!vaults.isOpen) return { plugins: [], enabled: [], globalDir: null };
+			const globalDir = vaults.globalPluginsPath;
+			if (!vaults.isOpen) return { plugins: [], enabled: [], globalDir };
 			const vaultSettings = vaults.loadState('vault-settings.json') ?? {};
 			return {
-				plugins: listPlugins(VAULT_ROOT),
+				plugins: listPlugins(VAULT_ROOT, GLOBAL_PLUGINS_ROOT),
 				enabled: Array.isArray(vaultSettings.plugins) ? vaultSettings.plugins : [],
-				globalDir: null,
+				globalDir,
 			};
 		},
-		[CH.PLUGINS_REVEAL_GLOBAL]: () => {
-			throw new Error('Global plugins are not available on iOS yet');
+		// "Open global plugin folder": Documents/Plugins, created on the way
+		// and shown in the Files app — the iOS reveal. A plugin installed
+		// there is discovered at the next vault open.
+		[CH.PLUGINS_REVEAL_GLOBAL]: async () => {
+			const result = await bridgeCall('revealGlobalPlugins');
+			return result?.path ?? null;
 		},
 
 		[CH.EXPORT_NOTE]: async ({ path, format }) => {
