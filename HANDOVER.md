@@ -207,6 +207,20 @@ cef2e0f/6c97f5b); still not deployed. `~/Source/mp-tikz-wasm` at
    copyTree if size matters. Desktop's `asset-stamp.js` cache clearing
    is NOT needed here: measured, WebKit served the restaged bundle
    index on an install-over-old.
+   **Known gap in the engines staged tonight** (from the Clew-app
+   session, late 2026-09-17): a complete document with
+   `\documentclass[12pt]{article}` + fontspec fails with "Font
+   \TU/lmr/m/n/12=[lmroman12-regular] … not loadable" — the bundle
+   carried only Latin Modern's 10pt faces, and `\small`, `\large`,
+   `\textsc`, `\texttt` reach the others the same way. mp-tikz-wasm is
+   moving all 72 LM faces into `opentype` (on demand, so a 12pt article
+   costs two files). **After their rebuild: `npm run sync-mptikz`** (the
+   stamp tracks `bundles/index.json`'s mtime, so it restages by itself;
+   `--force` if in doubt), `npm run build`, xcodebuild, and the 12pt
+   case from upstream's `smoke/make-figures-vault.mjs` (Fonts.md, "A
+   12pt document") on the sim. Upstream also fixed `extractFace`'s
+   `head` checksum (the commit after 4eae005) — cosmetic; re-vendor at
+   the next sync.
 5. Possible follow-ups, unchanged: canvas toolbar undo/redo; Pencil
    long-press → contextmenu; "New drawing" in the explorer root menu; a
    THIRD-PARTY-NOTICES surface (now also mp-tikz-wasm's TeX bundles).
