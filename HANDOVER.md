@@ -175,6 +175,37 @@ Widgets residue. `../Clew-docs` untouched. `~/Source/mp-tikz-wasm` at
    attribute set at load is stripped by the first morph (body attrs are
    synced from the incoming HTML); an attribute set later survives. The
    global plugin's sibling fetch proved the route.
+4b. **Next upstream delta, NOT ported (received from the Clew-app session
+   on 2026-09-17 evening, uncommitted upstream, library unreleased):
+   `font=note`** — a figure's text set in the note's own face (Avenir
+   Next) by the wasm TeX. What the iPad will need when it lands:
+   (a) an mp-tikz-wasm build with the `opentype` bundle (+14 MB; the
+   library's `opentype-fonts` branch, plus a luaotfload.sty patch for
+   ```tex) — the pinned 0.2.1 has none, and `preview-client/figures.js`
+   then refuses marked figures by name, so shipping without it is
+   honest but needs an "On iPad" sentence in `diagrams.html#note-font`;
+   (b) a `notefonts/index.json` + four `NoteFont-*.ttf` files served
+   under `__clew_assets__/notefonts/` — build each face from CoreText
+   (`CTFontCreateWithName("AvenirNext-Regular"…)`, `CTFontCopyTable` per
+   table, write an sfnt with recomputed `head.checkSumAdjustment`; the
+   desktop's `main/note-fonts.js#extractFace` is the 40-line reference,
+   unit-tested) — one file per face, never the .ttc (garbled under
+   woff2); cache in Application Support keyed on the OS version;
+   (c) the face map: `figures.js#noteFontFaces` reads
+   `globalThis.CLEW_NOTE_FONTS` OR `process.env.CLEW_NOTE_FONTS` — on
+   iOS the env route already exists (`engine-config.js#engineEnv`), so
+   add the JSON there; (d) **cache headers**: SchemeHandler serves the
+   `mptikz` root immutable for a year; the desktop found a restaged
+   build served STALE from Chromium's cache. Whether WebKit disk-caches
+   custom-scheme responses across app updates is UNVERIFIED — if a
+   restaged engine ever misbehaves after an update, drop `immutable`
+   (or clear `WKWebsiteDataStore` when the bundle's identity changes,
+   as desktop's `main/asset-stamp.js` does); (e) exports: the
+   reading-view PDF prints the preview, so a `font=note` figure would
+   carry Avenir Next glyphs into the PDF — decide with the owner
+   (desktop bakes outlines for the site). Verification recipe:
+   upstream `smoke/make-figures-vault.mjs` writes a Fonts.md; assertions
+   in its README.
 5. Possible follow-ups, unchanged: canvas toolbar undo/redo; Pencil
    long-press → contextmenu; "New drawing" in the explorer root menu; a
    THIRD-PARTY-NOTICES surface (now also mp-tikz-wasm's TeX bundles).
