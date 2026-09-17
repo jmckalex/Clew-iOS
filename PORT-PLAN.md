@@ -246,6 +246,34 @@ Ranked; items 1–5 are in scope for the first working build, 6–10 tracked:
   makes atomic. The ZetaOffice runtime is deliberately unported — its
   surfaces are backed by Quick Look (see Decisions). Simulator-verified
   across every arc on a clean install; tests 255 → 291.
+- **Upstream 0.11 sync** ✅ (2026-09-17) vendored at `da5f68a` plus the
+  two owner-requested uncommitted items in upstream's working tree (the
+  LibreOffice icon revert; `\nopagenumbers` gone from ```tex), 29
+  commits on. No new npm deps. **Figures without a TeX install**:
+  TikZ, MetaPost, LaTeX and plain TeX typeset IN the preview document by
+  mp-tikz-wasm — `figures.js` registered in the worker (Extensions + a
+  new `Environments` key through the same `__jmdImport` registry), a
+  `require('highlight.js')` registry so MetaPost highlights, the 74 MB
+  engine tree staged by `scripts/stage-mptikz.js` (upstream's tree, the
+  master build, or the SHA256-pinned release) into the app bundle and
+  served as the `mptikz` asset root, immutable. Measured on a clean
+  simulator install: seven figures cold in 2.3 s (LuaLaTeX included),
+  an edited figure re-typeset alone in 0.5 s with the other six SVGs
+  kept, a reopened note from IndexedDB in 251 ms; the library's
+  in-worker synchronous XHR reaches the scheme handler. Embeds that fold
+  (`|collapsed`/`|open`, written back), `|quiet`/`|bare`, and embedded
+  notes refreshing when their target changes (the shim render service
+  gained upstream's `embeddersOf` + `#restale`). Open in the OS default
+  app = Quick Look after upstream's `planOpen` over the mirror; global
+  plugins in `Documents/Plugins`; Export as PDF (reading view) from a
+  hidden `WKWebView` (see Decisions for all three). Closed folders,
+  reading position → editor, path-ranked wikilink completion, fence
+  grammars in the editor, Avenir Next, `::` as a description list,
+  `class()` on widgets, `!= null` — all ride the drop. Two pre-existing
+  iOS gaps closed on the way: `alert()` shows (own window on the app's
+  scene) and the share sheet actually presents on iPad. Upstream's demo
+  note used `\frac` in plain TeX (the engine's honest error found it;
+  fixed in the upstream working tree, uncommitted). Tests 291 → 388.
 
 ### Upstream candidates (iOS-owned today, worth pushing to ../Clew-app)
 

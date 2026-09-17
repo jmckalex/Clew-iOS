@@ -53,6 +53,10 @@ xcrun simctl spawn booted log stream --predicate 'eventMessage CONTAINS "CLEWJS"
 - `ios/` — the Xcode project: scheme handlers (`clew-app://`,
   `clew-preview://`), FS bridge, vault store, HEIC conversion, delegates.
 - `seed-vault/` — the demo vault, seeded into Documents on first launch.
+- `mptikz-assets/` — the wasm TeX engines (mp-tikz-wasm), gitignored;
+  `npm run sync-mptikz` stages them from upstream's tree, the owner's
+  master build or the SHA256-pinned release, and `npm run build` copies
+  them into the webroot. Figures typeset in the preview document.
 - `tools/render-note.mjs` — render any vault note through the worker
   bundle under Node.
 

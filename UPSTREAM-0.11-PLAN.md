@@ -1,6 +1,9 @@
 # Upstream 0.11 Sync — Plan for Clew-iOS
 
-**STATUS: in progress, started 2026-09-17 — p1 and p2 done and simulator-verified; p3 next.** Written the way the 0.8, 0.9
+**STATUS: executed in full on 2026-09-17, the day it was written.** Like
+the 0.8, 0.9 and 0.10 plans this is now history — read it for the
+reasoning behind a decision, not as a work list; results are in
+PORT-PLAN.md and HANDOVER.md. Written the way the 0.8, 0.9
 and 0.10 plans were: one branch per phase, chained off the previous tip
 (`sync10-p5-verify`, add3a49), so a bad phase falls back cleanly. Read
 `README.md` and `PORT-PLAN.md` for architecture, `HANDOVER.md` for session
@@ -142,11 +145,17 @@ tree: every one still matches.
    the page in WebKit; the device number is the owner's (§5).
 4. `.clew/cache/figures/` — not needed (§4.2 said yes).
 5. `UIPrintPageRenderer` over a `WKWebView` that is attached but hidden:
-   does it paginate the whole document, or does it need the view on
-   screen? Fallback: `createPDF(configuration:)`, one tall page.
+   **paginates the whole document** when the view is a subview of the
+   window (behind the app, at the printable width) — five A4 pages of
+   the Diagrams note in 3.3 s, figures whole (p4). Two things found on
+   the way: the share sheet had never presented on iPad (a popover
+   anchored to the whole web view has nowhere to point — fixed, for the
+   HTML export too), and `webView.window` is nil while Quick Look covers
+   the app (UIKit detaches the covered hierarchy), which is why the
+   alert() delegate takes its scene from the application.
 6. Does the vendored indexer's `embeddersOf` see canvas `file` embeds
-   as embeds? (Upstream's `#restale` covers what `links[].embed` says;
-   parity, not more.)
+   as embeds? Parity with upstream by construction (the same indexer
+   over the same metadata); not measured separately.
 
 ## 5. Definition of done
 
