@@ -152,13 +152,18 @@ Widgets residue. `../Clew-docs` untouched. `~/Source/mp-tikz-wasm` at
    Xcode Cloud's auto-incremented build number) — bump it in the project
    before a push if the version string should say what the build
    contains. 0.9 → 0.10 is ordinary semver; the components are integers.
-2. **Manual caveats for `../Clew-docs`** (the owner's): figures typeset
-   on iOS too, engines bundled (no download); global plugins live in
-   the Files app under Clew › Plugins; `|external` and `file://` open
-   in Quick Look, inside the vault only; "Export as PDF (reading view)"
-   offers the share sheet; the LaTeX PDF still needs the desktop; plus
-   the previous handover's five items (history, first launch, `.clew/`
-   table, office, settings keys).
+2. **Manual updated, UNCOMMITTED in `../Clew-docs`** (2026-09-17): "On
+   iPad" callouts on `diagrams.html` (engines bundled, no LaTeX export),
+   `plugins.html` (an iPad row in the global-folder table, the Files-app
+   callout, the summary table), `links-and-embeds.html` (Quick Look,
+   vault-only `file://`, plus a tap-to-fold sentence), `export.html`
+   (two of four commands, share sheet instead of a save dialog), each
+   with an iPad screenshot in `site/manual/images/ipad-*.jpg` (five,
+   1000 px wide, from the simulator). `make check-links` clean. Left
+   uncommitted because the owner's own pending `diagrams.html` edit
+   (`\nopagenumbers`) shares that file — commit them together, then
+   `make sync`. The previous handover's five caveats were already in
+   the manual (history, first launch, office pages carry On iPad text).
 3. **Upstream notes**: Web Awesome logs `[wa-color-picker] size="small"
    is deprecated. Use size="s"` on the Widgets guide (Meta Bind's
    `size="small"`, c579d11); `print-pdf.js`'s arm/probe scripts would be
