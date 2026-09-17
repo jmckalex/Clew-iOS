@@ -139,6 +139,8 @@ export const sitePath = (rel) => {
 	return sid ? `/${encodeURIComponent(sid)}/${encoded}` : `/${encoded}`;
 };
 
+import { parseEmbedModes } from './embed-state.js';
+
 const escapeAttr = (s) =>
 	s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const escapeHtml = escapeAttr;
@@ -197,6 +199,25 @@ export const wikilink = {
 	},
 	renderer(token) {
 		if (global.isLatex) return token.label;
+		// Clew-native: `[[paper.pdf|external]]` hands the file to the OS
+		// default app instead of opening a Clew tab — the same "the alias is
+		// the consent" shape as the office `|live` embed. An alias that was
+		// ONLY the mode is not a caption, so the label falls back to the name.
+		const aliasParts = (token.alias ?? '').split('|').map((s) => s.trim());
+		const wantsExternal = aliasParts.some((p) => p.toLowerCase() === 'external');
+		if (wantsExternal && token.target) {
+			const rest = aliasParts.filter((p) => p.toLowerCase() !== 'external').join('|');
+			const label = escapeHtml(rest || token.target);
+			const fileRel = resolveFileTarget(token.target) ?? resolveTarget(token.target);
+			if (!fileRel) return `<span class="internal-link unresolved">${label}</span>`;
+			// A static site has no OS shell to hand anything to: link to the
+			// file itself, which is what "open this outside" means there.
+			if (SITE_EXPORT) {
+				return `<a class="internal-link" href="${escapeAttr(sitePath(fileRel))}">${label}</a>`;
+			}
+			return `<a class="internal-link external-file" href="#"`
+				+ ` data-open-external="${escapeAttr(fileRel)}">${label}</a>`;
+		}
 		if (SITE_EXPORT) {
 			const rel = token.target ? resolveTarget(token.target) : null;
 			if (!rel) return `<span class="internal-link unresolved">${escapeHtml(token.label)}</span>`;
@@ -279,6 +300,16 @@ export const wikiembed = {
 				// An alias that was ONLY the mode is not a caption.
 				if (!alias) token.label = link.target;
 			}
+			// A note-embed keyword on a media embed does nothing — but it must
+			// not become the alt text either, which is what it did before the
+			// keywords existed to be mistaken for captions.
+			if (alias) {
+				const stripped = parseEmbedModes(alias);
+				if (stripped.state || stripped.chrome) {
+					alias = stripped.alias;
+					if (!alias) token.label = link.target;
+				}
+			}
 			const { alt, width, height } = parseMediaAlias(alias);
 			token.media.width = width;
 			token.media.height = height;
@@ -288,6 +319,23 @@ export const wikiembed = {
 			// A pure-size alias ("300") is not a caption — fall back to the name.
 			if (alias) token.label = alt ?? link.target;
 			return token;
+		}
+
+		// `![[Note|collapsed]]` / `![[Note|open]]`: a note embed that discloses.
+		// Read BEFORE the resolution guard so that even an embed that resolves
+		// to nothing gets its title fixed — otherwise the "not found" box
+		// would be titled "collapsed". Depth is recorded here, while the
+		// embed stack still means something: only a top-level embed's line
+		// number belongs to the note being rendered, and only that one can be
+		// toggled back into its source (see the renderer).
+		const modes = parseEmbedModes(link.alias);
+		if (modes.state || modes.chrome) {
+			// `bare` draws no title bar, so there is nothing to disclose and a
+			// folded one would render as literally nothing. Chrome wins.
+			token.embedChrome = modes.chrome;
+			token.embedState = modes.chrome === 'bare' ? null : modes.state;
+			token.label = modes.alias ?? link.target;
+			token.embedDepth = embedStack.length;
 		}
 
 		const rel = link.target ? resolveTarget(link.target) : null;
@@ -428,9 +476,38 @@ export const wikiembed = {
 				+ `<div class="embed-title">${title}</div>`
 				+ `<div class="embed-note">(${reason})</div></div>\n`;
 		}
-		return `<div class="internal-embed" data-href="${target}">`
+		const body = `<div class="embed-content">\n${this.parser.parse(token.tokens)}</div>`;
+		// `|bare`: no frame, no title, no disclosure — the transcluded note
+		// reads as part of this one. The wrapper stays (and keeps its class
+		// and data-href) so the preview client's DOM contract and any vault
+		// stylesheet still have something to hold on to; the CSS is what
+		// takes the decoration away.
+		if (token.embedChrome === 'bare') {
+			return `<div class="internal-embed is-bare" data-href="${target}">${body}</div>\n`;
+		}
+		const chrome = token.embedChrome ? ` is-${token.embedChrome}` : '';
+		if (token.embedState) {
+			// A real <details>, so the disclosure works with no script at all —
+			// in an export, on a static site, under any browser. The host only
+			// has to hear about the toggle to write it back.
+			//
+			// data-embed-line is what it writes: the line of THIS `![[…]]` in
+			// the note being rendered. A nested embed's line belongs to some
+			// other file, so it is left unstamped and toggles for the session
+			// only — the alternative is rewriting the wrong line of the wrong
+			// note. The title stays an anchor: clicking it opens the note (the
+			// client preventDefaults, which also stops the disclosure), while
+			// clicking anywhere else in the summary discloses.
+			const open = token.embedState === 'open' ? ' open' : '';
+			const line = token.embedDepth === 0 && token.sourceLine !== undefined
+				? ` data-embed-line="${token.sourceLine}"` : '';
+			return `<details class="internal-embed is-collapsible${chrome}"${open}${line} data-href="${target}">`
+				+ `<summary class="embed-title"><a class="internal-link" href="#" data-href="${target}">${title}</a></summary>`
+				+ `${body}</details>\n`;
+		}
+		return `<div class="internal-embed${chrome}" data-href="${target}">`
 			+ `<div class="embed-title"><a class="internal-link" href="#" data-href="${target}">${title}</a></div>`
-			+ `<div class="embed-content">\n${this.parser.parse(token.tokens)}</div></div>\n`;
+			+ `${body}</div>\n`;
 	},
 };
 

@@ -4,7 +4,9 @@ tags: [guide]
 # Reading Mode
 
 **⌘E** toggles between source and reading mode. Reading mode is the full
-jmarkdown engine — MathJax, TikZ, mermaid, theorem environments,
+jmarkdown engine — MathJax, TikZ, MetaPost and whole LaTeX snippets
+(typeset in the page by a wasm TeX, with no TeX installation), mermaid,
+theorem environments,
 citations, transclusion — not an approximation of it.
 
 While you type in a source pane of the same note, the reading pane

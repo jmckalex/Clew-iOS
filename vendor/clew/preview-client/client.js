@@ -21,6 +21,7 @@ import { initMetaBind } from './meta-bind.js';
 import { initPdfEmbeds } from './pdf-embed.js';
 import { initExcalidrawEmbeds } from './excalidraw-embed.js';
 import { initOfficeEmbeds } from './office-embed.js';
+import { figureMorph, initFigures, figuresPending } from './figures.js';
 
 const HOST_SOURCE = 'clew-preview-host';
 const post = (msg) => window.parent.postMessage({ source: 'clew-preview', ...msg }, '*');
@@ -94,6 +95,12 @@ function applyRender(html) {
 				// points at a different document.
 				if (fromEl.classList?.contains('office-embed-thumb') && fromEl.dataset.officeRequested
 					&& fromEl.dataset.officePath === toEl.dataset?.officePath) return false;
+				// TikZ/MetaPost figures are custom elements too, but they own
+				// a rendered SVG the incoming HTML does not carry AND must
+				// re-typeset when the figure itself changes — neither of which
+				// the generic rule below can tell apart (figures.js).
+				const figure = figureMorph(fromEl, toEl);
+				if (figure !== null) return figure;
 				// Custom elements (vault scripts / Script: metadata) render
 				// their own content, which the incoming HTML doesn't carry —
 				// morphing their subtree would wipe it. Keep the element and
@@ -159,6 +166,7 @@ function applyRender(html) {
 		enableTaskCheckboxes();
 		initCanvasEmbeds();
 		initLeafletMaps();
+		initFigures();
 		initPdfEmbeds();
 		initExcalidrawEmbeds();
 		initOfficeEmbeds();
@@ -213,6 +221,19 @@ document.addEventListener('change', (e) => {
 	});
 });
 
+// Collapsible note embeds (`![[Note|collapsed]]`). The disclosure is native
+// <details>, so this listener is only about PERSISTING it: the state belongs
+// to the note's own source, not to this session. `toggle` does not bubble,
+// hence the capture phase. An embed with no data-embed-line is a nested one,
+// whose line belongs to another file — it still discloses, just for now.
+document.addEventListener('toggle', (e) => {
+	const box = e.target;
+	if (!box?.classList?.contains('internal-embed')) return;
+	const line = Number(box.dataset.embedLine);
+	if (!Number.isFinite(line) || line < 1) return;
+	post({ type: 'embed-collapse', line, collapsed: !box.open });
+}, true);
+
 function showError(message) {
 	let el = document.getElementById('__clew_err');
 	if (!message) {
@@ -243,6 +264,12 @@ document.addEventListener('click', (e) => {
 	}
 	const link = e.target.closest?.('a');
 	if (!link) return;
+	// [[file|external]] — hand it to the OS rather than opening a Clew tab.
+	if (link.dataset.openExternal) {
+		e.preventDefault();
+		post({ type: 'open-external-file', path: link.dataset.openExternal });
+		return;
+	}
 	if (link.classList.contains('internal-link')) {
 		e.preventDefault();
 		post({ type: 'link-click', target: link.dataset.href, newTab: e.metaKey || e.ctrlKey });
@@ -382,6 +409,7 @@ function scrollToLine(line, behavior) {
 enableTaskCheckboxes();
 initCanvasEmbeds();
 initLeafletMaps();
+initFigures();
 initPdfEmbeds();
 initExcalidrawEmbeds();
 initOfficeEmbeds();
@@ -389,4 +417,6 @@ initQueryInteract();
 // Previews start dark until the host says otherwise (preview.css defaults).
 document.documentElement.classList.add('wa-dark');
 initMetaBind();
+// print-pdf.js waits on this the way it waits on MathJax and mermaid.
+window.__clewFiguresPending = figuresPending;
 post({ type: 'ready' });

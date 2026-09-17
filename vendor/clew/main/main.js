@@ -245,8 +245,9 @@ app.whenReady().then(() => {
 		nodeModulesDir: paths.previewAssets,
 		engineAssetsDir: paths.engineAssets,
 		embedpdfDir: paths.embedpdfAssets,
+		mptikzDir: paths.mptikzAssets,
 		zetaDir: paths.zetaAssets,
-		officeIconsDir: paths.officeIcons,
+		globalPluginsDir: paths.globalPlugins,
 	});
 	// No { role: 'close' } anywhere in the menu: Cmd+W belongs to the
 	// renderer (close tab). See src/main/menu.js.
@@ -254,7 +255,9 @@ app.whenReady().then(() => {
 	if (process.env.CLEW_DEV) watchRendererDist();
 
 	// Smoke runs open EXACTLY the given vault — never the user's restored
-	// set, and without rewriting openVaults/recents (harness isolation).
+	// set. The rest of the isolation lives in settings.js#save: under
+	// CLEW_SMOKE nothing is ever persisted, so vault opens and setting
+	// flips inside a scenario cannot leak into the user's real settings.
 	if (process.env.CLEW_SMOKE && process.env.CLEW_SMOKE_VAULT) {
 		createWindow(process.env.CLEW_SMOKE_VAULT);
 		return;

@@ -23,6 +23,8 @@ import { paths } from './paths.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { toolchainPath } from './render-service.js';
+import { printNoteToPdf } from './print-pdf.js';
+import { settings } from './settings.js';
 
 const WORKER_PATH = paths.engineWorker;
 
@@ -78,22 +80,42 @@ function compilePdf(texFile) {
 }
 
 /**
- * Export a note. format: 'html' | 'latex' | 'pdf'.
+ * Export a note. format: 'html' | 'latex' | 'pdf' | 'print-pdf'.
+ *
+ * The two PDFs are different documents on purpose. 'pdf' goes out through
+ * the engine's LaTeX path and a TeX toolchain — typeset, and nothing like
+ * the screen. 'print-pdf' prints the reading view itself (print-pdf.js), so
+ * what you were looking at is what you get, with no TeX installed.
+ *
  * Prompts for a destination; returns { output } or { canceled: true }.
  */
-export async function exportNote({ win, vaults, relPath, format }) {
+export async function exportNote({ win, vaults, sessionId, relPath, format, outFile }) {
 	const abs = vaults.resolve(relPath);
 	// Exports honor the vault's standard-syntax choice, like previews do.
 	const normalSyntax = vaults.loadState('vault-settings.json')?.normalSyntax === true;
 	const base = path.basename(abs).replace(/\.(md|jmd)$/i, '');
 	const ext = format === 'html' ? 'html' : format === 'latex' ? 'tex' : 'pdf';
 
-	const { canceled, filePath } = await dialog.showSaveDialog(win, {
-		title: `Export ${base} as ${ext.toUpperCase()}`,
-		defaultPath: path.join(vaults.root, `${base}.${ext}`),
-		filters: [{ name: ext.toUpperCase(), extensions: [ext] }],
-	});
-	if (canceled || !filePath) return { canceled: true };
+	// A relative outFile is vault-relative, not process-relative: the caller
+	// is a scenario inside the vault, and resolving against the working
+	// directory dropped the PDF in the repo root the first time.
+	let filePath = outFile ? (path.isAbsolute(outFile) ? outFile : path.join(vaults.root, outFile)) : null;
+	if (!filePath) {
+		const chosen = await dialog.showSaveDialog(win, {
+			title: `Export ${base} as ${ext.toUpperCase()}`,
+			defaultPath: path.join(vaults.root, `${base}.${ext}`),
+			filters: [{ name: ext.toUpperCase(), extensions: [ext] }],
+		});
+		if (chosen.canceled || !chosen.filePath) return { canceled: true };
+		filePath = chosen.filePath;
+	}
+
+	if (format === 'print-pdf') {
+		await printNoteToPdf({
+			sessionId, relPath, outFile: filePath, paperSize: settings.get('printPaperSize'),
+		});
+		return { output: filePath };
+	}
 
 	if (format === 'html') {
 		await runWorker({ file: abs, options: { to: 'html', output: filePath, normalSyntax }, cwd: path.dirname(abs) });

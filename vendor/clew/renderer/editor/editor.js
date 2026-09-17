@@ -34,6 +34,7 @@ import { jmdOverlay } from './jmd/overlay.js';
 import { jmdFolding } from './jmd/folding.js';
 import { tableKeymap } from './tables.js';
 import { autoFillHandler } from './fill.js';
+import { fenceLanguage } from './langs/fence-languages.js';
 import { settingsStore } from '../state/settings-store.js';
 
 /**
@@ -59,6 +60,9 @@ export function makeNoteState(doc, handlerRef) {
 				// jmarkdown has no indented code blocks or setext headings; removing
 				// them also stops the metadata header masquerading as a heading.
 				extensions: [{ remove: ['IndentedCode', 'SetextHeading'] }],
+				// ```tikz / ```latex / ```tex / ```metapost bodies are parsed
+				// by their own grammars (langs/); every other fence stays text.
+				codeLanguages: fenceLanguage,
 			}),
 			clewHighlighting,
 			clewEditorTheme,

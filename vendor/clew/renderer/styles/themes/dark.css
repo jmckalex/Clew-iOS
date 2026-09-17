@@ -54,7 +54,14 @@ body[data-theme='dark'] {
 	--clew-canvas-6: #a882ff;
 
 	--clew-ui-font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
-	--clew-editor-font: 'iA Writer Quattro', 'Avenir Next', -apple-system, BlinkMacSystemFont, sans-serif;
+	/* Avenir Next is the intended reading face (macOS ships it; it cannot be
+	   bundled — Apple/Linotype licensed). The tail keeps other platforms
+	   humanist rather than dropping to bare sans-serif: Segoe UI on Windows,
+	   Cantarell on GNOME. A CSS snippet can override this variable for the
+	   EDITOR; reading mode's face is set in src/engine/preview.css (kept in
+	   step with this one), where the per-vault lever is a vault script —
+	   snippets reach the app window only, not preview documents. */
+	--clew-editor-font: 'Avenir Next', Avenir, 'Segoe UI', Cantarell, -apple-system, BlinkMacSystemFont, sans-serif;
 	--clew-mono-font: 'SF Mono', Menlo, Consolas, monospace;
 	--clew-editor-font-size: 16px;
 	--clew-editor-line-width: 44em;

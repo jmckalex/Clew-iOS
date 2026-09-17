@@ -9,6 +9,14 @@ share the behavior), and every plugin is **off until you enable it** in
 Settings → This vault — a plugin is arbitrary code, so enabling one is a
 statement of trust, exactly like the note API toggle.
 
+A plugin you want in *every* vault doesn't have to be copied into each
+one: install it once in the **global plugin folder** (Settings → This
+vault has an *Open global plugin folder* button) and it is offered
+everywhere, listed beside this vault's own and marked `global`.
+Installing is global; **enabling stays per-vault**, so nothing runs in a
+vault you haven't switched it on for. A vault plugin with the same id as
+a global one wins, which is how a vault pins its own version.
+
 This very vault ships three: **Note Headers**, a preview surface that
 draws the banner on [[Welcome]] and can run a whole animated HTML page
 behind it ([[Note Headers]]); **Word Count**, the app surface whose

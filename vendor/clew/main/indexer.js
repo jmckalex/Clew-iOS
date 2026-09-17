@@ -145,6 +145,28 @@ export class Indexer {
 		return null;
 	}
 
+	/**
+	 * Every note that embeds `relPath`, directly or down a chain of embeds.
+	 * An embed is a TRANSCLUSION: the embedding note's rendered HTML contains
+	 * the target's content inline, so changing C restales B (which embeds C)
+	 * and A (which embeds B) alike. Ordinary links are not included — a link
+	 * renders as an anchor, and an anchor does not go stale.
+	 */
+	embeddersOf(relPath) {
+		const found = new Set();
+		const queue = [relPath];
+		while (queue.length) {
+			const target = queue.shift();
+			for (const [notePath, meta] of this.notes) {
+				if (notePath === relPath || found.has(notePath)) continue;
+				if (!meta.links?.some((link) => link.embed && link.resolved === target)) continue;
+				found.add(notePath);
+				queue.push(notePath); // whoever embeds THIS one is stale too
+			}
+		}
+		return found;
+	}
+
 	#resolveAll() {
 		for (const meta of this.notes.values()) {
 			for (const link of meta.links) {

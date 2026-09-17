@@ -39,16 +39,22 @@ reopen (or touch this note) to refresh.
 
 ## The writable layer
 
-Query tables are **editable**: any frontmatter or inline-field cell can
-be clicked, retyped, and committed with Enter — Clew writes the value
-into that note's own frontmatter (numbers stay numbers, lists stay
-lists). Three more powers:
+Query tables are **editable**: any frontmatter cell can be clicked,
+retyped, and committed with Enter — Clew writes the value into that
+note's own frontmatter (numbers stay numbers, lists stay lists). Two
+more powers, and one thing that is deliberately not one:
 
-- **Inline fields**, Dataview-style: `Rating:: 8` on its own line, or
-  `[chapter:: 5]` mid-sentence. Queries read them like frontmatter, and
-  editing one in a table rewrites that very line.
 - **Date arithmetic**: `where: due < today + 7d` (units d/w/m/y).
 - **Grouping**: `group: status` renders one section per value.
+- **Not inline fields.** Dataview's `Rating:: 8` on its own line and
+  `[chapter:: 5]` mid-sentence are not read as data here: `::` is this
+  dialect's *description list*, so a `Key:: value` line renders as a
+  term and its definition — like the one just below — and a bracketed
+  field swallows its sentence as the term. A line cannot be both, and
+  description lists won. Data lives in frontmatter, where the
+  properties panel and every query cell can edit it.
+
+Rating:: not a field but a description list — `<dt>Rating</dt>`, then this text as its `<dd>`.
 
 ## Kanban
 

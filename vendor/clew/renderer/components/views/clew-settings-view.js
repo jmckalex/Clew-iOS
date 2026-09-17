@@ -59,6 +59,8 @@ class ClewSettingsView extends ClewElement {
 				this.#numberRow('Editor line width (em)', 'editorLineWidth', 44, 20, 120),
 				this.#numberRow('Fill column (hard-wrap)', 'fillColumn', 72, 40, 120),
 				this.#checkRow('Auto-fill while typing', 'autoFill'),
+				this.#selectRow('PDF paper size (reading-view export)', 'printPaperSize',
+					[['a4', 'A4'], ['letter', 'US Letter'], ['legal', 'US Legal'], ['tabloid', 'Tabloid']]),
 			]),
 			this.#section('Diary', [
 				this.#selectRow('Mode', 'diaryMode',
@@ -177,24 +179,43 @@ class ClewSettingsView extends ClewElement {
 		return section;
 	}
 
-	/** Discovered vault plugins (.clew/plugins/*) with per-plugin enables. */
+	/** Every plugin available here — this vault's (.clew/plugins/) and the
+	 *  globally installed ones — each with its per-vault enable. */
 	#pluginRows(section) {
-		ipc.invoke(CH.PLUGINS_LIST).then(({ plugins, enabled }) => {
-			if (!plugins.length) return;
+		ipc.invoke(CH.PLUGINS_LIST).then(({ plugins, enabled, globalDir }) => {
 			const heading = document.createElement('p');
 			heading.className = 'settings-hint';
-			heading.textContent = 'Plugins found in this vault (.clew/plugins/). '
-				+ 'A plugin is arbitrary code — enable only what you trust. '
-				+ 'Notes already open re-render; reopen them if a preview plugin '
-				+ 'doesn\'t appear.';
+			heading.textContent = plugins.length
+				? 'Plugins available here: this vault\'s own (.clew/plugins/) and '
+					+ 'the ones installed globally, marked below. Installing is '
+					+ 'global; enabling is always per-vault — a plugin is arbitrary '
+					+ 'code, so enable only what you trust. Notes already open '
+					+ 're-render; reopen them if a preview plugin doesn\'t appear.'
+				: 'No plugins found. A plugin is a folder with a manifest.json, '
+					+ 'either in this vault\'s .clew/plugins/ or in the global '
+					+ 'folder — install it once there and it is offered in every '
+					+ 'vault, still off until you enable it here.';
 			section.append(heading);
+			// The global folder, and a way to reach it (it may not exist yet).
+			const openButton = document.createElement('button');
+			openButton.className = 'hotkey-button';
+			openButton.textContent = 'Open global plugin folder';
+			openButton.addEventListener('click', () => {
+				ipc.invoke(CH.PLUGINS_REVEAL_GLOBAL).catch(() => {});
+			});
+			const folderRow = this.#row('Global plugins', openButton);
+			folderRow.title = globalDir ?? '';
+			section.append(folderRow);
+
 			const enabledSet = new Set(enabled);
 			for (const plugin of plugins) {
 				const box = document.createElement('input');
 				box.type = 'checkbox';
 				box.checked = enabledSet.has(plugin.id);
 				const surfaces = Object.keys(plugin.surfaces).join(', ') || 'no surfaces';
-				const row = this.#row(`${plugin.name} (${plugin.version}) — ${surfaces}`, box);
+				const where = plugin.scope === 'global' ? 'global' : 'this vault';
+				const row = this.#row(
+					`${plugin.name} (${plugin.version}) — ${surfaces} · ${where}`, box);
 				box.addEventListener('change', () => {
 					if (box.checked) enabledSet.add(plugin.id);
 					else enabledSet.delete(plugin.id);

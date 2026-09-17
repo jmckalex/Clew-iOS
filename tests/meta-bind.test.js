@@ -98,6 +98,21 @@ test('the Tier-2 and Clew-native types: date, time, rating, color, progress', ()
 	assert.doesNotMatch(bar, /data-edit/, 'a progress bar is a display, not an editor');
 });
 
+test('class(…) is honored: author classes land on the element', () => {
+	assert.deepEqual(parseInputDeclaration('number(class(narrow)):rating').classes, ['narrow']);
+	assert.deepEqual(
+		parseInputDeclaration('number(class(a b), class(c)):rating').classes,
+		['a', 'b', 'c'], 'several class(…) arguments accumulate');
+	assert.deepEqual(
+		parseInputDeclaration('number(class(ok, "><script), class(2bad)):rating').classes,
+		['ok'], 'only CSS-identifier-shaped tokens reach the attribute');
+	assert.match(inputHtml('number(class(narrow)):rating'), /class="clew-mb narrow"/);
+	assert.match(inputHtml('toggle(class(big)):done'), /class="clew-mb big"/);
+	assert.match(inputHtml('progressBar(class(fat)):rating'), /class="clew-mb-display fat"/);
+	// No class(…) still renders the bare hook classes.
+	assert.match(inputHtml('number:rating'), /class="clew-mb"/);
+});
+
 test('VIEW: bare value, and the formatter kinds', () => {
 	assert.match(viewHtml('{rating}'), /clew-mb-view">7</);
 	assert.match(viewHtml('badge:{status}'), /<wa-badge variant="brand">review</);

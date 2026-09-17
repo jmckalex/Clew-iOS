@@ -226,6 +226,7 @@ class AppMenu {
 						c('export:html', 'As HTML…', { needs: 'note' }),
 						c('export:latex', 'As LaTeX…', { needs: 'note' }),
 						c('export:pdf', 'As PDF (via LaTeX)…', { needs: 'note' }),
+						c('export:print-pdf', 'As PDF (reading view)…', { needs: 'note' }),
 						{ type: 'separator' },
 						c('export:site', 'Vault as Website…', { needs: 'vault' }),
 					],

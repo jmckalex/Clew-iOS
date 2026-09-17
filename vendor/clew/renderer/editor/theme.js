@@ -106,4 +106,19 @@ export const clewHighlighting = syntaxHighlighting(HighlightStyle.define([
 	{ tag: tags.labelName, class: 'cmt-label' },
 	{ tag: tags.comment, class: 'cmt-comment' },
 	{ tag: tags.contentSeparator, class: 'cmt-hr' },
+	// Fence languages (editor/langs/): the TeX and MetaPost stream modes
+	// emit standard lezer tags, mapped onto the overlay's jmd-* faces so one
+	// palette serves a mermaid body, a TikZ fence and a MetaPost fence alike
+	// (styles/editor.css). The base grammar uses none of these tags for
+	// prose, so nothing outside a fence changes.
+	{ tag: tags.keyword, class: 'jmd-keyword' },
+	{ tag: tags.operatorKeyword, class: 'jmd-function' },
+	{ tag: tags.function(tags.variableName), class: 'jmd-function' },
+	{ tag: tags.typeName, class: 'jmd-type' },
+	{ tag: tags.atom, class: 'jmd-constant' },
+	{ tag: tags.number, class: 'jmd-number' },
+	{ tag: tags.string, class: 'jmd-string' },
+	{ tag: tags.operator, class: 'jmd-operator' },
+	{ tag: tags.bracket, class: 'jmd-paren' },
+	{ tag: tags.variableName, class: 'jmd-variable' },
 ]));

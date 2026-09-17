@@ -10,9 +10,8 @@
 
 // Interactivity for ```query tables and ```kanban boards: editable cells
 // and drag-between-columns cards. Both end in the same place — a
-// field-edit message the host applies to the SOURCE note's frontmatter
-// (or its inline Key:: value line), after which the live-query re-render
-// brings the view back in sync. The view is just a projection; the truth
+// field-edit message the host applies to the SOURCE note's frontmatter,
+// after which the live-query re-render brings the view back in sync. The view is just a projection; the truth
 // stays in the files.
 
 const post = (msg) => window.parent.postMessage({ source: 'clew-preview', ...msg }, '*');

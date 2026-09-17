@@ -41,6 +41,11 @@ export class RenderService {
 	#vaultOptions = {};
 	#assets = null; // { '/engine/…': text }
 	#subscribed = new Map(); // rel -> count
+	/** Injected by the session (which owns both services): the notes that
+	 *  transclude a given path. Standalone renders have no index — hence a
+	 *  default that claims nothing rather than a hard dependency. Mirrors
+	 *  desktop's render-service.js. */
+	embeddersOf = () => [];
 	#notes = new Map(); // rel -> {mtimeMs, html, hasQueries, inflight, dirty}
 	#fragments = new Map();
 	#fragmentInflight = new Map();
@@ -312,18 +317,36 @@ export class RenderService {
 				this.render(rel).catch(() => {});
 			}, REBUILD_DEBOUNCE_MS));
 		}
+		// Embeds are transclusions: `![[Child]]` puts Child's CONTENT inside
+		// the parent's HTML, so a change to Child leaves every note embedding
+		// it stale on screen. The index knows who embeds whom (transitively).
+		for (const embedder of this.embeddersOf(rel)) {
+			this.#restale(embedder);
+		}
 		// Query notes depend on the whole vault (see desktop render-service).
 		if (/\.(md|jmd)$/i.test(rel)) {
 			for (const [queryPath, entry] of this.#notes) {
 				if (queryPath === rel || !entry.hasQueries) continue;
-				entry.mtimeMs = 0;
-				if (!this.#subscribed.has(queryPath)) continue;
-				clearTimeout(this.#rebuildTimers.get(queryPath));
-				this.#rebuildTimers.set(queryPath, setTimeout(() => {
-					this.#rebuildTimers.delete(queryPath);
-					this.render(queryPath).catch(() => {});
-				}, REBUILD_DEBOUNCE_MS * 2));
+				this.#restale(queryPath);
 			}
 		}
+	}
+
+	/**
+	 * Mark another note's cached render stale and, if a preview is watching,
+	 * rebuild it. The note's own mtime has not moved — what changed is
+	 * something it renders from — so `mtimeMs = 0` is what makes the next
+	 * ensureRendered do the work rather than serve the cache. (Desktop's
+	 * #restale, verbatim.)
+	 */
+	#restale(rel) {
+		const entry = this.#notes.get(rel);
+		if (entry) entry.mtimeMs = 0;
+		if (!this.#subscribed.has(rel)) return;
+		clearTimeout(this.#rebuildTimers.get(rel));
+		this.#rebuildTimers.set(rel, setTimeout(() => {
+			this.#rebuildTimers.delete(rel);
+			this.render(rel).catch(() => {});
+		}, REBUILD_DEBOUNCE_MS * 2));
 	}
 }

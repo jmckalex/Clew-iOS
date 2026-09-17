@@ -23,7 +23,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { CH } from '../shared/channels.js';
 import { paths } from './paths.js';
-import { engineExtensionEntries, previewPluginPaths } from './plugins.js';
+import { engineExtensionEntries } from './plugins.js';
 import { writeFileAtomic } from './fs-utils.js';
 
 const WORKER_PATH = paths.engineWorker;
@@ -57,6 +57,10 @@ export class RenderService {
 	#vaultOptions = {};
 	/** vault-relative note paths with an open preview (rendered eagerly on change) */
 	#subscribed = new Map(); // path -> subscriber count
+	/** Injected by the session (which owns both services): the notes that
+	 *  transclude a given path. Standalone renders have no index — hence a
+	 *  default that claims nothing rather than a hard dependency. */
+	embeddersOf = () => [];
 	/** per-path render bookkeeping: {mtimeMs, htmlFile, inflight: Promise|null, dirty} */
 	#notes = new Map();
 	#rebuildTimers = new Map();
@@ -138,6 +142,13 @@ export class RenderService {
 			'Extensions': [
 				`wikiembed, wikilink from ${path.join(engineAssets, 'wikilinks.js')}`,
 				`mermaidFence, leafletFence from ${path.join(engineAssets, 'obsidian-fences.js')}`,
+				// TikZ, MetaPost, LaTeX and plain TeX typeset by wasm in the
+				// preview, so a figure needs no TeX installation: the ```tikz /
+				// ```metapost / ```latex / ```tex fences and the :::TiKZ
+				// directive. Listed here, i.e. loaded
+				// after the engine's own rules, which is what lets the
+				// directive win — see src/engine/figures.js.
+				`tikzFence, metapostFence, latexFence, texFence, tikzDirective from ${path.join(engineAssets, 'figures.js')}`,
 				`queryFence, tasksFence, kanbanFence from ${path.join(engineAssets, 'query-fences.js')}`,
 				`tableBeforeAnchor, blockAnchorLine, blockAnchor from ${path.join(engineAssets, 'block-refs.js')}`,
 				// Obsidian's Dataview, for vaults that arrive carrying it.
@@ -162,7 +173,16 @@ export class RenderService {
 				// as prose. Inert for every other note.
 				`kanbanBoard from ${path.join(engineAssets, 'kanban-board.js')}`,
 				// Enabled vault plugins' engine surfaces (custom syntax).
-				...engineExtensionEntries(this.vaultRoot, this.#vaultOptions),
+				...engineExtensionEntries(this.vaultRoot, this.#vaultOptions, paths.globalPlugins),
+			],
+			// @begin(TiKZ) / @begin(metapost) are block ENVIRONMENTS, not
+			// marked extensions: the engine keys them by name in a registry,
+			// and this line is loaded after its own registrations, so these
+			// handlers replace the ones that shell out to a local TeX. Only
+			// ever in an HTML build — a LaTeX export runs with the user's own
+			// config, where the native handlers still stand (export.js).
+			'Environments': [
+				`TiKZ, metapost from ${path.join(engineAssets, 'figures.js')}`,
 			],
 			...this.#biblifyConfig(),
 			// dvisvgm needs ghostscript to convert MetaPost EPS output (and
@@ -427,6 +447,13 @@ export class RenderService {
 				this.render(relPath).catch(() => {}); // errors already broadcast
 			}, REBUILD_DEBOUNCE_MS));
 		}
+		// Embeds are transclusions: `![[Child]]` puts Child's CONTENT inside
+		// the parent's HTML, so a change to Child leaves every note embedding
+		// it stale on screen — showing prose its own file no longer has. The
+		// index knows who embeds whom (transitively; embeds nest).
+		for (const embedder of this.embeddersOf(relPath)) {
+			this.#restale(embedder);
+		}
 		// Live queries: notes holding ```query/tasks/kanban fences depend on
 		// the WHOLE vault, not just their own file — so any note change makes
 		// their cached renders stale. Invalidate every known query note (the
@@ -435,14 +462,25 @@ export class RenderService {
 		if (/\.(md|jmd)$/i.test(relPath)) {
 			for (const [queryPath, entry] of this.#notes) {
 				if (queryPath === relPath || !entry.hasQueries) continue;
-				entry.mtimeMs = 0; // stale: results may have changed
-				if (!this.#subscribed.has(queryPath)) continue;
-				clearTimeout(this.#rebuildTimers.get(queryPath));
-				this.#rebuildTimers.set(queryPath, setTimeout(() => {
-					this.#rebuildTimers.delete(queryPath);
-					this.render(queryPath).catch(() => {});
-				}, REBUILD_DEBOUNCE_MS * 2));
+				this.#restale(queryPath);
 			}
 		}
+	}
+
+	/**
+	 * Mark another note's cached render stale and, if a preview is watching,
+	 * rebuild it. The note's own mtime has not moved — what changed is
+	 * something it renders from — so `mtimeMs = 0` is what makes the next
+	 * ensureRendered do the work rather than serve the cache.
+	 */
+	#restale(relPath) {
+		const entry = this.#notes.get(relPath);
+		if (entry) entry.mtimeMs = 0;
+		if (!this.#subscribed.has(relPath)) return;
+		clearTimeout(this.#rebuildTimers.get(relPath));
+		this.#rebuildTimers.set(relPath, setTimeout(() => {
+			this.#rebuildTimers.delete(relPath);
+			this.render(relPath).catch(() => {});
+		}, REBUILD_DEBOUNCE_MS * 2));
 	}
 }

@@ -27,7 +27,9 @@
 // Input types beyond toggle/slider/text/number/inlineSelect/select are
 // refused BY NAME, inline, as are VIEW expressions beyond a single
 // property and the whole button system (buttons run commands — behavior,
-// not data). Cosmetic arguments (addLabels, class, …) are tolerated.
+// not data). Cosmetic arguments (addLabels, …) are tolerated; `class(…)`
+// is HONORED — author classes land on the element, as the plugin does it,
+// so a vault script's stylesheet can size or restyle individual widgets.
 // In a site export widgets render disabled: a static page has no write path.
 import { display, coerceDate } from './dv-expr.js';
 import { currentPage, scanPages, resolvePath } from './vault-model.js';
@@ -91,6 +93,13 @@ export function parseInputDeclaration(inner) {
 		else if (name === 'maxValue') { decl.max = Number(value) || 100; decl.maxSet = true; }
 		else if (name === 'stepSize') decl.step = Number(value) || 1;
 		else if (name === 'defaultValue') decl.defaultValue = value;
+		else if (name === 'class') {
+			// Honored, not merely tolerated: the classes land on the element.
+			// Only CSS-identifier-shaped tokens survive (they go into an HTML
+			// attribute); several class(…) arguments accumulate.
+			decl.classes ??= [];
+			decl.classes.push(...value.split(/[\s,]+/).filter((c) => /^[A-Za-z_][\w-]*$/.test(c)));
+		}
 		// anything else is the plugin's cosmetics; the widget works without it
 	}
 
@@ -151,7 +160,8 @@ export function inputHtml(inner) {
 	}
 	const source = decl.block ? 'block' : page.sources?.[decl.prop] ?? 'fm';
 	const disabled = process.env.CLEW_SITE_EXPORT === '1' ? ' disabled' : '';
-	const data = `class="clew-mb" data-edit-path="${esc(page.path)}"`
+	const extra = decl.classes?.length ? ' ' + decl.classes.join(' ') : '';
+	const data = `class="clew-mb${esc(extra)}" data-edit-path="${esc(page.path)}"`
 		+ ` data-edit-field="${esc(decl.prop)}" data-edit-source="${esc(source)}"`;
 
 	if (global.isLatex) return esc(display(value ?? ''));
@@ -167,7 +177,7 @@ export function inputHtml(inner) {
 				+ `<span class="clew-mb-value">${now}</span></span>`;
 		}
 		case 'number':
-			return `<wa-number-input ${data} value="${esc(value ?? '')}"${disabled}></wa-number-input>`;
+			return `<wa-number-input ${data} size="small" value="${esc(value ?? '')}"${disabled}></wa-number-input>`;
 		case 'text':
 			return `<wa-input type="text" ${data} value="${esc(value ?? '')}"${disabled}></wa-input>`;
 		case 'textarea':
@@ -189,7 +199,7 @@ export function inputHtml(inner) {
 			const n = Number(value);
 			const pct = Number.isFinite(n)
 				? Math.max(0, Math.min(100, ((n - decl.min) / (decl.max - decl.min || 1)) * 100)) : 0;
-			return `<wa-progress-bar class="clew-mb-display" value="${pct}"></wa-progress-bar>`;
+			return `<wa-progress-bar class="clew-mb-display${esc(extra)}" value="${pct}"></wa-progress-bar>`;
 		}
 		case 'inlineselect':
 		case 'select': {

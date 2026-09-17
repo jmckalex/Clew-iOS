@@ -48,6 +48,10 @@ export function createClewShim({ workerFactory, assetLoader } = {}) {
 	vaults.send = send;
 	indexer.send = send;
 	renderService.send = send;
+	// A note embedding another goes stale when that other one changes, and
+	// only the index knows which notes those are (main/session.js does the
+	// same wiring).
+	renderService.embeddersOf = (rel) => indexer.embeddersOf(rel);
 	kvStore.send = send;
 
 	vaults.hooks = {
@@ -343,6 +347,9 @@ export function createClewShim({ workerFactory, assetLoader } = {}) {
 		[CH.SHELL_OPEN_EXTERNAL]: ({ url }) => {
 			if (/^https?:|^mailto:/i.test(url)) bridgeCall('openExternal', { url }).catch(() => {});
 		},
+		// `[[x.pdf|external]]` / file:// links — answered in sync11-p3 (Quick
+		// Look); registered now so the renderer never reaches an unknown channel.
+		[CH.SHELL_OPEN_PATH]: () => ({ ok: false, reason: 'Opening a file outside Clew is not available on iOS yet' }),
 
 		[CH.WORKSPACE_LOAD]: () => vaults.loadState('workspace.json'),
 		[CH.WORKSPACE_SAVE]: (state) => vaults.saveState('workspace.json', state),
@@ -373,15 +380,24 @@ export function createClewShim({ workerFactory, assetLoader } = {}) {
 		},
 
 		[CH.PLUGINS_LIST]: () => {
-			if (!vaults.isOpen) return { plugins: [], enabled: [] };
+			// globalDir: the global plugin root lands in sync11-p3.
+			if (!vaults.isOpen) return { plugins: [], enabled: [], globalDir: null };
 			const vaultSettings = vaults.loadState('vault-settings.json') ?? {};
 			return {
 				plugins: listPlugins(VAULT_ROOT),
 				enabled: Array.isArray(vaultSettings.plugins) ? vaultSettings.plugins : [],
+				globalDir: null,
 			};
+		},
+		[CH.PLUGINS_REVEAL_GLOBAL]: () => {
+			throw new Error('Global plugins are not available on iOS yet');
 		},
 
 		[CH.EXPORT_NOTE]: async ({ path, format }) => {
+			if (format === 'print-pdf') {
+				// The reading-view PDF lands in sync11-p4.
+				throw new Error('Export as PDF (reading view) is not available on iOS yet');
+			}
 			if (format !== 'html') {
 				throw new Error(`${format} export needs a LaTeX toolchain and is not available on iOS`);
 			}

@@ -141,15 +141,26 @@ class ClewEditorView extends ClewElement {
 		const saved = tab?.view;
 		if (!saved) return;
 		try {
-			// Inverse search from the preview lands here as a pending line.
+			// Inverse search from the preview lands here as a pending line. It
+			// names a spot the reader CLICKED, so it outranks the mere reading
+			// position — and consumes it, or a stale line would hijack the next
+			// mount of this tab.
 			if (saved.pendingLine) {
-				const line = view.state.doc.line(Math.min(saved.pendingLine, view.state.doc.lines));
+				const line = saved.pendingLine;
 				delete saved.pendingLine;
-				view.dispatch({
-					selection: { anchor: line.from },
-					effects: [],
-					scrollIntoView: true,
-				});
+				delete saved.readingLine;
+				this.#landOn(view, line);
+				return;
+			}
+			// Reading mode records where the reader scrolled to. Following it
+			// here is what makes ⌘E a flip rather than a jump back to the top:
+			// the saved cursor and scrollTop are from BEFORE reading mode opened
+			// and no longer say where this tab is. One-shot, so an ordinary tab
+			// switch later restores the editor's own position as usual.
+			const readingLine = saved.readingLine;
+			delete saved.readingLine;
+			if (Number.isFinite(readingLine)) {
+				this.#landOn(view, readingLine);
 				return;
 			}
 			if (saved.cursor && saved.cursor.head <= view.state.doc.length) {
@@ -157,6 +168,21 @@ class ClewEditorView extends ClewElement {
 			}
 			if (saved.scrollTop) view.scrollDOM.scrollTop = saved.scrollTop;
 		} catch { /* stale view state is harmless */ }
+	}
+
+	/**
+	 * Put a 1-based line at the TOP of the viewport with the cursor at its
+	 * start. Top, not `scrollIntoView`'s default 'nearest' (which lands it at
+	 * the bottom edge of a freshly mounted view), because that is where the
+	 * reading view had it; and the cursor moves with it so the next keystroke
+	 * does not yank the view back to wherever the cursor used to be.
+	 */
+	#landOn(view, line) {
+		const target = view.state.doc.line(Math.max(1, Math.min(line, view.state.doc.lines)));
+		view.dispatch({
+			selection: { anchor: target.from },
+			effects: [EditorView.scrollIntoView(target.from, { y: 'start' })],
+		});
 	}
 }
 

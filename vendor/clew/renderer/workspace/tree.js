@@ -53,6 +53,9 @@ export function createInitialState() {
 			left: { open: true, width: 260, activeTool: 'files' },
 			right: { open: true, width: 290, activeTool: 'backlinks' },
 		},
+		// File-explorer folders the user has closed. Absence means open, so a
+		// vault seen for the first time greets you fully expanded.
+		collapsedFolders: [],
 	};
 }
 
@@ -447,5 +450,12 @@ export function deserialize(json, { noteExists = () => true } = {}) {
 	state.sidebars.left ??= { open: true, width: 260, activeTool: 'files' };
 	state.sidebars.left.activeTool ??= 'files';
 	state.sidebars.right ??= { open: true, width: 290, activeTool: 'backlinks' };
+	// Workspaces saved before folder state was remembered simply have none.
+	// Paths for folders that have since gone are KEPT, not pruned: a folder
+	// restored from the Trash (or arriving with a git checkout) should come
+	// back closed, exactly as its owner left it.
+	state.collapsedFolders = Array.isArray(state.collapsedFolders)
+		? state.collapsedFolders.filter((p) => typeof p === 'string')
+		: [];
 	return state;
 }

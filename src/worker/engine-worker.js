@@ -28,6 +28,10 @@
 // host generates references exactly these paths.
 
 import './shims/globals.js';
+// Before figures.js: its module body registers a MetaPost grammar on the
+// engine's highlight.js through createRequire(), which the shim answers
+// from this registry — so the registry must exist when that body runs.
+import './shims/require-registry.js';
 import { vfs } from './shims/vfs.js';
 import * as wikilinks from '../../vendor/clew/engine/wikilinks.js';
 import * as obsidianFences from '../../vendor/clew/engine/obsidian-fences.js';
@@ -39,6 +43,7 @@ import * as admonitions from '../../vendor/clew/engine/admonitions.js';
 import * as metaBind from '../../vendor/clew/engine/meta-bind.js';
 import * as callouts from '../../vendor/clew/engine/callouts.js';
 import * as kanbanBoard from '../../vendor/clew/engine/kanban-board.js';
+import * as figures from '../../vendor/clew/engine/figures.js';
 
 // One entry per file the generated config NAMES; each module's own imports
 // (dataview's dv-expr/dv-functions/dataview-js/vault-model, bases' share of
@@ -54,6 +59,9 @@ globalThis.__jmdExtensionRegistry = {
 	'/engine-assets/meta-bind.js': metaBind,
 	'/engine-assets/callouts.js': callouts,
 	'/engine-assets/kanban-board.js': kanbanBoard,
+	// Both the Extensions line (fences + directive) and the Environments
+	// line (@begin handlers) name this one file.
+	'/engine-assets/figures.js': figures,
 };
 
 // Enabled vault plugins' engine surfaces: the config names them by absolute

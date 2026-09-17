@@ -49,6 +49,11 @@ class ClewPreviewView extends ClewElement {
 		});
 		this.listen(scrollSyncBus, 'scroll', ({ path, line, from }) => {
 			if (from === 'preview' || path !== this.path) return;
+			// A navigation jump (a [[#Heading]] click landing in reading mode)
+			// moves the reader as surely as a scroll gesture does, so it counts
+			// as the reading position; an editor's sync scroll does not — that
+			// pane's own cursor is already the truth for it.
+			if (from === 'nav') this.#rememberReadingLine(line);
 			this.#suppressor.suppress();
 			this.#post({ type: 'scroll-to-line', line, behavior: 'auto' });
 		});
@@ -96,6 +101,12 @@ class ClewPreviewView extends ClewElement {
 		this.#iframe?.contentWindow?.postMessage({ source: HOST_SOURCE, ...msg }, '*');
 	}
 
+	/** Where the reader is now — consumed once by the editor view when this
+	 *  tab flips to source mode (see clew-editor-view#restoreViewState). */
+	#rememberReadingLine(line) {
+		if (Number.isFinite(line)) workspaceStore.updateTabView(this.tabId, { readingLine: line });
+	}
+
 	async #refresh() {
 		try {
 			const response = await fetch(previewUrl(this.path));
@@ -136,6 +147,9 @@ class ClewPreviewView extends ClewElement {
 			case 'external-link':
 				openExternal(msg.url);
 				break;
+			case 'open-external-file':
+				actions.openFileExternally(msg.path);
+				break;
 			case 'anchor-jump':
 				// A TOC click is browser-style navigation: the spot you left
 				// becomes a history entry, so Back returns you to it.
@@ -151,6 +165,11 @@ class ClewPreviewView extends ClewElement {
 				}
 				break;
 			}
+			case 'embed-collapse':
+				// A disclosable embed was folded or unfolded — the state
+				// belongs in the note, on the line it was rendered from.
+				actions.setEmbedCollapsed(this.path, msg.line, msg.collapsed);
+				break;
 			case 'checkbox-toggle':
 				actions.toggleTaskLine(this.path, msg.line, msg.checked);
 				break;
@@ -195,7 +214,16 @@ class ClewPreviewView extends ClewElement {
 				if (this.#iframe) this.#iframe.src = previewUrl(this.path) + '?t=' + Date.now();
 				break;
 			case 'scrolled':
+				// A scroll the host did not drive is the reader moving: remember
+				// where they got to, so flipping back to source mode lands the
+				// editor there instead of at the cursor they left behind. The
+				// suppressor is what separates the two, and it must: the scroll
+				// that seeds this preview from the cursor on open would otherwise
+				// record the cursor's own block and then move the cursor to the
+				// top of it, mangling a reading-mode round trip that changed
+				// nothing.
 				if (!this.#suppressor.active()) {
+					this.#rememberReadingLine(msg.line);
 					scrollSyncBus.emit('scroll', { path: this.path, line: msg.line, from: 'preview' });
 				}
 				break;

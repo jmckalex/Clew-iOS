@@ -28,11 +28,15 @@
 // Plus ```kanban — notes as drag-between-columns cards grouped by a
 // frontmatter field; dropping a card REWRITES that note's field.
 //
-// The data model reads three places: frontmatter, Dataview-style inline
-// fields (Key:: value on its own line, or [key:: value] in a sentence),
-// and built-ins (name, path, modified). Table cells over frontmatter or
-// inline fields are EDITABLE in the app — the preview client posts a
-// field-edit and the host writes the source note.
+// The data model reads two places: frontmatter and the built-ins (name,
+// path, modified). Dataview's inline fields (`Key:: value` on a line,
+// `[key:: value]` in a sentence) are deliberately NOT read: `Term:: def`
+// is this dialect's description list (vendor/jmarkdown/src/
+// description-lists.js), and a line cannot be both a definition and a
+// datum — the engine claimed the field's line as a term, sentence and
+// all. Owner's decision, 2026-09-17: description lists win, data lives
+// in frontmatter. Table cells over frontmatter are EDITABLE in the app —
+// the preview client posts a field-edit and the host writes the note.
 //
 // Everything scans the live vault at render time (this file runs inside
 // the one-shot worker, which has fs); open notes holding these fences
@@ -87,33 +91,6 @@ function clean(v) {
 	return s;
 }
 
-// ---- inline fields (Key:: value — Dataview's idiom) ------------------------
-
-const INLINE_LINE_RE = /^([A-Za-z][\w -]{0,40}?)::\s+(.+?)\s*$/;
-const INLINE_BRACKET_RE = /\[([A-Za-z][\w -]{0,40}?)::\s+([^\]\n]+)\]/g;
-
-/** Inline fields with their 1-based source lines (for write-back):
- *  { fields: {key: value}, lines: {key: line} }. Fenced code is masked. */
-export function readInlineFields(text) {
-	const fields = {};
-	const lines = {};
-	let inFence = false;
-	const rows = text.split('\n');
-	for (let i = 0; i < rows.length; i++) {
-		if (/^\s*(```|~~~)/.test(rows[i])) { inFence = !inFence; continue; }
-		if (inFence) continue;
-		const own = INLINE_LINE_RE.exec(rows[i]);
-		if (own) {
-			if (!(own[1] in fields)) { fields[own[1]] = clean(own[2]); lines[own[1]] = i + 1; }
-			continue;
-		}
-		for (const m of rows[i].matchAll(INLINE_BRACKET_RE)) {
-			if (!(m[1] in fields)) { fields[m[1]] = clean(m[2]); lines[m[1]] = i + 1; }
-		}
-	}
-	return { fields, lines };
-}
-
 // ---- date arithmetic (where: due < today + 7d) -----------------------------
 
 const DATE_EXPR_RE = /^today(?:\s*([+-])\s*(\d+)\s*(d|w|m|y))?$/i;
@@ -152,17 +129,15 @@ function scanNotes() {
 					const abs = path.join(dir, entry.name);
 					const text = fs.readFileSync(abs, 'utf8');
 					const fm = readFrontmatter(text);
-					const inline = readInlineFields(text);
-					// Frontmatter wins on key collisions; sources drive edits.
+					// sources drive edits: every field lives in frontmatter
 					const sources = {};
-					for (const key of Object.keys(inline.fields)) sources[key] = `line:${inline.lines[key]}`;
 					for (const key of Object.keys(fm)) sources[key] = 'fm';
 					notes.push({
 						path: childRel,
 						name: entry.name.replace(NOTE_FILE, ''),
 						modified: fs.statSync(abs).mtimeMs,
 						text,
-						fm: { ...inline.fields, ...fm },
+						fm: { ...fm },
 						sources,
 					});
 				} catch { /* unreadable — skipped */ }
@@ -430,7 +405,7 @@ export const queryFence = {
 					const cells = config.columns.map((c) => {
 						const v = fieldOf(note, c);
 						const shown = v === undefined ? '' : Array.isArray(v) ? v.join(', ') : String(v);
-						// Frontmatter / inline fields are editable in the app;
+						// Frontmatter fields are editable in the app;
 						// built-ins (name, path, modified) are not.
 						const source = note.sources?.[c];
 						const editable = source

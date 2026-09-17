@@ -66,7 +66,11 @@ html[data-theme='light'] {
 body {
 	background: var(--preview-bg);
 	color: var(--preview-text);
-	font-family: 'iA Writer Quattro', 'Avenir Next', -apple-system, BlinkMacSystemFont, sans-serif;
+	/* Matches --clew-editor-font in the app themes: Avenir Next is the
+	   reading face (macOS ships it; it cannot be bundled), with a humanist
+	   tail so Windows and Linux — and exported websites read anywhere —
+	   land on something of the same character rather than bare sans-serif. */
+	font-family: 'Avenir Next', Avenir, 'Segoe UI', Cantarell, -apple-system, BlinkMacSystemFont, sans-serif;
 	font-size: 16px;
 	line-height: 1.6;
 	max-width: 44em;
@@ -144,6 +148,79 @@ a.internal-link.unresolved { color: var(--preview-muted); border-bottom: 1px das
 .internal-embed .embed-title { font-size: 0.8em; color: var(--preview-muted); margin-bottom: 4px; }
 .internal-embed .embed-title a { color: var(--preview-muted); }
 .internal-embed.unresolved .embed-note { color: var(--preview-danger); font-size: 0.9em; }
+
+/* How much frame an embed draws — `![[Note|quiet]]` / `![[Note|bare]]`.
+   `quiet` keeps the accent stripe and loses the panel around it: still
+   visibly a transclusion, without interrupting the page. `bare` keeps
+   nothing, so the transcluded note reads as part of the host note — its
+   wrapper survives only as a hook for vault CSS. */
+.internal-embed.is-quiet {
+	border: none;
+	border-left: 3px solid var(--preview-accent);
+	border-radius: 0;
+	padding: 0 0 0 14px;
+}
+.internal-embed.is-bare {
+	border: none;
+	border-radius: 0;
+	padding: 0;
+	margin: 0;
+}
+/* Nothing zeroes the first and last child's margins here, deliberately: with
+   no border and no padding on either wrapper, the transcluded blocks' own
+   margins collapse straight through to the host note's prose, which is what
+   makes the seam invisible. Zeroing them (the framed box's habit, where the
+   panel supplies the spacing) makes a bare embed hug whatever precedes it. */
+
+/* `![[Note|collapsed]]` / `![[Note|open]]` — a disclosable embed. Same
+   <details> treatment as a foldable callout, chevron and all, so the two
+   read as one idea; the title stays a link to the note it transcludes. */
+details.internal-embed > summary {
+	cursor: pointer;
+	list-style: none;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+details.internal-embed > summary::-webkit-details-marker { display: none; }
+details.internal-embed > summary::after {
+	content: '';
+	width: 6px;
+	height: 6px;
+	margin-left: auto;
+	border-right: 2px solid currentColor;
+	border-bottom: 2px solid currentColor;
+	transform: rotate(-45deg);
+	transition: transform 0.15s ease;
+	opacity: 0.7;
+}
+details.internal-embed[open] > summary::after { transform: rotate(45deg); }
+/* Closed, the box is just its own title: drop the gap the margin would leave. */
+details.internal-embed:not([open]) > summary { margin-bottom: 0; }
+
+/* Printing — "Export as PDF (reading view)", and any print of a preview.
+   The paper supplies the margins, so the reading column's centring goes, and
+   so does its scroll-past-end tail (40vh of nothing, which on paper is a
+   blank final page). What is left is keeping things that read as one object
+   from being split down the middle by a page boundary. */
+@media print {
+	body {
+		max-width: none;
+		margin: 0;
+		padding: 0;
+	}
+	pre, table, figure, blockquote,
+	.callout, .internal-embed, .clew-query-group, .mermaid,
+	mjx-container[display='true'] {
+		break-inside: avoid;
+	}
+	/* A heading stranded at the foot of a page is worse than a short page. */
+	h1, h2, h3, h4, h5, h6 { break-after: avoid; }
+	p, li { orphans: 2; widows: 2; }
+	/* The disclosure arrow means nothing once printed; a folded embed still
+	   prints folded, because the reading view is what was asked for. */
+	details.internal-embed > summary::after { display: none; }
+}
 
 /* Build-error overlay (kept in sync with the app's error banner styling) */
 #__clew_err {
@@ -227,6 +304,49 @@ img[src*="TiKZ/"], img[src*="MetaPost/"] {
 }
 html[data-theme='light'] img[src*="TiKZ/"], html[data-theme='light'] img[src*="MetaPost/"] {
 	filter: none;
+}
+
+/* Figures typeset IN the page by mp-tikz-wasm (```tikz / ```metapost fences,
+   :::TiKZ and @begin(metapost) — src/engine/figures.js). The two custom
+   elements are the block; the library fills each with a <figure class=
+   "mpw-figure"> holding the SVG. The same inversion as the cached images
+   above, for the same reason: this ink is black by construction. */
+tikz-diagram, metapost-diagram {
+	display: block;
+	margin: 1em auto;
+	text-align: center;
+}
+.mpw-figure svg { filter: invert(1) hue-rotate(180deg); }
+/* A figure asked for a width (`{width='45%'}`): the native path put that on
+   the <img>, so the picture itself was that wide. Here the width is on the
+   element, and the SVG must fill it instead of keeping its natural size. */
+.mpw-sized .mpw-figure, .mpw-sized .mpw-figure svg { width: 100%; height: auto; }
+html[data-theme='light'] .mpw-figure svg { filter: none; }
+/* ```latex / ```tex: a typeset DOCUMENT rather than a picture. Its pages are
+   one SVG each and stack, where a picture's several <svg>s (a MetaPost file
+   with several beginfigs) flow inline. */
+.clew-doc .mpw-figure { display: block; }
+.clew-doc .mpw-figure svg { display: block; margin: 0 auto 0.75em; }
+.clew-doc .mpw-figure svg:last-of-type { margin-bottom: 0; }
+
+/* The library injects its own styles for these when it loads — late in the
+   head, so the class alone would lose. Its colours assume a light page. */
+.mpw-figure .mpw-status {
+	font: inherit;
+	font-size: 0.9em;
+	color: #9aa0a6;
+}
+.mpw-figure .mpw-console {
+	color: #f0a0a0;
+	background: #2a1f1f;
+	border: 1px solid #5a3535;
+	text-align: left;
+}
+html[data-theme='light'] .mpw-figure .mpw-status { color: #6b7280; }
+html[data-theme='light'] .mpw-figure .mpw-console {
+	color: #a33;
+	background: #fff5f5;
+	border-color: #f0c0c0;
 }
 .mermaid { text-align: center; }
 
@@ -423,10 +543,19 @@ html.wa-dark, html.wa-light {
 	--wa-form-control-activated-color: var(--preview-accent);
 }
 wa-select.clew-mb { display: inline-block; min-width: 9.5em; }
-wa-input.clew-mb, wa-number-input.clew-mb, wa-time-input.clew-mb {
+wa-input.clew-mb, wa-time-input.clew-mb {
 	display: inline-block;
 	width: 11em;
 }
+/* A number is a few digits between two steppers — no prose measure needed.
+   The component defaults to a ~20-char input (277px), so it renders at
+   size="small" and its input part is shrunk to a few digits; the host then
+   sizes naturally around the steppers (~9.5em) instead of a text field's
+   11em. Sizing the input part (not the host) is deliberate: a fixed host
+   width narrower than the component's intrinsic minimum shoves the +
+   stepper out of the pill. 3.5em holds three digits (marks reach 100). */
+wa-number-input.clew-mb { display: inline-block; vertical-align: middle; }
+wa-number-input.clew-mb::part(input) { width: 3.5em; min-width: 0; }
 wa-textarea.clew-mb { display: block; max-width: 36em; margin: 0.4em 0; }
 wa-color-picker.clew-mb { display: inline-block; }
 wa-progress-bar.clew-mb-display { display: inline-block; width: 160px; vertical-align: middle; }

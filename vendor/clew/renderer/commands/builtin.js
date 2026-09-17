@@ -243,6 +243,8 @@ export function registerBuiltinCommands() {
 			} },
 		{ id: 'export:pdf', name: 'Export note as PDF (via LaTeX)', when: needsNote,
 			run: () => exportActiveNote('pdf') },
+		{ id: 'export:print-pdf', name: 'Export note as PDF (reading view)', when: needsNote,
+			run: () => exportActiveNote('print-pdf') },
 	];
 	for (const command of commands) registerCommand(command);
 	registerFormatCommands();

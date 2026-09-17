@@ -51,6 +51,9 @@ export class VaultSession {
 		this.vaults.send = this.send;
 		this.indexer.send = this.send;
 		this.renderService.send = this.send;
+		// A note embedding another goes stale when that other one changes, and
+		// only the index knows which notes those are.
+		this.renderService.embeddersOf = (relPath) => this.indexer.embeddersOf(relPath);
 		this.kvStore.send = this.send;
 
 		this.vaults.hooks = {

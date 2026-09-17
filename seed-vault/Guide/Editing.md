@@ -6,7 +6,10 @@ tags: [guide]
 Notes are edited in **source mode** with full jmarkdown-dialect
 highlighting: `/italics/`, `*strong*`, `**intense**`, `==highlights==`,
 directives, `@begin(…)` environments, math, citations, and footnotes all
-get faces (see [[Dialect Demo]] for a tour).
+get faces (see [[Dialect Demo]] for a tour). The fences Clew typesets are
+highlighted in their own languages too — TeX inside ` ```tikz `,
+` ```latex ` and ` ```tex `, MetaPost inside ` ```metapost ` (see
+[[Diagrams]]).
 
 Everything auto-saves about a second after you stop typing, and on
 blur/tab-switch. **Undo history survives navigation** — leave a note and
@@ -14,7 +17,11 @@ come back, and ⌘Z still works.
 
 ## Completions
 
-- `[[` completes note names, aliases, and (after `#`) headings.
+- `[[` completes note names, aliases, and (after `#`) headings. The
+  query matches the **path as well as the name**, and the letters need
+  not be adjacent: `[[mkrbrc` finds *Marking Rubric*, and
+  `[[Teaching/Rubric` finds it by folder (spaces and all). Typing a `/`
+  inserts the full vault path, so the link means the file you chose.
 - `#` completes tags, including nested ones like `#project/clew`.
 - `\cite{` (and `\citep`, `\fullcite`, …) completes citation keys from
   every `.bib` file in the vault, showing author, year, and title.

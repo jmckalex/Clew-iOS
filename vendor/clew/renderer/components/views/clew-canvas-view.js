@@ -2373,6 +2373,11 @@ class ClewCanvasView extends ClewElement {
 			case 'checkbox-toggle':
 				actions.toggleTaskLine(embed.path, msg.line, msg.checked);
 				break;
+			case 'embed-collapse':
+				// A note embedded on a canvas can hold embeds of its own, and
+				// folding one there writes the same line of the same note.
+				actions.setEmbedCollapsed(embed.path, msg.line, msg.collapsed);
+				break;
 			case 'task-toggle':
 				actions.toggleTaskLine(msg.path, msg.line, msg.checked);
 				break;

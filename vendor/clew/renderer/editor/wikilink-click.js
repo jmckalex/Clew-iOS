@@ -32,6 +32,14 @@ export function wikilinkClick() {
 				const end = start + match[0].length;
 				if (column >= start && column <= end) {
 					event.preventDefault();
+					// `|external` means the OS default app, in source mode too —
+					// the two modes must not disagree about what a link does.
+					const wantsExternal = (match[4] ?? '').split('|')
+						.some((part) => part.trim().toLowerCase() === 'external');
+					if (wantsExternal && match[2].trim()) {
+						actions.openFileExternally(match[2].trim());
+						return true;
+					}
 					const target = match[2].trim() + (match[3] ? `#${match[3].trim()}` : '');
 					actions.openWikilink(target, { newTab: event.altKey });
 					return true;

@@ -10,7 +10,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFrontmatter, readInlineFields, resolveDateExpr, parseQueryConfig, parseKanbanConfig, runQuery, parseTasksConfig, extractTasks, taskMeta, parseObsidianTasksQuery, parseSearchQuery, runSearchQuery } from '../vendor/clew/engine/query-fences.js';
+import { readFrontmatter, resolveDateExpr, parseQueryConfig, parseKanbanConfig, runQuery, parseTasksConfig, extractTasks, taskMeta, parseObsidianTasksQuery, parseSearchQuery, runSearchQuery } from '../vendor/clew/engine/query-fences.js';
 
 // ---- core Obsidian's ```query (embedded search) -----------------------------
 
@@ -144,13 +144,9 @@ test('tasks: extraction masks fences, config parses', () => {
 });
 
 // ---- the writable-database layer ----
-
-test('inline fields: own-line and bracketed, with line numbers', () => {
-	const text = '# T\nRating:: 8\nSome prose with [chapter:: 5] inline.\n```\nMasked:: 1\n```\n';
-	const { fields, lines } = readInlineFields(text);
-	assert.deepEqual(fields, { Rating: 8, chapter: 5 });
-	assert.deepEqual(lines, { Rating: 2, chapter: 3 });
-});
+// (No inline-field reader: `Key:: value` is a description list in this
+// dialect, not data. tests/dataview.test.js holds the guard, over a real
+// scan of a fixture vault.)
 
 test('date expressions resolve', () => {
 	const now = new Date(2026, 7, 22); // 22 Aug 2026

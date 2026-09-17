@@ -153,8 +153,9 @@ function sortable(value) {
 // ---- the page shape a script sees ----------------------------------------------
 
 /**
- * A page as a script sees it: frontmatter and inline fields at the top level,
- * `file` beneath.
+ * A page as a script sees it: the frontmatter fields at the top level,
+ * `file` beneath. (No inline fields: `Key:: value` is a description list
+ * in this dialect — query-fences.js.)
  *
  * The list-valued `file` members are DataArrays rather than plain arrays,
  * because scripts write `page.file.tasks.where(...)` — Dataview returns its

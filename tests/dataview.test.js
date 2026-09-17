@@ -118,10 +118,16 @@ test('the file.* namespace', () => {
 	assert.ok(evalIn('file.tags', pageNamed('Signals')).includes('#project/clew'));
 });
 
-test('inline Key:: fields are queryable like frontmatter', () => {
-	assert.equal(evalIn('Effort', pageNamed('Alpha')), 12);
-	assert.equal(evalIn('Effort > 10', pageNamed('Alpha')), true);
-	assert.equal(evalIn('Effort > 10', pageNamed('Beta')), false);
+test('a Key:: line is a description list, not a field (owner, 2026-09-17)', () => {
+	// Alpha and Beta carry `Effort:: 12` / `Effort:: 4` in their bodies.
+	// jmarkdown renders that line as <dt>Effort</dt><dd>12</dd>, and the
+	// two readings cannot coexist, so the vault model reads no field from
+	// it: data lives in frontmatter. A page's fields are its frontmatter.
+	assert.ok(!('Effort' in pageNamed('Alpha').fields), 'no inline field read');
+	assert.deepEqual(Object.keys(pageNamed('Alpha').fields).sort(), ['rating', 'status']);
+	assert.ok(evalIn('Effort', pageNamed('Alpha')) == null);
+	assert.equal(evalIn('Effort > 10', pageNamed('Alpha')), false);
+	assert.equal(evalIn('rating > 2', pageNamed('Alpha')), true, 'frontmatter still answers');
 });
 
 test('the link graph resolves both ways', () => {
@@ -190,6 +196,36 @@ test('clauses are found by keyword, so a query may wrap across lines', () => {
 	assert.deepEqual(q.where, ['rating > 1']);
 	assert.deepEqual(q.sort, [{ source: 'rating', desc: true }]);
 	assert.equal(q.limit, 5);
+});
+
+test('an absent field IS null: = null finds it, != null drops it, typeof agrees', () => {
+	const method = pageNamed('Method');   // no rating
+	const signals = pageNamed('Signals'); // rating: 5
+	assert.equal(evalIn('rating = null', method), true);
+	assert.equal(evalIn('rating != null', method), false);
+	assert.equal(evalIn('rating = null', signals), false);
+	assert.equal(evalIn('rating != null', signals), true);
+	// The two ways of asking must not disagree (they did: typeof said null,
+	// != null said present).
+	assert.equal(evalIn('typeof(rating)', method), 'null');
+	assert.equal(evalIn('(rating = null) = (typeof(rating) = "null")', method), true);
+	assert.equal(evalIn('(rating = null) = (typeof(rating) = "null")', signals), true);
+});
+
+test('present-but-falsy values are not null', () => {
+	const p = pageNamed('Signals');
+	assert.equal(evalIn('0 = null', p), false);
+	assert.equal(evalIn('0 != null', p), true);
+	assert.equal(evalIn('false = null', p), false);
+	assert.equal(evalIn('"" = null', p), false);
+	assert.equal(evalIn('null = null', p), true);
+	assert.equal(evalIn('null != null', p), false);
+});
+
+test('WHERE field != null is the incomplete-notes filter it reads as', () => {
+	// Every note in the vault, split by whether it has a rating at all.
+	assert.deepEqual(names(run('LIST\nWHERE rating != null')), ['Alpha', 'Beta', 'Signals']);
+	assert.deepEqual(names(run('LIST\nWHERE rating = null')), ['Method', 'Old', 'Scratchpad']);
 });
 
 test('repeated WHERE clauses are ANDed, as Dataview does', () => {

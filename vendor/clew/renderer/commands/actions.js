@@ -16,6 +16,7 @@ import { editorPool } from '../editor/pool.js';
 import { createTab } from '../workspace/tree.js';
 import { isCanvasPath } from '../lib/file-types.js';
 import { scrollSyncBus } from '../preview/scroll-sync.js';
+import { setEmbedState } from '../../engine/embed-state.js';
 import { ipc, CH } from '../ipc.js';
 import { parseProperties, applyProperties } from '../../shared/frontmatter.js';
 import { rewriteBlockText } from '../../shared/note-metadata.js';
@@ -102,6 +103,24 @@ export function historyForward() {
  * Open a wikilink target: resolve it against the vault, creating the note
  * (Obsidian-style, in the vault root) when unresolved.
  */
+/**
+ * `[[paper.pdf|external]]` — hand a vault file to the OS default app
+ * instead of opening a Clew tab. Takes a vault path or a bare name (the
+ * editor click has only the name). Main clamps it inside the vault and
+ * refuses executables by name; a refusal is shown, never swallowed.
+ */
+export function openFileExternally(target) {
+	const name = String(target ?? '').trim();
+	if (!name) return;
+	const rel = vaultStore.pathExists(name)
+		? name
+		: vaultStore.resolveFileName(name) ?? vaultStore.resolveNoteName(name);
+	if (!rel) { notice(`Not in this vault: ${name}`); return; }
+	ipc.invoke(CH.SHELL_OPEN_PATH, { path: rel })
+		.then((result) => { if (result && !result.ok) notice(result.reason); })
+		.catch(() => notice(`Could not open ${name}`));
+}
+
 export async function openWikilink(target, { newTab = false, mode } = {}) {
 	// A URL is not a note name. Whatever routed it here (a pasted link in
 	// the switcher, a stray href), creating "https:/…/.md" directories in
@@ -211,7 +230,9 @@ const TASK_RE = /^(\s*(?:[-*+]|\d+[.)])\s+)\[( |x|X)\]/;
  * Write one field of a note — the engine behind editable query tables and
  * kanban drags. `source` says where the field lives: 'fm' (frontmatter,
  * via the same parse/serialize machinery as the properties panel) or
- * 'line:N' (a Dataview-style inline `Key:: value` on that 1-based line).
+ * 'block' (a block-bound widget: the marker line's text). There is no
+ * inline-field source any more: `Key:: value` is a description list in
+ * this dialect, not data (engine/query-fences.js says why).
  * The value is retyped to match what it replaces (number stays number,
  * array stays array via comma-splitting).
  */
@@ -224,14 +245,6 @@ export async function editNoteField(path, field, value, source = 'fm') {
 			// line's TEXT, marker kept — prose editing with an address.
 			next = rewriteBlockText(text, field.replace(/^\^/, ''), value);
 			if (next === null) throw new Error(`no ${field} block in the note`);
-		} else if (source.startsWith('line:')) {
-			const lineNo = Number(source.slice(5));
-			const lines = text.split('\n');
-			if (!(lineNo >= 1 && lineNo <= lines.length)) throw new Error('stale line');
-			const re = new RegExp(`(${field.replace(/[.*+?^$()|[\]\\]/g, '\\$&')}\\s*::\\s*)([^\\]\\n]*)`);
-			if (!re.test(lines[lineNo - 1])) throw new Error('field not on that line anymore');
-			lines[lineNo - 1] = lines[lineNo - 1].replace(re, (_, head) => head + value);
-			next = lines.join('\n');
 		} else {
 			const { entries, clean, present } = parseProperties(text);
 			if (present && !clean) throw new Error('frontmatter is outside the editable subset');
@@ -296,6 +309,53 @@ export async function toggleTaskLine(path, line, checked) {
 		return true;
 	}
 	return false;
+}
+
+/**
+ * Persist a collapsible embed's disclosure state (`![[Note|collapsed]]` ↔
+ * `![[Note|open]]`) onto the 1-based source line it was rendered from.
+ *
+ * The state lives in the note rather than in app state on purpose: it travels
+ * with the file. Which is also why toggling OPEN writes `|open` rather than
+ * dropping the keyword — a bare `![[Note]]` is a plain embed with no
+ * disclosure at all, so removing it would take the affordance away and the
+ * reader could never fold it again.
+ *
+ * Live editor first (undoable, auto-save persists it), else straight to disk —
+ * the toggleTaskLine arrangement, for the same reason: the note may be open
+ * and dirty in the other half of a split.
+ */
+export async function setEmbedCollapsed(path, line, collapsed) {
+	const state = collapsed ? 'collapsed' : 'open';
+
+	for (const group of workspaceStore.allGroups()) {
+		for (const tab of group.tabs) {
+			if (tab.kind !== 'note' || tab.path !== path) continue;
+			const entry = editorPool.get(tab.id);
+			if (!entry?.view) continue;
+			const doc = entry.view.state.doc;
+			if (line < 1 || line > doc.lines) return false;
+			const docLine = doc.line(line);
+			const next = setEmbedState(docLine.text, state);
+			if (next === null || next === docLine.text) return false;
+			entry.view.dispatch({
+				changes: { from: docLine.from, to: docLine.to, insert: next },
+			});
+			editorPool.flush(tab.id);
+			return true;
+		}
+	}
+
+	const text = await ipc.invoke(CH.NOTE_READ, { path }).catch(() => null);
+	if (text === null) return false;
+	const lines = text.split('\n');
+	const next = lines[line - 1] === undefined ? null : setEmbedState(lines[line - 1], state);
+	// null means the line is no longer an embed — the numbers drifted, and
+	// writing anything now would corrupt whatever took its place.
+	if (next === null || next === lines[line - 1]) return false;
+	lines[line - 1] = next;
+	await ipc.invoke(CH.NOTE_WRITE, { path, content: lines.join('\n') }).catch(() => {});
+	return true;
 }
 
 /**

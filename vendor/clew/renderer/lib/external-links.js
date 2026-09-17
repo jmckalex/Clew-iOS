@@ -21,6 +21,16 @@ import { notice } from '../plugins.js';
 import { planObsidianUri } from '../../shared/obsidian-uri.js';
 
 export function openExternal(url) {
+	// file:// links are Obsidian's way of pointing at something on disk, and
+	// they open in the OS default app there too. shell.openExternal refuses
+	// them (it takes http/mailto only), so they route to the same guarded
+	// open path as the |external alias.
+	if (/^file:/i.test(String(url ?? ''))) {
+		ipc.invoke(CH.SHELL_OPEN_PATH, { url: String(url) })
+			.then((result) => { if (result && !result.ok) notice(result.reason); })
+			.catch(() => notice('Could not open that file'));
+		return;
+	}
 	const plan = planObsidianUri(url);
 	if (!plan) {
 		ipc.invoke(CH.SHELL_OPEN_EXTERNAL, { url }).catch(() => {});

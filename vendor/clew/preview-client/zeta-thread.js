@@ -75,18 +75,6 @@ function disableFileCommands() {
 }
 
 function loadFile(fileUrl, chromeless) {
-	// Small (16 px) toolbar icons, set BEFORE the document UI builds —
-	// unlike the icon THEME (resolved once at startup; see zeta-icons.js),
-	// the size is consulted when each toolbar is built, so this lands.
-	// The keys are UNO shorts: a bare JS number arrives as the wrong type
-	// and configmgr refuses it ("inappropriate property value").
-	tryUno('iconsize', () => {
-		const config = css.configuration.ReadWriteAccess.create(context, 'en-US');
-		const misc = config.getByHierarchicalName('/org.openoffice.Office.Common/Misc');
-		misc.setPropertyValue('SymbolSet', new zetajs.Any(zetajs.type.short, 0));
-		misc.setPropertyValue('SidebarIconSize', new zetajs.Any(zetajs.type.short, 1));
-		config.commitChanges();
-	});
 	tryUno('load', () => {
 		xModel = desktop.loadComponentFromURL(fileUrl, '_default', 0, []);
 		const ctrl = xModel.getCurrentController();

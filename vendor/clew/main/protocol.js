@@ -30,10 +30,9 @@ import zlib from 'node:zlib';
 import { Readable } from 'node:stream';
 import { NOTE_EXTENSIONS } from '../shared/channels.js';
 import { sessionById } from './session.js';
-import { previewPluginPaths, enabledPlugins } from './plugins.js';
+import { previewPluginScripts, enabledPlugins } from './plugins.js';
 import { settings } from './settings.js';
 import { fontsDir, fallbackConfig } from './pdf-fonts.js';
-import { themedMetadata, themedSplice, spliceTransform } from './zeta-icons.js';
 
 const MIME = {
 	'.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript',
@@ -69,7 +68,7 @@ export function registerPreviewScheme() {
 const RENDERED_SUFFIX = new RegExp(`(${NOTE_EXTENSIONS.map((e) => e.replace('.', '\\.')).join('|')})\\.html$`, 'i');
 
 /** After app.whenReady(). */
-export function installPreviewProtocol({ distDir, nodeModulesDir, engineAssetsDir, embedpdfDir, zetaDir, officeIconsDir }) {
+export function installPreviewProtocol({ distDir, nodeModulesDir, engineAssetsDir, embedpdfDir, mptikzDir, zetaDir, globalPluginsDir = null }) {
 	const assetRoots = {
 		mathjax: path.join(nodeModulesDir, 'mathjax', 'es5'),
 		mermaid: path.join(nodeModulesDir, 'mermaid', 'dist'),
@@ -80,6 +79,11 @@ export function installPreviewProtocol({ distDir, nodeModulesDir, engineAssetsDi
 		// The EmbedPDF bundle + pdfium.wasm (the PDF viewer) — the vendored
 		// OCG/layers build (vendor/embedpdf), not the npm package.
 		embedpdf: embedpdfDir,
+		// mp-tikz-wasm: the MetaPost/TikZ engines and their TeX bundles
+		// (paths.js#mptikzAssets). A first figure reads ~90 of these files
+		// through kpathsea, so the whole tree is servable rather than a
+		// closed set — it is read-only app payload, like embedpdf.
+		mptikz: mptikzDir,
 		// Our own PDF viewer page + its bundle (pdf-page.html/.js).
 		clewpdf: path.join(distDir, 'preview-client'),
 		// ZetaOffice (LibreOffice wasm) bundle: soffice.{js,wasm,data,…} +
@@ -180,40 +184,22 @@ export function installPreviewProtocol({ distDir, nodeModulesDir, engineAssetsDi
 					return new Response(JSON.stringify(config), { headers: headers('application/json') });
 				}
 				const [root, ...restParts] = rest.split('/');
-				// The LibreOffice icon-theme swap (zeta-icons.js): when the
-				// vendored Sifr zip is present, soffice.data is served with
-				// Sifr's bytes spliced over the packed Colibre entry, and the
-				// offsets metadata shifted to match. Nothing on disk changes.
-				if (root === 'zeta' && officeIconsDir) {
-					const name = restParts.join('/');
-					if (name === 'soffice.data.js.metadata') {
-						const json = themedMetadata(officeIconsDir, zetaDir);
-						if (json) return new Response(json, { headers: headers('application/json') });
-					} else if (name === 'soffice.data') {
-						const splice = themedSplice(officeIconsDir, zetaDir);
-						const plain = path.join(zetaDir, 'soffice.data');
-						if (splice && fs.existsSync(plain)) {
-							const buf = fs.readFileSync(plain);
-							return new Response(Buffer.concat([
-								buf.subarray(0, splice.start), splice.theme, buf.subarray(splice.end),
-							]), { headers: headers('application/octet-stream') });
-						}
-						if (splice && fs.existsSync(plain + '.br')) {
-							const stream = fs.createReadStream(plain + '.br')
-								.pipe(zlib.createBrotliDecompress())
-								.pipe(spliceTransform(splice));
-							return new Response(Readable.toWeb(stream),
-								{ headers: headers('application/octet-stream') });
-						}
-					}
-				}
 				const base = assetRoots[root];
 				if (!base) return new Response('Unknown asset root', { status: 404, headers: headers('text/plain') });
 				const abs = path.normalize(path.join(base, ...restParts));
 				if (!abs.startsWith(base + path.sep)) {
 					return new Response('Forbidden', { status: 403, headers: headers('text/plain') });
 				}
-				return fileResponse(abs, {}, request.headers.get('range'));
+				// Every other asset is served no-store (the default in
+				// headers()), which is right for anything that can change
+				// under the app. The TeX engines are the exception worth
+				// making: a pinned, read-only build whose wasm Chromium can
+				// only code-cache if it is allowed to store it, and whose
+				// bundles a figure re-reads by the dozen.
+				const extra = root === 'mptikz'
+					? { 'Cache-Control': 'public, max-age=31536000, immutable' }
+					: {};
+				return fileResponse(abs, extra, request.headers.get('range'));
 			}
 			if (pathname.startsWith('__clew_preview__/')) {
 				// A closed set: nothing outside dist/preview-client is servable.
@@ -236,15 +222,43 @@ export function installPreviewProtocol({ distDir, nodeModulesDir, engineAssetsDi
 					return new Response('No session', { status: 503, headers: headers('text/plain') });
 				}
 				const vaultSettings = pluginSession.vaults.loadState('vault-settings.json') ?? {};
-				const plugin = enabledPlugins(pluginSession.vaults.root, vaultSettings)
+				const plugin = enabledPlugins(pluginSession.vaults.root, vaultSettings, globalPluginsDir)
 					.find((p) => p.id === id && p.surfaces.app);
 				if (!plugin) {
 					return new Response('Not an enabled plugin', { status: 403, headers: headers('text/plain') });
 				}
-				const abs = path.join(pluginSession.vaults.root, '.clew', 'plugins', id, plugin.surfaces.app.file);
+				// plugin.dir is the plugin's own folder, vault-local or global.
+				const abs = path.join(plugin.dir, plugin.surfaces.app.file);
 				const code = fs.readFileSync(abs, 'utf8');
 				const wrapped = `(function (clew) {\n'use strict';\n${code}\n})(window.__clewPluginApi?.[${JSON.stringify(id)}]);`;
 				return new Response(wrapped, { headers: headers('text/javascript') });
+			}
+
+			// Files inside a GLOBAL plugin's folder:
+			// /__clew_plugin_file__/<sid>/<id>/<path>. A vault plugin's files
+			// are ordinary vault content and need none of this; a global
+			// plugin lives outside every vault, so its preview surface — and
+			// any sibling it fetches (the Charts plugin loads chart.umd.js) —
+			// is served from here. Gated on the plugin being ENABLED in that
+			// session's vault, and clamped inside the plugin's own folder.
+			if (pathname.startsWith('__clew_plugin_file__/')) {
+				const segments = pathname.split('/').slice(1);
+				const [psid, id, ...rest] = segments;
+				const pluginSession = sessionById(psid);
+				if (!pluginSession?.vaults.isOpen || !id || rest.length === 0) {
+					return new Response('No session', { status: 503, headers: headers('text/plain') });
+				}
+				const vaultSettings = pluginSession.vaults.loadState('vault-settings.json') ?? {};
+				const plugin = enabledPlugins(pluginSession.vaults.root, vaultSettings, globalPluginsDir)
+					.find((p) => p.id === id && p.scope === 'global');
+				if (!plugin) {
+					return new Response('Not an enabled global plugin', { status: 403, headers: headers('text/plain') });
+				}
+				const abs = path.resolve(plugin.dir, rest.map(decodeURIComponent).join('/'));
+				if (abs !== plugin.dir && !abs.startsWith(plugin.dir + path.sep)) {
+					return new Response('Path escapes plugin', { status: 403, headers: headers('text/plain') });
+				}
+				return fileResponse(abs);
 			}
 
 			// Everything else is vault content: first segment is the session id.
@@ -295,8 +309,18 @@ export function installPreviewProtocol({ distDir, nodeModulesDir, engineAssetsDi
 				// as ordinary vault files from .clew/plugins/).
 				const vaultSettings = session.vaults.loadState('vault-settings.json') ?? {};
 				const sid = pathname.slice(0, slash);
-				const pluginTags = previewPluginPaths(session.vaults.root, vaultSettings)
-					.map((p) => `<script src="/${sid}/${p.split('/').map(encodeURIComponent).join('/')}"></script>`)
+				// Vault plugins load as ordinary vault files; global ones from
+				// the __clew_plugin_file__ namespace (they are outside every
+				// vault). Either way the script's own URL sits in its plugin
+				// folder, so the house convention for loading a sibling —
+				// `new URL('x.js', document.currentScript.src)`, what the
+				// Charts plugin does — works in both scopes. (A bare relative
+				// fetch resolves against the NOTE's URL, in both scopes.)
+				const pluginTags = previewPluginScripts(session.vaults.root, vaultSettings, globalPluginsDir)
+					.map((p) => (p.vaultRel
+						? `/${sid}/${p.vaultRel.split('/').map(encodeURIComponent).join('/')}`
+						: `/__clew_plugin_file__/${sid}/${encodeURIComponent(p.id)}/${encodeURIComponent(p.file)}`))
+					.map((src) => `<script src="${src}"></script>`)
 					.join('');
 				// Vault scripts: <vault>/.clew/scripts/*.js load into EVERY
 				// rendered note (alphabetical) — shared custom elements and

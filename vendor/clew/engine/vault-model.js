@@ -25,7 +25,7 @@
 // `resolveTarget`.
 import fs from 'node:fs';
 import path from 'node:path';
-import { readFrontmatter, readInlineFields, extractTasks } from './query-fences.js';
+import { readFrontmatter, extractTasks } from './query-fences.js';
 
 const NOTE_FILE = /\.(md|jmd)$/i;
 const IGNORED = new Set(['.obsidian', '.clew', '.git', 'node_modules', '.trash']);
@@ -184,10 +184,10 @@ export function scanPages() {
 
 		let text;
 		try { text = fs.readFileSync(abs, 'utf8'); } catch { continue; }
+		// Fields are frontmatter only: `Key:: value` is a description list
+		// in this dialect, not data (query-fences.js says why).
 		const fm = readFrontmatter(text);
-		const inline = readInlineFields(text);
 		const sources = {};
-		for (const key of Object.keys(inline.fields)) sources[key] = `line:${inline.lines[key]}`;
 		for (const key of Object.keys(fm)) sources[key] = 'fm';
 
 		const name = base.replace(NOTE_FILE, '');
@@ -210,7 +210,7 @@ export function scanPages() {
 			size: stat.size, ctime: stat.birthtimeMs || stat.ctimeMs, mtime: stat.mtimeMs,
 			isNote: true,
 			tags: [...tags], aliases: aliases.map(String),
-			fields: { ...inline.fields, ...fm },
+			fields: { ...fm },
 			sources, text,
 			rawLinks: references.filter((r) => !r.embed),
 			rawEmbeds: references.filter((r) => r.embed),

@@ -77,6 +77,11 @@ export function engineConfig({ vaultRoot = '/vault', vaultOptions = {}, engineEx
 		'Extensions': [
 			'wikiembed, wikilink from /engine-assets/wikilinks.js',
 			'mermaidFence, leafletFence from /engine-assets/obsidian-fences.js',
+			// TikZ, MetaPost, LaTeX and plain TeX typeset by mp-tikz-wasm in the
+			// preview document (vendor/clew/engine/figures.js): the four fences
+			// and the :::TiKZ directive. Listed here, i.e. loaded after the
+			// engine's own rules, which is what lets the directive win.
+			'tikzFence, metapostFence, latexFence, texFence, tikzDirective from /engine-assets/figures.js',
 			'queryFence, tasksFence, kanbanFence from /engine-assets/query-fences.js',
 			'tableBeforeAnchor, blockAnchorLine, blockAnchor from /engine-assets/block-refs.js',
 			// Obsidian's Dataview, for vaults that arrive carrying it.
@@ -107,6 +112,14 @@ export function engineConfig({ vaultRoot = '/vault', vaultOptions = {}, engineEx
 			// blob/data import cannot resolve relative siblings, unlike
 			// desktop's real-disk dynamic import.
 			...engineExtensions,
+		],
+		// @begin(TiKZ) / @begin(metapost) are block ENVIRONMENTS: the engine
+		// keys them by name and loads this line after its own registrations,
+		// so these handlers replace the ones that shell out to a local TeX.
+		// The engine's environment loader goes through the same patched
+		// __jmdImport as Extensions, so the registry answers this key too.
+		'Environments': [
+			'TiKZ, metapost from /engine-assets/figures.js',
 		],
 		...biblifyConfig(vaultRoot, vaultOptions),
 		'MathJax': { 'src': '/__clew_assets__/mathjax/tex-svg.js' },

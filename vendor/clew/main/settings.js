@@ -27,6 +27,9 @@ const DEFAULTS = {
 	// Optional 139 MB CJK font download for the PDF viewer, off by
 	// default and fetched on demand — see src/main/pdf-fonts.js.
 	pdfCjkFonts: false,
+	// Paper for "Export as PDF (reading view)" — the LaTeX PDF takes its
+	// page size from the document's own class, and is not affected.
+	printPaperSize: 'a4',
 };
 
 class Settings {
@@ -72,6 +75,12 @@ class Settings {
 	}
 
 	#save() {
+		// Smoke runs never persist: everything still works in memory, but
+		// nothing a scenario does — opening a vault (rememberVault!),
+		// flipping the theme — can leak into the user's real settings.
+		// The 5k-note stress vault turning up in the owner's own launch
+		// (via the lastVault fallback) is how this line was earned.
+		if (process.env.CLEW_SMOKE) return;
 		try {
 			fs.mkdirSync(path.dirname(this.#file), { recursive: true });
 			writeFileAtomic(this.#file, JSON.stringify(this.#data, null, 2));

@@ -61,11 +61,13 @@ class WorkspaceStore extends Emitter {
 	async restore(noteExists) {
 		const saved = await ipc.invoke(CH.WORKSPACE_LOAD).catch(() => null);
 		this.state = tree.deserialize(saved, { noteExists }) ?? tree.createInitialState();
+		this.emit('workspace-restored');
 		this.emit('layout-changed');
 	}
 
 	reset() {
 		this.state = tree.createInitialState();
+		this.emit('workspace-restored');
 		this.emit('layout-changed');
 	}
 
@@ -206,6 +208,21 @@ class WorkspaceStore extends Emitter {
 		const found = this.findTab(tabId);
 		if (!found) return;
 		Object.assign(found.tab.view, patch);
+		this.#persist();
+	}
+
+	/**
+	 * The file explorer's closed folders. Silent like updateTabView: the
+	 * explorer has already redrawn itself by the time it tells us, and a
+	 * layout-changed here would put every other panel through a render for a
+	 * disclosure triangle.
+	 */
+	get collapsedFolders() {
+		return this.state.collapsedFolders ?? [];
+	}
+
+	setCollapsedFolders(paths) {
+		this.state.collapsedFolders = [...paths];
 		this.#persist();
 	}
 

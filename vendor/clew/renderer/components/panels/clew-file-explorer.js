@@ -33,6 +33,14 @@ class ClewFileExplorer extends ClewElement {
 		this.listen(vaultStore, 'vault-changed', () => this.render());
 		this.listen(workspaceStore, 'active-changed', () => this.#updateActiveHighlight());
 		this.listen(workspaceStore, 'layout-changed', () => this.#updateActiveHighlight());
+		// Which folders are closed is saved with the workspace, and arrives
+		// with it — AFTER the vault-changed/tree-changed renders above, since
+		// the workspace loads over IPC once the tree is already on screen.
+		// Hence a redraw here rather than a one-time read at startup.
+		this.listen(workspaceStore, 'workspace-restored', () => {
+			this.#collapsed = new Set(workspaceStore.collapsedFolders);
+			this.render();
+		});
 	}
 
 	#updateActiveHighlight() {
@@ -145,6 +153,7 @@ class ClewFileExplorer extends ClewElement {
 	#toggleFolder(path) {
 		if (this.#collapsed.has(path)) this.#collapsed.delete(path);
 		else this.#collapsed.add(path);
+		workspaceStore.setCollapsedFolders(this.#collapsed);
 		this.render();
 	}
 
@@ -238,10 +247,23 @@ class ClewFileExplorer extends ClewElement {
 			workspaceStore.remapPaths(path, newPath);
 			editorPool.remapPath(path, newPath);
 			bookmarkStore.remap(path, newPath);
-			if (this.#collapsed.delete(path)) this.#collapsed.add(newPath);
+			this.#remapCollapsed(path, newPath);
 		} catch (err) {
 			console.error('Move failed:', err);
 		}
+	}
+
+	/** Follow a renamed or moved folder — and everything closed inside it,
+	 *  which a rename of an ancestor moves just as surely. */
+	#remapCollapsed(path, newPath) {
+		let touched = false;
+		for (const collapsed of [...this.#collapsed]) {
+			if (collapsed !== path && !collapsed.startsWith(path + '/')) continue;
+			this.#collapsed.delete(collapsed);
+			this.#collapsed.add(newPath + collapsed.slice(path.length));
+			touched = true;
+		}
+		if (touched) workspaceStore.setCollapsedFolders(this.#collapsed);
 	}
 
 	// ---- actions ----------------------------------------------------------

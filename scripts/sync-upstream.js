@@ -55,9 +55,10 @@ for (const dir of ['renderer', 'shared', 'preview-client', 'engine', 'main', 'ex
 // and enabled plugins) and the sample plugins/scripts/snippets are part of
 // what the vault documents. Device-local state (caches, engine dir,
 // workspace layout) stays behind — the app regenerates those. The Excalidraw
-// shape library is per-user state too, not vault documentation.
+// shape library is per-user state too, not vault documentation, and so are
+// the note-history snapshots the owner's live sessions leave behind.
 const CLEW_STATE_EXCLUDED = new Set([
-	'cache', 'cache.json', 'engine', 'workspace.json', 'excalidraw-library.json',
+	'cache', 'cache.json', 'engine', 'workspace.json', 'excalidraw-library.json', 'history',
 ]);
 copyDir(path.join(upstream, 'demo-vault'), path.join(root, 'seed-vault'), (src) => {
 	const marker = `${path.sep}.clew${path.sep}`;

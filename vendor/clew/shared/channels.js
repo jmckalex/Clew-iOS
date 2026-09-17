@@ -44,6 +44,7 @@ export const CH = {
 	VSTATE_SAVE: 'clew:vstate-save',
 	VAULT_SETTINGS_GET: 'clew:vault-settings-get',
 	PLUGINS_LIST: 'clew:plugins-list',
+	PLUGINS_REVEAL_GLOBAL: 'clew:plugins-reveal-global',
 	VAULT_SETTINGS_SET: 'clew:vault-settings-set',
 
 	// invoke: vault key-value store (clewdata.json — the note API's state)
@@ -90,6 +91,7 @@ export const CH = {
 	PDF_FONTS_DOWNLOAD: 'clew:pdf-fonts-download',
 	PDF_FONTS_REMOVE: 'clew:pdf-fonts-remove',
 	SHELL_OPEN_EXTERNAL: 'clew:shell-open-external',
+	SHELL_OPEN_PATH: 'clew:shell-open-path',
 
 	// invoke: native application menu (renderer pushes context + hotkeys)
 	MENU_STATE: 'clew:menu-state',

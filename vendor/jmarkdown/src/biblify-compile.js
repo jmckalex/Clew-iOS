@@ -379,6 +379,24 @@ function resolveInline($, ctx) {
 	});
 }
 
+/*
+	Re-tag a rendered entry's <div>s as <span>s, in place.
+
+	A \fullcite lands where the author wrote it — mid-paragraph, as often as
+	not — but citation-js renders a bibliography as <div class="csl-bib-body">
+	wrapping <div class="csl-entry">, and an HTML parser closes an open <p> the
+	moment it meets a <div>. The paragraph was therefore torn in two and any
+	prose following the citation orphaned outside it, whatever the CSS said. Only
+	the tag names change: the classes are untouched, so `.fullcite`,
+	`.csl-entry` and friends still style it. The bibliography proper
+	(renderBibliography) keeps its <div>s — it is a block by nature.
+*/
+function retagAsSpans(el) {
+	if (el.type !== 'tag') return;
+	if (el.name === 'div') el.name = 'span';
+	(el.children || []).forEach(retagAsSpans);
+}
+
 function resolveOne($, el, ctx, style) {
 	const $el = $(el);
 	const cmd = $el.attr('data-cite-cmd') || '';
@@ -404,9 +422,11 @@ function resolveOne($, el, ctx, style) {
 			format: 'html', template: style, lang: 'en-US'
 		});
 		const $out = $(html);
+		$out.addClass('fullcite');
 		$out.addClass(`biblify-${style}-template`);
 		$out.attr('data-bibtex', keyString);
 		$out.attr('data-bib-member', 'all');
+		$out.toArray().forEach(retagAsSpans);
 		$el.replaceWith($out);
 		return;
 	}
@@ -538,7 +558,7 @@ function resolveVancouver($, ctx) {
 	for (const el of placeholders) {
 		const m = CITE_RE.exec($(el).attr('data-cite-cmd') || '');
 		if (!m) continue;
-		for (const k of parseKeys(m[8])) {
+		for (const k of parseKeys(m[9])) {
 			if (!seen.has(k)) { seen.add(k); orderedKeys.push(k); }
 		}
 	}
@@ -580,7 +600,7 @@ function resolveVancouver($, ctx) {
 	for (const el of placeholders) {
 		const m = CITE_RE.exec($(el).attr('data-cite-cmd') || '');
 		if (!m) { $(el).remove(); continue; }
-		const keys = parseKeys(m[8]);
+		const keys = parseKeys(m[9]);
 		const keyString = keys.join(',');
 		const indexes = keys.map(k => keyIndexMap[k]).filter(n => n !== undefined);
 		const sorted = Array.from(new Set(indexes)).sort((a, b) => a - b);

@@ -40,6 +40,11 @@ Obsidian's plugin will show its unknown-type error for those two. A
 binding can also reach *another* note's property:
 `INPUT[toggle:[[Some Note]]#done]`.
 
+Meta Bind's `class(…)` argument is honoured too —
+`INPUT[number(class(narrow)):pages]` puts your class on the control, so
+a [[Theming|vault script]] can restyle or resize one widget. (Number
+pickers are already sized for a few digits, not a text field's width.)
+
 ## Bound to text
 
 Widgets can edit **prose**, not only metadata. Give a block a

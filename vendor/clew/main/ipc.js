@@ -30,6 +30,8 @@ import { parseBib } from '../shared/bib.js';
 import { direntKind, shouldRecurse, walkGuard, writeFileAtomic } from './fs-utils.js';
 import { listSnapshots, readSnapshot } from './history.js';
 import { listPlugins } from './plugins.js';
+import { paths } from './paths.js';
+import { planOpen, pathFromFileUrl } from './open-file.js';
 import fs from 'node:fs';
 import nodePath from 'node:path';
 
@@ -188,6 +190,26 @@ export function registerIpc() {
 		if (/^https?:|^mailto:/i.test(url)) shell.openExternal(url);
 	});
 
+	// Hand a file to the OS default app: `[[paper.pdf|external]]` sends a
+	// vault-relative path, a file:// link an absolute one. The guards
+	// (vault clamp, executable refusal) live in open-file.js.
+	handle(CH.SHELL_OPEN_PATH, (s, { path: rel, url }) => {
+		let plan;
+		if (url) {
+			const abs = pathFromFileUrl(url);
+			if (!abs) return { ok: false, reason: 'Not a local file:// link' };
+			plan = planOpen(s.vaults, { abs });
+		} else {
+			plan = planOpen(s.vaults, { rel: String(rel ?? '') });
+		}
+		if (!plan.ok) return plan;
+		// openPath resolves to '' on success, or a message on failure.
+		shell.openPath(plan.target).then((message) => {
+			if (message) console.warn(`[clew] openPath failed (${plan.target}): ${message}`);
+		});
+		return { ok: true };
+	});
+
 	handle(CH.WORKSPACE_LOAD, (s) => s.vaults.loadState('workspace.json'));
 	handle(CH.WORKSPACE_SAVE, (s, state) => s.vaults.saveState('workspace.json', state));
 	handleGlobal(CH.SETTINGS_GET, () => settings.get());
@@ -215,16 +237,28 @@ export function registerIpc() {
 	});
 
 	handle(CH.PLUGINS_LIST, (s) => {
-		if (!s.vaults.isOpen) return { plugins: [], enabled: [] };
+		if (!s.vaults.isOpen) return { plugins: [], enabled: [], globalDir: paths.globalPlugins };
 		const vaultSettings = s.vaults.loadState('vault-settings.json') ?? {};
 		return {
-			plugins: listPlugins(s.vaults.root),
+			plugins: listPlugins(s.vaults.root, paths.globalPlugins),
 			enabled: Array.isArray(vaultSettings.plugins) ? vaultSettings.plugins : [],
+			globalDir: paths.globalPlugins,
 		};
 	});
 
-	handle(CH.EXPORT_NOTE, (s, { path, format }) =>
-		exportNote({ win: s.win, vaults: s.vaults, relPath: path, format }));
+	// "Where do I put them?" — open the global plugin folder, creating it on
+	// the way (it does not exist until the first plugin is installed).
+	handleGlobal(CH.PLUGINS_REVEAL_GLOBAL, () => {
+		fs.mkdirSync(paths.globalPlugins, { recursive: true });
+		shell.openPath(paths.globalPlugins);
+		return paths.globalPlugins;
+	});
+
+	// `outFile` (smoke tests) skips the save dialog, like EXPORT_SITE's outDir.
+	// sessionId: the reading-view PDF prints this session's own
+	// clew-preview:// document, and the protocol resolves it by sid.
+	handle(CH.EXPORT_NOTE, (s, { path, format, outFile }) =>
+		exportNote({ win: s.win, vaults: s.vaults, sessionId: s.id, relPath: path, format, outFile }));
 
 	// The whole vault as a static website. `outDir` (smoke tests) skips the
 	// dialog; otherwise the user picks a folder and the site lands in a

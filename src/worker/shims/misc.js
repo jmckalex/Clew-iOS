@@ -116,10 +116,14 @@ export const fork = noProcesses('child_process.fork');
 // ---- module ---------------------------------------------------------------
 
 // createRequire: script blocks and biblify use require() for optional CJS
-// modules. Nothing is requirable in the worker (biblify catches the throw and
-// degrades to unstyled citations); bundling citation-js is a follow-up.
+// modules. Nothing on disk is requirable in the worker (biblify catches the
+// throw and degrades to unstyled citations; bundling citation-js is a
+// follow-up) — except what shims/require-registry.js maps onto modules the
+// bundle already carries (highlight.js, for figures.js's MetaPost grammar).
 export function createRequire() {
 	const require = (id) => {
+		const hit = globalThis.__jmdRequireRegistry?.[id];
+		if (hit !== undefined) return hit;
 		throw new Error(`[clew-ios] require('${id}') is not available in the render worker`);
 	};
 	require.resolve = (id) => {

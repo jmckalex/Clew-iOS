@@ -345,7 +345,12 @@ export function valuesEqual(a, b, linkKey, isLinkish) {
 	}
 	const ca = comparable(a);
 	const cb = comparable(b);
-	if (ca === null || cb === null) return a === b;
+	// A missing field is `undefined` (vault-model.js#pageValue), the literal
+	// is `null`, and Dataview treats them as one value: `WHERE x != null`
+	// must drop a note that has no x at all, and `WHERE x = null` must find
+	// it — as typeof() already says 'null' for both. Objects (links, arrays)
+	// still compare by identity here.
+	if (ca === null || cb === null) return (a ?? null) === (b ?? null);
 	// A date compared against a plain 'YYYY-MM-DD' should match.
 	if (isDate(a) !== isDate(b)) {
 		const da = coerceDate(a);
