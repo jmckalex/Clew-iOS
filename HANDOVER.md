@@ -1,4 +1,4 @@
-# Handover — 2026-09-17 (upstream 0.11 sync: DONE, simulator-verified, unpushed)
+# Handover — 2026-09-17 (upstream 0.11 sync: DONE, PUSHED, cloud build succeeded; device verification next)
 
 Session-rollover state, upstream-style: rewritten each session, kept
 short. Durable architecture and build docs live in **README.md** and
@@ -11,20 +11,32 @@ for the reasoning behind a decision.
 **Never `git push` without the owner's explicit OK.** The Xcode Cloud
 workflow builds and ships to TestFlight on every push to `main` — a push
 IS a release. Commit locally freely; the owner verifies on their iPad
-first. (Also in Claude's memory.)
+first. (Also in Claude's memory.) A docs-only commit can carry
+`[ci skip]` in its message so a later push of it does not spend a cloud
+build — this handover commit does.
 
 ## 1. Where things stand
 
-Seven layers of finished, unpushed work, every phase tip green on its
+**Everything is on `main` and pushed.** On 2026-09-17 the owner
+fast-forwarded `main` from 6f75e34 to `sync11-p5-verify` (e46a5ce) and
+pushed; Xcode Cloud's "Default" workflow archived e46a5ce successfully
+(the GitHub check on the commit says so; the success mail arrived) and
+the build went to App Store Connect ▸ Clew Notes ▸ TestFlight for the
+internal group. That one push released seven layers at once — the 0.8,
+0.9 and 0.10 syncs, the contract parity work, and the 0.11 sync — none
+of which had been on a device before. Every phase tip was green on its
 own (`npm test` 388, `npm run build`, xcodebuild clean):
 
 ```
-main                6f75e34   (10 ahead of origin, UNPUSHED, deliberately not moved)
- └ …0.8 chain… → …0.9 chain… → canvas-delete-button → embedpdf-vendor
-    └ contracts-p1…p3 → sync10-p1…p5 (sync10-p5-verify add3a49)
-       └ sync11-p1-vendor 09e59e3 → sync11-p2-figures b5d3bf5 → sync11-p3-platform aa7b6bf
-          → sync11-p4-print 04e1d13 → sync11-p5-verify   ← TIP: review and merge
+origin/main = main = sync11-p5-verify = e46a5ce   (+ this handover commit, [ci skip], local)
+ …0.8 chain… → …0.9 chain… → canvas-delete-button → embedpdf-vendor
+  → contracts-p1…p3 → sync10-p1…p5 (add3a49)
+  → sync11-p1-vendor 09e59e3 → sync11-p2-figures b5d3bf5 → sync11-p3-platform aa7b6bf
+  → sync11-p4-print 04e1d13 → sync11-p5-verify e46a5ce
 ```
+
+The phase branches still exist locally and can be deleted once the
+TestFlight build is judged good.
 
 - **Everything before `sync11-*`** — unchanged from the previous
   handover; all simulator-verified.
@@ -118,12 +130,28 @@ Widgets residue. `../Clew-docs` untouched. `~/Source/mp-tikz-wasm` at
 
 ## 4. Open items
 
-1. **Device verification, then merge + push** = a TestFlight release.
-   Hardware-specific now: **figure memory and timing on the iPad**
-   (LuaTeX in wasm; the sim can't measure memory), plus everything in
-   the previous handover's list (Pencil, Excalidraw, Pdfium, chords,
-   Quick Look thumbnails, history modal, Web Awesome on touch). Suggested
-   merge: fast-forward `main` to `sync11-p5-verify`.
+1. **Device verification of the TestFlight build** (0.1.0, cloud build
+   number from App Store Connect). Hardware-specific: **figure memory
+   and timing on the iPad** (LuaTeX in wasm; the sim can't measure
+   memory — open Features/Diagrams first), then everything the earlier
+   syncs never had on a device: Pencil finger-pan feel, Excalidraw with
+   Pencil, per-scene Pdfium memory, hardware-keyboard chords incl.
+   Alt-Q fill-paragraph, Quick Look + QL thumbnail timing, the history
+   modal, Web Awesome widgets on touch, the reading-view PDF's share
+   sheet on a real screen, Documents/Plugins in the Files app. A bad
+   result is fixed forward on a new branch off `main`; the old chain
+   tips remain as fallbacks.
+1b. **Version numbering, the owner's call.** Three schemes coexist:
+   upstream's tags (v0.7.0–v0.9.0; `package.json` still 0.9.0); the
+   port's sync labels, which continued the count past the last tag
+   ("0.10", "0.11" name iOS sync rounds, not upstream releases, and
+   will collide with a real v0.10.0 tag one day — future rounds could
+   be named by date or upstream commit, e.g. `UPSTREAM-2026-09-PLAN.md`
+   / `sync2609-p1-…`; the past ones are history); and the app's own
+   `MARKETING_VERSION` 0.1.0 (`CURRENT_PROJECT_VERSION` 1, overridden by
+   Xcode Cloud's auto-incremented build number) — bump it in the project
+   before a push if the version string should say what the build
+   contains. 0.9 → 0.10 is ordinary semver; the components are integers.
 2. **Manual caveats for `../Clew-docs`** (the owner's): figures typeset
    on iOS too, engines bundled (no download); global plugins live in
    the Files app under Clew › Plugins; `|external` and `file://` open
