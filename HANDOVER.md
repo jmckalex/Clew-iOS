@@ -113,20 +113,27 @@ uninstall + reinstall to reseed. Working tree clean after this commit.
 5. **Two pre-existing bugs fixed on the way**: `alert()` was silent, and
    **the iPad share sheet had never presented** (popover anchored to the
    whole web view; the HTML export was affected since the first sync).
-6. **Upstream demo bug fixed in `../Clew-app`'s WORKING TREE,
-   uncommitted**: `demo-vault/Features/Diagrams.md`'s ```tex fence used
-   `\frac`, undefined in plain TeX — now `{1 \over n^2} = {\pi^2 \over 6}`
-   (the owner's diagnosis). It sits beside the owner's own pending edit
-   to that file; commit it with theirs. The manual carries no plain-TeX
-   snippet, so nothing to change there.
+6. **Upstream demo bug, fixed and now committed upstream**:
+   `demo-vault/Features/Diagrams.md`'s ```tex fence used `\frac`,
+   undefined in plain TeX — now `{1 \over n^2} = {\pi^2 \over 6}` (the
+   owner's diagnosis; my one-line edit). The Clew-app session committed
+   it with the owner's `\nopagenumbers` change as **f92c7ea** on
+   2026-09-17; nothing of ours is pending in that tree.
 
 ## 3. Upstream state
 
-`../Clew-app` main = **`da5f68a`**, tree DIRTY with: the owner's two
-items (icon revert, `\nopagenumbers`), their `Widgets.md` smoke residue,
-and my one-line Diagrams.md fix (§2.6). We vendored that tree minus the
-Widgets residue. `../Clew-docs` untouched. `~/Source/mp-tikz-wasm` at
-`main@ff8a98b` is what upstream staged and what we copied.
+`../Clew-app` main has moved PAST what we vendored: da5f68a → f92c7ea
+(the demo fix + `\nopagenumbers`), 3339969 (**`font=note`**, §4.4b),
+4897ad3 (screenshot kit), b14671a (`main/asset-stamp.js`, engine-cache
+stamp) — tree clean, nothing pushed, per the Clew-app session on the
+evening of 2026-09-17. We vendored da5f68a plus the working tree's two
+owner-requested items (minus the Widgets.md residue); the next sync
+starts from f92c7ea's successors. `../Clew-docs` main = 5372a7c (the
+app agent's illustration pass ca62354, `diagrams.html#note-font` +
+`publishing.html#figures` 2d60de1, handover 5372a7c, on top of my
+cef2e0f/6c97f5b); still not deployed. `~/Source/mp-tikz-wasm` at
+`main@ff8a98b` is what upstream staged and what we copied; the
+`opentype-fonts` branch is unreleased.
 
 ## 4. Open items
 
@@ -202,8 +209,10 @@ Widgets residue. `../Clew-docs` untouched. `~/Source/mp-tikz-wasm` at
    (or clear `WKWebsiteDataStore` when the bundle's identity changes,
    as desktop's `main/asset-stamp.js` does); (e) exports: the
    reading-view PDF prints the preview, so a `font=note` figure would
-   carry Avenir Next glyphs into the PDF — decide with the owner
-   (desktop bakes outlines for the site). Verification recipe:
+   carry an Avenir Next subset into the PDF — the desktop's does too,
+   deliberately (a PDF embedding subsetted glyphs is what every PDF
+   does; only a published web page bakes outlines), so no change
+   expected; flagged for the owner all the same. Verification recipe:
    upstream `smoke/make-figures-vault.mjs` writes a Fonts.md; assertions
    in its README.
 5. Possible follow-ups, unchanged: canvas toolbar undo/redo; Pencil
