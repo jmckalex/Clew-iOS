@@ -54,6 +54,14 @@ export function createClewShim({ workerFactory, assetLoader } = {}) {
 	// only the index knows which notes those are (main/session.js does the
 	// same wiring).
 	renderService.embeddersOf = (rel) => indexer.embeddersOf(rel);
+	// The note's typeface as font files, for `font=note` figures: the bridge
+	// builds NoteFont-*.ttf from CoreText once and the scheme handler serves
+	// them; the engine needs the face → file map in its env before its first
+	// standby spawns (render-service.js#noteFontsReady). A bridge without
+	// the op (tests, an older build) leaves the map empty: Latin Modern.
+	renderService.noteFontsReady = bridgeCall('noteFonts')
+		.then((result) => { renderService.noteFonts = result?.faces ?? null; })
+		.catch(() => { renderService.noteFonts = null; });
 	kvStore.send = send;
 
 	vaults.hooks = {

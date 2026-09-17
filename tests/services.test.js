@@ -62,6 +62,12 @@ const fakeBridge = {
 				return { path: globalDir };
 			case 'printPdf':
 				return { bytes: 1234 };
+			case 'noteFonts':
+				// What NoteFonts.swift answers once the four faces are built.
+				return { family: 'Avenir Next', dir: '/fake/notefonts', faces: {
+					Regular: 'NoteFont-Regular.ttf', Bold: 'NoteFont-Bold.ttf',
+					Italic: 'NoteFont-Italic.ttf', BoldItalic: 'NoteFont-BoldItalic.ttf',
+				} };
 			case 'write': {
 				const abs = path.join(params.vault, params.rel);
 				fs.mkdirSync(path.dirname(abs), { recursive: true });
@@ -119,12 +125,14 @@ const fakeBridge = {
 // A worker that answers ready + fake html (real rendering is M1-tested).
 // Build messages are recorded so tests can assert on their payloads.
 const workerBuilds = [];
+const workerInits = [];
 const fakeWorkerFactory = () => {
 	const worker = {
 		onmessage: null,
 		onerror: null,
 		postMessage(msg) {
 			if (msg.type === 'build') workerBuilds.push(msg);
+			if (msg.type === 'init') workerInits.push(msg);
 			queueMicrotask(() => {
 				if (msg.type === 'init') worker.onmessage?.({ data: { type: 'ready' } });
 				if (msg.type === 'build') worker.onmessage?.({ data: { type: 'done', output: msg.options.output, html: '<html>fake</html>' } });
@@ -575,4 +583,17 @@ test('export as PDF (reading view): the bridge prints this session\'s own previe
 	await clew.invoke('clew:export-note', { path: 'Guide/Links and Embeds.md', format: 'print-pdf' });
 	assert.equal(fakeBridge.calls.at(-1)[1].paperSize, 'a4', 'an unknown paper size falls back to A4');
 	await assert.rejects(clew.invoke('clew:export-note', { path: '../outside.md', format: 'print-pdf' }), /escapes/i);
+});
+
+test('font=note: the bridge\'s face map reaches EVERY engine worker\'s env, the first standby included', async () => {
+	assert.ok(workerInits.length > 0, 'workers were spawned');
+	for (const init of workerInits) {
+		const map = JSON.parse(init.env.CLEW_NOTE_FONTS || 'null');
+		assert.deepEqual(map, {
+			Regular: 'NoteFont-Regular.ttf', Bold: 'NoteFont-Bold.ttf',
+			Italic: 'NoteFont-Italic.ttf', BoldItalic: 'NoteFont-BoldItalic.ttf',
+		}, 'the file names the scheme handler serves, as figures.js#noteFontFaces reads them');
+	}
+	assert.ok(fakeBridge.calls.some(([m]) => m === 'noteFonts'), 'asked the bridge once');
+	assert.equal(fakeBridge.calls.filter(([m]) => m === 'noteFonts').length, 1, 'built once, not per vault open');
 });

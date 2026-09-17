@@ -164,6 +164,16 @@ final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 		case "demoVaultPath":
 			performIO(reply) { ["path": self.vaults.demoVaultPath()] }
 
+		case "noteFonts":
+			// The face → file map behind `font=note` figures, built from
+			// CoreText on first call (NoteFonts.swift) and served under
+			// __clew_assets__/notefonts/. The JS side puts it in the engine
+			// worker's env before the first standby spawns.
+			performIO(reply) {
+				let p = NoteFonts.shared.ensure()
+				return ["family": p.family, "faces": p.faces, "dir": p.dir.path]
+			}
+
 		case "revealGlobalPlugins":
 			// "Open global plugin folder": Documents/Plugins in the Files app —
 			// the iOS reveal (shell.openPath upstream), created on the way as

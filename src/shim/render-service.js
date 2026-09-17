@@ -50,6 +50,11 @@ export class RenderService {
 	 *  bridge has built the faces (engine-config.js#engineEnv says how it is
 	 *  used); null until then, which the engine treats as "no note fonts". */
 	noteFonts = null;
+	/** Resolves once `noteFonts` is known (or known to be unavailable): the
+	 *  first standby waits for it, so the first render already carries the
+	 *  map — a font=note figure in the first note opened would otherwise
+	 *  typeset against files the engine was never told about. */
+	noteFontsReady = Promise.resolve();
 	#notes = new Map(); // rel -> {mtimeMs, html, hasQueries, inflight, dirty}
 	#fragments = new Map();
 	#fragmentInflight = new Map();
@@ -77,6 +82,7 @@ export class RenderService {
 				const texts = await Promise.all(names.map((n) => this.assetLoader(n)));
 				this.#assets = Object.fromEntries(names.map((n, i) => [`/engine/${n}`, texts[i]]));
 			}
+			await this.noteFontsReady;
 			this.#spawnStandby();
 		})();
 		this.#openPromise.catch((err) => console.error('[clew-ios] render service open failed:', err));

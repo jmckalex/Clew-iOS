@@ -119,6 +119,18 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 			if rest == "pdffonts/fallback.json" {
 				return respondData(task, data: Data("null".utf8), mime: "application/json")
 			}
+			// The note's typeface as font files, for `font=note` figures
+			// (NoteFonts.swift): index.json naming the faces, then one sfnt
+			// per face, built from CoreText on first use and cached in
+			// Application Support — outside the WebRoot, hence before the
+			// asset-root lookup. Same URL shape as desktop's protocol.js.
+			if rest.hasPrefix("notefonts/") {
+				let name = String(rest.dropFirst("notefonts/".count))
+				guard let file = NoteFonts.shared.file(named: name) else {
+					return fail(task, "no such note font", status: 404)
+				}
+				return respondFile(task, fileURL: file, rangeHeader: nil)
+			}
 			let parts = rest.split(separator: "/", maxSplits: 1).map(String.init)
 			guard parts.count == 2, let base = Self.assetRoots[parts[0]], let webRoot = webRootURL else {
 				return fail(task, "unknown asset root")
