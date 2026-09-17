@@ -130,10 +130,11 @@ Widgets residue. `../Clew-docs` untouched. `~/Source/mp-tikz-wasm` at
 
 ## 4. Open items
 
-1. **Device verification of the TestFlight build** (0.1.0, cloud build
-   number from App Store Connect). Hardware-specific: **figure memory
-   and timing on the iPad** (LuaTeX in wasm; the sim can't measure
-   memory — open Features/Diagrams first), then everything the earlier
+1. **Device verification of the TestFlight build** (0.1.0 (6)). **The
+   owner ran it on the iPad on 2026-09-17: TikZ and LaTeX figures typeset
+   on the device — "works perfectly".** The build had to be added to the
+   Internal group by hand (no automatic distribution on the group; see
+   memory). Still unchecked on hardware, everything the earlier
    syncs never had on a device: Pencil finger-pan feel, Excalidraw with
    Pencil, per-scene Pdfium memory, hardware-keyboard chords incl.
    Alt-Q fill-paragraph, Quick Look + QL thumbnail timing, the history
