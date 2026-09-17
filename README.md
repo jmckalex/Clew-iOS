@@ -58,7 +58,8 @@ xcrun simctl spawn booted log stream --predicate 'eventMessage CONTAINS "CLEWJS"
 
 ## Known gaps (tracked in PORT-PLAN.md)
 
-Mathematica blocks (wolframscript), LaTeX/PDF export, site export,
+Mathematica blocks (wolframscript), the LaTeX export and its PDF (the
+reading-view PDF works), site export,
 the ZetaOffice runtime (office documents open read-only in Quick Look,
 and embeds show Quick Look thumbnails; editing them needs the desktop
 app), kanban drag on touch, touch-only file move (drag-to-move is

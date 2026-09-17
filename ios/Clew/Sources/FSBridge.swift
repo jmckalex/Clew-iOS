@@ -9,6 +9,7 @@ final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 	private let vaults: VaultStore
 	private let folderPicker = FolderPicker()
 	private let quickLook = QuickLookPresenter()
+	private let printer = PdfPrinter()
 
 	init(vaults: VaultStore) {
 		self.vaults = vaults
@@ -113,6 +114,32 @@ final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 			shareFile(named: name, data: Data(text.utf8), from: webView)
 			reply(nil, nil)
 
+		case "printPdf":
+			// "Export as PDF (reading view)": the note's preview document,
+			// printed once it has settled (PrintPDF.swift), into the share
+			// sheet. The scripts that say what "settled" means come from the
+			// JS side, so they are upstream's.
+			guard let urlString = params["url"] as? String, let url = URL(string: urlString),
+				url.scheme == "clew-preview",
+				let name = params["name"] as? String,
+				let arm = params["arm"] as? String, let probe = params["probe"] as? String,
+				let lightTheme = params["lightTheme"] as? String else { throw ClewError.badPayload }
+			guard let webView, let window = webView.window,
+				let handler = webView.configuration.urlSchemeHandler(forURLScheme: "clew-preview") else {
+				return reply(nil, "no window to print from")
+			}
+			let request = PdfPrinter.Request(url: url, paperSize: params["paperSize"] as? String ?? "a4",
+				armScript: arm, readyProbe: probe, lightThemeScript: lightTheme)
+			printer.print(request, schemeHandler: handler, in: window) { result in
+				switch result {
+				case .success(let data):
+					self.shareFile(named: name, data: data, from: webView)
+					reply(["bytes": data.count], nil)
+				case .failure(let error):
+					reply(nil, error.localizedDescription)
+				}
+			}
+
 		case "shareBase64":
 			guard let name = params["name"] as? String, let base64 = params["base64"] as? String,
 				let data = Data(base64Encoded: base64) else { throw ClewError.badPayload }
@@ -206,9 +233,22 @@ final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 		let url = FileManager.default.temporaryDirectory.appendingPathComponent(sanitized)
 		try? data.write(to: url)
 		let controller = UIActivityViewController(activityItems: [url], applicationActivities: nil)
-		guard let root = webView?.window?.rootViewController else { return }
-		controller.popoverPresentationController?.sourceView = webView
+		guard let webView, let root = webView.window?.rootViewController else { return }
+		// On iPad the share sheet is a popover and needs somewhere to point:
+		// anchored to the WHOLE web view (the old sourceView-only setup) it had
+		// nowhere to go and was never shown — measured. A point in the middle
+		// with no arrow presents it centred, the way a sheet would be.
+		if let popover = controller.popoverPresentationController {
+			popover.sourceView = webView
+			popover.sourceRect = CGRect(x: webView.bounds.midX, y: webView.bounds.midY, width: 1, height: 1)
+			popover.permittedArrowDirections = []
+		}
 		root.present(controller, animated: true)
+		#if DEBUG
+		DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+			NSLog("CLEWJS share sheet presented=%d (%@)", root.presentedViewController != nil ? 1 : 0, sanitized)
+		}
+		#endif
 	}
 }
 

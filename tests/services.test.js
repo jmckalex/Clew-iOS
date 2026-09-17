@@ -60,6 +60,8 @@ const fakeBridge = {
 			case 'revealGlobalPlugins':
 				fs.mkdirSync(globalDir, { recursive: true });
 				return { path: globalDir };
+			case 'printPdf':
+				return { bytes: 1234 };
 			case 'write': {
 				const abs = path.join(params.vault, params.rel);
 				fs.mkdirSync(path.dirname(abs), { recursive: true });
@@ -553,4 +555,24 @@ test('open externally: planOpen over the mirror, then Quick Look; refusals by na
 	assert.equal((await clew.invoke('clew:shell-open-path', { url: 'https://example.com/x.pdf' })).ok, false, 'not a file:// link');
 	const quickLooks = fakeBridge.calls.slice(mark).filter(([m]) => m === 'quickLook').length;
 	assert.equal(quickLooks, 2, 'exactly the two permitted opens reached the bridge');
+});
+
+test('export as PDF (reading view): the bridge prints this session\'s own preview document with upstream\'s ready probe', async () => {
+	await clew.invoke('clew:vault-open-path', { path: vaultDir });
+	await clew.invoke('clew:settings-set', { key: 'printPaperSize', value: 'letter' });
+	const mark = fakeBridge.calls.length;
+	const result = await clew.invoke('clew:export-note', { path: 'Guide/Links and Embeds.md', format: 'print-pdf' });
+	assert.deepEqual(result, { shared: true });
+	const [, params] = fakeBridge.calls.slice(mark).find(([m]) => m === 'printPdf') ?? [];
+	assert.ok(params, 'the bridge was asked to print');
+	assert.equal(params.url, 'clew-preview://vault/s1/Guide/Links%20and%20Embeds.md.html', 'the same document the reading pane shows');
+	assert.equal(params.name, 'Links and Embeds.pdf');
+	assert.equal(params.paperSize, 'letter', 'the printPaperSize setting, as upstream');
+	assert.match(params.arm, /__clewPrintReady = true/, 'upstream\'s arm script');
+	assert.match(params.probe, /__clewFiguresPending/, 'upstream\'s probe waits for figures too');
+	assert.match(params.lightTheme, /theme: 'light'/, 'prints light whatever the app wears');
+	await clew.invoke('clew:settings-set', { key: 'printPaperSize', value: 'nonsense' });
+	await clew.invoke('clew:export-note', { path: 'Guide/Links and Embeds.md', format: 'print-pdf' });
+	assert.equal(fakeBridge.calls.at(-1)[1].paperSize, 'a4', 'an unknown paper size falls back to A4');
+	await assert.rejects(clew.invoke('clew:export-note', { path: '../outside.md', format: 'print-pdf' }), /escapes/i);
 });

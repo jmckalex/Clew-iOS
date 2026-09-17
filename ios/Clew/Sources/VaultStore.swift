@@ -455,6 +455,8 @@ enum ClewError: Error, LocalizedError {
 	case vaultUnreachable(String)
 	case notFound(String)
 	case refused(String)
+	case printBusy
+	case printFailed(String)
 
 	var errorDescription: String? {
 		switch self {
@@ -465,6 +467,8 @@ enum ClewError: Error, LocalizedError {
 		case .notFound(let rel): return "No such vault file: \(rel)"
 		case .vaultUnreachable(let path): return "Cannot access vault at \(path) — re-pick the folder to renew access"
 		case .refused(let rel): return "Refused: \(rel) is not a note-history snapshot"
+		case .printBusy: return "A PDF export is already in progress"
+		case .printFailed(let why): return "PDF export failed: \(why)"
 		}
 	}
 }

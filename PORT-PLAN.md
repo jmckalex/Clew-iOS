@@ -17,8 +17,10 @@ Everything that shells out to external toolchains dies with `child_process`:
   0.11 sync: upstream typesets them IN the preview document with
   mp-tikz-wasm, and the engines ship in the app bundle — see the milestone
   and `scripts/stage-mptikz.js`.)
-- **LaTeX/PDF export** (`jmarkdown --to latex` + compile). `.tex` emission
-  itself is portable but useless without TeX; deferred.
+- **LaTeX export, and the PDF via LaTeX** (`jmarkdown --to latex` +
+  compile). `.tex` emission itself is portable but useless without TeX;
+  deferred. (The OTHER PDF — "Export as PDF (reading view)", upstream
+  6f3be17 — ports fine: see the 0.11 decisions.)
 - **Electron-isms**: multi-window (one vault open at a time on iOS),
   native menu bar (replaced by touch UI + command palette), `<webview>`
   canvas web nodes (replaced with the sandboxed `<iframe>` variant the
@@ -340,6 +342,20 @@ the golden master than forked here:
   use. A `file://` link can only reach the open vault (nothing outside the
   sandbox is reachable), and a folder has no viewer; both refuse with a
   reason the renderer shows as a notice.
+- **"Export as PDF (reading view)" prints from a hidden `WKWebView`**
+  (0.11 sync). Upstream prints the note's own `clew-preview://` document
+  from a hidden BrowserWindow once the page says it has settled; here
+  `PrintPDF.swift` loads the same document in a second web view on the
+  same preview scheme handler, parked behind the app at the paper's
+  printable width (WebKit lays out only views in a window), runs
+  upstream's arm and ready-probe scripts (`src/shim/print-pdf.js`, copied
+  verbatim — upstream candidate: export them from an electron-free
+  module), asks the client for the light theme, paginates with
+  `UIPrintPageRenderer` at the `printPaperSize` setting with 0.6 in
+  margins, and hands the PDF to the share sheet, iOS's save dialog.
+  Measured on the Diagrams note: five A4 pages in 3.3 s, MathJax, mermaid
+  and all seven wasm figures as vectors, `@media print` keeping each
+  figure whole.
 - **CJK PDF fallback fonts are stubbed off.** Upstream downloads a 139 MB
   Noto pack on demand; iOS has no downloader, so the three `CH.PDF_FONTS_*`
   channels answer "not available", the settings section is patched out, and

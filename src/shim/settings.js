@@ -9,6 +9,8 @@ const DEFAULTS = {
 	diaryLogFile: 'Diary.md',
 	lastVault: null,
 	theme: 'dark',
+	// Paper for "Export as PDF (reading view)" — upstream's default.
+	printPaperSize: 'a4',
 };
 
 const STORE_KEY = 'clew-settings';

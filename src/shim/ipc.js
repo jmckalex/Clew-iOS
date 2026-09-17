@@ -20,6 +20,7 @@ import { VaultManager, VAULT_ROOT, GLOBAL_PLUGINS_ROOT } from './vault-manager.j
 import { RenderService } from './render-service.js';
 import { settings } from './settings.js';
 import { bridgeCall, toBase64 } from './native-bridge.js';
+import { ARM_SCRIPT, READY_PROBE, LIGHT_THEME_SCRIPT, PAPER_SIZES } from './print-pdf.js';
 
 const SESSION_ID = 's1';
 
@@ -427,15 +428,30 @@ export function createClewShim({ workerFactory, assetLoader } = {}) {
 		},
 
 		[CH.EXPORT_NOTE]: async ({ path, format }) => {
+			const base = path.split('/').pop().replace(/\.(md|jmd)$/i, '');
 			if (format === 'print-pdf') {
-				// The reading-view PDF lands in sync11-p4.
-				throw new Error('Export as PDF (reading view) is not available on iOS yet');
+				// The note as the app draws it: the bridge loads this session's
+				// own clew-preview:// document in a hidden web view, waits for
+				// upstream's ready probe (print-pdf.js), paginates it and offers
+				// the PDF in the share sheet — iOS's save dialog.
+				vaults.resolve(path);
+				const encoded = path.split('/').map(encodeURIComponent).join('/');
+				const paper = String(settings.get('printPaperSize') ?? 'a4').toLowerCase();
+				await bridgeCall('printPdf', {
+					url: `clew-preview://vault/${encodeURIComponent(SESSION_ID)}/${encoded}.html`,
+					name: `${base}.pdf`,
+					paperSize: PAPER_SIZES.includes(paper) ? paper : 'a4',
+					arm: ARM_SCRIPT,
+					probe: READY_PROBE,
+					lightTheme: LIGHT_THEME_SCRIPT,
+				});
+				return { shared: true };
 			}
 			if (format !== 'html') {
 				throw new Error(`${format} export needs a LaTeX toolchain and is not available on iOS`);
 			}
 			const html = await renderService.ensureRendered(path);
-			const name = path.split('/').pop().replace(/\.(md|jmd)$/i, '') + '.html';
+			const name = `${base}.html`;
 			await bridgeCall('shareText', { name, text: html });
 			return { shared: true };
 		},
