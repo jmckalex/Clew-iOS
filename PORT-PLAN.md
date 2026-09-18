@@ -440,10 +440,38 @@ the golden master than forked here:
   content. Touches inside an engaged node are the content's: the
   two-finger canvas pan/zoom and the synthetic long-press menu both stand
   off it, and the viewport drops `touch-action: none` while it lasts so an
-  embedded PDF or page can scroll and pinch at all.
+  embedded PDF or page can scroll and pinch at all. Two WebKit facts had to
+  be worked around for the rule to hold in both directions (see WebKit
+  findings): a node that is NOT engaged is covered by a pseudo-element
+  shield, because `pointer-events: none` does not stop a drag reaching an
+  iframe's scroller; and a note embed, once engaged, is asked to scroll its
+  body rather than its document, because a subframe's root scroller is
+  unreachable by touch under the canvas's transform.
 
 ### WebKit findings worth keeping
 
+- **Neither `pointer-events: none` nor an ancestor's `touch-action` crosses
+  an iframe boundary.** A canvas PDF node whose iframe computed
+  `pointer-events: none`, under a viewport at `touch-action: none`, still
+  gave a vertical finger drag to the PDF's own scroller — so the node moved
+  horizontally (nothing to scroll that way) and scrolled instead of moving
+  vertically. Both properties govern the parent document only; a subframe's
+  scrollers answer to neither. To keep a touch out of a frame, cover it in
+  the parent document (`ios.css` shields every un-engaged canvas node with
+  `::after`).
+- **A subframe's ROOT scroller is not driven by touch under a transformed
+  ancestor; an element scroller inside the frame is.** A note embedded in a
+  canvas node would not scroll at all — 2628px of content in a 476px frame,
+  `touch-action: auto` throughout, no inner scroller — while the same
+  preview document read in a tab scrolls perfectly. The difference is
+  `.canvas-world`'s scale transform. The canvas's PDF nodes scroll under
+  that same transform because EmbedPDF's scroller is an ordinary
+  `overflow: auto` element, which is what makes this the diagnosis rather
+  than a guess. Cure: stop asking the root to scroll — `html` goes
+  `overflow: hidden` so the viewport no longer inherits body's overflow, and
+  `body` becomes an ordinary scroll container, with native momentum
+  (`src/preview/embed-scroll.js`, armed by a host message so only canvas
+  embeds are affected).
 - Moved custom-scheme iframes get a stale window proxy: the document
   loads and runs but postMessage drops silently both ways. Fixed by
   rebuilding the preview iframe when the client never reports ready

@@ -63,6 +63,21 @@ origin/main = e46a5ce   the 0.11 sync — TestFlight 0.1.0 (6), on the owner's i
   inert) → double tap (engaged, 0 handles, 0 anchors, #44cf6e,
   `touch-action: auto`, content live) → tap outside (clean). Tests 392,
   build and xcodebuild clean.
+  Two bugs the owner then found on the device, both fixed on the same
+  branch, and both one WebKit fact apart: (a) a SELECTED PDF node moved
+  horizontally but scrolled vertically — `pointer-events: none` and the
+  viewport's `touch-action` do not cross an iframe boundary, so the drag
+  reached the PDF's scroller; an un-engaged node now carries an `::after`
+  shield (verified: `elementFromPoint` over the node returns the node while
+  selected, the iframe once engaged). (b) an ENGAGED note embed would not
+  scroll — a subframe's root scroller is unreachable by touch under
+  `.canvas-world`'s transform, while an element scroller inside the frame
+  (the PDF's) is fine; the embed is now asked to scroll its body
+  (`src/preview/embed-scroll.js`, armed by a host postMessage on engage;
+  verified from inside the frame: `html[hidden] body[auto]`, 2628px in a
+  690px box, overflow on body). **The scroll gesture itself is unverified**
+  — synthetic touches do not drive native scrolling, so only the
+  configuration could be checked here; it wants a finger on the iPad.
 
 Working tree clean. The sim (90DCB612…) has the fontnote build installed
 over the 0.11 one; its Demo Vault carries residue (`Fonts.md`, the two
@@ -192,7 +207,7 @@ by itself; `--force` if in doubt), `npm run build`, then `xcodebuild
 a build warning here and a refusal in CI (`ci_post_clone.sh` runs
 `stage-mptikz --require`, which on a clean clone downloads the pinned
 release). Seventeen guarded patches in scripts/build.js (five on
-clew-canvas-view.js), all anchors re-checked at 4eae005. New Swift files go into `project.pbxproj` by hand
+clew-canvas-view.js); three iOS preview modules appended to client.js, all anchors re-checked at 4eae005. New Swift files go into `project.pbxproj` by hand
 (four entries, `C1E…/C1F…` ids — `NoteFonts.swift` is `…AD`).
 `sync-upstream` regenerates `AppIcon.png` non-deterministically — `git
 checkout --` it; it excludes `.clew/history` from the seed. npm deps do

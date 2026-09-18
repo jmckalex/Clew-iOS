@@ -144,3 +144,22 @@ body.is-ios .canvas-node[data-color].is-engaged {
 body.is-ios .canvas-viewport:has(.canvas-node.is-engaged) {
 	touch-action: auto;
 }
+
+/* A node that is NOT engaged must be unreachable, and `pointer-events: none`
+   on its content is not enough to make it so. Neither that nor the
+   viewport's `touch-action: none` crosses an iframe boundary in WebKit: a
+   selected PDF node would still hand a vertical drag to the PDF's own
+   scroller, so the node moved horizontally (where the PDF has nothing to
+   scroll) and scrolled instead of moving vertically. A pseudo-element over
+   the content keeps the touch in this document, where the canvas reads it as
+   the drag it is. ::after rather than a child, so `.canvas-node > *` does not
+   switch it off with the rest of the content; and not while the node is
+   engaged (the content is meant to have it then) or being edited (the card's
+   textarea is live). */
+body.is-ios .canvas-node:not(.is-engaged):not(.is-editing)::after {
+	content: '';
+	position: absolute;
+	inset: 0;
+	z-index: 2;
+	pointer-events: auto;
+}

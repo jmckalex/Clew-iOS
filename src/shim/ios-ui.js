@@ -41,7 +41,30 @@ const NATIVE_DBLCLICK_GRACE = 60;
 let lastTap = null; // {x, y, at, node}
 let nativeDblclickAt = -Infinity;
 
-document.addEventListener('dblclick', () => { nativeDblclickAt = performance.now(); }, true);
+// A note embedded in a canvas node cannot scroll its own root scroller under
+// the canvas's scale transform, so the frame is asked to scroll its body
+// instead (src/preview/embed-scroll.js has the measurement and the reasoning).
+// Sent on engage, which is the moment before the first drag; the preview
+// client ignores it (it answers only to `clew-preview-host`), and so does
+// every frame without our module in it.
+const armEmbedScroll = (node) => {
+	const frame = node?.querySelector?.('.canvas-note-frame');
+	if (!frame) return;
+	const post = () => {
+		try {
+			frame.contentWindow?.postMessage({ source: 'clew-ios', type: 'canvas-embed' }, '*');
+		} catch { /* frame not ready; the load listener below covers it */ }
+	};
+	post();
+	if (frame.dataset.clewEmbedScroll) return;
+	frame.dataset.clewEmbedScroll = '1';
+	frame.addEventListener('load', post); // a re-rendered frame loses the style
+};
+
+document.addEventListener('dblclick', (e) => {
+	nativeDblclickAt = performance.now();
+	armEmbedScroll(e.target.closest?.('.canvas-node'));
+}, true);
 
 document.addEventListener('click', (e) => {
 	if (lastPointerType !== 'touch') return;

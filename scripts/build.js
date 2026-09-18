@@ -317,10 +317,14 @@ export async function buildAppBundle({ minify = true } = {}) {
 //    no desktop equivalent.
 //  - pdf-scene-embeds.js goes into client.js only: raw <embed> PDFs inside
 //    .canvas-embed-scene, which WebKit shows as one static page.
+//  - embed-scroll.js goes into client.js only: a note embedded in a canvas
+//    node cannot scroll its root scroller under the canvas's scale
+//    transform, so on request it scrolls its body instead.
 const readPreviewModule = (name) =>
 	fs.readFileSync(path.join(root, 'src', 'preview', name), 'utf8');
 const iosPdfTouch = readPreviewModule('pdf-touch.js');
 const iosPdfSceneEmbeds = readPreviewModule('pdf-scene-embeds.js');
+const iosEmbedScroll = readPreviewModule('embed-scroll.js');
 
 const previewClientPatches = {
 	name: 'clew-preview-client-patches',
@@ -335,7 +339,7 @@ const previewClientPatches = {
 				"post({ type: 'ready' });",
 				"post({ type: 'ready' });\n"
 				+ "window.addEventListener('pageshow', () => post({ type: 'ready' }));\n"
-				+ iosPdfTouch + iosPdfSceneEmbeds),
+				+ iosPdfTouch + iosPdfSceneEmbeds + iosEmbedScroll),
 			loader: 'js',
 		}));
 		// Both PDF surfaces build their viewer here, so one hook reaches all
