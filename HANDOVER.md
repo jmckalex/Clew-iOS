@@ -1,241 +1,137 @@
-# Handover — 2026-09-17, late (0.11 on TestFlight and device-proven; font=note ported on top, unpushed)
+# Handover — 2026-09-18 (0.11 on TestFlight and device-proven; font=note ported on top, unpushed)
 
 Session-rollover state, upstream-style: rewritten each session, kept
 short. Durable architecture and build docs live in **README.md** and
-**PORT-PLAN.md** — trust those first. `UPSTREAM-0.8/0.9/0.10-PLAN.md` and
-now `UPSTREAM-0.11-PLAN.md` are **history**: executed in full; read them
-for the reasoning behind a decision.
+**PORT-PLAN.md** — trust those first. `UPSTREAM-0.8/0.9/0.10/0.11-PLAN.md`
+are **history**: executed in full; read them for the reasoning behind a
+decision.
 
 ## 0. THE ONE RULE
 
 **Never `git push` without the owner's explicit OK.** The Xcode Cloud
 workflow builds and ships to TestFlight on every push to `main` — a push
 IS a release. Commit locally freely; the owner verifies on their iPad
-first. (Also in Claude's memory.) A docs-only commit can carry
-`[ci skip]` in its message so a later push of it does not spend a cloud
-build — this handover commit does.
+first. A docs-only commit carries `[ci skip]` in its message so a push of
+it spends no cloud build. (Also in Claude's memory.)
 
 ## 1. Where things stand
 
-**Everything is on `main` and pushed.** On 2026-09-17 the owner
-fast-forwarded `main` from 6f75e34 to `sync11-p5-verify` (e46a5ce) and
-pushed; Xcode Cloud's "Default" workflow archived e46a5ce successfully
-(the GitHub check on the commit says so; the success mail arrived) and
-the build went to App Store Connect ▸ Clew Notes ▸ TestFlight for the
-internal group. That one push released seven layers at once — the 0.8,
-0.9 and 0.10 syncs, the contract parity work, and the 0.11 sync — none
-of which had been on a device before. Every phase tip was green on its
-own (`npm test` 388, `npm run build`, xcodebuild clean):
+Three layers, from the bottom:
 
 ```
-origin/main = sync11-p5-verify = e46a5ce      (the TestFlight build 0.1.0 (6), device-proven)
- main = e46a5ce + six docs commits ([ci skip], local, unpushed)
-  └ fontnote-p1-vendor 4ee243d → fontnote-p2-fonts edcad8c → fontnote-p3-docs   ← TIP: review and merge
+origin/main = e46a5ce   the 0.11 sync — TestFlight 0.1.0 (6), on the owner's iPad, figures typeset there
+ main = e46a5ce + 6 docs commits              [ci skip], local
+  └ fontnote-p1-vendor 4ee243d → fontnote-p2-fonts edcad8c → fontnote-p3-docs db9d3f6   ← TIP
 ```
 
-**On top, unpushed — `font=note` (`fontnote-p1…p3`, the evening of
-2026-09-17):** vendor at upstream 4eae005; engines restaged from the
-mp-tikz-wasm MASTER build (the `opentype` bundle + plain-LuaTeX patch
-live on its unreleased `opentype-fonts` branch, 41d3ea4; 109 MB
-staged); `NoteFonts.swift` builds the four Avenir Next faces from
-CoreText and the scheme handler serves them under
-`__clew_assets__/notefonts/`; the face map reaches every engine worker's
-env before the first standby. Sim-verified: nine Diagrams figures incl.
-two font=note in 5.1 s cold, real text with embedded faces, Avenir Next
-on screen; install-over-old served the new bundle index (no stale
-WebKit cache). Tests 392. **CI caveat: Xcode Cloud can only fetch the
-pinned v0.2.1 release, which has no `opentype` bundle, so a TestFlight
-build made from this tip refuses font=note figures by name (honestly,
-in their own place) until mp-tikz-wasm publishes 0.3.0 and upstream
-re-pins its manifest — then `npm run sync-upstream` + a push is all.**
+- **The 0.11 sync** (2026-09-17, pushed, released): wasm figures shipped
+  in the bundle, embeds that fold/refresh, Quick Look for `|external`,
+  global plugins in Documents/Plugins, the reading-view PDF, `alert()`
+  and the iPad share sheet fixed. Build 6 had to be added to the
+  Internal group by hand (no automatic distribution on the group). The
+  owner ran it: "TikZ and LaTeX embedded compilation works perfectly".
+- **`font=note`** (the evening of 09-17, `fontnote-p1…p3`, unpushed):
+  vendor at upstream 4eae005; engines restaged from the mp-tikz-wasm
+  MASTER build (branch `opentype-fonts`, dist at 1dea1b8: the `opentype`
+  bundle with all 72 Latin Modern faces + the plain-LuaTeX luaotfload
+  patch; 3,891 files, 109 MB); `NoteFonts.swift` builds the four Avenir
+  Next faces from CoreText tables and the scheme handler serves them
+  under `__clew_assets__/notefonts/`; the face → file map reaches every
+  engine worker's env before the first standby. Simulator, installed
+  over the previous build: Diagrams' nine figures (two font=note) ok in
+  5.0 s cold; upstream's Fonts.md fixture — ```latex, ```tikz, ```tex
+  on plain LuaTeX, a hand-written fontspec document, **a 12pt article**,
+  a control — all six ok in 5.6 s, text runs with embedded faces where
+  expected, Avenir Next on screen. Tests 392, build clean, xcodebuild
+  clean. The Swift sfnt writer was proven byte-identical to desktop's
+  extractor (table for table) on this Mac.
 
-The phase branches still exist locally and can be deleted once the
-TestFlight build is judged good.
-
-- **Everything before `sync11-*`** — unchanged from the previous
-  handover; all simulator-verified.
-- **0.11 sync** (`sync11-p1…p5`, all 2026-09-17) — `vendor/` +
-  `seed-vault/` at upstream **`da5f68a` plus the working tree's two
-  owner-requested uncommitted items** (LibreOffice icon revert;
-  `\nopagenumbers` gone from ```tex), 29 commits on from e64cf06. No new
-  npm deps. Per phase:
-  1. *p1 vendor*: `figures.js` registered in the worker (Extensions +
-     a new `Environments` config key, both through the patched
-     `__jmdImport`); `shims/require-registry.js` maps
-     `require('highlight.js')` onto the bundled instance so MetaPost
-     `show=code` highlights; the shim render service gained upstream's
-     `embeddersOf` + `#restale` (embedded notes refresh); ten test
-     suites refreshed/ported. `Widgets.md` smoke residue reset to
-     da5f68a's copy; `.clew/history/` joins the seed's excluded state.
-  2. *p2 figures*: **mp-tikz-wasm ships in the app bundle** —
-     `scripts/stage-mptikz.js` fills gitignored `mptikz-assets/` from
-     `../Clew-app/mptikz-assets`, the master build, or the SHA256-pinned
-     release in the vendored manifest; `npm run build` copies it into
-     `dist/webroot/preview-assets/mptikz` (3,645 files, 84 MB);
-     SchemeHandler serves the `mptikz` root immutable;
-     `ci_post_clone.sh` stages with `--require`. Measured on a clean
-     sim install: seven figures cold in **2.3 s** (LuaLaTeX incl.), an
-     edited figure alone in 0.5 s with six SVGs kept, a reopened note
-     from IndexedDB in 251 ms; the library's in-worker sync XHR reaches
-     the scheme handler. `figures.test.js` ported (checks the staged
-     bundle's libraries).
-  3. *p3 platform*: `SHELL_OPEN_PATH` = upstream's `planOpen` over the
-     mirror, then Quick Look; `file://` only inside the open vault;
-     folders refused. **Global plugins in `Documents/Plugins`**:
-     VaultStore snapshots it beside the vault, the mirror carries it
-     under `/global-plugins`, `plugins.js` runs verbatim over both
-     roots, the worker snapshot carries a global engine surface,
-     SchemeHandler serves `__clew_plugin_file__/<sid>/<id>/…`, and the
-     reveal opens the Files app (`shareddocuments://`). `alert()` now
-     shows, in its own window on the app's scene.
-  4. *p4 print*: **Export as PDF (reading view)** — `PrintPDF.swift`
-     loads the note's preview URL in a hidden `WKWebView` behind the app
-     at the printable width, runs upstream's arm/probe scripts
-     (`src/shim/print-pdf.js`, copied verbatim), light theme,
-     `UIPrintPageRenderer` at `printPaperSize`, share sheet. Diagrams:
-     five A4 pages in 3.3 s, figures and MathJax as vectors, rendered
-     page by page with PDFKit and eyeballed.
-  5. *p5 verify*: clean-install sweep — Welcome on first launch; the
-     Links guide's folded embed toggled in the preview wrote `|open` to
-     its own line 50 (the inline-code mention on 55 untouched);
-     `|quiet`/`|bare` rendered; a Grandparent→Parent→Child chain
-     re-rendered with the child's new text; history snapshot; search;
-     TikZ fence faces in the editor, Avenir Next in both panes; the
-     Widgets guide's Web Awesome elements; `Rating::` as `<dt>`;
-     closed folders restored across a relaunch (Guide's children
-     hidden); reading position → cursor line after the flip; PDF tab
-     on `pdf-page.html`; Excalidraw tab.
-
-The iPad sim (90DCB612…) has the tip's build installed. Its Demo Vault
-carries sweep residue (`.clew/scripts/probe-*.js`, `Chain A/B/C.md`,
-`Global Plugin Note.md`, the Links guide's `|open` write-back,
-`Documents/Plugins/hello-global`, `Documents/Plugins` itself) —
-uninstall + reinstall to reseed. Working tree clean after this commit.
+Working tree clean. The sim (90DCB612…) has the fontnote build installed
+over the 0.11 one; its Demo Vault carries residue (`Fonts.md`, the two
+font=note fences in Diagrams, `Documents/Plugins/hello-global`) —
+uninstall + reinstall to reseed.
 
 ## 2. Decisions the owner should know about (all reversible)
 
-1. **The TeX engines ship in the bundle** (~70 MB more on the App Store
-   listing). Download-on-demand is the alternative, but iOS has no
-   downloader yet and the release is a `.tar.gz` Foundation can't unpack.
-2. **Global plugins = `Documents/Plugins`** (Files-visible; desktop's
-   `<userData>/plugins` would be unreachable). No rescan watches it — a
-   plugin dropped in mid-session appears at the next vault open.
-3. **"Open in default app" = Quick Look**, `file://` links inside the
-   vault only. A `.bib` (no previewer) shows Quick Look's generic card
-   with the share button — that IS the open-in rung.
-4. **Reading-view PDF goes to the share sheet**, not a file dialog.
-5. **Two pre-existing bugs fixed on the way**: `alert()` was silent, and
-   **the iPad share sheet had never presented** (popover anchored to the
-   whole web view; the HTML export was affected since the first sync).
-6. **Upstream demo bug, fixed and now committed upstream**:
-   `demo-vault/Features/Diagrams.md`'s ```tex fence used `\frac`,
-   undefined in plain TeX — now `{1 \over n^2} = {\pi^2 \over 6}` (the
-   owner's diagnosis; my one-line edit). The Clew-app session committed
-   it with the owner's `\nopagenumbers` change as **f92c7ea** on
-   2026-09-17; nothing of ours is pending in that tree.
+1. **Engines from the library's master build, not upstream's staged copy
+   or the release** (`scripts/stage-mptikz.js` order: `MPTIKZ_SRC`,
+   `~/Source/mp-tikz-wasm/dist`, `../Clew-app/mptikz-assets`, the pinned
+   release). That is where the `opentype` bundle lives tonight. **Xcode
+   Cloud can only fetch the pinned release (v0.2.1, no bundle), so a
+   TestFlight build made from this tip refuses font=note figures by
+   name** — honestly, in their own place, everything else typesets —
+   until mp-tikz-wasm publishes 0.3.0 and upstream re-pins; then the
+   next `npm run sync-upstream` + push carries it.
+2. **The note's faces come from CoreText, never from Apple's font file**
+   (PORT-PLAN Decisions). One sfnt per face, cached in Application
+   Support keyed on the iOS version, built on first use.
+3. **No engine-cache clearing on iOS** (desktop needed `asset-stamp.js`):
+   measured twice — installing a build with a changed bundle over the old
+   one served the new `bundles/index.json`. Revisit only if a restaged
+   engine ever misbehaves after an app update; the fix would be
+   `WKWebsiteDataStore` removal on a bundle-identity change.
+4. `otf-fonts` (now latinmodern-math alone, 0.7 MB) rides along;
+   nothing to prune any more.
+5. The 0.11 decisions stand: engines in the bundle (~+70 MB on the
+   listing); Documents/Plugins; Quick Look as "default app"; the
+   reading-view PDF to the share sheet, Avenir Next subset and all (as
+   the desktop's does — a PDF embedding the glyphs it uses is ordinary).
+6. **Version numbering** is the owner's call (three schemes: upstream
+   tags v0.7–v0.9, the port's sync labels "0.10"/"0.11" which will
+   collide with a real v0.10.0, the app's `MARKETING_VERSION` 0.1.0 with
+   Xcode Cloud's build counter). Future rounds could be named by date.
 
-## 3. Upstream state
+## 3. Upstream state (2026-09-18 morning)
 
-`../Clew-app` main has moved PAST what we vendored: da5f68a → f92c7ea
-(the demo fix + `\nopagenumbers`), 3339969 (**`font=note`**, §4.4b),
-4897ad3 (screenshot kit), b14671a (`main/asset-stamp.js`, engine-cache
-stamp) — tree clean, nothing pushed, per the Clew-app session on the
-evening of 2026-09-17. We vendored da5f68a plus the working tree's two
-owner-requested items (minus the Widgets.md residue); the next sync
-starts from f92c7ea's successors. `../Clew-docs` main = 5372a7c (the
-app agent's illustration pass ca62354, `diagrams.html#note-font` +
-`publishing.html#figures` 2d60de1, handover 5372a7c, on top of my
-cef2e0f/6c97f5b); still not deployed. `~/Source/mp-tikz-wasm` at
-`main@ff8a98b` is what upstream staged and what we copied; the
-`opentype-fonts` branch is unreleased.
+- `../Clew-app` main = **0a4aa87**, clean. We vendor **4eae005**; the
+  three commits since are `d393b78` (extractFace's `head` checksum per
+  spec — the thing the iPad comparison found; plus the 12pt fixture),
+  `1eb25be` (fonts scenario timings), `0a4aa87` (handover). Nothing of
+  ours pending there. Next sync: trivial.
+- `../Clew-docs` main = **bc0a5d9**, clean: the iPad pass (6de0df8),
+  the font=note "On iPad" callout (7e7ca70), the app agent's
+  illustration + measurement passes. **Not deployed — the domains still
+  point at GoDaddy parking**; `make sync` waits on the DNS change and
+  the provision/tls sequence in that repo's handover. Landing page says
+  "in beta on TestFlight" with a mailto until a public link exists.
+- `~/Source/mp-tikz-wasm` on branch `opentype-fonts` at 99aadbe, dist
+  built from it; **no release past v0.2.1**. A 0.3.0 release is the
+  owner's call and the only thing between this tip and TestFlight
+  carrying font=note.
 
 ## 4. Open items
 
-1. **Device verification of the TestFlight build** (0.1.0 (6)). **The
-   owner ran it on the iPad on 2026-09-17: TikZ and LaTeX figures typeset
-   on the device — "works perfectly".** The build had to be added to the
-   Internal group by hand (no automatic distribution on the group; see
-   memory). Still unchecked on hardware, everything the earlier
-   syncs never had on a device: Pencil finger-pan feel, Excalidraw with
-   Pencil, per-scene Pdfium memory, hardware-keyboard chords incl.
-   Alt-Q fill-paragraph, Quick Look + QL thumbnail timing, the history
-   modal, Web Awesome widgets on touch, the reading-view PDF's share
-   sheet on a real screen, Documents/Plugins in the Files app. A bad
-   result is fixed forward on a new branch off `main`; the old chain
-   tips remain as fallbacks.
-1b. **Version numbering, the owner's call.** Three schemes coexist:
-   upstream's tags (v0.7.0–v0.9.0; `package.json` still 0.9.0); the
-   port's sync labels, which continued the count past the last tag
-   ("0.10", "0.11" name iOS sync rounds, not upstream releases, and
-   will collide with a real v0.10.0 tag one day — future rounds could
-   be named by date or upstream commit, e.g. `UPSTREAM-2026-09-PLAN.md`
-   / `sync2609-p1-…`; the past ones are history); and the app's own
-   `MARKETING_VERSION` 0.1.0 (`CURRENT_PROJECT_VERSION` 1, overridden by
-   Xcode Cloud's auto-incremented build number) — bump it in the project
-   before a push if the version string should say what the build
-   contains. 0.9 → 0.10 is ordinary semver; the components are integers.
-2. **Manual updated and COMMITTED in `../Clew-docs`** (2026-09-17,
-   6de0df8 — the owner's own `\nopagenumbers` hunk went in first as
-   47634d7; not yet deployed with `make sync`; the desktop-side docs for
-   the rest of the 0.11 features are the app agent's, per the owner): "On
-   iPad" callouts on `diagrams.html` (engines bundled, no LaTeX export),
-   `plugins.html` (an iPad row in the global-folder table, the Files-app
-   callout, the summary table), `links-and-embeds.html` (Quick Look,
-   vault-only `file://`, plus a tap-to-fold sentence), `export.html`
-   (two of four commands, share sheet instead of a save dialog), each
-   with an iPad screenshot in `site/manual/images/ipad-*.jpg` (five,
-   1000 px wide, from the simulator). `make check-links` clean. The
-   previous handover's five caveats were already in the manual (history,
-   first launch, office pages carry On iPad text).
-3. **Upstream notes**: Web Awesome logs `[wa-color-picker] size="small"
-   is deprecated. Use size="s"` on the Widgets guide (Meta Bind's
-   `size="small"`, c579d11); `print-pdf.js`'s arm/probe scripts would be
-   importable here if exported from an electron-free module (they are
-   copied verbatim in `src/shim/print-pdf.js` — keep in step).
-4. Probe subtlety, not a bug: a plugin preview script's `<body>`
-   attribute set at load is stripped by the first morph (body attrs are
-   synced from the incoming HTML); an attribute set later survives. The
-   global plugin's sibling fetch proved the route.
-4b. **font=note is ported** (§1). What remains is not code: the
-   release. mp-tikz-wasm's `opentype-fonts` branch (41d3ea4) is
-   unreleased; when v0.3.0 exists and upstream re-pins
-   `shared/mptikz-manifest.json`, the vendored manifest follows on the
-   next sync and CI builds carry the bundle. Until then the local build
-   has it (staged from the master dist) and the TestFlight build does
-   not. Also noted: the `otf-fonts` bundle (7 MB) rides along but only
-   unicode-math needs it — a prune candidate in `stage-mptikz.js`
-   copyTree if size matters. Desktop's `asset-stamp.js` cache clearing
-   is NOT needed here: measured, WebKit served the restaged bundle
-   index on an install-over-old.
-   **The 12pt gap, found and closed the same night**: a complete
-   document with `\documentclass[12pt]{article}` + fontspec failed on
-   the first opentype bundle (only Latin Modern's 10pt faces; `\small`,
-   `\large`, `\textsc`, `\texttt` reach the others the same way).
-   mp-tikz-wasm moved all 72 LM faces into `opentype` (branch head
-   1dea1b8, fix 57bbd6d; 245 files, `otf-fonts` down to latinmodern-math
-   alone) and the engines here were RESTAGED from that dist (still 3,891
-   files, 109 MB — the faces moved between bundles). Verified on the sim
-   with upstream's `smoke/make-figures-vault.mjs` Fonts.md, installed
-   over the previous build: all six figures ok in 5.6 s cold — ```latex
-   (16 text runs, 7 faces), ```tikz (3, 2), ```tex on plain LuaTeX (5,
-   3 — the luaotfload patch), the hand-written fontspec document
-   (outlines, as written), **the 12pt document (3, 2, `size12.clo`
-   fetched)**, and the control (no text, no faces). Diagrams' nine
-   figures still 5.0 s cold: luaotfload's name-database scan (72 faces,
-   7.2 MB through the scheme handler on the first OpenType figure) does
-   not show at this scale. Upstream also fixed `extractFace`'s `head`
-   checksum (the commit after 4eae005) — cosmetic; re-vendor at the
-   next sync.
-5. Possible follow-ups, unchanged: canvas toolbar undo/redo; Pencil
+1. **Merge + push, the owner's call**: fast-forward `main` to
+   `fontnote-p3-docs`. Pushing now releases a build whose font=note is
+   refused by name (§2.1) but is otherwise the 0.11 build plus the
+   4eae005 vendor drop (Widgets.md residue gone from the seed, the
+   demo's two font=note fences); waiting for the 0.3.0 pin gives one
+   release with the fonts. Either is fine; the docs commits on `main`
+   are `[ci skip]` either way.
+2. **Device check of font=note** once a build carries the bundle: the
+   Diagrams note's last two figures, and a 12pt document. Memory on the
+   iPad is the unmeasured number (luaotfload scans 72 faces on the first
+   OpenType figure, ~7 MB through the scheme handler).
+3. **TestFlight group**: turn on the Internal group's automatic
+   distribution, or add each build by hand (memory:
+   clew-ios-release-pipeline). External testers need an external group,
+   Test Information incl. a privacy-policy URL, Beta App Review once,
+   then the public link — and the landing page sentence to replace.
+4. Manual: deploy is gated on DNS (§3). The two desktop sentences the
+   docs handover listed (reading position → editor; Avenir Next in
+   theming) were the app agent's; check `../Clew-docs/HANDOVER.md`.
+5. Follow-ups seen, not requested: canvas toolbar undo/redo; Pencil
    long-press → contextmenu; "New drawing" in the explorer root menu; a
-   THIRD-PARTY-NOTICES surface (now also mp-tikz-wasm's TeX bundles).
+   THIRD-PARTY-NOTICES surface (now also mp-tikz-wasm's TeX bundles and
+   the Latin Modern faces); a prebuilt luaotfload name database in the
+   bundle (engine side; the scan is noise on the sim).
 6. Deferred, unchanged: `\citefile`; native CJK font download; Xiaolai
    prune; ```kanban touch drag; "Move to folder…"; empty folders in the
    explorer; iCloud conflict surfacing; stale recents pruning; ZetaOffice.
 
 ## 5. Verification kit (works, use it)
 
-- `npm test` — 388 green. `node tools/render-note.mjs <vault> <note>`
+- `npm test` — 392 green. `node tools/render-note.mjs <vault> <note>`
   renders through the worker (figures come out as `<tikz-diagram>` /
   `<metapost-diagram>` elements holding source; the browser typesets).
 - Smoke: `xcrun simctl launch <sim> org.jmckalex.clew.ios -ClewSmokeJS
@@ -243,49 +139,43 @@ cef2e0f/6c97f5b); still not deployed. `~/Source/mp-tikz-wasm` at
   <sim> log show --start "<date>" --predicate 'eventMessage CONTAINS
   "CLEWJS"'`. FUNCTION BODY; `return` an async IIFE; **no backslashes**;
   `git commit -F file`.
-- **Inside a preview document**: drop a vault script at
-  `<vault>/.clew/scripts/probe.js` (injected into every preview; no
-  manifest) that `console.warn('PROBE …')`s — the DEBUG console
-  forwarder logs every frame. Re-arm on `document.addEventListener(
-  'clew:render', …)` for post-morph state. Cross-origin iframes stay
-  unreachable from the app page.
-- Screenshots: `xcrun simctl io <sim> screenshot x.png`. A PDF from the
-  share sheet lands in the app container's `tmp/<name>.pdf`; render its
-  pages with a 20-line PDFKit script under `xcrun swift` (page count,
-  MediaBox, text per page) — `qlmanage -t` only shows page 1.
+- **Inside a preview document**: a vault script at
+  `<vault>/.clew/scripts/probe.js` (injected into every preview, no
+  manifest) that `console.warn('PROBE …')`s; re-arm on
+  `document.addEventListener('clew:render', …)`. For figures: per
+  element `data-opentype`, `svg text` count, `@font-face` count in the
+  SVG's `<style>` — upstream's smoke README assertions. Cross-origin
+  iframes stay unreachable from the app page.
+- Screenshots: `xcrun simctl io <sim> screenshot x.png`. A share-sheet
+  PDF lands in the container's `tmp/`; render pages with a 20-line
+  PDFKit script under `xcrun swift`. `sips` crops from the CENTRE.
+- Fonts: the device's faces land in `<container>/Library/Application
+  Support/notefonts/<iOS>/`. The Swift sfnt writer's pure functions
+  compile on the Mac (`xcrun swiftc`); `cmp` the result against
+  `../Clew-app/src/main/note-fonts.js#extractFace` on the system .ttc.
+  Upstream's `smoke/make-figures-vault.mjs <dir>` writes Fonts.md.
+- Upstream's `smoke/make-global-plugin.mjs <dir>` builds a three-surface
+  plugin fixture for `Documents/Plugins/`.
 - App-page surface: `__clew` = workspaceStore/vaultStore/editorPool/
   settingsStore/ipc/actions/registry/officeDock; `__clewNative` =
-  renderNote/renderFragment/externalDiff/flush/sessionId. Same-path tabs
-  are REUSED and `openWikilink` navigates the active tab — count tabs
-  accordingly. `ws.setTabMode(id, 'source')` flips a tab.
-- On-disk checks: `xcrun simctl get_app_container <sim> <bundle> data`
-  (rotates on every install); `/usr/bin/stat -f "%Sm %N"`.
-- Upstream's `smoke/make-global-plugin.mjs <dir>` builds a three-surface
-  plugin fixture; copy `userdata/plugins/hello-global` into the sim's
-  `Documents/Plugins/` and add it to the vault's `plugins` array.
-- Fonts: a vault-script probe per figure — `data-opentype`, `svg text`
-  count, `@font-face` count in the SVG's `<style>` — is the
-  font=note assertion (upstream's smoke README: text>0 + embedded faces
-  on marked figures, text=0 on controls). The Swift sfnt writer can be
-  checked on the Mac: compile its pure functions with `xcrun swiftc`,
-  build `AvenirNext-Regular`, and `cmp` against
-  `../Clew-app/src/main/note-fonts.js#extractFace` on the system .ttc —
-  identical bar `head`'s checksum field. The device's faces land in
-  `<container>/Library/Application Support/notefonts/<iOS>/`.
+  renderNote/renderFragment/externalDiff/flush/sessionId. Same-path
+  tabs are REUSED and `openWikilink` navigates the active tab.
+- A `python3 -m http.server 8000 --directory site` for the manual may
+  still be running from 09-17: `kill $(lsof -t -iTCP:8000)`.
 
 ## 6. Build
 
 `export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` first.
-`npm run sync-mptikz` (prefers `~/Source/mp-tikz-wasm/dist`, then
-upstream's staged tree, then the pinned release; `MPTIKZ_SRC` overrides;
-`--force` restages; re-run after the library rebuilds), `npm run
-build`, then `xcodebuild -project ios/Clew.xcodeproj -scheme Clew
--destination 'id=<sim>' -derivedDataPath build/DerivedData build`. A
-missing `mptikz-assets/` is a build warning here and a refusal in CI.
-Twelve guarded patches in scripts/build.js, all fourteen anchors
-re-checked against da5f68a (none moved). New Swift files must be added to
-`project.pbxproj` by hand (four entries, `C1E…/C1F…` ids —
-`PrintPDF.swift` is the latest). `sync-upstream` regenerates
-`AppIcon.png` non-deterministically — `git checkout --` it; it also
-excludes `.clew/history` from the seed now. npm deps do NOT auto-merge
-(none changed this time).
+`npm run sync-mptikz` (source order in §2.1; the stamp tracks the
+engines' and `bundles/index.json`'s mtimes so a library rebuild restages
+by itself; `--force` if in doubt), `npm run build`, then `xcodebuild
+-project ios/Clew.xcodeproj -scheme Clew -destination 'id=<sim>'
+-derivedDataPath build/DerivedData build`. A missing `mptikz-assets/` is
+a build warning here and a refusal in CI (`ci_post_clone.sh` runs
+`stage-mptikz --require`, which on a clean clone downloads the pinned
+release). Twelve guarded patches in scripts/build.js, all anchors
+re-checked at 4eae005. New Swift files go into `project.pbxproj` by hand
+(four entries, `C1E…/C1F…` ids — `NoteFonts.swift` is `…AD`).
+`sync-upstream` regenerates `AppIcon.png` non-deterministically — `git
+checkout --` it; it excludes `.clew/history` from the seed. npm deps do
+NOT auto-merge (none changed since 0.10).
