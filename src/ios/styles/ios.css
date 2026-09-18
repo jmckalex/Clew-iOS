@@ -106,3 +106,41 @@ body.is-ios clew-app {
 	body.is-ios .sidebar.sidebar-left { left: 0; }
 	body.is-ios .sidebar.sidebar-right { right: 0; }
 }
+
+/* ---- canvas: the engaged ("live") node ---- */
+/* A canvas node's content is inert until the node is engaged (double tap);
+   from then until a tap outside, every touch inside it is the content's.
+   Upstream rings an engaged node in the SAME accent that marks selection,
+   which on a touch screen leaves no way to tell an armed node from a merely
+   selected one — and that difference decides where the next tap goes. Give
+   it its own hue and a solid ring; the resize handles come off in
+   scripts/build.js, since a node you are typing or scrolling in is not a
+   node you are sizing. */
+body.is-ios {
+	--clew-canvas-engaged: #1f8a4c;
+}
+body.is-ios[data-theme='dark'] {
+	--clew-canvas-engaged: #44cf6e;
+}
+body.is-ios .canvas-node.is-engaged,
+body.is-ios .canvas-node[data-color].is-engaged {
+	border-color: var(--clew-canvas-engaged);
+	/* Colour alone cannot carry this: a node the reader has painted green
+	   (data-color="4" is this very green) would look the same engaged as
+	   selected. The inset hairline adds a second, colourless line inside the
+	   border — a doubled frame no selected node ever has. */
+	box-shadow:
+		inset 0 0 0 2px var(--clew-canvas-node-bg),
+		0 0 0 3px color-mix(in srgb, var(--clew-canvas-engaged) 60%, transparent),
+		0 2px 14px var(--clew-shadow);
+}
+
+/* The viewport sets `touch-action: none` so the canvas owns every gesture.
+   touch-action intersects down the ancestor chain, so a descendant cannot
+   win it back: while a node is engaged the viewport has to relax, or the
+   embedded PDF or web page can never scroll or pinch. Gestures outside the
+   node are unaffected in practice — the pointerdown that starts them
+   disengages first. */
+body.is-ios .canvas-viewport:has(.canvas-node.is-engaged) {
+	touch-action: auto;
+}

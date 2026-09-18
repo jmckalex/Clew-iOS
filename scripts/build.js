@@ -213,15 +213,17 @@ const rendererPatches = {
 				"external.textContent = engine.soffice ? 'Open in LibreOffice' : 'Open in Quick Look';"),
 			loader: 'js',
 		}));
-		// A canvas office node's context menu offers a LIVE LibreOffice per
-		// node; with no engine that is a blank frame. Drop the choice (the
-		// node stays a Quick Look thumbnail; a `live` flag set on desktop is
-		// simply not honoured here).
-		builder.onLoad({ filter: /vendor\/clew\/renderer\/components\/views\/clew-canvas-view\.js$/ }, (args) => ({
-			contents: patched('clew-canvas-view.js', fs.readFileSync(args.path, 'utf8'),
+		// Three transforms on the canvas view, applied in order.
+		builder.onLoad({ filter: /vendor\/clew\/renderer\/components\/views\/clew-canvas-view\.js$/ }, (args) => {
+			let src = fs.readFileSync(args.path, 'utf8');
+			// 1. A canvas office node's context menu offers a LIVE LibreOffice
+			// per node; with no engine that is a blank frame. Drop the choice
+			// (the node stays a Quick Look thumbnail; a `live` flag set on
+			// desktop is simply not honoured here).
+			src = patched('clew-canvas-view.js', src,
 				"\t\tif (node.type === 'file' && fileKind(node.file ?? '') === 'office') {\n"
 				+ "\t\t\t// Thumbnail vs live editor. Live boots a LibreOffice PER NODE\n"
-				+ "\t\t\t// (~1.6 GB) — an explicit, per-node opt-in, stored under the clew\n"
+				+ "\t\t\t// (~1.6 GB) \u2014 an explicit, per-node opt-in, stored under the clew\n"
 				+ "\t\t\t// key so Obsidian ignores it.\n"
 				+ "\t\t\titems.push(\n"
 				+ "\t\t\t\t{ separator: true },\n"
@@ -231,9 +233,31 @@ const rendererPatches = {
 				+ "\t\t\t\t], onPick: (v) => this.#applyNodeStyle({ office: v }) },\n"
 				+ "\t\t\t);\n"
 				+ "\t\t}\n",
-				''),
-			loader: 'js',
-		}));
+				'');
+			// 2. An engaged node's content owns its pointer events, so the
+			// resize handles drawn over its corners are a lie: a drag there
+			// goes to the content, not to the geometry. On touch that matters
+			// more than on desktop \u2014 engaging is a double tap (src/shim/
+			// ios-ui.js) and the handles vanishing is half of how you can see
+			// it happened, the border colour (ios.css) being the other half.
+			src = patched('clew-canvas-view.js', src,
+				"if (soloNode && this.#tool === 'select' && !this.#drag) handleRect(model.nodeRect(soloNode));",
+				"if (soloNode && this.#tool === 'select' && !this.#drag && this.#engagedId !== soloNode.id) handleRect(model.nodeRect(soloNode));");
+			// 3. \u2026 which only shows if the overlay is redrawn when the engaged
+			// node changes. #engage/#disengage just toggle a class today.
+			src = patched('clew-canvas-view.js', src,
+				"\t\tthis.#nodeEls.get(id)?.classList.add('is-engaged');\n",
+				"\t\tthis.#nodeEls.get(id)?.classList.add('is-engaged');\n\t\tthis.#syncOverlay();\n");
+			src = patched('clew-canvas-view.js', src,
+				"\t\tthis.#engagedId = null;\n",
+				"\t\tthis.#engagedId = null;\n\t\tthis.#syncOverlay();\n");
+			// 4. Same argument for the connection anchors: the side dots start
+			// an edge drag, which an engaged node's content swallows.
+			src = patched('clew-canvas-view.js', src,
+				"\t\tif (anchorTarget) {\n",
+				"\t\tif (anchorTarget && this.#engagedId !== anchorTarget.id) {\n");
+			return { contents: src, loader: 'js' };
+		});
 		// WebKit + custom schemes: when the workspace reconciler moves a
 		// freshly inserted preview iframe, the reinserted frame's window
 		// proxy goes stale — its document loads and runs, but postMessage is

@@ -15,20 +15,58 @@ import * as actions from '../../vendor/clew/renderer/commands/actions.js';
 // implementation of the same thing and is gone; the `quickLook` bridge itself
 // stays available for anything that wants the system reader.
 
-// ---- canvas media engages on a single tap ---------------------------------
-// Canvas node content is inert until the node is "engaged" (double-click on
-// desktop) — so a tap on a video's play button hit an inert overlay. On
-// touch, a single tap on a node holding playable/interactive content
-// engages it via the canvas's own dblclick path; the next tap reaches the
-// controls. Non-media nodes keep desktop semantics.
+// ---- canvas nodes engage on a double tap ----------------------------------
+// A canvas node's content is inert until the node is "engaged" (canvas.css:
+// `.canvas-node > * { pointer-events: none }`); upstream engages on dblclick
+// and disengages on a pointerdown outside.
+//
+// iOS used to engage a node holding <video>/<iframe>/<embed> on a SINGLE
+// tap. That armed exactly the nodes whose content is worth touching — video,
+// web pages, PDFs — on the very tap that selected them, and an armed node
+// looked no different from a selected one, so the NEXT tap went somewhere
+// the reader had not predicted. One gesture for every node type is easier
+// to hold in the head, and a double tap cannot be mistaken for the tap that
+// begins a drag. The armed state is legible now: its own border colour
+// (ios.css) and no resize handles (scripts/build.js).
+//
+// WebKit does synthesize dblclick from a double tap, but the viewport's
+// `touch-action: none` and the two-finger layer below both sit in that
+// path, so the gesture is recognised here too — and dispatched only when no
+// native dblclick arrived first, since a second one would open a .canvas
+// node in two tabs.
+const DOUBLE_TAP_MS = 350;
+const DOUBLE_TAP_SLOP = 24;
+const NATIVE_DBLCLICK_GRACE = 60;
+
+let lastTap = null; // {x, y, at, node}
+let nativeDblclickAt = -Infinity;
+
+document.addEventListener('dblclick', () => { nativeDblclickAt = performance.now(); }, true);
+
 document.addEventListener('click', (e) => {
 	if (lastPointerType !== 'touch') return;
 	const node = e.target.closest?.('.canvas-node');
-	if (!node || node.classList.contains('is-engaged')) return;
-	if (!node.querySelector('video, audio, iframe, embed')) return;
-	node.dispatchEvent(new MouseEvent('dblclick', {
-		bubbles: true, cancelable: true, clientX: e.clientX, clientY: e.clientY,
-	}));
+	// An engaged node's taps are its content's; a card being edited owns its
+	// textarea. Neither starts a fresh double tap.
+	if (!node || node.classList.contains('is-engaged') || node.classList.contains('is-editing')) {
+		lastTap = null;
+		return;
+	}
+	const at = performance.now();
+	const first = lastTap;
+	lastTap = { x: e.clientX, y: e.clientY, at, node };
+	if (!first || first.node !== node) return;
+	if (at - first.at > DOUBLE_TAP_MS) return;
+	if (Math.hypot(e.clientX - first.x, e.clientY - first.y) > DOUBLE_TAP_SLOP) return;
+	lastTap = null;
+	const { clientX, clientY } = e;
+	// WebKit's own dblclick, if it comes at all, lands just after this click.
+	setTimeout(() => {
+		if (performance.now() - nativeDblclickAt < NATIVE_DBLCLICK_GRACE) return;
+		node.dispatchEvent(new MouseEvent('dblclick', {
+			bubbles: true, cancelable: true, clientX, clientY,
+		}));
+	}, NATIVE_DBLCLICK_GRACE);
 }, true);
 
 // ---- long-press → contextmenu ---------------------------------------------
@@ -43,11 +81,16 @@ let suppressNextClick = false;
 
 document.addEventListener('pointerdown', (e) => {
 	if (e.pointerType !== 'touch') return;
+	// Inside an engaged node the press belongs to the content — a live web
+	// page or PDF has its own press-and-hold.
+	if (e.target.closest?.('.canvas-node.is-engaged')) return;
 	press = {
 		x: e.clientX, y: e.clientY, target: e.target,
 		timer: setTimeout(() => {
 			const { x, y, target } = press ?? {};
 			press = null;
+			lastTap = null; // a long press never opens a double tap
+
 			target?.dispatchEvent(new MouseEvent('contextmenu', {
 				bubbles: true, cancelable: true, clientX: x, clientY: y,
 			}));
@@ -180,6 +223,10 @@ document.addEventListener('pointerdown', (e) => {
 	if (e.pointerType !== 'touch') return;
 	const viewport = viewportOf(e.target);
 	if (!viewport) return;
+	// Touches that land inside an engaged node are the content's: two fingers
+	// scroll and pinch the embedded page, they do not pan the canvas. They are
+	// not recorded, so they cannot combine with a finger on the canvas either.
+	if (e.target.closest?.('.canvas-node.is-engaged')) return;
 	canvasTouches.set(e.pointerId, { x: e.clientX, y: e.clientY });
 	if (canvasTouches.size === 1 && fingerShouldPan(viewport)) {
 		// Swallow before the canvas can start a stroke; moves become pans.

@@ -16,12 +16,13 @@ it spends no cloud build. (Also in Claude's memory.)
 
 ## 1. Where things stand
 
-Three layers, from the bottom:
+Four layers, from the bottom:
 
 ```
 origin/main = e46a5ce   the 0.11 sync — TestFlight 0.1.0 (6), on the owner's iPad, figures typeset there
  main = e46a5ce + 6 docs commits              [ci skip], local
-  └ fontnote-p1-vendor 4ee243d → fontnote-p2-fonts edcad8c → fontnote-p3-docs db9d3f6   ← TIP
+  └ fontnote-p1-vendor 4ee243d → fontnote-p2-fonts edcad8c → fontnote-p3-docs 2ac5c14
+     └ canvas-engage-touch   ← TIP   the canvas's engage convention on touch
 ```
 
 - **The 0.11 sync** (2026-09-17, pushed, released): wasm figures shipped
@@ -45,6 +46,23 @@ origin/main = e46a5ce   the 0.11 sync — TestFlight 0.1.0 (6), on the owner's i
   expected, Avenir Next on screen. Tests 392, build clean, xcodebuild
   clean. The Swift sfnt writer was proven byte-identical to desktop's
   extractor (table for table) on this Mac.
+- **The canvas's engage convention on touch** (`canvas-engage-touch`,
+  unpushed, on top of the chain): the owner reported not knowing when a
+  tap would reach a video, a web page or a PDF on a canvas. Cause: the
+  port engaged those nodes — and only those — on a SINGLE tap
+  (`ios-ui.js`), while every other node wanted the desktop's double
+  click, and an engaged node was drawn in the same accent as a selected
+  one. Now one tap selects, a double tap engages, a tap outside returns
+  to the canvas, for every node type; engaged has its own border colour
+  plus an inset hairline and loses its resize handles and connection
+  anchors; and touches inside an engaged node reach its content (the
+  two-finger pan/zoom and the long-press menu stand off, the viewport
+  drops `touch-action: none`). PORT-PLAN carries the decision and the
+  upstream candidate. Simulator, all four states asserted through the
+  real UI: idle → tap (selected, 8 handles, 4 anchors, accent, content
+  inert) → double tap (engaged, 0 handles, 0 anchors, #44cf6e,
+  `touch-action: auto`, content live) → tap outside (clean). Tests 392,
+  build and xcodebuild clean.
 
 Working tree clean. The sim (90DCB612…) has the fontnote build installed
 over the 0.11 one; its Demo Vault carries residue (`Fonts.md`, the two
@@ -102,7 +120,7 @@ uninstall + reinstall to reseed.
 ## 4. Open items
 
 1. **Merge + push, the owner's call**: fast-forward `main` to
-   `fontnote-p3-docs`. Pushing now releases a build whose font=note is
+   `canvas-engage-touch` (which carries the fontnote chain under it). Pushing now releases a build whose font=note is
    refused by name (§2.1) but is otherwise the 0.11 build plus the
    4eae005 vendor drop (Widgets.md residue gone from the seed, the
    demo's two font=note fences); waiting for the 0.3.0 pin gives one
@@ -173,8 +191,8 @@ by itself; `--force` if in doubt), `npm run build`, then `xcodebuild
 -derivedDataPath build/DerivedData build`. A missing `mptikz-assets/` is
 a build warning here and a refusal in CI (`ci_post_clone.sh` runs
 `stage-mptikz --require`, which on a clean clone downloads the pinned
-release). Twelve guarded patches in scripts/build.js, all anchors
-re-checked at 4eae005. New Swift files go into `project.pbxproj` by hand
+release). Seventeen guarded patches in scripts/build.js (five on
+clew-canvas-view.js), all anchors re-checked at 4eae005. New Swift files go into `project.pbxproj` by hand
 (four entries, `C1E…/C1F…` ids — `NoteFonts.swift` is `…AD`).
 `sync-upstream` regenerates `AppIcon.png` non-deterministically — `git
 checkout --` it; it excludes `.clew/history` from the seed. npm deps do

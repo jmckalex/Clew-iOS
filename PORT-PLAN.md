@@ -299,6 +299,14 @@ the golden master than forked here:
   pointer has been seen in a document, fingers pan the PDF and only the
   Pencil draws. It self-arms on a `pen` event, so a desktop that never sees
   one is untouched — which is exactly why it is safe to upstream.
+- **An engaged canvas node should not draw resize handles or connection
+  anchors.** Both are affordances for geometry, and an engaged node's
+  content owns its pointer events, so a drag on either goes to the
+  content, not to the node — on desktop as much as on iOS. Currently a
+  `clew-canvas-view` build patch (the draw gates take `#engagedId` into
+  account, and `#engage`/`#disengage` call `#syncOverlay` so the overlay
+  redraws when it changes). Upstream would also want the engaged style to
+  be distinguishable from the selected one, which it is not today.
 - **Publish viewer handles from `pdf-core.js`.** `pdf-embed.js` exposes
   `window.__clewPdfViewers`, but `pdf-page.js` keeps its handle private, so
   anything wanting all three surfaces (the touch layer) needs a build patch.
@@ -413,6 +421,26 @@ the golden master than forked here:
   channels answer "not available", the settings section is patched out, and
   `pdffonts/fallback.json` answers `null`. A native URLSession downloader is
   a possible later feature.
+- **A canvas node engages on a double tap, and says so.** Upstream keeps
+  node content inert (`pointer-events: none`) until the node is *engaged*
+  by a double-click, and the port used to engage a node holding
+  `<video>`/`<iframe>`/`<embed>` on a SINGLE tap so a video's play button
+  could be reached. That armed exactly the interesting nodes — video, web
+  pages, PDFs — on the tap that selected them, while every other node
+  still wanted two, and an armed node was drawn in the same accent as a
+  selected one. Which of your taps reached the content was therefore
+  unpredictable, which is what the owner reported. Now: one tap selects
+  (drag to move, handles to resize), a double tap engages, a tap outside
+  returns to the canvas — every node type alike, the gesture upstream
+  already uses, and one that cannot be confused with the tap that begins a
+  drag. The engaged state is legible: its own border colour plus an inset
+  hairline (`ios.css` — the hairline because a node the reader painted
+  green would otherwise look identical engaged and selected), and no
+  resize handles or connection anchors, since a drag on either goes to the
+  content. Touches inside an engaged node are the content's: the
+  two-finger canvas pan/zoom and the synthetic long-press menu both stand
+  off it, and the viewport drops `touch-action: none` while it lasts so an
+  embedded PDF or page can scroll and pinch at all.
 
 ### WebKit findings worth keeping
 
