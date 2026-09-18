@@ -163,3 +163,22 @@ body.is-ios .canvas-node:not(.is-engaged):not(.is-editing)::after {
 	z-index: 2;
 	pointer-events: auto;
 }
+
+/* An embed's title bar is an absolutely-positioned strip across the top of
+   the node, faded in while the node is selected — and an engaged node is
+   always selected, so on the one kind of content that has its own chrome it
+   lands squarely on it: EmbedPDF's toolbar (menu, page thumbnails, zoom)
+   sits under the filename. Put the title in the flex flow instead, first in
+   the column since it is appended last, so the frame starts below it and
+   nothing is covered. Only for embeds that hold a frame: a PDF, a note, a
+   drawing, an office document or a web page each bring their own controls,
+   while a video, a portal or an office thumbnail has none to lose and keeps
+   the overlay (an image is given no title bar at all upstream). The
+   band is always visible here rather than faded, so the frame's height does
+   not change under it when the node is selected. */
+body.is-ios .canvas-embed:has(> iframe) > .canvas-node-title {
+	position: static;
+	order: -1;
+	flex: 0 0 auto;
+	opacity: 1;
+}

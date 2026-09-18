@@ -78,6 +78,12 @@ origin/main = e46a5ce   the 0.11 sync — TestFlight 0.1.0 (6), on the owner's i
   690px box, overflow on body). **The scroll gesture itself is unverified**
   — synthetic touches do not drive native scrolling, so only the
   configuration could be checked here; it wants a finger on the iPad.
+  Both confirmed fixed by the owner on the device. (c) then: the embed
+  title bar overlapped EmbedPDF's toolbar, because it is an absolute strip
+  shown while selected and an engaged node is always selected. For framed
+  embeds it is now a flex row above the frame (`order: -1`, always
+  visible); measured on the PDF, note and web nodes, `titleBottom ==
+  frameTop`, no overlap.
 
 Working tree clean. The sim (90DCB612…) has the fontnote build installed
 over the 0.11 one; its Demo Vault carries residue (`Fonts.md`, the two

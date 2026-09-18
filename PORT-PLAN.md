@@ -446,7 +446,12 @@ the golden master than forked here:
   shield, because `pointer-events: none` does not stop a drag reaching an
   iframe's scroller; and a note embed, once engaged, is asked to scroll its
   body rather than its document, because a subframe's root scroller is
-  unreachable by touch under the canvas's transform.
+  unreachable by touch under the canvas's transform. A third follow-up is
+  pure layout: an embed's title bar is an absolute strip across the top of
+  the node, shown while the node is selected — which an engaged node always
+  is — so it sat on EmbedPDF's toolbar. For embeds holding a frame it is a
+  flex row above the frame instead (`order: -1`, since it is appended last),
+  always visible so the frame's height does not change under it.
 
 ### WebKit findings worth keeping
 
