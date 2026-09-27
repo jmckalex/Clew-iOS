@@ -182,3 +182,75 @@ body.is-ios .canvas-embed:has(> iframe) > .canvas-node-title {
 	flex: 0 0 auto;
 	opacity: 1;
 }
+
+/* ---- live edit on touch ---- */
+/* Upstream's editor toolbar is 36 px tall with 28 px buttons, the table
+   grid's cells 18 px, the selection bubble's buttons 26 px — all below the
+   44 pt a finger needs. The toolbar lays its groups out to the width it
+   has (toolbar-layout.js), so bigger buttons only mean more of them fold
+   into overflow menus. The bubble is off by default on iOS (settings.js)
+   but sized here for the reader who turns it on. */
+body.is-ios .editor-toolbar {
+	height: 44px;
+}
+body.is-ios .toolbar-button {
+	min-width: 36px;
+	height: 36px;
+}
+body.is-ios .toolbar-segmented .toolbar-button {
+	height: 34px;
+}
+body.is-ios clew-selection-bubble .toolbar-button {
+	min-width: 36px;
+	height: 36px;
+}
+body.is-ios .popover-item {
+	min-height: 40px;
+}
+body.is-ios .popover-grid {
+	grid-template-columns: repeat(8, 28px);
+	gap: 4px;
+}
+body.is-ios .popover-grid-cell {
+	width: 28px;
+	height: 28px;
+}
+
+/* Floaters must fit the screen: a popover is capped at 320 px, the link
+   preview is a fixed 440 px and the preview pane sizes to its content —
+   an iPhone is 375 px wide. Their vertical placement reads the visual
+   viewport (scripts/build.js patches popover.js and floating-pane.js). */
+body.is-ios .clew-popover {
+	max-width: calc(100vw - 16px);
+}
+body.is-ios clew-link-preview {
+	width: min(440px, calc(100vw - 16px));
+}
+body.is-ios clew-preview-pane {
+	max-width: calc(100vw - 16px);
+}
+
+/* A block frame's edge — the strip above the frame that reveals the fence
+   on click — is 6 px and lit only on :hover upstream, which touch never
+   sees. Make it a 24 px handle with a visible grip, so a long-press (the
+   port's ⌥, ios-ui.js) has something to land on and the reader can see
+   that the frame has a source. */
+body.is-ios .le-frame-edge {
+	position: relative;
+	height: 24px;
+	border-radius: 3px;
+}
+body.is-ios .le-frame-edge::after {
+	content: '';
+	position: absolute;
+	left: 50%;
+	top: 50%;
+	width: 40px;
+	height: 4px;
+	margin: -2px 0 0 -20px;
+	border-radius: 2px;
+	background: var(--clew-border);
+}
+body.is-ios .le-frame-edge:active {
+	background: var(--clew-active-item);
+}

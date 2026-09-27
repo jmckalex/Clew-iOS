@@ -307,6 +307,34 @@ const rendererPatches = {
 				+ '\t\tawait vaultSettingsStore.load();\n'),
 			loader: 'js',
 		}));
+		// Floaters clamp to window.innerWidth/innerHeight, and in a WKWebView
+		// the software keyboard shrinks neither — only the VISUAL viewport —
+		// so "below the anchor" can land under the keyboard. Both placement
+		// functions read the visual viewport's bottom and right edges
+		// instead; identical on desktop, where the two viewports agree
+		// (upstream candidate). The formatting popovers (popover.js) and the
+		// preview pane + link preview (floating-pane.js#placeAgainst).
+		builder.onLoad({ filter: /vendor\/clew\/renderer\/editor\/toolbar\/popover\.js$/ }, (args) => ({
+			contents: patched('toolbar/popover.js', fs.readFileSync(args.path, 'utf8'),
+				"\tif (top + r.height > window.innerHeight - 8 && a.top - r.height - 4 > 8) top = a.top - r.height - 4;\n"
+				+ "\tconst left = Math.max(8, Math.min(a.left, window.innerWidth - r.width - 8));\n",
+				"\tconst vv = window.visualViewport;\n"
+				+ "\tconst bottom = vv ? vv.offsetTop + vv.height : window.innerHeight;\n"
+				+ "\tconst right = vv ? vv.offsetLeft + vv.width : window.innerWidth;\n"
+				+ "\tif (top + r.height > bottom - 8 && a.top - r.height - 4 > 8) top = a.top - r.height - 4;\n"
+				+ "\tconst left = Math.max(8, Math.min(a.left, right - r.width - 8));\n"),
+			loader: 'js',
+		}));
+		builder.onLoad({ filter: /vendor\/clew\/renderer\/components\/chrome\/floating-pane\.js$/ }, (args) => ({
+			contents: patched('chrome/floating-pane.js',
+				patched('chrome/floating-pane.js', fs.readFileSync(args.path, 'utf8'),
+					"\t\tconst fitsBelow = below + r.height <= window.innerHeight - 8;\n",
+					"\t\tconst vv = window.visualViewport;\n"
+					+ "\t\tconst fitsBelow = below + r.height <= (vv ? vv.offsetTop + vv.height : window.innerHeight) - 8;\n"),
+				"\t\tthis.style.left = `${Math.round(Math.max(8, Math.min(left, window.innerWidth - r.width - 8)))}px`;\n",
+				"\t\tthis.style.left = `${Math.round(Math.max(8, Math.min(left, (vv ? vv.offsetLeft + vv.width : window.innerWidth) - r.width - 8)))}px`;\n"),
+			loader: 'js',
+		}));
 		// WebKit + custom schemes: when the workspace reconciler moves a
 		// freshly inserted preview iframe, the reinserted frame's window
 		// proxy goes stale — its document loads and runs, but postMessage is

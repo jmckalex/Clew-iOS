@@ -6,6 +6,10 @@ import { runCommand } from '../../vendor/clew/renderer/commands/registry.js';
 import { workspaceStore } from '../../vendor/clew/renderer/state/workspace-store.js';
 import { vaultStore } from '../../vendor/clew/renderer/state/vault-store.js';
 import * as actions from '../../vendor/clew/renderer/commands/actions.js';
+import { linkAt } from '../../vendor/clew/renderer/editor/link-at.js';
+import { showCitation } from '../../vendor/clew/renderer/editor/live/events.js';
+import { numberDocument } from '../../vendor/clew/renderer/editor/live/numbering.js';
+import { openExternal } from '../../vendor/clew/renderer/lib/external-links.js';
 // PDFs are no longer special-cased on iOS. Every PDF surface — note embeds,
 // file tabs, canvas nodes, and canvas-embed scenes — is upstream's EmbedPDF
 // viewer running in a clew-preview document, saving through CH.PDF_WRITE
@@ -137,60 +141,136 @@ document.addEventListener('click', (e) => {
 	}
 }, true);
 
-// ---- wikilinks in the editor on touch -------------------------------------
-// Desktop follows [[links]] with Cmd-click. Touch: the first tap places the
-// cursor (normal editing); a second tap on the same link — or a long-press
-// (which lands here as the synthesized contextmenu) — follows it.
-const LINK_RE = /(!?)\[\[([^\[\]|#\n]*)(?:#([^\[\]|\n]+))?(?:\|([^\[\]\n]+))?\]\]/g;
+// ---- links in the editor on touch --------------------------------------
+// Desktop follows a source-mode link with ⌘-click (wikilink-click.js) and a
+// LIVE-mode concealed link with a plain click (live/events.js: click
+// follows, ⌥-click places the caret, ⌘-click opens a new tab). Touch has
+// one tap and no modifiers, so the two modes get one convention each,
+// documented in the guide as the one place their gestures differ:
+//
+//   source mode   the first tap places the caret (normal editing); a
+//                 second tap on the same link — or a long-press — follows
+//                 it. Links are read through upstream's link-at.js, so a
+//                 [[wikilink]], a [text](url), a \cite{key} and an
+//                 @ref[label] all follow, exactly as ⌘-click would.
+//   live mode     a tap on a concealed link IS upstream's click and
+//                 follows (WebKit synthesises the mousedown liveEvents
+//                 wants); the port's second-tap rule stands OFF such
+//                 targets, or the note would open twice. ⌥ has no touch
+//                 equivalent, so the long-press — which already
+//                 synthesises contextmenu — is it: a long-press on any
+//                 concealed stand-in (a link, a chip, an image, a maths
+//                 widget, a frame's placeholder) places the caret there,
+//                 upstream's own placeCursor, which reveals the source.
+//                 Table cells are left to upstream's contextmenu handler
+//                 (the table menu), which is the only one it has.
 
+/** The concealed stand-ins liveEvents acts on (its TARGETS, mirrored). */
+const LIVE_TARGETS = '[data-le-cite],[data-le-cell],[data-le-task],[data-le-fold],[data-le-copy],[data-le-goto],[data-le-command],[data-le-href],[data-le-target],[data-le-tag],[data-le-ref],[data-le-blockid],.le-reveal-on-click';
+/** What a long-press reveals, beyond those: every rendered stand-in. */
+const LIVE_REVEALABLE = `${LIVE_TARGETS},.le-math,.le-math-block,.le-image,.le-image-block,.le-frame-slot,.le-frame-edge,.le-chip,.le-hr,.le-fence-head,.le-table-wrap`;
+
+const viewOf = (target) => {
+	const content = target?.closest?.('.cm-content');
+	return content ? EditorView.findFromDOM(content) : null;
+};
+
+/** The source-mode link under a point, through link-at.js. */
 function editorLinkAt(clientX, clientY, target) {
-	const content = target.closest?.('.cm-content');
-	if (!content) return null;
-	const view = EditorView.findFromDOM(content);
+	const view = viewOf(target);
 	if (!view) return null;
 	const pos = view.posAtCoords({ x: clientX, y: clientY });
 	if (pos === null) return null;
 	const line = view.state.doc.lineAt(pos);
-	const column = pos - line.from;
-	LINK_RE.lastIndex = 0;
-	let match;
-	while ((match = LINK_RE.exec(line.text)) !== null) {
-		if (column >= match.index && column <= match.index + match[0].length) {
-			return {
-				view,
-				from: line.from + match.index,
-				to: line.from + match.index + match[0].length,
-				target: match[2].trim() + (match[3] ? `#${match[3].trim()}` : ''),
-			};
+	const link = linkAt(line.text, pos - line.from);
+	if (!link) return null;
+	return { view, link, from: line.from + link.from, to: line.from + link.to };
+}
+
+/** Follow a source-mode link the way ⌘-click (and a live-mode click) would. */
+function followLink(view, link) {
+	switch (link.kind) {
+		case 'wikilink':
+			if (link.embed && !link.target) return false;
+			if (link.external && link.target) { actions.openFileExternally(link.target); return true; }
+			if (!link.target && !link.heading) return false;
+			actions.openWikilink(link.target + (link.heading ? `#${link.heading}` : ''), {});
+			return true;
+		case 'markdown': {
+			const url = link.url;
+			if (!url) return false;
+			if (/^[a-z][a-z0-9+.-]*:/i.test(url)) openExternal(url);
+			else actions.openWikilink(decodeURI(url).replace(/\.(md|jmd)$/i, ''), {});
+			return true;
 		}
+		case 'cite':
+			showCitation(link.keys[0]);
+			return true;
+		case 'xref': {
+			// As live/events.js does for a concealed @ref: jump to the label,
+			// leaving a Back entry.
+			const target = numberDocument(view.state.doc).labels.get(link.key);
+			if (!target) return false;
+			const from = view.state.doc.lineAt(view.state.selection.main.head).number;
+			const at = view.state.doc.line(Math.min(target.line, view.state.doc.lines)).from;
+			const tab = workspaceStore.activeTab();
+			if (tab) workspaceStore.recordAnchorJump(tab.id, from, target.line, { editor: true });
+			view.dispatch({ selection: { anchor: at }, effects: EditorView.scrollIntoView(at, { y: 'center' }) });
+			view.focus();
+			return true;
+		}
+		default:
+			return false;
 	}
-	return null;
+}
+
+/** Upstream's placeCursor: the caret at `pos`, which reveals the construct. */
+function placeCursor(view, pos) {
+	view.dispatch({ selection: { anchor: pos } });
+	view.focus();
 }
 
 let preTapHead = null;
 let lastPointerType = 'mouse';
 document.addEventListener('pointerdown', (e) => {
 	lastPointerType = e.pointerType;
-	const content = e.target.closest?.('.cm-content');
-	preTapHead = content ? EditorView.findFromDOM(content)?.state.selection.main.head ?? null : null;
+	preTapHead = viewOf(e.target)?.state.selection.main.head ?? null;
 }, true);
 
 document.addEventListener('click', (e) => {
 	if (lastPointerType !== 'touch') return;
-	const link = editorLinkAt(e.clientX, e.clientY, e.target);
-	if (!link || !link.target) return;
-	if (preTapHead === null || preTapHead < link.from || preTapHead > link.to) return;
+	// Live mode's concealed stand-ins are liveEvents' — its mousedown has
+	// already followed the link (or revealed the construct); a second open
+	// from here would be one too many.
+	if (e.target.closest?.('.cm-live') && e.target.closest?.(LIVE_TARGETS)) return;
+	const hit = editorLinkAt(e.clientX, e.clientY, e.target);
+	if (!hit) return;
+	if (preTapHead === null || preTapHead < hit.from || preTapHead > hit.to) return;
+	if (!followLink(hit.view, hit.link)) return;
 	e.preventDefault();
 	e.stopPropagation();
-	actions.openWikilink(link.target, {});
 });
 
 document.addEventListener('contextmenu', (e) => {
-	const link = editorLinkAt(e.clientX, e.clientY, e.target);
-	if (!link || !link.target) return;
+	const view = viewOf(e.target);
+	if (!view) return;
+	if (view.dom.classList.contains('cm-live')) {
+		// A table cell's contextmenu is upstream's (the table menu).
+		if (e.target.closest?.('[data-le-cell]')) return;
+		const el = e.target.closest?.(LIVE_REVEALABLE);
+		if (!el || !view.contentDOM.contains(el)) return;
+		e.preventDefault();
+		e.stopPropagation();
+		// A frame's slot sits at its fence's first line; posAtDOM of the
+		// slot (or its edge) is that line, as upstream reveals it.
+		placeCursor(view, view.posAtDOM(el));
+		return;
+	}
+	const hit = editorLinkAt(e.clientX, e.clientY, e.target);
+	if (!hit) return;
+	if (!followLink(hit.view, hit.link)) return;
 	e.preventDefault();
 	e.stopPropagation();
-	actions.openWikilink(link.target, {});
 }, true);
 
 // ---- Pencil-aware canvas input --------------------------------------------
