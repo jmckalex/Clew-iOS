@@ -285,6 +285,50 @@ Ranked; items 1–5 are in scope for the first working build, 6–10 tracked:
   font=note in 5.1 s cold, real text runs with embedded faces, Avenir
   Next on screen; no stale WebKit cache when installing over the old
   build. Tests 388 → 392.
+- **Upstream live-edit sync** ✅ (2026-09-27, `live-p1-vendor` →
+  `live-p5-verify`, plan in `UPSTREAM-LIVE-EDIT-PLAN.md`) vendored at
+  `ccf8dca`, 77 commits on — the `feat/live-edit` branch (a THIRD view
+  mode: constructs conceal and render in place, an editor toolbar, the
+  `//` menu, tables edited in place, link previews, a preview pane,
+  cross-references numbered as you type, citations as objects, PDF
+  annotations extracted to a note, sidenotes) plus the shell panel,
+  vault exclusion lists, the virtualised explorer, `@reveal[…]`, TeX
+  fragments and 0.10.0. Two new npm deps (`@xterm/*`) stubbed, no new
+  channels of live edit's own. What the port added: the block-frame
+  endpoints (`__clew_block__` POST/GET in `SchemeHandler.swift`,
+  `renderBlock`/`blockDocument` with upstream's keys in the shim render
+  service, the `.source` sidecar riding into the worker's vfs so
+  Dataview `this` is the owning note — measured); the touch conventions
+  (a tap on a concealed link follows, a long-press is ⌥ and reveals; the
+  source-mode second-tap rule reads links through `link-at.js` and
+  stands off live mode); touch sizing and visual-viewport placement for
+  the floaters; the shell stubbed; exclusion lists compiled over the
+  mirror; `BIB_ENTRIES` in the citations-as-objects shape; TeX fragments
+  in both scopes through `CLEW_TEX_FRAGMENTS`; `reveal` registered as an
+  Environment; the boot path loading the renderer's vault-settings store
+  (iOS never fires `EV_VAULT_OPENED`). Sixteen new settings defaults
+  with the iOS overrides (Decisions). Twenty-eight upstream suites
+  ported; tests 392 → 675. Simulator, clean install: upstream's
+  live-sweep scenarios translated to state-level probes — live-edit,
+  live-lines, table editing, headerless tables, nested fences, the `//`
+  menu, fence/description-list/empty-line fixes, live footnotes,
+  cross-reference parity with the engine (`numbers-match=true`),
+  footnote and math highlighting, the toolbar, citations (Library,
+  Insert, Cited-in, the in-vault PDF, the refusals), PDF annotations
+  (three created through the viewer, extracted to a note with page
+  links, a page link tapped in live mode), TeX fragments (both scopes,
+  the shadow note, the by-name refusal), `@reveal` of the seed deck in a
+  frame, exclusion lists, the explorer's virtualised rows with a
+  long-press after a scroll, sidenotes (auto correctly off in portrait,
+  forced on works), the Live Edit guide itself; and the 0.8–0.11 arcs
+  (search, index, history, EmbedPDF, Excalidraw, Web Awesome, eleven
+  figures incl. two font=note in 5.5 s, Quick Look, print). Typing
+  latency on a 210 KB note: source 15 ms median, live 17 ms. A cold live
+  open of the Diagrams note draws its first three frames, sized, in
+  0.4 s. Device-only: real taps synthesising `mousedown` on widgets, the
+  keyboard's effect on `visualViewport`, the preview pane (it gates on
+  `document.hasFocus()`, which a simctl-launched page never has), IME in
+  a concealed word, sidenotes in landscape, memory with the frame cap.
 
 ### Upstream candidates (iOS-owned today, worth pushing to ../Clew-app)
 
@@ -332,6 +376,37 @@ the golden master than forked here:
   reconfigures on `jmarkdownProject`/`normalSyntax`/`pandocCitations` but
   leaves `dataviewJs` to take effect at the next vault open, which looks
   like an oversight rather than a decision. iOS reconfigures immediately.
+- **The boot path should load the vault-settings store too.** Same hole
+  as the greeting: `renderer/main.js` calls `vaultSettingsStore.load()`
+  only in the `EV_VAULT_OPENED` handler, so a desktop window reload (and
+  every iOS launch) runs the grammar, the live config and the TeX-fragment
+  warnings on `{}` until a setting is touched. A guarded patch here awaits
+  it in the `VAULT_CURRENT` branch (live-edit sync).
+- **Floaters should measure the visual viewport.** `popover.js` and
+  `floating-pane.js#placeAgainst` clamp to `window.innerWidth/innerHeight`;
+  a WKWebView's software keyboard shrinks only `visualViewport`, so
+  "below the anchor" lands under the keyboard. Reading `visualViewport`'s
+  edges gives the same numbers on desktop (two guarded patches here).
+- **`Origin` guard parity on the two POST routes.** `protocol.js` refuses
+  an http(s) `Origin` on `__clew_block__` but not on `__clew_fragment__`;
+  the Swift handler guards both.
+- **A package self-reference for the engine mirror.** `editor/live/
+  numbering.js` reaches `vendor/jmarkdown/src/crossref.js` by a relative
+  path that counts on the app living at `<repo>/src`; any other layout
+  (this mirror keeps the app at `vendor/clew`) has to re-root it (an
+  esbuild `onResolve` and a `node --import` hook here). An import map or
+  a package self-reference would make the engine reachable by name.
+- **"Long-press as ⌥" as a question for upstream's touch story.** Live
+  mode's click semantics are mouse-shaped (click follows, ⌥ places the
+  caret, ⌘ opens a tab); the port maps a long-press onto ⌥. If upstream
+  ever runs on a touch surface of its own, that convention — and a touch
+  route to link previews, which have none — is the decision to take.
+- **The References panel does not refresh when the exclusion lists
+  change.** It fetches `BIB_ENTRIES` once; after `unindexed` gains a
+  library folder the shim's scan excludes that folder's `.bib` (measured
+  in the services suite) but the open panel keeps showing its entries
+  until it is reopened. A `vault-settings-changed` listener would fix it
+  on desktop too.
 - **Canvas-embed scene PDFs.** Upstream still emits a raw
   `<embed type="application/pdf">` inside `.canvas-embed-scene`, relying on
   Chromium's plugin; every other PDF surface went through `pdf-page.html` in
@@ -453,7 +528,73 @@ the golden master than forked here:
   flex row above the frame instead (`order: -1`, since it is appended last),
   always visible so the frame's height does not change under it.
 
+- **Live is the default edit mode on iOS** (live-edit sync, §2.11 of its
+  plan): `newTabMode: 'live'`, `defaultEditMode: 'live'`, `editorToolbar:
+  'always'`. Upstream keeps new tabs in source ("do not move users"); the
+  iPad has no users to move, no chords, and the toolbar is the only
+  formatting surface without a hardware keyboard. All three reversible in
+  Settings; a tab's mode is per vault in `workspace.json` (upstream's
+  design), so a tab opened live here is live on the desktop next time.
+- **The live frame cap is 8, not 16.** Each frame is a full preview
+  document (~22 MB measured on desktop, plus a wasm engine for a figure)
+  and an iPad's content process is jetsam-killed well short of a Mac.
+  Reversible in Settings (4–64); the device number is the owner's.
+- **Touch conventions in live mode: long-press is the source.** A tap on
+  a concealed link/URL/citation/embed chip FOLLOWS (upstream's click; the
+  reader expects a tapped link to open, and a reveal would pop the
+  keyboard); a long-press — already the port's contextmenu — is ⌥: on any
+  concealed stand-in it places the caret there (upstream's `placeCursor`),
+  revealing the source. Table cells stay upstream's (the table menu).
+  Source mode keeps the first-tap-places / second-tap-follows rule but
+  reads links through `link-at.js` (so `[text](url)`, `\cite{}` and
+  `@ref[]` follow too) and stands off live mode's targets, or a note
+  opened twice. The frame edge is a 24 px handle with a visible grip on
+  `.is-ios` (6 px, `:hover`-lit upstream). Rejected: plain tap edits,
+  long-press follows — a tapped link that does not open reads as broken.
+- **Link hover previews default off; the selection bubble defaults off.**
+  Touch has no hover, and WebKit's tap-synthesised `mousemove` would arm
+  the 500 ms timer with no `mouseleave` ever coming; an iPad trackpad
+  delivers real hover and the setting stays. The bubble appears on
+  `pointerup` above the selection — where iOS draws its own callout — and
+  every command on it is on the toolbar. Both reversible.
+- **The shell panel is stubbed, not shipped.** No PTY on iOS: `@xterm/*`
+  aliased to an inert stub, `shell:toggle` dropped from the registry
+  (guarded patch), `SHELL_*` answer upstream's refusal shapes,
+  `WORKSPACE_LOAD` forces a desktop-saved open panel closed. The element
+  stays in the DOM, `display: none`, in upstream's `.center-column`.
+- **Exclusion lists are honoured in JS over the mirror, not in Swift.**
+  Every walk that matters — tree, indexer, `.bib` scan, rename rewrite —
+  is upstream code over `MirrorFS`, so `compileExcludes` on the shim
+  VaultManager gives identical semantics by construction. The Swift
+  snapshot still carries hidden files (a perf cost, not a correctness
+  one); pruning it there would mean porting the glob dialect.
+- **Block frames are NOT rebuilt on re-attach.** The plan budgeted two
+  guarded patches for WebKit's stale-window-proxy case; measured, the
+  renderer's own path recreates the frame-layer plugin when the pooled
+  editor's DOM is re-adopted (a fresh `.le-frames` element), so every
+  frame comes back as a new document from its cached hash and both
+  message directions work. See WebKit findings.
+
 ### WebKit findings worth keeping
+
+- **Live frames do not go stale when the editor DOM is re-attached.** The
+  tab group re-adopts the pooled `EditorView.dom` on every tab switch; the
+  view and its DOM survive, but `.le-frames` is a new element afterwards —
+  the frame-layer `ViewPlugin` is recreated — so its iframes are new
+  elements loaded from cached hashes (one cached POST + one GET each),
+  heights kept in the height field (41/86/30 px before and after, tagged
+  iframes), `theme` reaching the frames and `size` reaching the host
+  afterwards. The stale-proxy finding below stands for the preview-view
+  case it came from; it does not generalise to every moved iframe.
+- **A page launched by `simctl launch` never has `document.hasFocus()`**
+  until a real touch; `EditorView.hasFocus` is false with it, so anything
+  gated on editor focus (the preview pane) cannot be driven from a smoke
+  script — assert its configuration, let the iPad confirm.
+- **Quick Look covering the app detaches the web view's window**, so a
+  print (or an alert routed through `webView.window`) issued while the
+  sheet is up fails with "no window to print from"; the same fact the
+  alert fix (0.11) worked around. Sequence such probes, or route through
+  the scene.
 
 - **Neither `pointer-events: none` nor an ancestor's `touch-action` crosses
   an iframe boundary.** A canvas PDF node whose iframe computed

@@ -1,6 +1,20 @@
 # Upstream Live-Edit Sync — Plan for Clew-iOS
 
-**STATUS: written 2026-09-27, not yet executed.** Written the way the
+**STATUS: EXECUTED 2026-09-27 (`live-p1-vendor` → `live-p5-verify`,
+all simulator-verified on a clean install; nothing pushed).** Where the
+outcome differs from the plan: §2.1's re-attach rebuild was NOT added —
+measured, the renderer's own path recreates the frame layer on
+re-attach and the frames never go stale (PORT-PLAN, WebKit findings);
+p4 changed no source (verification only, folded into p5's record, so
+the chain is p1 → p2 → p3 → p5); the "44 pt row rule" of §1's explorer
+row does not exist in `ios.css` (rows measure 22 px, as before — the
+virtualised explorer measures a probe row, so any future rule is safe);
+and the citations arc surfaced a PRE-EXISTING gap, formatted citations
+in reading mode (citation-js is not in the worker — README known gaps).
+Guarded patches (counted as `patched()` calls, HANDOVER's convention):
+seventeen → twenty-two (`shell:toggle`, the boot path, `popover.js`,
+`floating-pane.js` ×2), plus the engine-mirror resolver.
+Written the way the
 0.8–0.11 plans were: one branch per phase, chained off the previous tip
 (`main` = 6a5d521, which now carries the fontnote chain and the canvas
 engage convention), so a bad phase falls back cleanly. Read `README.md`

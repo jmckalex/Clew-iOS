@@ -63,11 +63,20 @@ xcrun simctl spawn booted log stream --predicate 'eventMessage CONTAINS "CLEWJS"
 ## Known gaps (tracked in PORT-PLAN.md)
 
 Mathematica blocks (wolframscript), the LaTeX export and its PDF (the
-reading-view PDF works), site export,
+reading-view PDF works), site export, the shell panel (no PTY on iOS —
+stubbed, its command dropped), **formatted citations and bibliographies
+in reading mode** (the engine's Biblify needs `citation-js` through
+`createRequire`, which the render worker refuses — `\cite{}` renders
+empty and a `\fullcite{}` preview is blank; the live-mode chips, the
+References panel and citation completion work, since they read the
+`.bib` files directly; bundling citation-js into the worker through the
+require registry, as highlight.js is, is the follow-up),
 the ZetaOffice runtime (office documents open read-only in Quick Look,
 and embeds show Quick Look thumbnails; editing them needs the desktop
 app), kanban drag on touch, touch-only file move (drag-to-move is
 pointer-only; no Move menu item yet), iCloud conflict-version surfacing
 (sync Phase 2), CJK fallback fonts for PDFs (upstream's 139 MB pack has
 no iOS downloader), `\citefile` BibDesk attachments (BufferShim gaps),
-and a third-party-notices surface.
+and a third-party-notices surface. Live edit on touch: link hover
+previews and the selection bubble default off (Settings turns either
+on), and the preview pane needs the editor focused — a tap.
