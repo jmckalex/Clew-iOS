@@ -19,16 +19,18 @@ it spends no cloud build. (Also in Claude's memory.)
 
 ## 1. Where things stand
 
-Four layers, from the bottom:
+Two layers, from the bottom (the fontnote and canvas branches were
+fast-forwarded into `main` on 2026-09-27, owner's instruction):
 
 ```
 origin/main = e46a5ce   the 0.11 sync — TestFlight 0.1.0 (6), on the owner's iPad
- main = e46a5ce + 6 docs commits                          [ci skip], local
-  └ fontnote-p1-vendor 4ee243d → p2-fonts edcad8c → p3-docs 2ac5c14
-     └ canvas-engage-touch  7d7fc49 → f89b035 → d2ad1bb   ← TIP
+ main = 6a5d521 + this plan's docs commit                 ← TIP, local
+   (carries fontnote-p1…p3 and canvas-engage-touch, both still as branches)
 ```
 
-15 commits sit unpushed. Working tree clean, tests **392 green**.
+17 commits sit unpushed. Working tree clean, tests **392 green**.
+**`UPSTREAM-LIVE-EDIT-PLAN.md` is written and unexecuted** — the next
+session starts at its §3 `live-p1-vendor`, chained off `main`.
 
 - **The 0.11 sync** (pushed, released): wasm figures in the bundle,
   embeds that fold/refresh, Quick Look for `|external`, global plugins in
@@ -140,21 +142,22 @@ origin/main = e46a5ce   the 0.11 sync — TestFlight 0.1.0 (6), on the owner's i
 
 ## 4. Open items
 
-1. **Merge + push, the owner's call**: fast-forward `main` to
-   `canvas-engage-touch` (it carries the fontnote chain under it).
-   Pushing now releases the 0.11 build plus the 4eae005 vendor drop and
-   the canvas work, with font=note refused by name (§2.1); waiting for
-   the 0.3.0 pin gives one release with the fonts. The canvas fixes are
-   device-proven and are the strongest reason to ship something.
-2. **The live-edit sync** — the big one, and worth a plan of its own
-   (`UPSTREAM-LIVE-EDIT-PLAN.md`, in the style of the 0.8–0.11 plans)
-   rather than a straight `sync-upstream`. It is a new view mode built
-   on concealment and pointer work: a toolbar, a `//` menu at the
-   cursor, in-place table editing and hover previews all need a touch
-   answer, and the port already owns the editor's touch layer
-   (`ios-ui.js`: no autofocus, second-tap wikilinks, long-press menus).
-   Re-check all 17 patch anchors as part of it. Phase-per-branch, as
-   usual.
+1. **Push, the owner's call** (`main` is merged, §1). Pushing now
+   releases the 0.11 build plus the 4eae005 vendor drop and the canvas
+   work, with font=note refused by name (§2.1); waiting for the 0.3.0 pin
+   gives one release with the fonts. The canvas fixes are device-proven
+   and are the strongest reason to ship something.
+2. **The live-edit sync** — planned in `UPSTREAM-LIVE-EDIT-PLAN.md`
+   (2026-09-27): five phases `live-p1-vendor` → `p5-verify`, twelve
+   decisions (§2), eleven seam questions (§4). Findings that shaped it:
+   **all 17 patch anchors still match at `ccf8dca`** (the churn table
+   below was a false alarm); the build BREAKS on `@xterm/*` imports
+   without the stub alias; `FS_RENAME` THROWS without `vaults.excludes`;
+   the iOS boot path never loads the renderer's vault-settings store
+   (grammar and live config would run on `{}`); block frames must be
+   rebuilt when the editor DOM is re-attached (the WebKit stale-proxy
+   case). §2.11 — live as the default edit mode on iOS — is the decision
+   the owner may want to reverse before p1 runs.
 3. **Device check of font=note** once a build carries the bundle: the
    Diagrams note's last two figures, and a 12pt document. Memory on the
    iPad is the unmeasured number (luaotfload scans 72 faces on the first
