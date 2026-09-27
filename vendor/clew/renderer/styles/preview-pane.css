@@ -1,0 +1,49 @@
+/* <clew-preview-pane> (editor/preview-pane.js): the rendering of the
+   formula or diagram being edited. Fixed, one per window, never focused,
+   a mirror — its frame takes no pointer events; its body scrolls. */
+clew-preview-pane {
+	position: fixed;
+	z-index: 940;
+	display: flex;
+	flex-direction: column;
+	background: var(--clew-bg-primary);
+	border: 1px solid var(--clew-border);
+	border-radius: 8px;
+	box-shadow: 0 8px 22px var(--clew-shadow);
+	overflow: hidden;
+	pointer-events: auto;
+}
+clew-preview-pane[hidden] { display: none; }
+clew-preview-pane .preview-pane-body {
+	overflow: auto;
+	padding: 6px 14px;
+}
+clew-preview-pane[data-kind='math-inline'] .preview-pane-body { padding: 4px 10px; }
+clew-preview-pane .preview-pane-math {
+	color: var(--clew-text-normal);
+	/* Wide formulas scroll sideways, never vertically: MathJax's SVG
+	   overflows its box by a pixel, and an overflow-x: auto container then
+	   grew a vertical scrollbar whose thumb sat after the formula like a
+	   stray cursor (the owner's report, 2026-09-27). */
+	overflow-x: auto;
+	overflow-y: hidden;
+}
+clew-preview-pane[data-kind^='math'] .preview-pane-body { overflow: hidden; }
+clew-preview-pane .preview-pane-math mjx-container[display='true'] { margin: 4px 0; }
+clew-preview-pane .preview-pane-frame {
+	display: block;
+	width: 100%;
+	border: none;
+	pointer-events: none;
+}
+/* As .le-frame: the frame's color-scheme must match its document's. */
+body[data-theme='dark'] .preview-pane-frame { color-scheme: dark; }
+body[data-theme='light'] .preview-pane-frame { color-scheme: light; }
+clew-preview-pane .preview-pane-error {
+	padding: 4px 14px 6px;
+	border-top: 1px solid var(--clew-border);
+	font-family: var(--clew-mono-font);
+	font-size: 12px;
+	color: var(--clew-danger);
+}
+clew-preview-pane [hidden] { display: none !important; }

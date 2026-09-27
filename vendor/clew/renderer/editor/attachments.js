@@ -22,7 +22,7 @@ function timestampName(ext) {
 		+ `${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}${ext}`;
 }
 
-async function saveAndInsert(view, files, pos) {
+export async function saveAndInsert(view, files, pos) {
 	let insertAt = pos;
 	for (const file of files) {
 		const generic = !file.name || /^image\.(png|jpe?g|gif|webp)$/i.test(file.name);

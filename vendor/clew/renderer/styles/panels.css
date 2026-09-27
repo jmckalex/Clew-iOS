@@ -56,6 +56,11 @@ clew-file-explorer {
 	padding: 2px 4px 20px;
 	user-select: none;
 }
+/* Windowed rows: the sizer carries the full height of the tree and each
+   row is placed at its index (components/panels/clew-file-explorer.js,
+   lib/tree-window.js). Only the rows on screen exist. */
+.file-tree-sizer { position: relative; }
+.file-tree-sizer > .tree-item { position: absolute; left: 0; right: 0; }
 .tree-item {
 	display: flex;
 	align-items: center;
@@ -618,6 +623,85 @@ clew-search-panel .search-results { flex: 1; }
 	line-height: 1.5;
 }
 .settings-row input[type='checkbox'] { accent-color: var(--clew-accent); }
+
+/* A per-vault list (the exclusion globs): the label sits above a box that
+   grows with the list rather than beside a one-line field. */
+.settings-row-stacked { flex-direction: column; align-items: stretch; gap: 6px; }
+.settings-list-input {
+	font: inherit;
+	font-family: var(--clew-editor-font);
+	font-size: 12.5px;
+	width: 100%;
+	resize: vertical;
+	background: var(--clew-bg-secondary);
+	color: var(--clew-text-normal);
+	border: 1px solid var(--clew-border);
+	border-radius: 6px;
+	padding: 6px 8px;
+	outline: none;
+}
+.settings-list-input:focus { border-color: var(--clew-accent); }
+
+/* ---- TeX fragments (Settings → TeX fragments) ----
+   One row per fragment: a narrow column for the name a figure asks for with
+   `clew-fragments=`, and the fragment itself in a CodeMirror that grows with
+   its content (mini-editor.js sets no height). At a narrow window the two
+   stack rather than squeezing the editor to nothing. */
+.settings-subhead {
+	font-size: 13px;
+	font-weight: 600;
+	color: var(--clew-text-muted);
+	margin: 16px 0 6px;
+}
+.tex-fragment-row {
+	display: grid;
+	grid-template-columns: 180px minmax(0, 1fr);
+	gap: 12px;
+	align-items: start;
+	padding: 8px 0;
+	border-top: 1px solid var(--clew-border);
+}
+.tex-fragment-side { display: flex; flex-direction: column; gap: 6px; }
+.tex-fragment-side input[type='text'] {
+	font: inherit;
+	font-size: 13px;
+	width: 100%;
+	background: var(--clew-bg-secondary);
+	color: var(--clew-text-normal);
+	border: 1px solid var(--clew-border);
+	border-radius: 6px;
+	padding: 4px 8px;
+	outline: none;
+}
+.tex-fragment-side input[type='text']:focus { border-color: var(--clew-accent); }
+.tex-fragment-note {
+	font-size: 11.5px;
+	line-height: 1.4;
+	color: var(--clew-text-faint);
+	margin: 0;
+}
+.tex-fragment-note:empty { display: none; }
+.tex-fragment-delete {
+	font: inherit;
+	font-size: 12px;
+	align-self: flex-start;
+	background: none;
+	border: 1px solid var(--clew-border);
+	border-radius: 6px;
+	color: var(--clew-text-faint);
+	padding: 2px 8px;
+	cursor: pointer;
+}
+.tex-fragment-delete:hover { color: var(--clew-text-normal); background: var(--clew-hover); }
+.tex-fragment-delete.is-armed { color: var(--clew-text-on-accent); background: #b4453a; border-color: #b4453a; }
+/* The editor is the row's second column; the view itself carries the border. */
+.tex-fragment-editor { min-width: 0; }
+.tex-fragment-group + .tex-fragment-group { margin-top: 10px; }
+.tex-fragment-list + .hotkey-button { margin-top: 10px; }
+
+@media (max-width: 700px) {
+	.tex-fragment-row { grid-template-columns: minmax(0, 1fr); }
+}
 body[data-theme='dark'] .props-value[type='date'] { color-scheme: dark; }
 body[data-theme='light'] .props-value[type='date'] { color-scheme: light; }
 
@@ -760,3 +844,43 @@ clew-bibliography .csl-entry a { color: var(--clew-accent); word-break: break-al
 /* Numeric styles (vancouver) put the label in a left-margin span. */
 clew-bibliography .csl-left-margin { margin-right: 5px; }
 clew-bibliography .csl-right-inline { display: inline; }
+
+/* ---- References panel: modes and the Library (§5.14) ---- */
+clew-bibliography .bib-modes { display: flex; gap: 2px; padding: 6px 8px 4px; }
+clew-bibliography .bib-mode {
+	flex: 1; padding: 3px 6px; font: inherit; font-size: 12px; border-radius: 5px;
+	border: 1px solid var(--clew-border); background: none; color: var(--clew-text-muted); cursor: pointer;
+}
+clew-bibliography .bib-mode[aria-pressed='true'] { background: var(--clew-active-item); color: var(--clew-text-normal); }
+clew-bibliography .bib-tools { display: flex; gap: 4px; padding: 4px 8px 6px; }
+clew-bibliography .bib-search {
+	flex: 1; min-width: 0; padding: 3px 6px; font: inherit; font-size: 12px;
+	background: var(--clew-bg-primary); color: var(--clew-text-normal); border: 1px solid var(--clew-border); border-radius: 5px;
+}
+clew-bibliography .bib-filter { font: inherit; font-size: 12px; background: var(--clew-bg-primary); color: var(--clew-text-normal); border: 1px solid var(--clew-border); border-radius: 5px; }
+clew-bibliography .bib-row { padding: 6px 10px 8px; border-bottom: 1px solid var(--clew-border); font-size: 12.5px; }
+clew-bibliography .bib-row.is-focused { background: var(--clew-active-item); }
+clew-bibliography .bib-head { display: flex; justify-content: space-between; gap: 6px; }
+clew-bibliography .bib-label { font-weight: 600; color: var(--clew-text-normal); }
+clew-bibliography .bib-key { color: var(--clew-text-faint); font-family: var(--clew-mono-font); font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
+clew-bibliography .bib-title { color: var(--clew-text-muted); margin: 2px 0 3px; }
+clew-bibliography .bib-cited, clew-bibliography .bib-citer {
+	display: block; padding: 0; border: none; background: none; font: inherit; font-size: 12px;
+	color: var(--clew-accent); cursor: pointer; text-align: left;
+}
+clew-bibliography .bib-cited:disabled { color: var(--clew-text-faint); cursor: default; }
+clew-bibliography .bib-citers { padding: 2px 0 2px 10px; }
+clew-bibliography .bib-actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+clew-bibliography .bib-action {
+	padding: 1px 7px; font: inherit; font-size: 11.5px; border-radius: 4px; cursor: pointer;
+	border: 1px solid var(--clew-border); background: var(--clew-bg-secondary); color: var(--clew-text-normal);
+}
+clew-bibliography .bib-action:disabled { opacity: 0.45; cursor: default; }
+
+/* The graph's References toggle (§5.14). */
+.graph-host { position: relative; }
+.graph-references-toggle {
+	position: absolute; top: 8px; right: 10px; font-size: 12px; color: var(--clew-text-muted);
+	background: var(--clew-bg-secondary); border: 1px solid var(--clew-border); border-radius: 5px; padding: 2px 7px;
+	user-select: none; cursor: pointer;
+}

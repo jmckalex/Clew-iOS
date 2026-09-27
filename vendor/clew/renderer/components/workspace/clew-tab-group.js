@@ -71,7 +71,11 @@ class ClewTabGroup extends ClewElement {
 			body.replaceChildren(this.#emptyState());
 			return;
 		}
-		const mode = active.view?.mode ?? 'source';
+		// Source and live edit are ONE view — the same pooled editor wearing
+		// a different compartment (clew-editor-view handles the flip) — so a
+		// source↔live change must not replace the body and remount it.
+		const viewMode = active.view?.mode ?? 'source';
+		const mode = viewMode === 'reading' ? 'reading' : 'editor';
 		if (active.id === this.#renderedTabId && active.path === this.#renderedPath
 			&& mode === this.#renderedMode) return;
 		this.#renderedTabId = active.id;

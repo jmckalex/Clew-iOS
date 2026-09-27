@@ -78,7 +78,8 @@ class WorkspaceStore extends Emitter {
 	}
 
 	openNote(path, opts) {
-		const defaultMode = settingsStore.get('newTabMode') === 'reading' ? 'reading' : null;
+		const setting = settingsStore.get('newTabMode');
+		const defaultMode = setting === 'reading' || setting === 'live' ? setting : null;
 		const tab = tree.openNote(this.state, path, { defaultMode, ...opts });
 		this.#commit();
 		return tab;
@@ -179,8 +180,8 @@ class WorkspaceStore extends Emitter {
 		this.#commit();
 	}
 
-	recordAnchorJump(tabId, fromLine, toLine) {
-		if (tree.recordAnchorJump(this.state, tabId, fromLine, toLine)) this.#commit();
+	recordAnchorJump(tabId, fromLine, toLine, options) {
+		if (tree.recordAnchorJump(this.state, tabId, fromLine, toLine, options)) this.#commit();
 	}
 
 	goBack(tabId) {
@@ -198,7 +199,14 @@ class WorkspaceStore extends Emitter {
 
 	setTabMode(tabId, mode) {
 		const found = this.findTab(tabId);
-		if (!found || found.tab.view.mode === mode) return;
+		if (!found) return;
+		// Remember the editing mode, so ⌘E from reading returns to it.
+		const editChanged = mode !== 'reading' && found.tab.view.editMode !== mode;
+		if (editChanged) found.tab.view.editMode = mode;
+		if (found.tab.view.mode === mode) {
+			if (editChanged) this.#persist();
+			return;
+		}
 		found.tab.view.mode = mode;
 		this.#commit();
 	}
@@ -224,6 +232,16 @@ class WorkspaceStore extends Emitter {
 	setCollapsedFolders(paths) {
 		this.state.collapsedFolders = [...paths];
 		this.#persist();
+	}
+
+	/** The shell panel's state — open/closed and its height. */
+	get shell() {
+		return this.state.shell ?? { open: false, height: 220 };
+	}
+
+	setShell(patch) {
+		this.state.shell = { ...this.shell, ...patch };
+		this.#commit('shell-changed');
 	}
 
 	setSidebar(side, patch) {

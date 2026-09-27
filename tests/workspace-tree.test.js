@@ -252,3 +252,42 @@ test('deserialize keeps collapsed paths for folders that are gone, but drops jun
 	saved.collapsedFolders = ['Deleted Folder', 42, null, 'Kept'];
 	assert.deepEqual(tree.deserialize(saved).collapsedFolders, ['Deleted Folder', 'Kept']);
 });
+
+/* ── live edit: the third mode and the remembered editing mode ─────────── */
+
+test('a new tab opened live records live as its editing mode', () => {
+	const state = tree.createInitialState();
+	const tab = tree.openNote(state, 'a.md', { defaultMode: 'live' });
+	assert.deepEqual([tab.view.mode, tab.view.editMode], ['live', 'live']);
+	const reading = tree.openNote(state, 'b.md', { newTab: true, defaultMode: 'reading' });
+	assert.equal(reading.view.editMode, undefined);
+});
+
+test('navigation in place keeps both the mode and the editing mode', () => {
+	const state = tree.createInitialState();
+	const tab = tree.openNote(state, 'a.md', { defaultMode: 'live' });
+	tab.view.mode = 'reading';
+	tree.navigateTab(state, tab.id, 'b.md');
+	assert.deepEqual([tab.view.mode, tab.view.editMode], ['reading', 'live']);
+	// Back restores the snapshot, editing mode included.
+	tree.goBack(state, tab.id);
+	assert.equal(tab.view.editMode, 'live');
+});
+
+test('a split clone carries the editing mode', () => {
+	const state = tree.createInitialState();
+	const tab = tree.openNote(state, 'a.md', { defaultMode: 'live' });
+	const group = tree.splitWithClone(state, tree.activeGroup(state).id, 'right', tab.id);
+	assert.deepEqual([group.tabs[0].view.mode, group.tabs[0].view.editMode], ['live', 'live']);
+});
+
+test('serialize/deserialize round-trips live mode; legacy tabs have no editMode', () => {
+	const state = tree.createInitialState();
+	tree.openNote(state, 'a.md', { defaultMode: 'live' });
+	const back = tree.deserialize(tree.serialize(state));
+	const tab = tree.activeTab(back);
+	assert.deepEqual([tab.view.mode, tab.view.editMode], ['live', 'live']);
+	const legacy = tree.createInitialState();
+	tree.openNote(legacy, 'b.md', { defaultMode: 'reading' });
+	assert.equal(tree.activeTab(tree.deserialize(tree.serialize(legacy))).view.editMode, undefined);
+});

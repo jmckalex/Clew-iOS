@@ -1,6 +1,16 @@
 {
   "noteApi": true,
   "dataviewJs": true,
+  "texFragments": [
+    {
+      "name": "math macros",
+      "text": "\\usepackage{amsmath,amssymb}\n\\newcommand{\\R}{\\mathbb{R}}\n\\newcommand{\\E}{\\mathbb{E}}\n\\DeclareMathOperator*{\\argmax}{arg\\,max}"
+    },
+    {
+      "name": "diagram colours",
+      "text": "\\usepackage{xcolor}\n\\definecolor{clewink}{HTML}{6C5CE7}"
+    }
+  ],
   "plugins": [
     "charts",
     "header",

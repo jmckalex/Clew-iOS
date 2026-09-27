@@ -25,6 +25,6 @@ tabs sit first in the bar with a pin icon, lose their close button, ignore
 a new tab instead. The tab context menu also has *Close others* and
 *Close tabs to the right* (both leave pinned tabs alone).
 
-⌘B and ⌘⇧B toggle the left and right sidebars.
+⌘⌥B and ⌘⌥⇧B toggle the left and right sidebars.
 
 See also: [[Panels]], [[Settings and Hotkeys]].

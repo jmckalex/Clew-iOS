@@ -266,12 +266,34 @@ export function resolvePath(target) {
 	return [...matches].sort((a, b) => a.length - b.length || a.localeCompare(b))[0];
 }
 
+/**
+ * The note being rendered, as an absolute path — `global.current_file`,
+ * which the engine sets for every build (index.js). A FRAGMENT build (a
+ * canvas card, a live-edit block) renders a temp file under
+ * `.clew/cache/fragments/`; when render-service knows which note the
+ * fragment belongs to it leaves a `<key>.source` sidecar naming it, and that
+ * note is the current file — so `this` in a live-edit block is the note it
+ * sits in, exactly as in reading mode.
+ */
+export function currentFilePath() {
+	const file = global.current_file;
+	if (!file || file === '<stdin>') return null;
+	const root = process.env.CLEW_VAULT_ROOT;
+	if (root && path.dirname(file) === path.join(root, '.clew', 'cache', 'fragments')) {
+		try {
+			const rel = fs.readFileSync(file.replace(/\.md$/, '.source'), 'utf8').trim();
+			if (rel) return path.join(root, rel);
+		} catch { /* no sidecar: an anonymous fragment */ }
+	}
+	return file;
+}
+
 /** The page a `.base` view or a query is being rendered INSIDE, or null.
  *  `global.current_file` is set by the engine for every build (index.js), the
  *  same way `global.isLatex` is — which is what makes `this` cost nothing. */
 export function currentPage() {
-	const file = global.current_file;
-	if (!file || file === '<stdin>') return null;
+	const file = currentFilePath();
+	if (!file) return null;
 	const root = process.env.CLEW_VAULT_ROOT;
 	if (!root) return null;
 	const rel = path.relative(root, file).split(path.sep).join('/');

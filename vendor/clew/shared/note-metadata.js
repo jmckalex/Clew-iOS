@@ -112,6 +112,55 @@ const LINK_RE = /(!?)\[\[([^\[\]|#\n]*)(?:#([^\[\]|\n]+))?(?:\|([^\[\]\n]+))?\]\
 // or pure numbers ("bug #123" style is still a tag in Obsidian — keep it).
 const TAG_RE = /(^|[\s(,;])#([A-Za-z0-9_][A-Za-z0-9_/-]*)/g;
 
+// ---- cross-reference labels (docs/dev/live-edit.md §5.13) ----------------
+//
+// The engine's targets, regex-level: `{#key}` / `{id=key}` on a numbered
+// environment's opener (`@begin(theorem)[Name]{#thm-a}`, `:::figure[Cap]{id=f}`)
+// and `@label[key]` / `:label[key]` anywhere outside code and maths. The
+// scanner in renderer/editor/jmd/ knows these shapes too, but shared/ must not
+// reach into the renderer; the regexes below are the scanner's rules for an
+// opener line, restated.
+
+/** `@begin(name)[caption]{attrs}` / `:::name[caption]{attrs}` on its own line. */
+const ENV_OPEN_RE = /^[ \t]*(?:@begin\(([\w*-]+)\)|(:{3,})[ \t]*([\w*-]+))(?:\[([^\]\n]*)\])?(?:\{([^}\n]*)\})?/;
+const ENV_CLOSE_RE = /^[ \t]*(?:@end\(([\w*-]+)\)|(:{3,})[ \t]*$)/;
+const LABEL_RE = /(^|[^\w@:\\])[@:]label\[([^\]\n]+)\]/g;
+/** The same, for stripping a label out of a heading's title (a separate
+ *  object: reusing LABEL_RE inside its own exec loop resets lastIndex). */
+const LABEL_STRIP_RE = /(^|[^\w@:\\])[@:]label\[([^\]\n]+)\]/g;
+
+/** Environments the engine numbers, and the counter each advances. */
+export const THEOREM_KINDS = ['theorem', 'lemma', 'corollary', 'proposition', 'definition', 'example', 'remark'];
+const NUMBERED_KINDS = new Set([...THEOREM_KINDS, 'equation', 'figure', 'subfigure', 'table', 'listing']);
+/** Bodies the engine takes verbatim: an `@label` inside is not a label. */
+const VERBATIM = new Set(['equation', 'TeX', 'HTML', 'comment', 'mermaid', 'TiKZ', 'tikz', 'tikzpicture', 'metapost']);
+
+/**
+ * The label key a `{…}` attribute group names: `#key` (the shorthand, which
+ * cannot carry a colon — the engine's attribute grammar stops there) or
+ * `id=key` / `id="key"`. Null when there is none.
+ */
+export function attrLabel(attrs) {
+	if (!attrs) return null;
+	const id = /(?:^|\s)id\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s}]+))/.exec(attrs);
+	if (id) return (id[1] ?? id[2] ?? id[3]).trim() || null;
+	const hash = /(?:^|\s)#([A-Za-z0-9_-]+)(?=\s|$)/.exec(attrs);
+	return hash ? hash[1] : null;
+}
+
+// ---- citations (docs/dev/live-edit.md §5.14) -------------------------------
+
+/** `\cite`, `\citep`, `\citet`, `\fullcite`, `\parencite`, … — any command
+ *  with "cite" in its name — starred, with up to two `[…]` notes. */
+const CITE_RE = /\\([a-zA-Z]*cite[a-zA-Z]*)\*?(?:\[[^\]\n]*\]){0,2}\{([^}\n]*)\}/g;
+/** Pandoc's bracketed `[@key]` / `[see @a, p. 3; @b]`. */
+const PANDOC_BRACKET_RE = /\[[^\[\]\n]*@[^\[\]\n]*\]/g;
+const PANDOC_KEY_RE = /(^|[^\w@])-?@([A-Za-z0-9_][\w:.#$%&+?<>~/-]*)/g;
+/** A bare `@key` in prose — never a directive (`@begin(`, `@label[`) and
+ *  never an address (a word character before the @). */
+const PANDOC_BARE_RE = /(^|[^\w@\\[])@([A-Za-z0-9_][\w:.#$%&+?<>~/-]*)(?![\w(\[])/g;
+const trimKey = (k) => k.replace(/[.:,;?!]+$/, '');
+
 /**
  * Extract index metadata from a note's text.
  * Lines are 1-based. `links` includes embeds (flagged `embed: true`).
@@ -125,6 +174,10 @@ export function extractNoteMetadata(text) {
 	const headings = [];
 	const links = [];
 	const blocks = [];
+	const labels = [];
+	const citations = [];
+	/** Open environments, innermost last: {name, kind, line, title, labels}. */
+	const envs = [];
 	const tags = new Map(); // tag -> [lines]
 
 	// Line indices covered by a fenced block. A blank line INSIDE a fence is
@@ -149,6 +202,79 @@ export function extractNoteMetadata(text) {
 		const heading = HEADING_RE.exec(rawLines[i] ?? '');
 		if (heading && HEADING_RE.test(line)) {
 			headings.push({ level: heading[1].length, text: heading[2].trim(), line: lineNo });
+		}
+
+		// Citations: the \cite family, then pandoc's forms (flagged — the
+		// vault's pandocCitations switch decides whether they count).
+		CITE_RE.lastIndex = 0;
+		for (let cm; (cm = CITE_RE.exec(line));) {
+			for (const key of cm[2].split(',').map((k) => k.trim()).filter(Boolean)) {
+				citations.push({ key, line: lineNo, command: cm[1], pandoc: false });
+			}
+		}
+		const bracketed = [];
+		PANDOC_BRACKET_RE.lastIndex = 0;
+		for (let bm; (bm = PANDOC_BRACKET_RE.exec(line));) {
+			bracketed.push([bm.index, bm.index + bm[0].length]);
+			PANDOC_KEY_RE.lastIndex = 0;
+			for (let km; (km = PANDOC_KEY_RE.exec(bm[0]));) {
+				citations.push({ key: trimKey(km[2]), line: lineNo, command: '[@]', pandoc: true });
+			}
+		}
+		PANDOC_BARE_RE.lastIndex = 0;
+		for (let pm; (pm = PANDOC_BARE_RE.exec(line));) {
+			const at = pm.index + pm[1].length;
+			if (bracketed.some(([a, b]) => at >= a && at < b)) continue;
+			citations.push({ key: trimKey(pm[2]), line: lineNo, command: '@', pandoc: true });
+		}
+
+		// Cross-reference labels: environment openers and closers first
+		// (read from the raw line — maths masking must not hide an opener).
+		const raw = rawLines[i] ?? '';
+		const verbatim = envs.length > 0 && VERBATIM.has(envs[envs.length - 1].name);
+		const close = !fenced.has(i) ? ENV_CLOSE_RE.exec(raw) : null;
+		const open = !fenced.has(i) && !close ? ENV_OPEN_RE.exec(raw) : null;
+		if (close && envs.length) {
+			const name = close[1];
+			// `@end(x)` closes the innermost open x; a bare `:::` the innermost
+			// ::: directive.
+			let at = envs.length - 1;
+			if (name) while (at >= 0 && envs[at].name !== name) at--;
+			else while (at >= 0 && !envs[at].colons) at--;
+			if (at >= 0) {
+				for (const env of envs.splice(at)) for (const l of env.labels) l.host.to = lineNo;
+			}
+		} else if (open && !verbatim) {
+			const name = open[1] ?? open[3];
+			const kind = NUMBERED_KINDS.has(name) ? name : `env:${name}`;
+			const env = { name, kind, colons: Boolean(open[2]), line: lineNo, title: (open[4] ?? '').trim(), labels: [] };
+			envs.push(env);
+			const key = attrLabel(open[5]);
+			if (key) {
+				const label = { key, kind, line: lineNo, col: raw.indexOf(open[5]), title: env.title, host: { from: lineNo, to: lineNo } };
+				labels.push(label);
+				env.labels.push(label);
+			}
+		} else if (!verbatim) {
+			LABEL_RE.lastIndex = 0;
+			let lm;
+			while ((lm = LABEL_RE.exec(line)) !== null) {
+				const col = lm.index + lm[1].length;
+				// The host, as the post-processor decides it: a footnote's
+				// body, else the innermost NUMBERED environment, else this
+				// heading, else nothing (a plain label, numberless).
+				const before = line.slice(0, col);
+				const inFootnote = /\[(?:fn:|\^)[^\]]*$/.test(before) || /^\[\^[^\]]+\]:/.test(raw);
+				const host = [...envs].reverse().find((e) => NUMBERED_KINDS.has(e.kind) || e.kind.startsWith('env:'));
+				let label;
+				if (inFootnote) label = { kind: 'footnote', title: '', host: { from: lineNo, to: lineNo } };
+				else if (host) label = { kind: host.kind, title: host.title, host: { from: host.line, to: host.line } };
+				else if (heading) label = { kind: 'section', title: heading[2].replace(LABEL_STRIP_RE, '$1').trim(), host: { from: lineNo, to: lineNo } };
+				else label = { kind: 'plain', title: '', host: { from: lineNo, to: lineNo } };
+				const entry = { key: lm[2].trim(), line: lineNo, col, ...label };
+				labels.push(entry);
+				if (host && !inFootnote) host.labels.push(entry);
+			}
 		}
 
 		// Block identifiers. The recorded line is the one to SCROLL TO, which
@@ -206,6 +332,8 @@ export function extractNoteMetadata(text) {
 		aliases: frontmatter.aliases,
 		headings,
 		blocks,
+		labels,
+		citations,
 		links,
 		tags: [...tags.entries()].map(([tag, lineNos]) => ({ tag, lines: lineNos })),
 	};

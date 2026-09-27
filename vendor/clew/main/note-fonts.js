@@ -132,7 +132,12 @@ export function faceNames(buf, offset) {
  * directory, the face's tables copied behind it (4-byte aligned, as the
  * format requires), and `head.checkSumAdjustment` recomputed so the file
  * sums to the magic 0xB1B0AFBA a strict reader checks. Per-table checksums
- * are carried over unchanged — the bytes they cover are the same bytes.
+ * are carried over unchanged — the bytes they cover are the same bytes —
+ * except `head`'s, which the spec defines over the table with its
+ * adjustment field zeroed and which a collection's directory therefore
+ * carries for a different adjustment than this file's: recomputed (the
+ * Clew-iOS port, building the same faces from CoreText tables, came out
+ * byte-identical everywhere but that one directory word).
  */
 export function extractFace(buf, offset) {
 	const { sfntVersion, records } = tableDirectory(buf, offset);
@@ -164,11 +169,24 @@ export function extractFace(buf, offset) {
 	const head = placed.find((r) => r.tag === 'head');
 	if (head) {
 		out.writeUInt32BE(0, head.at + 8);
+		// The head record's own checksum, over the table with the adjustment zeroed.
+		out.writeUInt32BE(tableChecksum(out, head.at, head.length), 12 + 16 * placed.indexOf(head) + 4);
 		let sum = 0;
 		for (let i = 0; i < out.length; i += 4) sum = (sum + out.readUInt32BE(i)) >>> 0;
 		out.writeUInt32BE((0xB1B0AFBA - sum) >>> 0, head.at + 8);
 	}
 	return out;
+}
+
+/** A table's checksum as the directory records it: the sum of its 32-bit words, zero-padded to a multiple of four. */
+export function tableChecksum(buf, at, length) {
+	let sum = 0;
+	for (let i = 0; i < length; i += 4) {
+		let word = 0;
+		for (let b = 0; b < 4; b++) word = (word << 8) | (i + b < length ? buf[at + i + b] : 0);
+		sum = (sum + (word >>> 0)) >>> 0;
+	}
+	return sum;
 }
 
 /** '.otf' for a CFF-flavoured face ('OTTO'), '.ttf' for TrueType outlines. */

@@ -120,6 +120,9 @@ export function engineConfig({ vaultRoot = '/vault', vaultOptions = {}, engineEx
 		// __jmdImport as Extensions, so the registry answers this key too.
 		'Environments': [
 			'TiKZ, metapost from /engine-assets/figures.js',
+			// @reveal[…] — a presentation in an iframe. One registry entry
+			// serves the inline, block and @begin forms (reveal-embed.js).
+			'reveal from /engine-assets/reveal-embed.js',
 		],
 		...biblifyConfig(vaultRoot, vaultOptions),
 		'MathJax': { 'src': '/__clew_assets__/mathjax/tex-svg.js' },
@@ -134,6 +137,9 @@ export function engineConfig({ vaultRoot = '/vault', vaultOptions = {}, engineEx
  * spawn-time env because reconfigure() discards the warm standby whenever
  * vault options change.
  *
+ * `globalTexFragments` is the app-level `texFragments` setting (the
+ * vault's own list rides in `vaultOptions`).
+ *
  * `noteFonts` is the face → file map behind `font=note` figures
  * (vendor/clew/engine/figures.js#noteFontFaces reads it from
  * process.env.CLEW_NOTE_FONTS, upstream's own fallback for a worker with
@@ -142,11 +148,23 @@ export function engineConfig({ vaultRoot = '/vault', vaultOptions = {}, engineEx
  * figure's \setmainfont / \font lines. On iOS the bridge builds them from
  * CoreText (NoteFonts.swift); an empty map means fontspec's Latin Modern.
  */
-export function engineEnv({ vaultRoot = '/vault', sessionId = '', vaultOptions = {}, noteFonts = null } = {}) {
+export function engineEnv({
+	vaultRoot = '/vault', sessionId = '', vaultOptions = {}, noteFonts = null, globalTexFragments = [],
+} = {}) {
 	return {
 		CLEW_VAULT_ROOT: vaultRoot,
 		CLEW_SESSION_ID: sessionId ?? '',
 		CLEW_DATAVIEW_JS: vaultOptions.dataviewJs === true ? '1' : '',
 		CLEW_NOTE_FONTS: noteFonts && Object.keys(noteFonts).length ? JSON.stringify(noteFonts) : '',
+		// Named TeX fragments for `clew-fragments=` (engine/figures.js): both
+		// scopes as they are stored, because engine/tex-fragments.js owns the
+		// rule that a vault fragment shadows a global one — resolving it here
+		// would be a second copy of that rule (upstream render-service.js,
+		// verbatim). Editing either list reconfigures, which respawns the
+		// standby so the env lands.
+		CLEW_TEX_FRAGMENTS: JSON.stringify({
+			global: Array.isArray(globalTexFragments) ? globalTexFragments : [],
+			vault: Array.isArray(vaultOptions.texFragments) ? vaultOptions.texFragments : [],
+		}),
 	};
 }

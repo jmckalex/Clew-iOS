@@ -18,7 +18,32 @@ import { writeFileAtomic } from './fs-utils.js';
 const DEFAULTS = {
 	recentVaults: [],
 	openVaults: [], // one window each, restored at launch
-	newTabMode: 'source',
+	newTabMode: 'source', // 'source' | 'live' | 'reading'
+	// Live edit (docs/dev/live-edit.md §8). defaultEditMode: where ⌘E
+	// returns from reading for a tab that has no editing mode of its own.
+	defaultEditMode: 'source',
+	liveReveal: 'construct', // 'construct' | 'line'
+	liveRenderMath: true,
+	liveRenderFences: true,
+	liveRenderEmbeds: true,
+	liveFrameCap: 16,
+	// The editor toolbar (docs/dev/live-edit.md §6.8): shown in live edit only,
+	// always, or never; `editorToolbarPrev` remembers which of the first two
+	// view:toggle-toolbar returns to. Groups: ordered ids, null = default.
+	editorToolbar: 'live',
+	editorToolbarPrev: 'live',
+	editorToolbarGroups: null,
+	selectionBubble: true,
+	// The `//` menu (editor/complete/slash-commands.js).
+	slashCommands: true,
+	// Link hover previews (editor/link-hover.js): 'hover' | 'mod' | 'off'.
+	linkPreview: 'hover',
+	// The live preview pane (editor/preview-pane.js): 'on' | 'off'.
+	previewPane: 'on',
+	// The graph's References toggle (clew-graph-view.js, §5.14).
+	graphReferences: false,
+	// Footnotes in the margin (§5.16): 'auto' (a wide pane with room) | 'on' | 'off'.
+	sidenotes: 'auto',
 	explorerOpenMode: 'new-tab', // how newly created note tabs open ('source'|'reading')
 	diaryMode: 'files', // 'files' = one note per day, 'log' = single log note
 	diaryLogFile: 'Diary.md',
@@ -30,6 +55,11 @@ const DEFAULTS = {
 	// Paper for "Export as PDF (reading view)" — the LaTeX PDF takes its
 	// page size from the document's own class, and is not affected.
 	printPaperSize: 'a4',
+	// Named TeX fragments a figure can ask for with `clew-fragments=`
+	// ([{ name, text }] — src/engine/tex-fragments.js). These are the
+	// GLOBAL ones; a vault's own live in its vault-settings.json and
+	// shadow these where the names meet.
+	texFragments: [],
 };
 
 class Settings {

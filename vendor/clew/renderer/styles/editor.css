@@ -28,8 +28,10 @@
 .cmt-heading4 { font-size: 1.05em; }
 
 /* jmarkdown dialect semantics: *x* is STRONG, **x** is INTENSE (small caps),
-   /x/ is italic (painted by the overlay's jmd-italic). */
-.cmt-emphasis { font-style: normal; font-weight: 650; }
+   /x/ is italic (painted by the overlay's jmd-italic). No font-style here:
+   nothing makes *x* italic, and a `normal` would un-slant `/*x*/`, whose
+   strong span sits inside the italic one. */
+.cmt-emphasis { font-weight: 650; }
 .cmt-strong { font-weight: 700; font-variant: small-caps; letter-spacing: 0.02em; }
 .cmt-strikethrough { text-decoration: line-through; color: var(--clew-text-muted); }
 .cmt-link { color: var(--clew-link); }
@@ -54,6 +56,10 @@
 .jmd-cite { color: var(--clew-accent); }
 .jmd-cite-key { color: var(--clew-link); }
 .jmd-footnote { color: var(--clew-quote); }
+/* A note's body wears its opener's colour, whether it runs to the end of
+   the line or over several paragraphs; the constructs inside it keep
+   their own faces (they are painted over this one). */
+.jmd-footnote-body { color: var(--clew-quote); }
 .jmd-embedded { opacity: 0.92; }
 
 .jmd-directive-punct, .jmd-env-keyword { color: var(--clew-formatting); font-weight: 600; }
@@ -84,3 +90,8 @@
 .jmd-function { color: var(--clew-link); }
 .jmd-variable, .jmd-type { color: var(--clew-text-normal); }
 .jmd-comment { color: var(--clew-text-faint); font-style: italic; }
+
+/* Fence code highlighted by highlight.js (editor/code-highlight.js): the
+   token's jmd-* colour wins over the fence's single text colour, whichever
+   way CodeMirror nests the two spans. */
+.cm-line .cm-code-token * { color: inherit !important; }

@@ -13,7 +13,7 @@
 // quote-delimited; one level of nested braces is tolerated ({\"o}, {LSE}).
 
 const ENTRY_RE = /@\s*([a-zA-Z]+)\s*\{\s*([^,\s{}]+)\s*,/g;
-const FIELD_RE = /(author|editor|title|year|date)\s*=\s*(?:\{((?:[^{}]|\{[^{}]*\})*)\}|"([^"]*)"|(\d+))/gi;
+const FIELD_RE = /(author|editor|title|year|date|file|url|doi)\s*=\s*(?:\{((?:[^{}]|\{[^{}]*\})*)\}|"([^"]*)"|(\d+))/gi;
 
 const stripBraces = (s) => s.replace(/[{}]/g, '').replace(/\s+/g, ' ').trim();
 
@@ -32,7 +32,8 @@ function shortAuthors(field) {
 }
 
 /**
- * @returns {Array<{key, type, authors, title, year}>}
+ * @returns {Array<{key, type, authors, title, year, file, url, doi}>}
+ *   `file`: the raw BibTeX `file` field (Zotero/JabRef — see bibFilePath)
  */
 export function parseBib(text) {
 	const entries = [];
@@ -59,7 +60,32 @@ export function parseBib(text) {
 			authors: shortAuthors(fields.author ?? fields.editor ?? ''),
 			title: stripBraces(fields.title ?? ''),
 			year: (fields.year ?? fields.date ?? '').slice(0, 4),
+			file: (fields.file ?? '').trim(),
+			url: stripBraces(fields.url ?? ''),
+			doi: stripBraces(fields.doi ?? '').replace(/^https?:\/\/(dx\.)?doi\.org\//i, ''),
 		});
 	}
 	return entries;
+}
+
+/**
+ * The path a BibTeX `file` field names. Zotero and JabRef write
+ * `Description:path:mime` (`:papers/x.pdf:PDF`), several joined by `;`, with
+ * `\:` escaping a colon (Windows drives); a plain path is also common. The
+ * first PDF wins, else the first path. Relative paths are the caller's to
+ * resolve (against the .bib's folder, then the vault root).
+ *
+ * @param {string} value
+ * @returns {string|null}
+ */
+export function bibFilePath(value) {
+	if (!value) return null;
+	const parts = String(value).split(/(?<!\\);/).map((s) => s.trim()).filter(Boolean);
+	const paths = parts.map((part) => {
+		// Split on UNESCAPED colons: [description, path, mime] when typed.
+		const pieces = part.split(/(?<!\\):/);
+		const path = pieces.length >= 3 ? pieces.slice(1, -1).join(':') : part;
+		return path.replace(/\\:/g, ':').replace(/\\\\/g, '\\').trim();
+	}).filter(Boolean);
+	return paths.find((p) => /\.pdf$/i.test(p)) ?? paths[0] ?? null;
 }

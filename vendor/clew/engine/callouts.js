@@ -98,6 +98,19 @@ const ALIASES = (() => {
 	return map;
 })();
 
+/**
+ * The canonical types, for the editor side (live edit's callout heads, the
+ * toolbar's callout popover): name → { label, aliases }. One table, so the
+ * editor cannot offer or draw a type the engine would not render.
+ */
+export const CALLOUT_TYPES = Object.freeze(Object.fromEntries(
+	Object.entries(TYPES).map(([name, spec]) => [name, { label: spec.label, aliases: spec.aliases ?? [] }])));
+
+/** A type's icon as inline SVG markup (the same one reading mode draws). */
+export function calloutIcon(type) {
+	return iconSvg(TYPES[type]?.icon);
+}
+
 /** The canonical type for whatever the author wrote, or null. Case-insensitive. */
 export function resolveType(raw) {
 	return ALIASES.get(String(raw ?? '').toLowerCase().trim()) ?? null;

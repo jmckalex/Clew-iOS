@@ -10,7 +10,8 @@
 
 /**
  * @file JMarkdown dialect scanner — a pure, DOM-free scan of one
- * document producing `{captures, regions, folds, injections}`.
+ * document producing `{captures, regions, folds, injections,
+ * constructs}`.
  *
  * Ported from the jmacs project (`packages/renderer/src/jmarkdown-scan.js`,
  * GPL-3.0-or-later, same author), itself a tested port of the
@@ -32,7 +33,9 @@
  *     spans (with `\/` escapes and the mid-word-slash abort)
  *   - embedded JavaScript chains `ident(...).prop(...)`
  *   - `<script>` / `<style>` blocks and block-level HTML runs
- *   - `\cite{…}` family commands and `[^label:`/`[fn:` footnote openers
+ *   - `\cite{…}` family commands and inline footnotes — `[^label: …]`,
+ *     `[fn: …]`, either with a `(group)` — opener, body and closer,
+ *     the body free to span paragraphs as the engine allows
  *
  * Changes in the Clew port (vs jmacs):
  *
@@ -48,6 +51,11 @@
  *     underscores; never inside code/math or a heading's leading #s).
  *   - Math segments get a `jmd-math` capture of their own (jmacs hands
  *     math to a MathJax preview; Clew styles the source span instead).
+ *   - `constructs`: the same passes that paint also RECORD what they
+ *     matched, structurally — kind, extent, delimiters, parts — for live
+ *     edit (`editor/live/model.js`), which must know where a construct's
+ *     delimiters are to conceal them. Emitted beside the captures, never
+ *     instead of them, so the two cannot disagree about a position.
  *
  * (Alignment `>> … <<` and description lists are deliberately *not*
  * scanned — Sublime renders those through stock Markdown, and so does
@@ -87,6 +95,40 @@ import { scanMermaid } from './mermaid-scan.js';
  *   jmacs these were tree-sitter injections; in Clew they are inert
  *   data that overlay.js paints uniformly (see overlay.js). The
  *   `wrapPrefix`/`wrapSuffix` fields are kept for test parity only.
+ * @property {Construct[]} constructs - What the passes matched, in
+ *   document order (outer before inner).
+ */
+
+/**
+ * One dialect construct. Every offset is absolute; every part is a
+ * `{start, end}` range (or null when absent). `open`/`close` are the
+ * delimiter runs a live view hides — `close` is null when the construct
+ * is unclosed (still being typed, or a block running to end of file).
+ *
+ * Kind-specific parts:
+ *
+ *   math             display (bool), env (name|null), body
+ *   metaHeader       body (open null for a fence-less legacy header)
+ *   directiveBlock   name|null, content, attrs, colons, body
+ *   environment      name, content, attrs, body
+ *   directiveInline  name|null, content, attrs, block (`::x` vs `:x`)
+ *   directiveAt      name, content, attrs, block (`@x+[…]`)
+ *   mustache         name
+ *   highlight        body
+ *   italic           body
+ *   cite             command (without the backslash), notes[], keys[]
+ *   footnote         label|null, group|null, body|null, multiline
+ *   wikilink/embed   target, heading, blockId, alias, aliasText (string)
+ *   tag              name (without the `#`)
+ *   htmlBlock / scriptBlock / styleBlock   (none)
+ *
+ * `content`/`attrs` are the INTERIORS of the `[…]`/`{…}` groups.
+ * A block's `body` runs from the line after its opener to the newline
+ * before its closer (empty when they are adjacent).
+ *
+ * @typedef {{ kind: string, start: number, end: number,
+ *   open: {start: number, end: number}|null,
+ *   close: {start: number, end: number}|null }} Construct
  */
 
 /** LaTeX-bodied `@begin(…)` environment names (the Sublime list). */
@@ -114,7 +156,7 @@ const HTML_BLOCK_TAGS = new RegExp(
  */
 export function scanJmarkdown(text) {
 	/** @type {JmarkdownScan} */
-	const out = { captures: [], regions: [], folds: [], injections: [] };
+	const out = { captures: [], regions: [], folds: [], injections: [], constructs: [] };
 	if (typeof text !== 'string' || text.length === 0) return out;
 
 	// The masked working copy: code first (fences + inline spans), then
@@ -126,6 +168,7 @@ export function scanJmarkdown(text) {
 		// markdown grammar knows nothing about `$…$`, so this is the one
 		// place math source gets a style of its own.
 		out.captures.push({ start: seg.start, end: seg.end, face: 'jmd-math' });
+		out.constructs.push(mathConstruct(text, seg));
 		blank(buf, seg.start, seg.end);
 	}
 
@@ -143,7 +186,54 @@ export function scanJmarkdown(text) {
 	const afterHeader = scanHeader(ctx);
 	scanBlocks(ctx, afterHeader);
 	scanInlines(ctx);
+	// Document order, an outer construct before the inner ones it holds.
+	out.constructs.sort((a, b) => a.start - b.start || b.end - a.end);
 	return out;
+}
+
+/**
+ * The `math` construct for one segment: its delimiters recovered from
+ * the text (`$`, `$$`, `\(`, `\[`, or a whole `\begin{env}` line run).
+ * For an environment the segment body IS the `\begin…\end` source —
+ * MathJax typesets the environment whole — so `body` spans it and
+ * `open`/`close` are the `\begin{…}`/`\end{…}` commands inside it.
+ *
+ * @param {string} text
+ * @param {import('./math-segments.js').MathSegment} seg
+ * @returns {object}
+ */
+function mathConstruct(text, seg) {
+	const display = seg.kind === 'block';
+	const env = /^\\begin\{([^}]+)\}/.exec(text.slice(seg.start, seg.start + 40));
+	if (env) {
+		const closeLen = `\\end{${env[1]}}`.length;
+		return {
+			kind: 'math', start: seg.start, end: seg.end, display, env: env[1],
+			open: { start: seg.start, end: seg.start + env[0].length },
+			close: { start: seg.end - closeLen, end: seg.end },
+			body: { start: seg.start, end: seg.end },
+		};
+	}
+	const two = text.startsWith('$$', seg.start) || text[seg.start] === '\\';
+	const len = two ? 2 : 1;
+	return {
+		kind: 'math', start: seg.start, end: seg.end, display, env: null,
+		open: { start: seg.start, end: seg.start + len },
+		close: { start: seg.end - len, end: seg.end },
+		body: { start: seg.start + len, end: seg.end - len },
+	};
+}
+
+/**
+ * The body range of a block construct whose opener is line `k` and
+ * whose closer is line `c` (`c === lineCount` when unclosed): from the
+ * start of the line after the opener to the newline before the closer.
+ * Empty (start === end) when nothing lies between them.
+ */
+function bodyBetween(ctx, k, c) {
+	const start = k + 1 < ctx.lineCount ? ctx.lineStarts[k + 1] : ctx.text.length;
+	const end = c < ctx.lineCount ? ctx.lineStarts[c] - 1 : ctx.text.length;
+	return { start, end: Math.max(start, end) };
 }
 
 /* ── small shared helpers ────────────────────────────────────────────── */
@@ -198,6 +288,16 @@ function consumeLine(ctx, i) {
 	blank(ctx.buf, ctx.lineStarts[i], lineEnd(ctx, i));
 }
 
+/** Record a construct (see `constructs` on JmarkdownScan). */
+function construct(ctx, kind, start, end, parts) {
+	ctx.out.constructs.push({ kind, start, end, open: null, close: null, ...parts });
+}
+
+/** A `{start, end}` range, or null when empty. */
+function span(start, end) {
+	return end > start ? { start, end } : null;
+}
+
 /** Mark an inline span as claimed so later matchers skip it. */
 function claim(ctx, s, e) {
 	ctx.claimed.push({ s, e });
@@ -224,13 +324,20 @@ function scanHeader(ctx) {
 	if (ctx.lineCount === 0) return 0;
 	let i = 0;
 	const first = lineAt(ctx, 0);
+	const header = {
+		kind: 'metaHeader', start: 0, end: ctx.text.length,
+		open: null, close: null, body: null,
+	};
+	ctx.out.constructs.push(header);
 	if (/^-{3,}$/.test(first)) {
+		header.open = { start: 0, end: lineEnd(ctx, 0) };
 		cap(ctx, ctx.lineStarts[0], lineEnd(ctx, 0), 'jmd-meta-fence');
 		consumeLine(ctx, 0);
 		i = 1;
 	} else if (/^[-A-Za-z0-9 ]+:/.test(first) && legacyHeaderTerminated(ctx)) {
 		i = 0;
 	} else {
+		ctx.out.constructs.pop();
 		return 0;
 	}
 
@@ -242,6 +349,9 @@ function scanHeader(ctx) {
 		if (/^-{3,}$/.test(line)) {
 			cap(ctx, ls, lineEnd(ctx, i), 'jmd-meta-fence');
 			consumeLine(ctx, i);
+			header.close = { start: ls, end: lineEnd(ctx, i) };
+			header.end = lineEnd(ctx, i);
+			header.body = bodyBetween(ctx, header.open ? 0 : -1, i);
 			return i + 1;
 		}
 
@@ -272,6 +382,7 @@ function scanHeader(ctx) {
 		i += 1;
 	}
 	// No closing fence: like Sublime, the header runs to end of file.
+	header.body = bodyBetween(ctx, header.open ? 0 : -1, ctx.lineCount);
 	return ctx.lineCount;
 }
 
@@ -369,9 +480,9 @@ function headerBody(ctx, from) {
  * @param {number} from - First line after the header.
  */
 function scanBlocks(ctx, from) {
-	/** @type {{ colons: number, start: number }[]} */
+	/** @type {{ colons: number, start: number, construct: object, line: number }[]} */
 	const dirStack = [];
-	/** @type {number[]} */
+	/** @type {{ start: number, construct: object, line: number }[]} */
 	const envStack = [];
 	let k = from;
 
@@ -393,14 +504,17 @@ function scanBlocks(ctx, from) {
 			if (!m[2] && /^:{3,}\s*$/.test(line) && top && top.colons === colons) {
 				cap(ctx, ls, ls + colons, 'jmd-directive-punct');
 				ctx.out.folds.push({ start: top.start, end: lineEnd(ctx, k) });
+				closeBlock(ctx, top.construct, top.line, k, { start: ls, end: ls + colons });
 				dirStack.pop();
 			} else {
 				cap(ctx, ls, ls + colons, 'jmd-directive-punct');
 				if (m[2]) {
 					cap(ctx, ls + colons, ls + m[0].length, 'jmd-directive-name');
 				}
-				afterName(ctx, line, m[0].length, ls);
-				dirStack.push({ colons, start: ls });
+				const parts = {};
+				afterName(ctx, line, m[0].length, ls, parts);
+				const construct = directiveBlock(ctx, k, colons, m, parts);
+				dirStack.push({ colons, start: ls, construct, line: k });
 			}
 			consumeLine(ctx, k);
 			k += 1;
@@ -417,8 +531,10 @@ function scanBlocks(ctx, from) {
 				k = verbatimEnvironment(ctx, k, 'mermaid', m);
 				continue;
 			}
-			const end = environmentZones(ctx, k, m);
-			envStack.push(ls);
+			const parts = {};
+			const end = environmentZones(ctx, k, m, parts);
+			const construct = environment(ctx, k, m, parts, end);
+			envStack.push({ start: ls, construct, line: k });
 			region(ctx, ls, end);
 			blank(ctx.buf, ls, end);
 			k += 1;
@@ -435,7 +551,10 @@ function scanBlocks(ctx, from) {
 				// rather than swallowing the closing line (`@end(…)` is not a
 				// structural close the line-based preview would re-show). See
 				// folding.js / view.js.
-				ctx.out.folds.push({ start: open, end: lineEnd(ctx, k), block: true });
+				ctx.out.folds.push({ start: open.start, end: lineEnd(ctx, k), block: true });
+				closeBlock(ctx, open.construct, open.line, k, {
+					start: ls + m[0].indexOf('@'), end,
+				});
 			}
 			region(ctx, ls, end);
 			blank(ctx.buf, ls, end);
@@ -453,6 +572,7 @@ function scanBlocks(ctx, from) {
 				end: lineEnd(ctx, last),
 				language: 'html',
 			});
+			htmlConstruct(ctx, 'scriptBlock', ls, lineEnd(ctx, last));
 			blank(ctx.buf, ls, lineEnd(ctx, last));
 			k = last + 1;
 			continue;
@@ -472,6 +592,7 @@ function scanBlocks(ctx, from) {
 				end: lineEnd(ctx, last),
 				language: 'html',
 			});
+			htmlConstruct(ctx, 'styleBlock', ls, lineEnd(ctx, last));
 			blank(ctx.buf, ls, lineEnd(ctx, last));
 			k = last + 1;
 			continue;
@@ -494,6 +615,7 @@ function scanBlocks(ctx, from) {
 				end: lineEnd(ctx, c),
 				language: 'html',
 			});
+			htmlConstruct(ctx, 'htmlBlock', ls, lineEnd(ctx, c));
 			blank(ctx.buf, ls, lineEnd(ctx, c));
 			k = c + 1;
 			continue;
@@ -504,6 +626,68 @@ function scanBlocks(ctx, from) {
 
 		k += 1;
 	}
+}
+
+/**
+ * Open a `directiveBlock` construct on line `k` — closed later by
+ * `closeBlock`, or left running to end of file (`close: null`), which is
+ * what the scanner's colouring does with an unclosed opener too.
+ *
+ * @param {object} ctx
+ * @param {number} k - The opener's line index.
+ * @param {number} colons - The fence's colon count (nesting level).
+ * @param {RegExpExecArray} m - The opener match (m[2] = the name).
+ * @param {{content: object|null, attrs: object|null}} parts - From afterName.
+ * @returns {object}
+ */
+function directiveBlock(ctx, k, colons, m, parts) {
+	const ls = ctx.lineStarts[k];
+	const construct = {
+		kind: 'directiveBlock', start: ls, end: ctx.text.length,
+		open: { start: ls, end: ls + colons }, close: null,
+		name: m[2] ? { start: ls + colons, end: ls + m[0].length } : null,
+		content: parts.content, attrs: parts.attrs, colons,
+		body: bodyBetween(ctx, k, ctx.lineCount),
+	};
+	ctx.out.constructs.push(construct);
+	return construct;
+}
+
+/**
+ * Open an `environment` construct (`@begin(name)` on line `k`).
+ *
+ * @param {object} ctx
+ * @param {number} k
+ * @param {RegExpExecArray} m - The begin match (m[4] = the name).
+ * @param {{content: object|null, attrs: object|null}} parts - From afterName.
+ * @param {number} openEnd - One past the opener's tail.
+ * @returns {object}
+ */
+function environment(ctx, k, m, parts, openEnd) {
+	const ls = ctx.lineStarts[k];
+	const at = ls + m[0].indexOf('@');
+	const nameAt = ls + m[0].indexOf('(') + 1 + (m[3] ? 1 : 0);
+	const construct = {
+		kind: 'environment', start: ls, end: ctx.text.length,
+		open: { start: at, end: openEnd }, close: null,
+		name: { start: nameAt, end: nameAt + m[4].length },
+		content: parts.content, attrs: parts.attrs,
+		body: bodyBetween(ctx, k, ctx.lineCount),
+	};
+	ctx.out.constructs.push(construct);
+	return construct;
+}
+
+/** Close a block construct opened on line `k` at closer line `c`. */
+function closeBlock(ctx, construct, k, c, close) {
+	construct.close = close;
+	construct.end = lineEnd(ctx, c);
+	construct.body = bodyBetween(ctx, k, c);
+}
+
+/** An HTML / `<script>` / `<style>` block construct. */
+function htmlConstruct(ctx, kind, start, end) {
+	ctx.out.constructs.push({ kind, start, end, open: null, close: null });
 }
 
 /**
@@ -522,7 +706,9 @@ function verbatimDirective(ctx, k, kind, m) {
 	const ls = ctx.lineStarts[k];
 	cap(ctx, ls, ls + 3, 'jmd-directive-punct');
 	cap(ctx, ls + 3, ls + m[0].length, 'jmd-directive-name');
-	afterName(ctx, lineAt(ctx, k), m[0].length, ls);
+	const parts = {};
+	afterName(ctx, lineAt(ctx, k), m[0].length, ls, parts);
+	const construct = directiveBlock(ctx, k, 3, m, parts);
 	consumeLine(ctx, k);
 
 	let c = k + 1;
@@ -531,6 +717,9 @@ function verbatimDirective(ctx, k, kind, m) {
 	if (c < ctx.lineCount) {
 		cap(ctx, ctx.lineStarts[c], ctx.lineStarts[c] + 3, 'jmd-directive-punct');
 		ctx.out.folds.push({ start: ls, end: lineEnd(ctx, c) });
+		closeBlock(ctx, construct, k, c, {
+			start: ctx.lineStarts[c], end: ctx.lineStarts[c] + 3,
+		});
 		consumeLine(ctx, c);
 	}
 	return c + 1;
@@ -548,7 +737,9 @@ function verbatimDirective(ctx, k, kind, m) {
  */
 function verbatimEnvironment(ctx, k, kind, m) {
 	const ls = ctx.lineStarts[k];
-	environmentZones(ctx, k, m);
+	const parts = {};
+	const openEnd = environmentZones(ctx, k, m, parts);
+	const construct = environment(ctx, k, m, parts, openEnd);
 	consumeLine(ctx, k);
 
 	let c = k + 1;
@@ -556,8 +747,12 @@ function verbatimEnvironment(ctx, k, kind, m) {
 	verbatimBody(ctx, k, c, kind);
 	if (c < ctx.lineCount) {
 		const em = /^[ \t]*(@end)(\()([^)]*)(\))/.exec(lineAt(ctx, c));
-		if (em) environmentZones(ctx, c, em);
+		const cs = ctx.lineStarts[c];
+		const closeEnd = em ? environmentZones(ctx, c, em) : lineEnd(ctx, c);
 		ctx.out.folds.push({ start: ls, end: lineEnd(ctx, c) });
+		closeBlock(ctx, construct, k, c, {
+			start: cs + lineAt(ctx, c).indexOf('@'), end: closeEnd,
+		});
 		consumeLine(ctx, c);
 	}
 	return c + 1;
@@ -595,10 +790,11 @@ function verbatimBody(ctx, k, c, kind) {
  * @param {object} ctx
  * @param {number} k - The line index.
  * @param {RegExpExecArray} m - A begin/end match for that line.
+ * @param {object} [parts] - Passed through to afterName.
  * @returns {number} Absolute offset one past the construct (after any
  *   `[label]{attrs}` tail).
  */
-function environmentZones(ctx, k, m) {
+function environmentZones(ctx, k, m, parts) {
 	const ls = ctx.lineStarts[k];
 	let at = ls + m[0].indexOf(m[1]);
 	cap(ctx, at, at + m[1].length, 'jmd-env-keyword');
@@ -623,7 +819,7 @@ function environmentZones(ctx, k, m) {
 	}
 	const close = ls + m[0].length - 1;
 	cap(ctx, close, close + 1, 'jmd-env-paren'); // )
-	return afterName(ctx, lineAt(ctx, k), m[0].length, ls);
+	return afterName(ctx, lineAt(ctx, k), m[0].length, ls, parts);
 }
 
 /* ── the directive tail: [content]{.class #id attr="val"} ────────────── */
@@ -638,10 +834,16 @@ function environmentZones(ctx, k, m) {
  * @param {string} line - The line's text.
  * @param {number} col - Column where the tail may start.
  * @param {number} base - Absolute offset of `line[0]`.
+ * @param {object} [parts] - When given, receives `content` and `attrs`:
+ *   the absolute `{start, end}` interiors of the `[…]` and `{…}` groups
+ *   (delimiters excluded), or null for a group that is absent. An
+ *   unclosed `[` reports its interior to end of line.
  * @returns {number} Absolute offset one past the tail.
  */
-function afterName(ctx, line, col, base) {
+function afterName(ctx, line, col, base, parts = {}) {
 	let i = col;
+	parts.content = null;
+	parts.attrs = null;
 	if (line[i] === '[') {
 		cap(ctx, base + i, base + i + 1, 'jmd-punct');
 		let depth = 1;
@@ -654,9 +856,11 @@ function afterName(ctx, line, col, base) {
 		if (depth === 0) {
 			cap(ctx, base + i + 1, base + j - 1, 'jmd-directive-bracket');
 			cap(ctx, base + j - 1, base + j, 'jmd-punct');
+			parts.content = { start: base + i + 1, end: base + j - 1 };
 			i = j;
 		} else {
 			cap(ctx, base + i + 1, base + line.length, 'jmd-directive-bracket');
+			parts.content = { start: base + i + 1, end: base + line.length };
 			return base + line.length;
 		}
 	}
@@ -692,6 +896,7 @@ function afterName(ctx, line, col, base) {
 				j += 1;
 			}
 		}
+		parts.attrs = { start: base + i + 1, end: base + j };
 		if (line[j] === '}') {
 			cap(ctx, base + j, base + j + 1, 'jmd-punct');
 			j += 1;
@@ -743,6 +948,11 @@ function mustaches(ctx, S) {
 		cap(ctx, m.index, m.index + 2, 'jmd-punct');
 		cap(ctx, m.index + 2, m.index + 2 + m[2].length, 'jmd-mustache');
 		cap(ctx, m.index + 2 + m[2].length, m.index + m[0].length, 'jmd-punct');
+		construct(ctx, 'mustache', m.index, m.index + m[0].length, {
+			open: { start: m.index, end: m.index + 2 },
+			close: { start: m.index + m[0].length - 2, end: m.index + m[0].length },
+			name: { start: m.index + 2, end: m.index + 2 + m[2].length },
+		});
 		claim(ctx, m.index, m.index + m[0].length);
 	}
 }
@@ -772,12 +982,20 @@ function inlineDirectives(ctx, S) {
 			const eol = S.indexOf('\n', nameEnd);
 			const lineEndAt = eol === -1 ? S.length : eol;
 			const lineStartAt = S.lastIndexOf('\n', at) + 1;
+			const parts = {};
 			const end = afterName(
 				ctx,
 				S.slice(lineStartAt, lineEndAt),
 				nameEnd - lineStartAt,
-				lineStartAt
+				lineStartAt,
+				parts
 			);
+			construct(ctx, 'directiveInline', at, end, {
+				open: { start: at, end: nameEnd },
+				name: m[3] ? { start: nameEnd - m[3].length, end: nameEnd } : null,
+				content: parts.content, attrs: parts.attrs,
+				block: m[2].length > 1,
+			});
 			region(ctx, at, end);
 			claim(ctx, at, end);
 			re.lastIndex = end;
@@ -831,6 +1049,12 @@ function atDirectives(ctx, S) {
 		const openEnd = p;
 		region(ctx, at, openEnd);
 		claim(ctx, at, openEnd);
+		const nameAt = at + 1 + (m[2] ? 1 : 0);
+		const directive = {
+			open: { start: at, end: openEnd },
+			name: { start: nameAt, end: nameAt + m[3].length },
+			content: null, attrs: null, block: Boolean(m[5]),
+		};
 
 		// Optional [jmarkdown text] group: paint/own the brackets, then
 		// inject the bracket-free interior into the inline grammar. Injecting
@@ -856,6 +1080,7 @@ function atDirectives(ctx, S) {
 						language: 'jmarkdown_inline',
 					});
 				}
+				directive.content = { start: p + 1, end: rb };
 				p = rb + 1;
 			}
 		}
@@ -886,9 +1111,11 @@ function atDirectives(ctx, S) {
 				}
 				claim(ctx, p, p + 1);
 				claim(ctx, rc, rc + 1);
+				directive.attrs = { start: p + 1, end: rc };
 				p = rc + 1;
 			}
 		}
+		construct(ctx, 'directiveAt', at, p, directive);
 		re.lastIndex = p;
 	}
 }
@@ -1059,12 +1286,21 @@ function highlights(ctx, S) {
 			cap(ctx, open, open + 2, 'jmd-punct');
 			cap(ctx, open + 2, close, 'jmd-highlight');
 			cap(ctx, close, close + 2, 'jmd-punct');
+			construct(ctx, 'highlight', open, close + 2, {
+				open: { start: open, end: open + 2 },
+				close: { start: close, end: close + 2 },
+				body: { start: open + 2, end: close },
+			});
 			region(ctx, open, close + 2);
 			claim(ctx, open, close + 2);
 			re.lastIndex = close + 2;
 		} else if (blankAt !== -1) {
 			cap(ctx, open, open + 2, 'jmd-punct');
 			cap(ctx, open + 2, blankAt, 'jmd-highlight');
+			construct(ctx, 'highlight', open, blankAt, {
+				open: { start: open, end: open + 2 },
+				body: { start: open + 2, end: blankAt },
+			});
 			region(ctx, open, blankAt);
 			claim(ctx, open, blankAt);
 			re.lastIndex = blankAt;
@@ -1074,56 +1310,52 @@ function highlights(ctx, S) {
 }
 
 /**
- * `/italic/` spans, with Sublime's three exits: a closing `/` before
- * whitespace or trailing punctuation; an *abort* on a mid-word or
- * space-then-word slash (`/usr/bin` never italicises); and a blank
- * line, which ends the span like the Sublime context's pop. `\/` is an
- * escaped slash. Not owned — a nested `*bold*` keeps its grammar face.
+ * `/italic/` spans, exactly as the ENGINE reads them (owner's rule,
+ * 2026-09-27: the editor always follows the engine). Its tokenizer
+ * (vendor/jmarkdown/src/syntax-modifications.js#italics) is a bare regex,
+ * `/([^/.?!]+[.?!]?)/`, tried at every slash the inline lexer reaches — no
+ * word boundaries, so `and/or/not`, `/usr/bin` and `1/2 or 3/4` italicise
+ * too, and `\/` is how an author says a slash is only a slash. A slash the
+ * lexer never reaches cannot open one: an escaped `\/`, a slash inside a
+ * link's destination, or an autolink or HTML tag (each consumed whole by an
+ * earlier token). A BARE URL is not one: the engine does not link it, and
+ * `https://a.com/b/c` italicises its `b` (measured with the engine itself). The body is raw text up to the next slash of
+ * any kind — escaped or not — and no further than the paragraph. Not owned:
+ * a nested `*bold*` keeps its grammar face.
  */
+const ITALIC = /\/([^/.?!]+[.?!]?)\//y;
+const LEXED_WHOLE = [
+	/\]\([^)\n]*\)/g, // a link's destination (its text is lexed, and may hold one)
+	/<[A-Za-z/!?][^>\n]*>/g, // an HTML tag or an autolink
+];
+
 function italics(ctx, S) {
-	const re = /(^|\s)\/(?=[^\s/])/g;
-	let m;
-	while ((m = re.exec(S))) {
-		const open = m.index + m[1].length;
-		if (isClaimed(ctx, open)) continue;
-		let j = open + 1;
-		let closed = -1;
-		let aborted = false;
-		while (j < S.length) {
-			const c = S[j];
-			if (c === '\\' && S[j + 1] === '/') {
-				j += 2;
-				continue;
-			}
-			if (c === '/') {
-				const next = S[j + 1];
-				if (next === undefined || /[\s.,;:!?)]/.test(next)) {
-					closed = j;
-				} else {
-					aborted = true;
-				}
-				break;
-			}
-			if (c === '\n') {
-				const blankAt = /^[ \t]*(\n|$)/.test(S.slice(j + 1)) ? j : -1;
-				if (blankAt !== -1) {
-					closed = blankAt; // partial span, no closing punct
-					break;
-				}
-			}
-			j += 1;
-		}
-		if (aborted || closed === -1) continue;
+	const whole = [];
+	for (const re of LEXED_WHOLE) {
+		re.lastIndex = 0;
+		for (let m = re.exec(S); m; m = re.exec(S)) whole.push([m.index, m.index + m[0].length]);
+	}
+	const unreached = (pos) => whole.some(([a, b]) => pos >= a && pos < b);
+	for (let open = S.indexOf('/'); open !== -1; open = S.indexOf('/', open + 1)) {
+		if (isClaimed(ctx, open) || unreached(open)) continue;
+		let backslashes = 0;
+		for (let k = open - 1; k >= 0 && S[k] === '\\'; k -= 1) backslashes += 1;
+		if (backslashes % 2 === 1) continue;
+		ITALIC.lastIndex = open;
+		const m = ITALIC.exec(S);
+		// A blank line ends the paragraph, and the engine lexes one at a time.
+		if (!m || /\n[ \t]*\n/.test(m[1])) continue;
+		const closed = open + m[0].length - 1;
 		cap(ctx, open, open + 1, 'jmd-punct');
 		cap(ctx, open + 1, closed, 'jmd-italic');
-		if (S[closed] === '/') {
-			cap(ctx, closed, closed + 1, 'jmd-punct');
-			claim(ctx, open, closed + 1);
-			re.lastIndex = closed + 1;
-		} else {
-			claim(ctx, open, closed);
-			re.lastIndex = closed;
-		}
+		cap(ctx, closed, closed + 1, 'jmd-punct');
+		construct(ctx, 'italic', open, closed + 1, {
+			open: { start: open, end: open + 1 },
+			close: { start: closed, end: closed + 1 },
+			body: { start: open + 1, end: closed },
+		});
+		claim(ctx, open, closed + 1);
+		open = closed;
 	}
 }
 
@@ -1135,6 +1367,11 @@ function citations(ctx, S) {
 		if (isClaimed(ctx, m.index)) continue;
 		const start = m.index;
 		cap(ctx, start, start + m[0].length, 'jmd-cite');
+		const cite = {
+			open: { start, end: start + m[0].length },
+			command: { start: start + 1, end: start + m[0].length },
+			notes: [], keys: [],
+		};
 		let i = start + m[0].length;
 		while (S[i] === '[') {
 			const close = S.indexOf(']', i + 1);
@@ -1143,6 +1380,7 @@ function citations(ctx, S) {
 			cap(ctx, i, i + 1, 'jmd-punct');
 			cap(ctx, i + 1, close, 'jmd-string');
 			cap(ctx, close, close + 1, 'jmd-punct');
+			cite.notes.push({ start: i + 1, end: close });
 			i = close + 1;
 		}
 		if (S[i] === '{') {
@@ -1152,25 +1390,116 @@ function citations(ctx, S) {
 				cap(ctx, i, i + 1, 'jmd-punct');
 				cap(ctx, i + 1, close, 'jmd-cite-key');
 				cap(ctx, close, close + 1, 'jmd-punct');
+				// One range per comma-separated key, whitespace trimmed.
+				const keyRe = /[^,\s]+/g;
+				const list = S.slice(i + 1, close);
+				let k;
+				while ((k = keyRe.exec(list))) {
+					cite.keys.push({ start: i + 1 + k.index, end: i + 1 + k.index + k[0].length });
+				}
 				i = close + 1;
 			}
 		}
+		construct(ctx, 'cite', start, i, cite);
 		region(ctx, start, i);
 		claim(ctx, start, i);
 		re.lastIndex = i;
 	}
 }
 
-/** Footnote openers: `[^label:` and `[fn:` (the body renders normally). */
+/**
+ * The opener of an inline footnote: `[fn:`, `[^label:`, and either with
+ * an endnote group — `[fn(g):`, `[^label(g):`. The label may not hold a
+ * `]`, whitespace, a colon or a `(`.
+ *
+ * This is the engine's own pair of patterns (OPEN_ANON / OPEN_LABEL in
+ * `vendor/jmarkdown/src/inline-footnotes.js`) written as one regex, and
+ * it is exported so `jmd/footnote-parser.js` — which tells lang-markdown
+ * that these brackets are NOT a link — cannot drift from the scanner
+ * that colours them (the arrangement block-refs.js/block-ids.js use).
+ * Callers add their own flags; the source carries no anchor.
+ */
+export const FOOTNOTE_OPEN = /\[(?:\^[^\]\s:(]+|fn)(?:\([^)\n]*\))?:/;
+
+/**
+ * Inline footnotes — `[^label: body]`, `[fn: body]`, either with a
+ * `(group)` — the WHOLE construct: the opener, the body, the closing
+ * `]`.
+ *
+ * The body carries `jmd-footnote-body` and is left unclaimed, so the
+ * passes that ran before this one (and the base grammar) still paint
+ * italics, wikilinks, maths and the rest inside a note.
+ *
+ * The body may span paragraphs: the engine extracts a note whose body
+ * holds blank lines, dedents it and renders it as its own block
+ * (`preprocessFootnotes`), so a blank line inside the brackets ends
+ * nothing. That is the whole point of this pass — lang-markdown reads
+ * `[…]` as a link, which is what used to colour a note's body, and a
+ * link stops dead at a blank line. The scanner's own face carries
+ * across the break; footnote-parser.js takes the bogus link away.
+ *
+ * The closing bracket is found the engine's way (`findClosingBracket`):
+ * nesting counted, `\]` escaped. Its code-span and maths cases are
+ * already handled here — the scan runs on the masked buffer, where both
+ * are blank. An unclosed opener paints the opener alone.
+ */
 function footnotes(ctx, S) {
-	const re = /\[(\^[^\]\s:]+|fn):/g;
+	const re = new RegExp(FOOTNOTE_OPEN.source, 'g');
 	let m;
 	while ((m = re.exec(S))) {
-		if (isClaimed(ctx, m.index)) continue;
-		cap(ctx, m.index, m.index + m[0].length, 'jmd-footnote');
-		region(ctx, m.index, m.index + m[0].length);
-		claim(ctx, m.index, m.index + m[0].length);
+		const start = m.index;
+		if (isClaimed(ctx, start)) continue;
+		const open = start + m[0].length;
+		cap(ctx, start, open, 'jmd-footnote');
+		region(ctx, start, open);
+		claim(ctx, start, open);
+		const close = footnoteClose(S, open);
+		const note = {
+			open: { start, end: open },
+			label: m[0][1] === '^' ? { start: start + 2, end: start + 2 + /^[^(:]*/.exec(m[0].slice(2))[0].length } : null,
+			group: null, body: null, multiline: false,
+		};
+		const g = /\(([^)\n]*)\):$/.exec(m[0]);
+		if (g) note.group = { start: open - 2 - g[1].length, end: open - 2 };
+		if (close === -1) {
+			// Still being typed: the opener alone, nothing to conceal.
+			construct(ctx, 'footnote', start, open, note);
+			continue;
+		}
+		note.close = { start: close, end: close + 1 };
+		note.body = { start: open, end: close };
+		note.multiline = S.slice(open, close).includes('\n');
+		construct(ctx, 'footnote', start, close + 1, note);
+		cap(ctx, open, close, 'jmd-footnote-body');
+		cap(ctx, close, close + 1, 'jmd-footnote');
+		region(ctx, close, close + 1);
+		claim(ctx, close, close + 1);
+		// Past the whole note, as the engine's preprocessor skips it: an
+		// opener inside a body is body text, not a note of its own.
+		re.lastIndex = close + 1;
 	}
+}
+
+/**
+ * The offset of the `]` closing a footnote opened before `from`, or -1
+ * when the brackets never balance.
+ *
+ * @param {string} S - the masked buffer (code and maths already blank)
+ * @param {number} from - the offset just past the opener's colon
+ * @returns {number}
+ */
+function footnoteClose(S, from) {
+	let depth = 1;
+	for (let i = from; i < S.length; i += 1) {
+		const ch = S[i];
+		if (ch === '\\') i += 1;
+		else if (ch === '[') depth += 1;
+		else if (ch === ']') {
+			depth -= 1;
+			if (depth === 0) return i;
+		}
+	}
+	return -1;
 }
 
 /* ── Clew's Obsidian passes: wikilinks and tags ──────────────────────── */
@@ -1224,6 +1553,19 @@ function wikilinks(ctx, S) {
 		}
 		cap(ctx, p, p + 2, 'jmd-wikilink-bracket'); // ]]
 		const end = start + m[0].length;
+		const t0 = bstart + 2;
+		const h0 = t0 + target.length; // offset of '#', when present
+		const a0 = h0 + (heading ? heading.length : 0); // offset of '|'
+		const isBlock = Boolean(heading) && heading[1] === '^';
+		construct(ctx, m[1] ? 'embed' : 'wikilink', start, end, {
+			open: { start, end: t0 },
+			close: { start: end - 2, end },
+			target: span(t0, h0),
+			heading: heading && !isBlock ? span(h0 + 1, a0) : null,
+			blockId: isBlock ? span(h0 + 2, a0) : null,
+			alias: alias ? { start: a0 + 1, end: a0 + alias.length } : null,
+			aliasText: alias ? alias.slice(1) : null,
+		});
 		region(ctx, start, end);
 		claim(ctx, start, end);
 		re.lastIndex = end;
@@ -1251,6 +1593,7 @@ function tags(ctx, S) {
 		if (!/[^\d/]/.test(m[2])) continue; // purely numeric
 		const end = at + 1 + m[2].length;
 		cap(ctx, at, end, 'jmd-tag');
+		construct(ctx, 'tag', at, end, { name: { start: at + 1, end } });
 		region(ctx, at, end);
 		claim(ctx, at, end);
 	}

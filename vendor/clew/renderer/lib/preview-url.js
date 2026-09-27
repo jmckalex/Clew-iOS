@@ -35,12 +35,13 @@ export function vaultFileUrl(path) {
  * in an iframe of its own (the file tab, canvas PDF nodes) rather than inside
  * a rendered note.
  */
-export function pdfViewerUrl(fileUrl) {
+export function pdfViewerUrl(fileUrl, { page = null } = {}) {
 	// NB: no session id. Asset URLs sit at the root of the URL space
 	// (vault/__clew_assets__/…); only vault FILES are sid-prefixed. The PDF
-	// itself keeps its sid — it travels in the src parameter.
+	// itself keeps its sid — it travels in the src parameter. `page`: open
+	// there (`[[paper.pdf#page=12]]`, §5.15).
 	return `clew-preview://vault/__clew_assets__/clewpdf/pdf-page.html`
-		+ `?src=${encodeURIComponent(fileUrl)}`;
+		+ `?src=${encodeURIComponent(fileUrl)}${page ? `&page=${Number(page)}` : ''}`;
 }
 
 /**
@@ -67,6 +68,16 @@ export function zetaOfficeUrl(path) {
 /** Engine fragment-render endpoint (canvas cards; POST markdown → HTML). */
 export function fragmentUrl() {
 	return `clew-preview://vault/${sessionId}/__clew_fragment__`;
+}
+
+/** Live edit's block frames: POST `{text, sourcePath}` here for `{hash}`… */
+export function blockUrl() {
+	return `clew-preview://vault/${sessionId}/__clew_block__`;
+}
+
+/** …then frame the rendered block document at this URL. */
+export function blockDocumentUrl(hash) {
+	return `clew-preview://vault/${sessionId}/__clew_block__/${hash}`;
 }
 
 /** Base URL of the preview origin (rewrites root-relative asset paths). */

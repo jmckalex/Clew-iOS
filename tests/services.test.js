@@ -268,6 +268,11 @@ test('note create dedupes names', async () => {
 
 test('rename propagates wikilinks and lands on disk', async () => {
 	await settle();
+	// rename-links.js#rewriteCanvasRefs consults `vaults.excludes.isUnindexed`
+	// (upstream 1747269) on every walk that meets a .canvas — without the
+	// excludes on the shim VaultManager this rename THROWS. The demo vault
+	// ships one, so this test is also that guard.
+	assert.ok(fs.existsSync(path.join(vaultDir, 'Projects', 'Demo Canvas.canvas')), 'a canvas is present');
 	const result = await clew.invoke(CH.FS_RENAME, { path: 'Guide/Editing.md', newPath: 'Guide/Editing Notes.md' });
 	assert.ok(result.rewrittenLinks > 0, `rewrote ${result.rewrittenLinks} links`);
 	await native.flush();
@@ -596,4 +601,138 @@ test('font=note: the bridge\'s face map reaches EVERY engine worker\'s env, the 
 	}
 	assert.ok(fakeBridge.calls.some(([m]) => m === 'noteFonts'), 'asked the bridge once');
 	assert.equal(fakeBridge.calls.filter(([m]) => m === 'noteFonts').length, 1, 'built once, not per vault open');
+});
+
+// ---- the live-edit sync: exclusion lists, citations as objects, the shell,
+// TeX fragments (UPSTREAM-LIVE-EDIT-PLAN.md §1, §2.8–2.9) ------------------
+
+test('BIB_ENTRIES: upstream\'s object shape — the .bib each entry came from, and where its file field points', async () => {
+	// A second .bib, written mid-session so the mirror and the disk both
+	// carry it: one entry whose PDF is in the vault (Attachments/Paper.pdf,
+	// planted in before()), one whose relative path exists nowhere, one
+	// absolute — which on iOS is outside the sandbox by definition.
+	await clew.invoke(CH.NOTE_WRITE, { path: 'Features/more.bib', content: [
+		'@article{withpdf, title={Has a PDF}, author={A. Uthor}, year={2020},',
+		'  file={:Attachments/Paper.pdf:PDF}}',
+		'@article{missing, title={Gone}, author={B. Uthor}, year={2021}, file={papers/gone.pdf}}',
+		'@article{outside, title={Elsewhere}, author={C. Uthor}, year={2022}, file={/Users/someone/Zotero/x.pdf}}',
+		'@article{nofile, title={No file at all}, author={D. Uthor}, year={2023}}',
+	].join('\n') + '\n' });
+	const entries = await clew.invoke(CH.BIB_ENTRIES);
+	const byKey = Object.fromEntries(entries.map((e) => [e.key, e]));
+	assert.ok(byKey.alexander2023, 'the demo vault\'s refs.bib is still scanned');
+	assert.equal(byKey.alexander2023.bib, 'Features/refs.bib', '`bib` is the .bib\'s vault path');
+	assert.equal(byKey.withpdf.bib, 'Features/more.bib');
+	// The old `file: <bib rel>` key is GONE: `file` is now the raw BibTeX field.
+	assert.equal(byKey.alexander2023.file, '', 'no file field → empty string, never the .bib path');
+	assert.deepEqual(byKey.withpdf.pdf, { path: 'Attachments/Paper.pdf', inVault: true, exists: true },
+		'resolved against the vault root, vault-relative, found');
+	assert.deepEqual(byKey.missing.pdf, { path: 'Features/papers/gone.pdf', inVault: true, exists: false },
+		'the .bib\'s own folder is the first candidate for a relative path');
+	assert.deepEqual(byKey.outside.pdf, { path: '/Users/someone/Zotero/x.pdf', inVault: false, exists: false },
+		'an absolute path is reported as upstream would; nothing outside the sandbox exists here');
+	assert.equal(byKey.nofile.pdf, null);
+});
+
+test('exclusion lists: `unindexed` keeps a folder in the tree but out of the index and the .bib scan', async () => {
+	const before = await clew.invoke(CH.INDEX_GET);
+	assert.ok(before.notes['Features/Diagrams.md'], 'Features is indexed to begin with');
+	assert.ok((await clew.invoke(CH.BIB_ENTRIES)).some((e) => e.bib === 'Features/refs.bib'));
+
+	await clew.invoke(CH.VAULT_SETTINGS_SET, { key: 'unindexed', value: ['Features'] });
+	await settle();
+	const tree = await clew.invoke(CH.VAULT_TREE);
+	assert.ok(tree.some((e) => e.name === 'Features'), 'still listed — that is the difference from hidden');
+	const index = await clew.invoke(CH.INDEX_GET);
+	assert.ok(!Object.keys(index.notes).some((p) => p.startsWith('Features/')), 'no Features note in the index');
+	assert.ok(!(await clew.invoke(CH.BIB_ENTRIES)).some((e) => e.bib.startsWith('Features/')),
+		'a .bib inside an unindexed folder is that library\'s, not this vault\'s');
+	// On disk, in vault-settings.json, the way desktop would read it.
+	await native.flush();
+	const saved = JSON.parse(fs.readFileSync(path.join(vaultDir, '.clew', 'vault-settings.json'), 'utf8'));
+	assert.deepEqual(saved.unindexed, ['Features']);
+
+	await clew.invoke(CH.VAULT_SETTINGS_SET, { key: 'unindexed', value: [] });
+	await settle();
+	assert.ok((await clew.invoke(CH.INDEX_GET)).notes['Features/Diagrams.md'], 'back in the index once admitted');
+});
+
+test('exclusion lists: `hidden` removes a folder from the tree, and the tree event fires', async () => {
+	let trees = 0;
+	const off = clew.on('clew:ev-tree-changed', () => { trees++; });
+	await clew.invoke(CH.VAULT_SETTINGS_SET, { key: 'hidden', value: ['Projects', '**/Templates'] });
+	await settle();
+	const tree = await clew.invoke(CH.VAULT_TREE);
+	const names = tree.map((e) => e.name);
+	assert.ok(!names.includes('Projects'), 'hidden: not there at all');
+	assert.ok(!names.includes('Templates'), 'a `**/` pattern matches at the root too');
+	assert.ok(names.includes('Guide'));
+	assert.ok(trees >= 1, 'reloadExcludes pushed a fresh tree');
+	assert.ok(!(await clew.invoke(CH.INDEX_GET)).notes['Projects/Clew Design.md'], 'hidden implies unindexed');
+	// The built-in rules hold regardless of the lists.
+	assert.ok(!names.includes('.clew') && !names.includes('.obsidian'));
+	off();
+	await clew.invoke(CH.VAULT_SETTINGS_SET, { key: 'hidden', value: [] });
+	await settle();
+	assert.ok((await clew.invoke(CH.VAULT_TREE)).some((e) => e.name === 'Projects'));
+});
+
+test('the shell panel answers with upstream\'s refusal shapes and never throws', async () => {
+	assert.deepEqual(await clew.invoke('clew:shell-open'), { ok: false, error: 'A shell is not available on iOS' });
+	assert.deepEqual(await clew.invoke('clew:shell-write', { data: 'ls\n' }), { ok: false });
+	assert.deepEqual(await clew.invoke('clew:shell-resize', { cols: 80, rows: 24 }), { ok: false });
+	assert.deepEqual(await clew.invoke('clew:shell-close'), { ok: false });
+});
+
+test('WORKSPACE_LOAD forces a desktop-saved open shell panel closed, keeping its height', async () => {
+	await clew.invoke(CH.WORKSPACE_SAVE, { layout: { probe: 2 }, shell: { open: true, height: 300 } });
+	const loaded = await clew.invoke(CH.WORKSPACE_LOAD);
+	assert.deepEqual(loaded.shell, { open: false, height: 300 });
+	assert.deepEqual(loaded.layout, { probe: 2 }, 'nothing else is touched');
+	// A workspace without a shell key at all (pre-shell desktop, or fresh)
+	// passes through unchanged.
+	await clew.invoke(CH.WORKSPACE_SAVE, { layout: { probe: 3 } });
+	assert.deepEqual(await clew.invoke(CH.WORKSPACE_LOAD), { layout: { probe: 3 } });
+});
+
+test('TeX fragments: both scopes reach every engine worker\'s env, and editing either list respawns the standby', async () => {
+	const last = () => JSON.parse(workerInits.at(-1).env.CLEW_TEX_FRAGMENTS);
+	// The seed vault ships two fragments; the app-level list starts empty.
+	assert.deepEqual(last().global, []);
+	assert.deepEqual(last().vault.map((f) => f.name), ['math macros', 'diagram colours']);
+
+	const spawns = workerInits.length;
+	await clew.invoke('clew:settings-set', { key: 'texFragments', value: [{ name: 'colours', text: '\\usepackage{xcolor}' }] });
+	await settle();
+	assert.equal(workerInits.length, spawns + 1, 'a global fragment change retires the standby (reconfigure)');
+	assert.deepEqual(last().global, [{ name: 'colours', text: '\\usepackage{xcolor}' }]);
+
+	await clew.invoke(CH.VAULT_SETTINGS_SET, { key: 'texFragments', value: [{ name: 'math macros', text: '\\newcommand{\\R}{\\mathbb{R}}' }] });
+	await settle();
+	assert.equal(workerInits.length, spawns + 2, 'so does a vault fragment change');
+	assert.deepEqual(last().vault, [{ name: 'math macros', text: '\\newcommand{\\R}{\\mathbb{R}}' }]);
+	assert.deepEqual(last().global, [{ name: 'colours', text: '\\usepackage{xcolor}' }], 'the other scope is untouched');
+	await native.flush();
+	const saved = JSON.parse(fs.readFileSync(path.join(vaultDir, '.clew', 'vault-settings.json'), 'utf8'));
+	assert.equal(saved.texFragments[0].name, 'math macros', 'on disk, where the desktop reads it');
+});
+
+test('the iOS settings defaults carry every key upstream defines, with the plan\'s overrides', async () => {
+	const all = await clew.invoke('clew:settings-get');
+	for (const key of ['defaultEditMode', 'liveReveal', 'liveRenderMath', 'liveRenderFences', 'liveRenderEmbeds',
+		'liveFrameCap', 'editorToolbar', 'editorToolbarPrev', 'editorToolbarGroups', 'selectionBubble',
+		'slashCommands', 'linkPreview', 'previewPane', 'graphReferences', 'sidenotes', 'texFragments']) {
+		assert.ok(key in all, `${key} is defined`);
+	}
+	assert.equal(all.newTabMode, 'live');
+	assert.equal(all.defaultEditMode, 'live');
+	assert.equal(all.editorToolbar, 'always');
+	assert.equal(all.liveFrameCap, 8);
+	assert.equal(all.linkPreview, 'off');
+	assert.equal(all.selectionBubble, false);
+	// Upstream's own defaults where the plan keeps them.
+	assert.equal(all.liveReveal, 'construct');
+	assert.equal(all.previewPane, 'on');
+	assert.equal(all.sidenotes, 'auto');
+	assert.equal(all.slashCommands, true);
 });

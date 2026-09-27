@@ -24,8 +24,10 @@ import path from 'node:path';
 import { CH } from '../shared/channels.js';
 import { paths } from './paths.js';
 import { readNoteFonts } from './note-fonts.js';
+import { settings } from './settings.js';
 import { engineExtensionEntries } from './plugins.js';
 import { writeFileAtomic } from './fs-utils.js';
+import { isDependentFragment } from '../shared/fragment-deps.js';
 
 const WORKER_PATH = paths.engineWorker;
 
@@ -41,6 +43,28 @@ export function toolchainPath() {
 		: ['/Library/TeX/texbin', '/opt/homebrew/bin', '/usr/local/bin'];
 	const current = (process.env.PATH ?? '').split(path.delimiter);
 	return [...current, ...extras.filter((dir) => !current.includes(dir))].join(path.delimiter);
+}
+
+/**
+ * `fork`, with the one failure that needs explaining translated. The render
+ * worker is a fork, and a fork needs descriptors: past ~10,240 held by the
+ * process libuv refuses with EBADF (and with EMFILE at the true ceiling).
+ * The cause is almost always the vault watcher on a vault full of library
+ * files — vault.js keeps a budget to prevent it, so reaching this means
+ * something ELSE is holding descriptors, and "spawn EBADF" in a preview
+ * tells the reader nothing at all.
+ */
+function spawnWorker(workerPath, options) {
+	try {
+		return fork(workerPath, [], options);
+	} catch (err) {
+		if (err?.code === 'EBADF' || err?.code === 'EMFILE') {
+			throw new Error('Clew could not start its render worker: too many files are open '
+				+ `(${err.code}). This usually means a vault with a very large folder in it is `
+				+ 'being watched. Close other vault windows, or move the folder out of the vault.');
+		}
+		throw err;
+	}
 }
 
 export class RenderService {
@@ -65,9 +89,16 @@ export class RenderService {
 	/** per-path render bookkeeping: {mtimeMs, htmlFile, inflight: Promise|null, dirty} */
 	#notes = new Map();
 	#rebuildTimers = new Map();
-	/** fragment cache: hash(text) → html string (canvas cards; bounded) */
+	/** fragment cache: key → html string (canvas cards, live-edit blocks; bounded) */
 	#fragments = new Map();
 	#fragmentInflight = new Map();
+	/** Bumped on every file change: a DEPENDENT fragment's key carries it, so
+	 *  a cached render of `![[Note]]` is never served after Note changed. */
+	#fragmentEpoch = 0;
+	/** Bumped on every reconfigure: in EVERY fragment key, so a block whose
+	 *  rendering changed with the config (normalSyntax, a TeX fragment, a
+	 *  plugin) gets a NEW hash — a caller comparing hashes sees the change. */
+	#configGeneration = 0;
 
 	/** dist/ directory (engine assets: wikilinks.js, clew-template.html). */
 	constructor(distDir) {
@@ -104,6 +135,8 @@ export class RenderService {
 		this.#spawnStandby();
 		this.#notes.clear();
 		this.#fragments.clear();
+		this.#fragmentEpoch++;
+		this.#configGeneration++;
 		for (const relPath of this.#subscribed.keys()) {
 			this.render(relPath).catch(() => {});
 		}
@@ -184,6 +217,9 @@ export class RenderService {
 			// config, where the native handlers still stand (export.js).
 			'Environments': [
 				`TiKZ, metapost from ${path.join(engineAssets, 'figures.js')}`,
+				// @reveal[…] — a presentation in an iframe. One registry entry
+				// serves the inline, block and @begin forms (reveal-embed.js).
+				`reveal from ${path.join(engineAssets, 'reveal-embed.js')}`,
 			],
 			...this.#biblifyConfig(),
 			// dvisvgm needs ghostscript to convert MetaPost EPS output (and
@@ -241,7 +277,7 @@ export class RenderService {
 
 	#spawnStandby() {
 		if (!this.vaultRoot) return;
-		const child = fork(WORKER_PATH, [], {
+		const child = spawnWorker(WORKER_PATH, {
 			cwd: this.engineDir,
 			stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
 			env: {
@@ -257,6 +293,16 @@ export class RenderService {
 				// wrapper (engine/figures.js#noteFontPreamble). App-global
 				// (main/note-fonts.js prepared it before any vault opened).
 				CLEW_NOTE_FONTS: JSON.stringify(readNoteFonts(paths.noteFonts)?.faces ?? {}),
+				// Named TeX fragments for `clew-fragments=` (engine/figures.js):
+				// both scopes as they are stored, because engine/tex-fragments.js
+				// owns the rule that a vault fragment shadows a global one — main
+				// resolving it here would be a second copy of that rule. Editing
+				// either list reconfigures, which is what re-typesets the figures
+				// using it (their source changes, so their fig-key does).
+				CLEW_TEX_FRAGMENTS: JSON.stringify({
+					global: settings.get('texFragments') ?? [],
+					vault: this.#vaultOptions.texFragments ?? [],
+				}),
 				// Engine console chatter goes to the pipes; keep them from filling.
 			},
 		});
@@ -371,30 +417,77 @@ export class RenderService {
 	 * fragment mode: body HTML only, no template. Same worker pipeline and
 	 * engine config as note renders (wikilinks, fences, normalSyntax), so a
 	 * card renders exactly like the same text would in a note. Cached by
-	 * content hash — a canvas reopening re-renders nothing.
+	 * content hash — a canvas reopening re-renders nothing — unless the text
+	 * reads other files (fragment-deps.js), whose key then carries the file
+	 * epoch so any file change retires it.
+	 *
+	 * `sourcePath` (vault-relative) is the note the snippet belongs to. It is
+	 * part of the key and is left beside the temp file as `<key>.source`,
+	 * which engine/vault-model.js#currentFilePath reads — so Dataview `this`,
+	 * Bases' `this.file`, Meta Bind and a kanban board see the note.
+	 *
+	 * @param {string} text
+	 * @param {{ sourcePath?: string|null, dependent?: boolean }} [options]
+	 * @returns {Promise<string>} the body HTML
 	 */
-	async renderFragment(text) {
-		if (!this.vaultRoot) throw new Error('no vault open');
-		const key = crypto.createHash('sha1').update(text).digest('hex').slice(0, 20);
+	renderFragment(text, options = {}) {
+		return this.#cachedBuild(text, { ...options, document: false });
+	}
+
+	/**
+	 * Render a snippet as a FULL preview document — the engine's own
+	 * template, exactly as a note gets it (MathJax config, mermaid, CSS) —
+	 * for live edit's block frames. protocol.js serves it at
+	 * `__clew_block__/<key>` with the preview client injected. Resolves to
+	 * the key; `blockDocument(key)` returns the HTML while it is cached.
+	 *
+	 * @param {string} text
+	 * @param {{ sourcePath?: string|null, dependent?: boolean }} [options]
+	 * @returns {Promise<string>} the block's key
+	 */
+	async renderBlock(text, options = {}) {
+		const key = this.#fragmentKey(text, { ...options, document: true });
+		await this.#cachedBuild(text, { ...options, document: true });
+		return key;
+	}
+
+	/** A built block document by key, or undefined once evicted. */
+	blockDocument(key) {
+		return this.#fragments.get(key);
+	}
+
+	#fragmentKey(text, { sourcePath = null, dependent = isDependentFragment(text), document = false }) {
+		return crypto.createHash('sha1')
+			.update(`${document ? 'doc' : 'frag'}\0${this.#configGeneration}\0${sourcePath ?? ''}\0${dependent ? this.#fragmentEpoch : ''}\0${text}`)
+			.digest('hex').slice(0, 20);
+	}
+
+	#cachedBuild(text, options) {
+		if (!this.vaultRoot) return Promise.reject(new Error('no vault open'));
+		const key = this.#fragmentKey(text, options);
 		const cached = this.#fragments.get(key);
-		if (cached !== undefined) return cached;
+		if (cached !== undefined) return Promise.resolve(cached);
 		const inflight = this.#fragmentInflight.get(key);
 		if (inflight) return inflight;
 
-		const job = this.#buildFragment(key, text).finally(() => {
+		const job = this.#buildFragment(key, text, options).finally(() => {
 			this.#fragmentInflight.delete(key);
 		});
 		this.#fragmentInflight.set(key, job);
 		return job;
 	}
 
-	async #buildFragment(key, text) {
+	async #buildFragment(key, text, { sourcePath = null, document = false } = {}) {
 		const generation = this.#generation;
 		const dir = path.join(this.vaultRoot, '.clew', 'cache', 'fragments');
 		fs.mkdirSync(dir, { recursive: true });
 		const mdFile = path.join(dir, `${key}.md`);
 		const htmlFile = path.join(dir, `${key}.html`);
+		const sourceFile = path.join(dir, `${key}.source`);
 		fs.writeFileSync(mdFile, text);
+		// Which note the snippet belongs to: engine/vault-model.js#currentFilePath
+		// reads this, so Dataview `this` & co. see the note, not the temp file.
+		if (sourcePath) fs.writeFileSync(sourceFile, sourcePath);
 
 		const standby = this.#takeStandby();
 		const child = await standby.ready;
@@ -411,7 +504,7 @@ export class RenderService {
 				options: {
 					to: 'html',
 					output: htmlFile,
-					fragment: true,
+					fragment: !document,
 					normalSyntax: this.#vaultOptions.normalSyntax === true,
 				},
 			});
@@ -422,6 +515,7 @@ export class RenderService {
 		const html = fs.readFileSync(htmlFile, 'utf8');
 		fs.rmSync(mdFile, { force: true });
 		fs.rmSync(htmlFile, { force: true });
+		fs.rmSync(sourceFile, { force: true });
 		// Bounded cache: drop the oldest half when it grows past 500 entries.
 		if (this.#fragments.size > 500) {
 			const keys = [...this.#fragments.keys()].slice(0, 250);
@@ -445,6 +539,7 @@ export class RenderService {
 
 	/** Called by the vault watcher on every content change. */
 	onFileChanged(relPath) {
+		this.#fragmentEpoch++;
 		if (this.#subscribed.has(relPath)) {
 			clearTimeout(this.#rebuildTimers.get(relPath));
 			this.#rebuildTimers.set(relPath, setTimeout(() => {

@@ -3,7 +3,9 @@ tags: [guide]
 ---
 # Editing
 
-Notes are edited in **source mode** with full jmarkdown-dialect
+Notes are edited in **source mode** — or in **live edit**, where the
+markup is put away until the cursor touches it ([[Live Edit]], ⌘⇧E) —
+and source mode has full jmarkdown-dialect
 highlighting: `/italics/`, `*strong*`, `**intense**`, `==highlights==`,
 directives, `@begin(…)` environments, math, citations, and footnotes all
 get faces (see [[Dialect Demo]] for a tour). The fences Clew typesets are
@@ -28,7 +30,14 @@ come back, and ⌘Z still works.
 
 ## Links and files
 
-- **⌘-click** a `[[wikilink]]` to follow it (⌥ for a new tab).
+- **⌘-click** a `[[wikilink]]` to follow it (⌥ for a new tab). In live
+  edit a plain click follows it and ⌥-click edits it.
+- **Edit a formula or a diagram** and its rendering sits beside it,
+  updating as you pause — $e^{i\pi} + 1 = 0$ is one to try. *Esc* puts it
+  away until you leave that formula.
+- **Hover** a link to peek at it: [[Welcome#The guide]] shows just that
+  section, rendered, in a popover — in every mode. Settings → Appearance
+  can make it wait for ⌘, or turn it off.
 - **Paste or drop** images and files straight into a note — they're saved
   to the attachment folder and embedded (see [[Attachments and Files]]).
 - ⌘F searches within the note.
@@ -44,6 +53,15 @@ and every block container from mermaid and TiKZ to `:::TeX`,
 `:::game`, and `:::comment`. Styles and lists **toggle** (apply again
 to remove; a bullet list converts straight to a task list), containers
 **wrap the selection**, and every item is also a palette command you
-can give a hotkey in Settings.
+can give a hotkey in Settings. In live edit the same commands sit on the
+**editor toolbar** above the note, where a style under the cursor shows
+as pressed and a second click removes it — the cursor only has to be
+inside `*word*`, not around it.
+
+## Lists and tasks
+
+**⌘↩** ticks or unticks the task on the cursor's line (anywhere else it
+opens a blank line below, as it always did). **Tab** and **⇧Tab** indent
+and outdent list items; Enter continues a list, a task list or a quote.
 
 See also: [[Reading Mode]], [[Links and Embeds]].

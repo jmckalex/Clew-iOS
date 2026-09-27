@@ -140,28 +140,14 @@ export const sitePath = (rel) => {
 };
 
 import { parseEmbedModes } from './embed-state.js';
+// The size alias parser lives in its own module so the editor (live edit's
+// image widget) reads `|300x200` exactly as this file does.
+import { parseMediaAlias } from './media-alias.js';
+export { parseMediaAlias };
 
 const escapeAttr = (s) =>
 	s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 const escapeHtml = escapeAttr;
-
-/**
- * Obsidian media-embed alias: the segment after the last '|' may be a size —
- * "300" (width) or "300x200" (width × height) — with any earlier segments
- * forming the alt text: ![[img.png|300]], ![[img.png|A caption|300]].
- * Returns { alt, width, height } (alt null when the alias was only a size).
- */
-export function parseMediaAlias(alias) {
-	if (!alias) return { alt: null, width: null, height: null };
-	const parts = alias.split('|').map((s) => s.trim());
-	const m = /^(\d+)(?:x(\d+))?$/.exec(parts[parts.length - 1]);
-	if (!m) return { alt: alias, width: null, height: null };
-	return {
-		alt: parts.slice(0, -1).join('|') || null,
-		width: Number(m[1]),
-		height: m[2] ? Number(m[2]) : null,
-	};
-}
 
 // [[target]] / [[target#heading]] / [[target#^block-id]] / [[target|alias]] —
 // target may be empty for same-file links ([[#Heading]], [[#^block-id]]).

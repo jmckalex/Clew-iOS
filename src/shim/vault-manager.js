@@ -20,8 +20,7 @@ import { snapshotBeforeWrite, renameHistory } from '../../vendor/clew/main/histo
 import { bridgeCall, toBase64 } from './native-bridge.js';
 import { settings } from './settings.js';
 import { isTextPath } from './engine-config.js';
-
-const IGNORED_DIRS = new Set(['.obsidian', '.clew', '.git', 'node_modules', '.trash']);
+import { compileExcludes } from '../../vendor/clew/main/vault-excludes.js';
 
 /** Desktop's atomic-write temp beside its target: `.<basename>.clew-tmp`. */
 const isAtomicTemp = (rel) => /(^|\/)\.[^/]+\.clew-tmp$/.test(rel);
@@ -53,6 +52,16 @@ export class VaultManager {
 	hooks = {};
 	/** The mirror root every service resolves against. */
 	root = VAULT_ROOT;
+	/** What this vault asks Clew to leave alone — upstream's vault-excludes.js,
+	 *  verbatim over the mirror (the `hidden` and `unindexed` lists of
+	 *  vault-settings.json, plus the built-in dot/.clew/.git/node_modules/
+	 *  .trash rules that used to be a local IGNORED_DIRS). Compiled at open
+	 *  and whenever the two lists change; consulted by every walk — the
+	 *  tree here, the indexer, the rename rewriter and the .bib scan
+	 *  (ipc.js), all of which are upstream code over the same fs alias, so
+	 *  the semantics are identical by construction. The Swift snapshot
+	 *  still carries hidden files (a perf cost, not a correctness one). */
+	excludes = compileExcludes({});
 
 	#flushQueue = Promise.resolve();
 	#pendingWrites = 0;
@@ -77,6 +86,8 @@ export class VaultManager {
 			vfs.patch(`${VAULT_ROOT}/${rel}`, entry.text ?? '', entry.mtimeMs);
 		}
 		vfs.mkdir(`${VAULT_ROOT}/.clew`);
+		// realPath is set above, so loadState reads the mirror already.
+		this.excludes = compileExcludes(this.loadState('vault-settings.json') ?? {});
 		this.globalPluginsPath = globalPlugins?.path ?? null;
 		if (globalPlugins?.files) {
 			vfs.mkdir(GLOBAL_PLUGINS_ROOT);
@@ -151,6 +162,24 @@ export class VaultManager {
 		this.realPath = null;
 		this.name = null;
 		this.globalPluginsPath = null;
+		this.excludes = compileExcludes({});
+	}
+
+	/**
+	 * The vault's exclusion lists changed. Everything that walked the vault
+	 * under the old rules has to walk again: the tree the window shows and
+	 * the index behind search and backlinks (the caller re-opens the
+	 * indexer with the new excludes, as upstream's ipc.js does). No watcher
+	 * to restart here: the Swift rescan diffs the whole folder and the
+	 * mirror filters on arrival.
+	 */
+	reloadExcludes() {
+		if (!this.isOpen) return null;
+		this.excludes = compileExcludes(this.loadState('vault-settings.json') ?? {});
+		const tree = this.tree();
+		this.send('clew:ev-tree-changed', { tree });
+		this.hooks.onStructureChanged?.();
+		return tree;
 	}
 
 	#relOf(abs) {
@@ -178,9 +207,11 @@ export class VaultManager {
 			let names;
 			try { names = vfs.readdir(dirAbs); } catch { return entries; }
 			for (const name of names) {
-				if (name.startsWith('.') || IGNORED_DIRS.has(name)) continue;
 				const childAbs = `${dirAbs}/${name}`;
 				const childRel = rel ? `${rel}/${name}` : name;
+				// `hidden` only: an `unindexed` folder is still listed and still
+				// opens — that is the whole difference between the two lists.
+				if (this.excludes.isHidden(childRel)) continue;
 				if (vfs.isDir(childAbs)) {
 					entries.push({ type: 'folder', name, path: childRel, children: walk(childAbs, childRel) });
 				} else {

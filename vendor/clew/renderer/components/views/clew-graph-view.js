@@ -18,6 +18,10 @@ import { ClewElement } from '../base/clew-element.js';
 import { vaultStore } from '../../state/vault-store.js';
 import { workspaceStore } from '../../state/workspace-store.js';
 import { debounce } from '../../lib/debounce.js';
+import { settingsStore } from '../../state/settings-store.js';
+import { vaultSettingsStore } from '../../state/vault-settings-store.js';
+import { citationLabel, citationsReady } from '../../editor/complete/citations.js';
+import { showCitation } from '../../editor/live/events.js';
 import {
 	forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide, forceX, forceY,
 } from 'd3-force';
@@ -39,9 +43,17 @@ export class ClewGraphView extends ClewElement {
 	#raf = 0;
 	#resizeObserver = null;
 	#rebuild = debounce(() => this.#buildGraph(), 300);
+	#toggle = null;
+
+	#syncToggle() {
+		if (this.#toggle) this.#toggle.checked = settingsStore.get('graphReferences') === true;
+	}
 
 	subscribe() {
 		this.listen(vaultStore, 'index-changed', () => this.#rebuild());
+		this.listen(settingsStore, 'settings-changed', (key) => {
+			if (key === 'graphReferences') { this.#syncToggle(); this.#buildGraph(); }
+		});
 		if (this.local) {
 			this.listen(workspaceStore, 'active-changed', () => this.#rebuild());
 			this.listen(workspaceStore, 'layout-changed', () => this.#rebuild());
@@ -51,7 +63,18 @@ export class ClewGraphView extends ClewElement {
 	render() {
 		this.classList.add('graph-host');
 		this.#canvas = document.createElement('canvas');
-		this.replaceChildren(this.#canvas);
+		// References (§5.14): one node per cited key, an edge from each note
+		// citing it. App-global, persisted (`graphReferences`).
+		const label = document.createElement('label');
+		label.className = 'graph-references-toggle';
+		this.#toggle = document.createElement('input');
+		this.#toggle.type = 'checkbox';
+		this.#toggle.addEventListener('change', () => settingsStore.set('graphReferences', this.#toggle.checked));
+		label.append(this.#toggle, document.createTextNode(' References'));
+		this.replaceChildren(this.#canvas, label);
+		this.#syncToggle();
+		// Author-year labels arrive with the .bib cache.
+		citationsReady().then(() => { if (settingsStore.get('graphReferences') === true) this.#buildGraph(); });
 		this.#ctx = this.#canvas.getContext('2d');
 
 		this.#resizeObserver = new ResizeObserver(() => this.#resize());
@@ -127,6 +150,21 @@ export class ClewGraphView extends ClewElement {
 			radius: Math.min(14, 4 + (degree.get(path) ?? 0) * 1.2) * (path === center ? 1.4 : 1),
 			isCenter: path === center,
 		}));
+		if (settingsStore.get('graphReferences') === true) {
+			const pandoc = vaultSettingsStore.get('pandocCitations') === true;
+			const refs = new Map();
+			for (const source of paths) {
+				const keys = new Set((index[source]?.citations ?? []).filter((c) => pandoc || !c.pandoc).map((c) => c.key));
+				for (const key of keys) {
+					const id = `cite:${key}`;
+					if (!refs.has(id)) refs.set(id, { id, key, label: citationLabel(key)?.label ?? key, radius: 5, isReference: true });
+					links.push({ source, target: id, reference: true });
+				}
+			}
+			nodes.push(...refs.values());
+		}
+		this.dataset.nodes = String(nodes.length);
+		this.dataset.links = String(links.length);
 		return { nodes, links };
 	}
 
@@ -179,6 +217,7 @@ export class ClewGraphView extends ClewElement {
 			node: styles.getPropertyValue('--clew-text-muted').trim(),
 			accent: styles.getPropertyValue('--clew-accent').trim(),
 			label: styles.getPropertyValue('--clew-text-muted').trim(),
+			reference: styles.getPropertyValue('--clew-graph-reference').trim() || styles.getPropertyValue('--clew-accent').trim(),
 		};
 
 		ctx.save();
@@ -212,9 +251,11 @@ export class ClewGraphView extends ClewElement {
 
 		for (const node of this.#nodes) {
 			ctx.globalAlpha = dim(node.id) ? 0.25 : 1;
-			ctx.fillStyle = node.isCenter || node === this.#hovered ? colors.accent : colors.node;
+			ctx.fillStyle = node.isCenter || node === this.#hovered ? colors.accent : node.isReference ? colors.reference : colors.node;
 			ctx.beginPath();
-			ctx.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
+			// A reference is a square: a work, not a note.
+			if (node.isReference) ctx.rect(node.x - node.radius, node.y - node.radius, node.radius * 2, node.radius * 2);
+			else ctx.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
 			ctx.fill();
 		}
 
@@ -295,7 +336,8 @@ export class ClewGraphView extends ClewElement {
 				drag.node.fx = null;
 				drag.node.fy = null;
 				if (!drag.moved) {
-					workspaceStore.openNote(drag.node.id, { newTab: e.metaKey || e.ctrlKey });
+					if (drag.node.isReference) showCitation(drag.node.key);
+					else workspaceStore.openNote(drag.node.id, { newTab: e.metaKey || e.ctrlKey });
 				}
 			}
 		});

@@ -207,7 +207,13 @@ details.internal-embed:not([open]) > summary { margin-bottom: 0; }
 	body {
 		max-width: none;
 		margin: 0;
-		padding: 0;
+		/* Not quite zero on the right: an element flush against the printable
+		   edge loses its rightmost rule to the page clip. Measured 2026-09-25
+		   on A4 at 0.6in margins — a full-width table's right border was drawn
+		   in the PDF (a rule at 611 of a 612-wide table) and sliced off at the
+		   boundary, so the row rules ended in mid-air. A point of inset is
+		   under a third of a millimetre and buys the border back. */
+		padding: 0 1pt 0 0;
 	}
 	pre, table, figure, blockquote,
 	.callout, .internal-embed, .clew-query-group, .mermaid,
@@ -237,6 +243,30 @@ details.internal-embed:not([open]) > summary { margin-bottom: 0; }
 	white-space: pre-wrap;
 	max-height: 40vh;
 	overflow-y: auto;
+}
+
+/* @reveal[…] — a presentation embedded as a live frame (reveal-embed.js).
+   Sized by the directive (width/height/aspect); what is fixed here is that
+   it reads as a block on the page rather than as a word in a sentence,
+   since the directive is inline and can be written mid-paragraph. */
+.reveal-embed {
+	display: block;
+	margin: 1em auto;
+	border: 1px solid var(--preview-border);
+	border-radius: 6px;
+	background: var(--preview-bg);
+}
+/* A target Clew will not embed, said in the note rather than left blank —
+   a missing path, a .php that needs its server, a javascript: URL. */
+.clew-embed-refused {
+	display: block;
+	margin: 1em 0;
+	padding: 0.6em 0.9em;
+	border: 1px solid var(--preview-border);
+	border-left: 3px solid var(--preview-danger);
+	border-radius: 4px;
+	background: var(--preview-code-bg);
+	font-size: 0.92em;
 }
 
 /* Media embeds (![[img.png]], ![[paper.pdf]], …) */
@@ -329,6 +359,22 @@ html[data-theme='light'] .mpw-figure svg { filter: none; }
 .clew-doc .mpw-figure svg { display: block; margin: 0 auto 0.75em; }
 .clew-doc .mpw-figure svg:last-of-type { margin-bottom: 0; }
 
+/* A figure refused BY NAME before it was ever typeset: an undefined
+   clew-fragments name, or the attribute on a MetaPost block (figures.js
+   #figureRefusal). It reads as a note to the author, not as a TeX error —
+   there is no console to show, because no engine ran. */
+.clew-figure-refused {
+	margin: 1em auto;
+	padding: 0.6em 0.9em;
+	border: 1px solid var(--preview-border);
+	border-left: 3px solid var(--preview-danger);
+	border-radius: 4px;
+	background: var(--preview-code-bg);
+	color: var(--preview-text);
+	font-size: 0.92em;
+	text-align: left;
+}
+
 /* The library injects its own styles for these when it loads — late in the
    head, so the class alone would lose. Its colours assume a light page. */
 .mpw-figure .mpw-status {
@@ -363,6 +409,46 @@ html[data-theme='light'] .mpw-figure .mpw-console {
    ships no rule for them — only its docs site styles them. */
 .jmarkdown-right { text-align: right; }
 .jmarkdown-center { text-align: center; }
+
+/* Description lists (`Term:: definition`). Same story as the alignment
+   wrappers above: the engine emits a bare <dl><dt>…</dt><dd>…</dd></dl>
+   and nothing in the pipeline styles it, so the browser's default stacked
+   the definition under its term with a 40px indent. A two-column grid puts
+   the definition BESIDE the term, which is what the form is for; the first
+   track is `auto`, so every term in one list shares the width of the
+   widest — that is the alignment. (Sizing each row on its own would be a
+   table's job, not a list's.)
+
+   `min-width: 0` on both tracks because a grid track's implicit minimum is
+   `auto`: one long unbreakable term — a wide MathJax box, a code span, a
+   URL — would otherwise push the definition column off the page instead of
+   letting it wrap. */
+dl {
+	display: grid;
+	grid-template-columns: auto 1fr;
+	column-gap: 1.5em;
+	row-gap: 0.6em;
+	margin: 1em 0;
+}
+dl > dt {
+	grid-column: 1;
+	min-width: 0;
+}
+dl > dd {
+	grid-column: 2;
+	min-width: 0;
+	margin: 0; /* the 40px indent was the browser's; the grid owns it now */
+}
+/* A definition may be several paragraphs — and lists, quotes, fences. They
+   stack inside the one cell, so only the outermost margins need adjusting:
+   the first block has to sit on the term's own line, and the last must not
+   push the next row past the row-gap. */
+dl > dd > :first-child { margin-top: 0; }
+dl > dd > :last-child { margin-bottom: 0; }
+/* A list inside a definition keeps its own indent — that gutter is the
+   list's marker column, not the dd's old margin. */
+dl > dd > ul,
+dl > dd > ol { padding-left: 1.4em; }
 
 /* ---- canvas embeds (![[X.canvas]]) — read-only scene rendered by the
    preview client's canvas-embed.js ------------------------------------- */
@@ -773,3 +859,24 @@ details.callout[open] > summary::after { transform: rotate(45deg); }
 /* The engine's own alert styling assumes a light page and would otherwise
    fight the tint above; ours is the one that applies. */
 .callout.markdown-alert { border-top: 0; border-right: 0; border-bottom: 0; }
+
+/* Live edit's block documents (protocol.js `__clew_block__`): one rendered
+   block in a frame inside the editor, sized by its content (client.js
+   reports the height). Never scrollable — a wheel over it must chain to the
+   editor — and no page chrome: the editor supplies the margins and the
+   background. */
+html[data-clew-block], html[data-clew-block] body { overflow: hidden; background: transparent; }
+html[data-clew-block] body { max-width: none; margin: 0; padding: 0; }
+html[data-clew-block] body > :first-child { margin-top: 0; }
+html[data-clew-block] body > :last-child { margin-bottom: 0; }
+
+/* Sidenotes (Clew, docs/dev/live-edit.md §5.16): footnote bodies in the right
+   margin of a wide page; the end list hidden while they show. */
+body.clew-sidenotes-on section.footnotes, body.clew-sidenotes-on .jmd-endnotes { display: none; }
+.clew-sidenotes { position: absolute; top: 0; left: 0; width: 0; height: 0; }
+.clew-sidenote {
+	position: absolute; box-sizing: border-box; font-size: 0.8em; line-height: 1.45;
+	color: var(--preview-text); opacity: 0.85; border-left: 2px solid var(--preview-accent); padding-left: 8px;
+}
+.clew-sidenote p { margin: 0 0 0.4em; }
+.clew-sidenote-number { font-weight: 600; color: var(--preview-accent); }

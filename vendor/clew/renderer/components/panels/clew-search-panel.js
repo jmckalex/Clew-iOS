@@ -55,6 +55,14 @@ export class ClewSearchPanel extends ClewElement {
 		this.querySelector('.search-input')?.focus();
 	}
 
+	/** Replace the query and run it (a tag clicked in live edit). */
+	setQuery(query) {
+		this.#query = String(query ?? '');
+		const input = this.querySelector('.search-input');
+		if (input) input.value = this.#query;
+		this.#run();
+	}
+
 	#renderResults() {
 		const container = this.querySelector('.search-results');
 		if (!container) return;

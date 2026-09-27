@@ -16,6 +16,7 @@ import { vaultStore } from '../../state/vault-store.js';
 import { workspaceStore } from '../../state/workspace-store.js';
 import { ipc, CH } from '../../ipc.js';
 import '../workspace/clew-workspace.js';
+import '../workspace/clew-shell-panel.js';
 import '../workspace/clew-split.js';
 import '../workspace/clew-tab-group.js';
 import '../panels/clew-file-explorer.js';
@@ -43,8 +44,9 @@ const TOOLS = {
 		{ id: 'outgoing', label: 'Out', element: 'clew-outgoing-links' },
 		{ id: 'tags', label: 'Tags', element: 'clew-tag-pane' },
 		{ id: 'outline', label: 'Outline', element: 'clew-outline' },
-		// Gated on the vault's bibliographyPanel setting (see #refreshVaultTools).
-		{ id: 'bibliography', label: 'Refs', element: 'clew-bibliography', when: (vs) => vs?.bibliographyPanel === true },
+		// Always there (§5.14): its Library needs no render; its "This note"
+		// mode stays behind the vault's bibliographyPanel setting.
+		{ id: 'bibliography', label: 'Refs', element: 'clew-bibliography' },
 		{ id: 'props', label: 'Props', element: 'clew-properties' },
 		{
 			id: 'graph', label: 'Graph', element: 'clew-graph-view',
@@ -63,6 +65,7 @@ class ClewApp extends ClewElement {
 		this.listen({ on: (ev, cb) => { window.addEventListener(ev, cb); return () => window.removeEventListener(ev, cb); } },
 			'clew:vault-settings-changed', () => this.#refreshVaultTools());
 		this.listen(workspaceStore, 'sidebar-changed', () => this.#applySidebars());
+		this.listen(workspaceStore, 'shell-changed', () => this.#applyShell());
 		this.listen(workspaceStore, 'active-changed', () => this.#updateTitle());
 		this.listen(workspaceStore, 'layout-changed', () => this.#updateTitle());
 	}
@@ -80,7 +83,11 @@ class ClewApp extends ClewElement {
 					<div class="tool-body" data-side="left"></div>
 				</div>
 				<div class="sidebar-resizer" data-side="left"></div>
-				<clew-workspace></clew-workspace>
+				<div class="center-column">
+					<clew-workspace></clew-workspace>
+					<div class="shell-resizer"></div>
+					<clew-shell-panel></clew-shell-panel>
+				</div>
 				<div class="sidebar-resizer" data-side="right"></div>
 				<div class="sidebar sidebar-right">
 					<div class="tool-tabs" data-side="right"></div>
@@ -95,6 +102,45 @@ class ClewApp extends ClewElement {
 		this.#updateTitle();
 		this.#wireSidebarResize('left');
 		this.#wireSidebarResize('right');
+		this.#applyShell();
+		this.#wireShellResize();
+	}
+
+	/** The shell panel's height and whether it is showing at all. */
+	#applyShell() {
+		const { open, height } = workspaceStore.shell;
+		const panel = this.querySelector('clew-shell-panel');
+		const resizer = this.querySelector('.shell-resizer');
+		if (!panel) return;
+		panel.style.height = `${Math.max(80, height)}px`;
+		panel.classList.toggle('is-open', open);
+		if (resizer) resizer.style.display = open ? '' : 'none';
+	}
+
+	/** Drag the seam between the workspace and the shell. */
+	#wireShellResize() {
+		const resizer = this.querySelector('.shell-resizer');
+		const panel = this.querySelector('clew-shell-panel');
+		if (!resizer || !panel) return;
+		resizer.addEventListener('pointerdown', (event) => {
+			event.preventDefault();
+			const startY = event.clientY;
+			const startHeight = panel.getBoundingClientRect().height;
+			resizer.setPointerCapture(event.pointerId);
+			const onMove = (move) => {
+				// Up is bigger: the panel grows from its top edge.
+				const next = Math.min(Math.max(80, startHeight - (move.clientY - startY)),
+					Math.max(120, window.innerHeight - 200));
+				panel.style.height = `${Math.round(next)}px`;
+			};
+			const onUp = () => {
+				resizer.removeEventListener('pointermove', onMove);
+				resizer.removeEventListener('pointerup', onUp);
+				workspaceStore.setShell({ height: Math.round(panel.getBoundingClientRect().height) });
+			};
+			resizer.addEventListener('pointermove', onMove);
+			resizer.addEventListener('pointerup', onUp);
+		});
 	}
 
 	/** Re-fetch vault settings and re-render conditional right-bar tools. */
@@ -128,11 +174,14 @@ class ClewApp extends ClewElement {
 		}
 	}
 
-	/** Open the search tool (left sidebar) and focus its input. */
-	openSearch() {
+	/** Open the search tool (left sidebar) and focus its input — with a
+	 *  query already in it when one is given (live edit's tag clicks). */
+	openSearch(query) {
 		workspaceStore.setSidebar('left', { open: true, activeTool: 'search' });
 		requestAnimationFrame(() => {
-			this.querySelector('clew-search-panel')?.focusInput();
+			const panel = this.querySelector('clew-search-panel');
+			if (typeof query === 'string') panel?.setQuery(query);
+			panel?.focusInput();
 		});
 	}
 

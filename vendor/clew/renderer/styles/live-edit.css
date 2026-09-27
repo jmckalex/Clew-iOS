@@ -1,0 +1,324 @@
+/* Clew — live edit (docs/dev/live-edit.md). Structure classes `le-*`;
+   every colour is a --clew-* variable. What a REVEALED construct looks like
+   is source mode's business (editor.css): nothing here applies to it except
+   line-level classes, which must hold in both states — entering a line
+   never changes its height (plan §5.10). */
+
+/* ---- inline constructs, concealed ---- */
+.le-strong { font-weight: 650; }
+.le-intense { font-weight: 700; font-variant: small-caps; letter-spacing: 0.02em; }
+.le-italic { font-style: italic; }
+.le-underline { text-decoration: underline; text-underline-offset: 0.15em; }
+.le-highlight { background: var(--clew-search-match); border-radius: 2px; }
+.le-strike { text-decoration: line-through; color: var(--clew-text-muted); }
+.le-sub, .le-sup { font-size: 0.75em; line-height: 0; }
+.le-sub { vertical-align: sub; }
+.le-sup { vertical-align: super; }
+.le-code {
+	font-family: var(--clew-mono-font);
+	font-size: 0.875em;
+	background: var(--clew-bg-tertiary);
+	border-radius: 4px;
+	padding: 0.1em 0.3em;
+	color: var(--clew-code);
+}
+.le-link, .le-wikilink, .le-ref {
+	color: var(--clew-link);
+	text-decoration: underline;
+	text-decoration-color: color-mix(in srgb, var(--clew-link) 45%, transparent);
+	text-underline-offset: 0.18em;
+	cursor: pointer;
+}
+.le-wikilink.le-unresolved { opacity: 0.65; text-decoration-style: dashed; }
+.le-tag { cursor: pointer; }
+.le-directive { text-decoration: underline dotted var(--clew-formatting); text-underline-offset: 0.2em; }
+.le-tex-only { opacity: 0.55; }
+
+/* ---- stand-ins for replaced constructs ---- */
+.le-chip {
+	font-family: var(--clew-ui-font);
+	font-size: 0.8em;
+	border-radius: 6px;
+	padding: 0 5px;
+	background: var(--clew-active-item);
+	color: var(--clew-accent);
+	cursor: pointer;
+	white-space: nowrap;
+}
+.le-fn {
+	background: none;
+	padding: 0 1px;
+	font-size: 0.72em;
+	font-weight: 600;
+	vertical-align: super;
+	line-height: 0;
+}
+.le-cite { color: var(--clew-link); }
+.le-var { font-family: var(--clew-mono-font); }
+.le-label, .le-today, .le-directive-chip, .le-embed-chip { color: var(--clew-text-muted); background: var(--clew-bg-tertiary); }
+.le-block-id { background: none; color: var(--clew-text-faint); margin-left: 0.3em; }
+.le-block-id:hover { color: var(--clew-accent); }
+
+/* ---- math ---- */
+.le-math { cursor: pointer; }
+.le-math mjx-container { margin: 0 !important; }
+.le-math-display:not(.le-math-block) mjx-container { display: inline-block !important; }
+.le-math-pending { color: var(--clew-code); font-family: var(--clew-mono-font); font-size: 0.9em; opacity: 0.7; }
+.le-math-error {
+	color: var(--clew-code);
+	font-family: var(--clew-mono-font);
+	font-size: 0.9em;
+	text-decoration: underline wavy var(--clew-danger);
+}
+
+/* ---- headings: the size lives on the LINE, in both states ---- */
+.cm-live .le-h .cmt-heading1, .cm-live .le-h .cmt-heading2, .cm-live .le-h .cmt-heading3,
+.cm-live .le-h .cmt-heading4 { font-size: inherit; }
+.le-h { color: var(--clew-heading); font-weight: 650; line-height: 1.3; }
+.le-h1 { font-size: 1.55em; padding-top: 0.35em !important; }
+.le-h2 { font-size: 1.35em; padding-top: 0.3em !important; }
+.le-h3 { font-size: 1.18em; padding-top: 0.2em !important; }
+.le-h4 { font-size: 1.05em; }
+.le-h5, .le-h6 { font-size: 1em; }
+.le-h6 { color: var(--clew-text-muted); }
+
+/* ---- alignment ---- */
+.le-align-center { text-align: center; }
+.le-align-right { text-align: right; }
+
+/* ---- lists: a hanging indent, so wrapped lines sit under the text ---- */
+.le-li {
+	--le-hang: calc(var(--le-indent, 0) * 0.3em + 1.4em);
+	padding-left: calc(24px + var(--le-hang)) !important;
+	text-indent: calc(-1 * var(--le-hang));
+}
+.le-bullet {
+	display: inline-block;
+	width: 1.4em;
+	text-indent: 0;
+	color: var(--clew-accent);
+	font-weight: 700;
+}
+.le-li-2 .le-bullet, .le-li-4 .le-bullet { font-weight: 400; }
+.le-task {
+	width: 1em;
+	height: 1em;
+	margin: 0 0.3em 0 0;
+	vertical-align: -0.12em;
+	accent-color: var(--clew-accent);
+	cursor: pointer;
+}
+.le-done { color: var(--clew-text-muted); text-decoration: line-through; text-decoration-color: var(--clew-text-faint); }
+
+/* ---- quotes and callouts (colours mirror preview.css's callout table) ---- */
+.le-quote {
+	border-left: 3px solid var(--clew-quote);
+	color: var(--clew-quote);
+	padding-left: 20px !important;
+	margin-left: 24px;
+}
+.le-quote-2 { border-left-width: 6px; }
+.le-quote-3, .le-quote-4 { border-left-width: 9px; }
+.le-callout {
+	--callout: #6b7785;
+	border-left: 4px solid var(--callout);
+	background: color-mix(in srgb, var(--callout) 12%, transparent);
+	color: var(--clew-text-normal);
+}
+.le-callout-head { font-weight: 600; }
+.le-callout-marker { color: var(--callout); display: inline-flex; align-items: center; gap: 0.35em; margin-right: 0.35em; vertical-align: -0.1em; }
+.le-callout-marker .callout-icon { width: 1em; height: 1em; }
+.le-callout-label, .le-callout-title { color: var(--callout); }
+.le-callout-fold { cursor: pointer; display: inline-block; transform: rotate(90deg); transition: transform 0.12s; padding: 0 0.3em; }
+.le-callout-fold.is-folded { transform: rotate(0deg); }
+.le-callout-note          { --callout: #5b8def; }
+.le-callout-abstract      { --callout: #00b8a3; }
+.le-callout-info          { --callout: #3b9dd8; }
+.le-callout-todo          { --callout: #3b9dd8; }
+.le-callout-tip           { --callout: #00b8a3; }
+.le-callout-success       { --callout: #3fb950; }
+.le-callout-question      { --callout: #d9a441; }
+.le-callout-warning       { --callout: #e08c3c; }
+.le-callout-failure       { --callout: #e5534b; }
+.le-callout-danger        { --callout: #e5534b; }
+.le-callout-bug           { --callout: #e5534b; }
+.le-callout-example       { --callout: #a371f7; }
+.le-callout-quote         { --callout: #8b949e; }
+.le-callout-compatibility { --callout: #00b8a3; }
+
+/* ---- code fences: source stays, the fence lines become chrome ---- */
+.le-fence {
+	font-family: var(--clew-mono-font);
+	font-size: 0.9em;
+	background: var(--clew-bg-tertiary);
+}
+.le-fence-open { border-radius: 8px 8px 0 0; }
+.le-fence-close { border-radius: 0 0 8px 8px; }
+.le-fence-head { display: inline-flex; width: 100%; justify-content: space-between; font-family: var(--clew-ui-font); font-size: 0.8em; }
+.le-fence-lang { color: var(--clew-text-muted); cursor: pointer; }
+.le-fence-copy { color: var(--clew-text-faint); cursor: pointer; }
+.le-fence-copy:hover { color: var(--clew-accent); }
+.le-fence-foot { display: inline-block; }
+/* The concealed closer: a pad finishing the box, not a line of its own.
+   Revealed (the caret on the fence's opener or closer) it is full height
+   again, showing its backticks — the one line whose height changes. */
+.cm-line.le-fence-foot-line { font-size: 0; line-height: 10px; height: 10px; }
+
+/* ---- directives and environments: a captioned frame ---- */
+.le-env { border-left: 2px solid var(--clew-accent); padding-left: 20px !important; margin-left: 24px; }
+.le-env-open { padding-top: 2px !important; }
+.le-env-head { font-family: var(--clew-ui-font); font-size: 0.8em; color: var(--clew-accent); cursor: pointer; }
+.le-env-name { font-weight: 700; text-transform: capitalize; }
+.le-env-caption { margin-left: 0.6em; color: var(--clew-text-normal); font-weight: 600; }
+.le-env-note { margin-left: 0.6em; color: var(--clew-text-faint); }
+.le-env-foot { display: inline-block; }
+.le-tex-only-block, .le-env-comment { opacity: 0.55; }
+.le-dt { font-weight: 600; }
+/* The concealed `::` becomes a dash between the term and its definition. */
+.le-dt-sep.le-chip { background: none; padding: 0 0.45em; color: var(--clew-text-faint); }
+
+/* ---- blocks ---- */
+.le-hr { padding: 8px 24px; cursor: pointer; }
+.le-hr hr { border: none; border-top: 1px solid var(--clew-border); margin: 0; }
+.le-math-block { padding: 6px 24px; text-align: center; overflow-x: auto; }
+.le-toc { padding: 8px 24px; font-size: 0.95em; }
+.le-toc-title { font-family: var(--clew-ui-font); font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.06em; color: var(--clew-text-muted); cursor: pointer; }
+.le-toc ul { list-style: none; margin: 4px 0 0; padding: 0; }
+.le-toc li { color: var(--clew-link); cursor: pointer; line-height: 1.7; }
+.le-toc li:hover { text-decoration: underline; }
+.le-props { margin: 4px 24px 8px; padding: 6px 0; border-bottom: 1px solid var(--clew-border); font-family: var(--clew-ui-font); font-size: 0.85em; }
+.le-props-row { display: flex; align-items: center; gap: 8px; }
+.le-props-key { flex: 0 0 9em; color: var(--clew-text-muted); padding: 3px 6px; }
+.le-props-foot { color: var(--clew-text-faint); font-size: 0.85em; padding: 4px 6px 0; }
+.le-props-yaml { cursor: pointer; color: var(--clew-text-muted); text-decoration: underline dotted; }
+.le-banner {
+	margin: 8px 24px;
+	padding: 8px 12px;
+	border-radius: 6px;
+	background: var(--clew-active-item);
+	font-family: var(--clew-ui-font);
+	font-size: 0.85em;
+	display: flex;
+	gap: 12px;
+	align-items: center;
+	justify-content: space-between;
+}
+/* Source mode tints a whole list item with the list face; in live edit the
+   bullet carries the colour and the item reads as prose. */
+.cm-live .le-li .cmt-list { color: inherit; }
+
+/* CodeMirror puts a 1em, `vertical-align: text-top` image either side of a
+   replaced range (a caret anchor). On a large-font line that image pokes
+   above the line box and a concealed heading stood 1px taller than the same
+   heading revealed (measured, 41.9 vs 40.9) — which breaks the rule that
+   entering a line never changes its height. Sat on the baseline and kept
+   short, it holds the caret without lifting the line. */
+.cm-live .cm-widgetBuffer { vertical-align: baseline; height: 0.6em; }
+
+/* ---- tables and images (Tier B) ---- */
+.le-table-wrap { padding: 6px 24px; overflow-x: auto; }
+.le-table { border-collapse: collapse; font-size: 0.95em; }
+.le-table th, .le-table td { border: 1px solid var(--clew-border); padding: 4px 10px; cursor: text; }
+.le-table th { background: var(--clew-bg-secondary); font-weight: 650; text-align: left; }
+/* An empty cell keeps a line's height, or a blank row (Tab's new one) collapses flat. */
+.le-table th:empty::before, .le-table td:empty::before { content: '\200b'; }
+.le-image-block { display: block; padding: 6px 24px; }
+.le-image img { max-width: 100%; border-radius: 6px; vertical-align: middle; cursor: pointer; }
+.le-image:not(.le-image-block) img { max-height: 1.6em; }
+.le-image-chip { color: var(--clew-text-muted); background: var(--clew-bg-tertiary); }
+
+/* ---- Tier C: engine-rendered frames over their placeholders ---- */
+.cm-live .cm-scroller { position: relative; }
+.le-frames { position: absolute; top: 0; left: 0; width: 100%; height: 0; pointer-events: none; z-index: 1; }
+.le-frame {
+	position: absolute;
+	border: 0;
+	pointer-events: auto;
+	background: transparent;
+}
+/* The frame element's color-scheme must MATCH its document's (preview.css
+   declares dark / light per theme): when they differ Chromium paints an
+   opaque backdrop behind a transparent document (measured — every frame
+   showed a dark slab over the editor). */
+body[data-theme='dark'] .le-frame { color-scheme: dark; }
+body[data-theme='light'] .le-frame { color-scheme: light; }
+.le-frame-slot { padding: 0 24px; }
+.le-frame-edge { height: 6px; cursor: pointer; }
+.le-frame-edge:hover { background: var(--clew-active-item); border-radius: 3px; }
+.le-frame-body { position: relative; }
+.le-frame-skeleton {
+	height: 100%;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border: 1px dashed var(--clew-border);
+	border-radius: 6px;
+	color: var(--clew-text-faint);
+	font-family: var(--clew-ui-font);
+	font-size: 0.8em;
+}
+.le-frame-slot.is-measured .le-frame-skeleton { border-color: transparent; color: transparent; }
+/* A callout's text is prose, as in reading mode — not the quote face that
+   lang-markdown puts on every span of a blockquote. */
+.cm-live .le-callout .cmt-quote { color: inherit; }
+/* lang-markdown tags `__x__` as strong emphasis, and the source theme's
+   strong face is the dialect's INTENSE (small caps). Concealed, `__x__` is
+   an underline and nothing else — whichever way the two spans nest. */
+.le-underline, .le-underline .cmt-strong { font-variant: normal; letter-spacing: normal; font-weight: inherit; }
+
+/* ---- tables edited in place (docs/dev/live-edit.md §5.5c) ---- */
+.le-table [data-le-active] {
+	outline: 2px solid var(--clew-accent);
+	outline-offset: -2px;
+	background: var(--clew-bg-primary);
+	cursor: text;
+}
+/* The cell editor sits INSIDE the note's editor, and CodeMirror's theme
+   rules are descendant selectors under the note editor's theme class — so
+   the note's `.cm-content { padding: 24px 0 40vh }` and `.cm-line`
+   padding reach the nested editor too (measured: a one-line cell stood
+   ~40vh tall). These win back the cell's own box. */
+.le-table .le-cell-editor.cm-editor { height: auto; font: inherit; color: inherit; min-width: 2em; background: transparent; }
+.le-table .le-cell-editor .cm-scroller { font-family: inherit; line-height: inherit; overflow: visible; }
+.le-table .le-cell-editor .cm-content {
+	padding: 0 !important;
+	margin: 0 !important;
+	max-width: none !important;
+	font-family: inherit;
+	font-size: inherit;
+	line-height: inherit;
+}
+.le-table .le-cell-editor .cm-line { padding: 0 !important; }
+.le-table .le-cell-editor .cm-activeLine { background: transparent; }
+.le-table-note {
+	font-family: var(--clew-ui-font);
+	font-size: 0.75em;
+	color: var(--clew-text-faint);
+	margin-bottom: 4px;
+	cursor: pointer;
+}
+
+/* Cross-references (§5.13): reference chips show the number the engine will
+   print; a missing label is the key in the danger colour; a numberless one
+   "??". Numbered headings get the engine's prefix; an @begin(equation) its
+   "(n)" at the right, as reading mode's .eqn-number. */
+.le-ref.le-chip { background: none; padding: 0; color: var(--clew-accent); cursor: pointer; }
+.le-ref.le-chip:hover { text-decoration: underline; }
+.le-ref-missing.le-chip { color: var(--clew-danger); text-decoration: underline dotted; }
+.le-ref-numberless.le-chip, .le-ref-uncounted.le-chip { color: var(--clew-danger); }
+.le-heading-number { background: none !important; padding: 0 0.35em 0 0 !important; color: var(--clew-text-muted); font: inherit; }
+.le-math-block[data-le-tag] { position: relative; }
+.le-math-block[data-le-tag]::after {
+	content: attr(data-le-tag);
+	position: absolute; right: 0.5em; top: 50%; transform: translateY(-50%);
+	color: var(--clew-text-normal);
+}
+
+/* Sidenotes (§5.16): concealed footnotes' bodies in the right margin. */
+.le-sidenotes { position: absolute; top: 0; left: 0; width: 0; height: 0; pointer-events: none; }
+.le-sidenotes[hidden] { display: none; }
+.le-sidenote {
+	position: absolute; box-sizing: border-box; font-family: var(--clew-editor-font); font-size: 0.8em; line-height: 1.45;
+	color: var(--clew-text-muted); border-left: 2px solid var(--clew-accent); padding-left: 8px; pointer-events: auto;
+}
+.le-sidenote-number { font-weight: 600; color: var(--clew-accent); }

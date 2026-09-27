@@ -104,6 +104,12 @@ export async function createViewer({ target, src, onStatus = () => {} }) {
 	}).toPromise();
 	onStatus('');
 
+	// The annotation plugin fills its state after the document opens and
+	// says so ('loaded'); a PDF with no annotations may say nothing at all.
+	let loadedResolve;
+	const loaded = new Promise((resolve) => { loadedResolve = resolve; });
+	setTimeout(() => loadedResolve(), 5000);
+
 	// ---- annotation autosave ----
 	const exportCap = registry.getPlugin('export')?.provides();
 	const annotationCap = registry.getPlugin('annotation')?.provides();
@@ -130,12 +136,106 @@ export async function createViewer({ target, src, onStatus = () => {} }) {
 		};
 		handle.saveNow = saveNow;
 		annotationCap.onAnnotationEvent((event) => {
-			if (event?.type === 'loaded') return;   // opening a file is not a change
+			if (event?.type === 'loaded') { loadedResolve(); return; }   // opening a file is not a change
 			onStatus('unsaved');
 			clearTimeout(handle.saveTimer);
 			handle.saveTimer = setTimeout(saveNow, SAVE_DEBOUNCE_MS);
 		});
 	}
+
+	// ---- annotations as data (§5.15) ----
+	const engine = registry.getEngine?.();
+	const scrollCap = registry.getPlugin('scroll')?.provides();
+	const doc = () => docManager.getActiveDocument?.();
+	const KIND = { 1: 'note', 3: 'freetext', 9: 'highlight', 10: 'underline', 11: 'squiggly', 12: 'strikeout', 15: 'ink' };
+	/** The document text under `rects` on a page: the glyphs whose centres
+	 *  fall inside, as one slice (the selection plugin's own method). */
+	const textUnder = async (pageIndex, rects) => {
+		const d = doc();
+		if (!engine || !d?.pages?.[pageIndex] || !rects?.length) return '';
+		const { runs } = await engine.getPageGeometry(d, d.pages[pageIndex]).toPromise();
+		const inside = (x, y) => rects.some((r) => x >= r.origin.x && x <= r.origin.x + r.size.width && y >= r.origin.y && y <= r.origin.y + r.size.height);
+		let lo = Infinity;
+		let hi = -1;
+		for (const run of runs ?? []) {
+			run.glyphs.forEach((g, i) => {
+				if (inside(g.x + g.width / 2, g.y + g.height / 2)) { lo = Math.min(lo, run.charStart + i); hi = Math.max(hi, run.charStart + i); }
+			});
+		}
+		if (hi < 0) return '';
+		const [text] = await engine.getTextSlices(d, [{ pageIndex, charIndex: lo, charCount: hi - lo + 1 }]).toPromise();
+		return (text ?? '').replace(/\s+/g, ' ').trim();
+	};
+	/** Every annotation worth a note: markup, notes, free text, ink — not
+	 *  popups, links or replies. Text under a markup annotation from the
+	 *  engine; `custom.text` (what the UI stored at creation) as a fallback. */
+	handle.listAnnotations = async () => {
+		if (!annotationCap) return [];
+		await loaded;
+		// An edit still waiting on the autosave debounce is written NOW: the
+		// note is about to name these annotations, so the PDF must hold them
+		// (measured: a highlight made just before its tab was rebuilt was
+		// lost — a document that unloads takes its pending timer with it).
+		if (handle.saveTimer && handle.saveNow) {
+			clearTimeout(handle.saveTimer);
+			handle.saveTimer = null;
+			await handle.saveNow();
+		}
+		const out = [];
+		for (const tracked of annotationCap.getAnnotations()) {
+			const a = tracked?.object;
+			if (!a || tracked.commitState === 'deleted' || !KIND[a.type] || a.inReplyToId) continue;
+			const markup = a.type >= 9 && a.type <= 12;
+			let text = '';
+			if (markup) {
+				try { text = await textUnder(a.pageIndex, a.segmentRects?.length ? a.segmentRects : [a.rect]); } catch { text = ''; }
+				if (!text && typeof a.custom?.text === 'string') text = a.custom.text;
+			}
+			out.push({
+				id: a.id, page: a.pageIndex + 1, kind: KIND[a.type], text,
+				contents: a.contents ?? '', color: a.strokeColor ?? a.color ?? '',
+				rect: a.rect,
+			});
+		}
+		// Reading order: page, then top to bottom (EmbedPDF's y grows downward).
+		return out.sort((x, y) => x.page - y.page || x.rect.origin.y - y.rect.origin.y || x.rect.origin.x - y.rect.origin.x);
+	};
+	handle.scrollToPage = (page) => {
+		scrollCap?.scrollToPage?.({ pageNumber: Math.max(1, Number(page) || 1), behavior: 'instant' });
+	};
+	handle.currentPage = () => scrollCap?.getCurrentPage?.() ?? null;
+	/**
+	 * For scenarios: annotations made from script as the UI makes them — a
+	 * highlight over the text run holding `match` on `page` (1-based), or a
+	 * sticky note. Autosave then writes them into the PDF, as for any edit.
+	 */
+	handle.createAnnotations = async (specs) => {
+		if (!annotationCap) return 0;
+		let made = 0;
+		for (const spec of specs) {
+			const pageIndex = (spec.page ?? 1) - 1;
+			const id = (crypto.randomUUID?.() ?? `${Date.now()}-${made}`);
+			if (spec.kind === 'note') {
+				annotationCap.createAnnotation(pageIndex, {
+					id, type: 1, pageIndex, contents: spec.contents ?? '', strokeColor: '#FFCD45', opacity: 1, name: 0,
+					rect: { origin: { x: 60, y: 60 }, size: { width: 24, height: 24 } }, flags: ['print', 'noRotate', 'noZoom'], created: new Date(),
+				});
+				made += 1;
+				continue;
+			}
+			const d = doc();
+			const runs = await engine.getPageTextRects(d, d.pages[pageIndex]).toPromise();
+			const run = runs.find((r) => r.content.includes(spec.match));
+			if (!run) continue;
+			annotationCap.createAnnotation(pageIndex, {
+				id, type: 9, pageIndex, rect: run.rect, segmentRects: [run.rect], strokeColor: '#FFCD45', color: '#FFCD45',
+				opacity: 1, blendMode: 1, contents: spec.contents ?? '', created: new Date(),
+			});
+			made += 1;
+		}
+		await annotationCap.commit?.().toPromise?.();
+		return made;
+	};
 
 	// Spike instrumentation.
 	window.__clewPdfReady = (window.__clewPdfReady ?? 0) + 1;

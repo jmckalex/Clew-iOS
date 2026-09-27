@@ -56,10 +56,14 @@ const defaultState = () => ({
 	noteActive: false,
 	tabOpen: false,
 	readingMode: false,
+	/** the active note tab's 'source' | 'live' | 'reading', or null */
+	viewMode: null,
+	toolbarVisible: true,
 	pinned: false,
 	bookmarked: false,
 	leftSidebar: true,
 	rightSidebar: true,
+	shellOpen: false,
 	theme: 'dark',
 	/** command id → CM chord or null, from the renderer's effective keymap */
 	hotkeys: {},
@@ -258,6 +262,10 @@ class AppMenu {
 				// the palette alone because an identifier nobody can discover
 				// is an identifier nobody writes.
 				c('editor:copy-block-ref', 'Copy Link to Block', { needs: 'editor' }),
+				// Same reason: ⌥Q is Emacs' M-q and nothing on screen says so
+				// (the owner's ask, 2026-09-18). The gloss is for the word the
+				// hand reaches for; the command's own name stays the manual's.
+				c('editor:fill-paragraph', 'Fill Paragraph (Reflow)', { chord: 'Alt-q', needs: 'editor' }),
 				{ type: 'separator' },
 				c('edit:find-in-note', 'Find in Note', { chord: 'Mod-f', needs: 'editor' }),
 				c('nav:search', 'Search in All Files', { chord: 'Mod-Shift-f', needs: 'vault' }),
@@ -282,6 +290,16 @@ class AppMenu {
 				c('app:command-palette', 'Command Palette…', { chord: 'Mod-p' }),
 				{ type: 'separator' },
 				c('workspace:toggle-mode', 'Reading Mode', { chord: 'Mod-e', needs: 'note', type: 'checkbox', checked: s.readingMode }),
+				c('workspace:toggle-live', 'Live Edit', { chord: 'Mod-Shift-e', needs: 'note', type: 'checkbox', checked: s.viewMode === 'live' }),
+				{
+					label: 'Mode',
+					submenu: [
+						c('workspace:mode-source', 'Source', { needs: 'note', type: 'radio', checked: s.viewMode === 'source' }),
+						c('workspace:mode-live', 'Live Edit', { needs: 'note', type: 'radio', checked: s.viewMode === 'live' }),
+						c('workspace:mode-reading', 'Reading', { needs: 'note', type: 'radio', checked: s.viewMode === 'reading' }),
+					],
+				},
+				c('view:toggle-toolbar', 'Editor Toolbar', { type: 'checkbox', checked: s.toolbarVisible }),
 				c('view:properties', 'Properties Panel', { needs: 'vault' }),
 				{ type: 'separator' },
 				{
@@ -294,6 +312,7 @@ class AppMenu {
 				{ type: 'separator' },
 				c('workspace:toggle-left-sidebar', 'Left Sidebar', { chord: 'Mod-b', type: 'checkbox', checked: s.leftSidebar }),
 				c('workspace:toggle-right-sidebar', 'Right Sidebar', { chord: 'Mod-Shift-b', type: 'checkbox', checked: s.rightSidebar }),
+				c('shell:toggle', 'Shell Panel', { chord: 'Ctrl-`', needs: 'vault', type: 'checkbox', checked: s.shellOpen }),
 				{ type: 'separator' },
 				{ role: 'resetZoom' },
 				{ role: 'zoomIn' },

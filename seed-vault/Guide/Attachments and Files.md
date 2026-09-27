@@ -14,8 +14,13 @@ it in a **viewer tab**; `[[links]]` to attachments open the viewer too.
 
 ## PDF embeds
 
-PDFs render with Chromium's built-in viewer, embedded right in the note:
+PDFs render in Clew's own viewer, embedded right in the note — and you can
+highlight and comment in it; the notes save into the PDF:
 
 ![[sample.pdf]]
+
+Right-click a PDF in the explorer and choose *Extract annotations to a
+note* to get its highlights and comments as a note beside it, each linked
+back to its page ([[sample.pdf#page=1]] opens the PDF at a page).
 
 See also: [[Links and Embeds]], [[Settings and Hotkeys]].

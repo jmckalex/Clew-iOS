@@ -10,11 +10,10 @@
 
 // Cmd/Ctrl+click a [[wikilink]] in the editor to open it (creating the note
 // when unresolved, Obsidian-style). Finds the link by scanning the clicked
-// line's text — independent of the highlighting overlay.
+// line's text (link-at.js) — independent of the highlighting overlay.
 import { EditorView } from '@codemirror/view';
 import * as actions from '../commands/actions.js';
-
-const LINK_RE = /(!?)\[\[([^\[\]|#\n]*)(?:#([^\[\]|\n]+))?(?:\|([^\[\]\n]+))?\]\]/g;
+import { linkAt } from './link-at.js';
 
 export function wikilinkClick() {
 	return EditorView.domEventHandlers({
@@ -23,29 +22,17 @@ export function wikilinkClick() {
 			const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
 			if (pos === null) return false;
 			const line = view.state.doc.lineAt(pos);
-			const column = pos - line.from;
-
-			LINK_RE.lastIndex = 0;
-			let match;
-			while ((match = LINK_RE.exec(line.text)) !== null) {
-				const start = match.index;
-				const end = start + match[0].length;
-				if (column >= start && column <= end) {
-					event.preventDefault();
-					// `|external` means the OS default app, in source mode too —
-					// the two modes must not disagree about what a link does.
-					const wantsExternal = (match[4] ?? '').split('|')
-						.some((part) => part.trim().toLowerCase() === 'external');
-					if (wantsExternal && match[2].trim()) {
-						actions.openFileExternally(match[2].trim());
-						return true;
-					}
-					const target = match[2].trim() + (match[3] ? `#${match[3].trim()}` : '');
-					actions.openWikilink(target, { newTab: event.altKey });
-					return true;
-				}
+			const link = linkAt(line.text, pos - line.from);
+			if (link?.kind !== 'wikilink') return false;
+			event.preventDefault();
+			// `|external` means the OS default app, in source mode too —
+			// the two modes must not disagree about what a link does.
+			if (link.external && link.target) {
+				actions.openFileExternally(link.target);
+				return true;
 			}
-			return false;
+			actions.openWikilink(link.target + (link.heading ? `#${link.heading}` : ''), { newTab: event.altKey });
+			return true;
 		},
 	});
 }

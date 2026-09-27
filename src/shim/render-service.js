@@ -11,6 +11,7 @@ import { vfs } from '../worker/shims/vfs.js';
 import { VAULT_ROOT, GLOBAL_PLUGINS_ROOT } from './vault-manager.js';
 import { engineConfig, engineEnv, isTextPath } from './engine-config.js';
 import { engineExtensionEntries } from '../../vendor/clew/main/plugins.js';
+import { settings } from './settings.js';
 
 const REBUILD_DEBOUNCE_MS = 300;
 const ENGINE_CWD = `${VAULT_ROOT}/.clew/engine`;
@@ -187,6 +188,10 @@ export class RenderService {
 				vaultRoot: VAULT_ROOT,
 				sessionId: this.sessionId,
 				vaultOptions: this.#vaultOptions,
+				// The device's global TeX fragments; a change to them
+				// reconfigures (ipc.js SETTINGS_SET), so a standby never
+				// outlives the list it was spawned with.
+				globalTexFragments: settings.get('texFragments') ?? [],
 			}),
 		});
 		this.#standby = { worker, ready };

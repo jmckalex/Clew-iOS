@@ -55,7 +55,7 @@ export const FORMAT_MENU = [
 			{ id: 'format:numbered-list', label: 'Numbered List' },
 			{ id: 'format:task-list', label: 'Task List — [ ]' },
 			{ id: 'format:blockquote', label: 'Blockquote' },
-			{ id: 'format:description-list', label: 'Description List — term : definition' },
+			{ id: 'format:description-list', label: 'Description List — term:: definition' },
 			{ separator: true },
 			{ id: 'format:horizontal-rule', label: 'Horizontal Rule' },
 		],
@@ -97,8 +97,9 @@ export const FORMAT_MENU = [
 			{ separator: true },
 			{ id: 'format:footnote', label: 'Footnote — [fn: …]' },
 			{ id: 'format:citation', label: 'Citation — \\cite{…}' },
-			{ id: 'format:label', label: 'Label — :label[key]' },
-			{ id: 'format:reference', label: 'Reference — :ref[key]' },
+			{ id: 'format:label', label: 'Label — @label[key]' },
+			{ id: 'format:reference', label: 'Reference — @ref[key]' },
+			{ id: 'format:cref', label: 'Typed Reference — @cref[key]' },
 			{ separator: true },
 			{ id: 'format:toc', label: 'Table of Contents — {{TOC}}' },
 			{ id: 'format:today', label: "Today's Date — :today" },
@@ -126,3 +127,16 @@ export const FORMAT_MENU = [
 		],
 	},
 ];
+
+/**
+ * The commands that make sense inside a table cell edited in place (live
+ * edit): inline formatting and inline inserts — a heading or a list in a
+ * cell is not a thing GFM can hold. The rest refuse there with a notice,
+ * and the `//` menu leaves them out.
+ */
+export const CELL_SAFE_COMMANDS = new Set([
+	'edit:format-strong', 'edit:format-intense', 'edit:format-italic', 'format:underline',
+	'edit:format-highlight', 'edit:format-strike', 'format:subscript', 'format:superscript',
+	'edit:format-code', 'edit:format-math', 'edit:insert-wikilink', 'format:insert-link',
+	'format:footnote', 'format:citation', 'format:label', 'format:reference', 'format:cref', 'format:Cref', 'format:today',
+]);

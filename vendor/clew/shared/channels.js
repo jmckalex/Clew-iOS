@@ -98,6 +98,16 @@ export const CH = {
 
 	// events: main → renderer
 	EV_VAULT_OPENED: 'clew:ev-vault-opened',
+	// The watcher hit its descriptor budget: part of the vault is not being
+	// watched, so the explorer and previews can go stale there (vault.js).
+	EV_WATCH_CAPPED: 'clew:ev-watch-capped',
+	// The shell panel: one real shell per window (main/shell-core.js).
+	SHELL_OPEN: 'clew:shell-open',
+	SHELL_WRITE: 'clew:shell-write',
+	SHELL_RESIZE: 'clew:shell-resize',
+	SHELL_CLOSE: 'clew:shell-close',
+	EV_SHELL_DATA: 'clew:ev-shell-data',
+	EV_SHELL_EXIT: 'clew:ev-shell-exit',
 	EV_TREE_CHANGED: 'clew:ev-tree-changed',
 	EV_FILE_CHANGED: 'clew:ev-file-changed',
 	EV_RENDER_DONE: 'clew:ev-render-done',

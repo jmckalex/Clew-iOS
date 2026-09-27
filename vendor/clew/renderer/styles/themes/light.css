@@ -20,6 +20,7 @@ body[data-theme='light'] {
 	--clew-text-muted: #6a6a6a;
 	--clew-text-faint: #9a9a9a;
 	--clew-text-on-accent: #ffffff;
+	--clew-graph-reference: #a8741a;
 	--clew-accent: #6c5fb0;
 	--clew-accent-hover: #5747a5;
 	--clew-selection: rgba(108, 95, 176, 0.22);

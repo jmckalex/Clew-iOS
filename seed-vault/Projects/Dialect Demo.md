@@ -18,3 +18,16 @@ For all $n$, something profound holds. [fn: With a footnote.]
 :::TeX
 \LaTeX\ passthrough block (renders in LaTeX export only).
 :::
+
+A description list sets each definition beside its term:
+
+Term:: The definition may sit on the same line as the term.
+
+Longer definition::
+  It may also start on the next line, indented, and run to several
+  paragraphs.
+
+  Like this one. Indent a nested list by two spaces so it stays a list:
+
+  - one
+  - two

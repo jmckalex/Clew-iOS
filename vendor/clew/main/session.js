@@ -20,6 +20,7 @@ import { Indexer } from './indexer.js';
 import { RenderService } from './render-service.js';
 import { KvStore, KV_FILE } from './kv-store.js';
 import { SearchService } from './search.js';
+import { shells } from './ipc.js';
 
 const byWebContents = new Map(); // webContents.id -> session
 const byId = new Map(); // session id -> session
@@ -59,7 +60,7 @@ export class VaultSession {
 		this.vaults.hooks = {
 			onOpen: (root) => {
 				this.renderService.openVault(root);
-				this.indexer.openVault(root);
+				this.indexer.openVault(root, this.vaults.excludes);
 				this.kvStore.open(root);
 			},
 			onClose: () => {
@@ -80,6 +81,9 @@ export class VaultSession {
 	}
 
 	dispose() {
+		// A window's shell dies with the window — the pty, and the shell
+		// inside it, would otherwise outlive everything that could reach it.
+		shells.close(this.id);
 		this.vaults.close();
 		byWebContents.delete(this.wcId);
 		byId.delete(this.id);

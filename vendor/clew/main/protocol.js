@@ -170,6 +170,51 @@ export function installPreviewProtocol({ distDir, nodeModulesDir, engineAssetsDi
 		return new Response(fs.readFileSync(absPath), { headers: base });
 	};
 
+	/**
+	 * What every preview document gets on top of the engine's own template:
+	 * the note API in <head> (so inline note scripts can use window.clew
+	 * immediately), the client bridge at the end of <body>, then the vault
+	 * scripts and the enabled preview-surface plugin scripts. One function
+	 * for notes and live edit's block documents, so the two cannot drift;
+	 * a block is marked `data-clew-block` on its <html>.
+	 */
+	function wrapPreviewDocument(html, { session, sid, block = false }) {
+		const vaultSettings = session.vaults.loadState('vault-settings.json') ?? {};
+		// Vault plugins load as ordinary vault files; global ones from
+		// the __clew_plugin_file__ namespace (they are outside every
+		// vault). Either way the script's own URL sits in its plugin
+		// folder, so the house convention for loading a sibling —
+		// `new URL('x.js', document.currentScript.src)`, what the
+		// Charts plugin does — works in both scopes. (A bare relative
+		// fetch resolves against the NOTE's URL, in both scopes.)
+		const pluginTags = previewPluginScripts(session.vaults.root, vaultSettings, globalPluginsDir)
+			.map((p) => (p.vaultRel
+				? `/${sid}/${p.vaultRel.split('/').map(encodeURIComponent).join('/')}`
+				: `/__clew_plugin_file__/${sid}/${encodeURIComponent(p.id)}/${encodeURIComponent(p.file)}`))
+			.map((src) => `<script src="${src}"></script>`)
+			.join('');
+		// Vault scripts: <vault>/.clew/scripts/*.js load into EVERY
+		// rendered note (alphabetical) — shared custom elements and
+		// helpers, the JS twin of the .clew/snippets CSS convention.
+		// Same trust surface as the inline <script>s notes can already
+		// carry; per-note "Script:" metadata still works alongside.
+		let vaultScriptTags = '';
+		try {
+			vaultScriptTags = fs.readdirSync(path.join(session.vaults.root, '.clew', 'scripts'))
+				.filter((f) => f.endsWith('.js')).sort()
+				.map((f) => `<script src="/${sid}/.clew/scripts/${encodeURIComponent(f)}"></script>`)
+				.join('');
+		} catch { /* no scripts folder */ }
+		let out = html
+			.replace(/<head([^>]*)>/i, `<head$1><script src="/__clew_preview__/api.js"></script>`)
+			.replace(
+				/<\/body>/i,
+				`<script src="/__clew_preview__/client.js"></script>${vaultScriptTags}${pluginTags}</body>`,
+			);
+		if (block) out = out.replace(/<html([^>]*)>/i, '<html$1 data-clew-block="1">');
+		return out;
+	}
+
 	protocol.handle(PREVIEW_SCHEME, async (request) => {
 		try {
 			const url = new URL(request.url);
@@ -203,6 +248,11 @@ export function installPreviewProtocol({ distDir, nodeModulesDir, engineAssetsDi
 				const extra = root === 'mptikz'
 					? { 'Cache-Control': 'public, max-age=31536000, immutable' }
 					: {};
+				// What a figure actually fetched — the engines run in a Worker,
+				// invisible to the preview document's resource timings, so a
+				// smoke run counts here (smoke/README.md: "what the engines
+				// fetched").
+				if (process.env.CLEW_SMOKE_LOG && root === 'mptikz') console.log(`smoke-asset: ${rest}`);
 				return fileResponse(abs, extra, request.headers.get('range'));
 			}
 			if (pathname.startsWith('__clew_preview__/')) {
@@ -291,6 +341,49 @@ export function installPreviewProtocol({ distDir, nodeModulesDir, engineAssetsDi
 				return new Response(html, { headers: headers('text/html') });
 			}
 
+			// Live edit's block frames (docs/dev/live-edit.md §7.2). POST
+			// `{text, sourcePath}` renders the snippet as a full preview
+			// document and answers `{hash}`; GET `__clew_block__/<hash>` serves
+			// that document with the same client injection a note gets, marked
+			// `data-clew-block` so the client reports its size instead of its
+			// scroll. Same origin guard and size limit as fragments. An
+			// evicted hash is a 404: the caller POSTs again.
+			if (rel === '__clew_block__' && request.method === 'POST') {
+				const origin = request.headers.get('origin') ?? '';
+				if (/^https?:/i.test(origin)) {
+					return new Response('Forbidden', { status: 403, headers: headers('text/plain') });
+				}
+				const body = await request.text();
+				if (body.length > 100_000) {
+					return new Response('Too large', { status: 413, headers: headers('text/plain') });
+				}
+				let text;
+				let sourcePath = null;
+				try {
+					({ text, sourcePath = null } = JSON.parse(body));
+				} catch {
+					return new Response('Bad request', { status: 400, headers: headers('text/plain') });
+				}
+				if (typeof text !== 'string') {
+					return new Response('Bad request', { status: 400, headers: headers('text/plain') });
+				}
+				if (sourcePath !== null) {
+					try { vaults.resolve(sourcePath); } catch {
+						return new Response('Forbidden', { status: 403, headers: headers('text/plain') });
+					}
+				}
+				const hash = await renderService.renderBlock(text, { sourcePath });
+				return new Response(JSON.stringify({ hash }), { headers: headers('application/json') });
+			}
+			if (rel.startsWith('__clew_block__/') && request.method === 'GET') {
+				const html = renderService.blockDocument(rel.slice('__clew_block__/'.length));
+				if (html === undefined) {
+					return new Response('Not found', { status: 404, headers: headers('text/plain') });
+				}
+				const injected = wrapPreviewDocument(html, { session, sid: pathname.slice(0, slash), block: true });
+				return new Response(injected, { headers: headers('text/html') });
+			}
+
 			// Rendered note: "<note path>.html" → render on demand, inject client.
 			if (RENDERED_SUFFIX.test(rel)) {
 				const relPath = rel.replace(/\.html$/i, '');
@@ -307,43 +400,7 @@ export function installPreviewProtocol({ distDir, nodeModulesDir, engineAssetsDi
 						+ `<body><div id="__clew_err">${String(err.message ?? err)
 							.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</div></body></html>`;
 				}
-				// The note API loads in <head> so inline note scripts can use
-				// window.clew immediately; the client bridge loads at end of body,
-				// followed by any enabled preview-surface plugin scripts (served
-				// as ordinary vault files from .clew/plugins/).
-				const vaultSettings = session.vaults.loadState('vault-settings.json') ?? {};
-				const sid = pathname.slice(0, slash);
-				// Vault plugins load as ordinary vault files; global ones from
-				// the __clew_plugin_file__ namespace (they are outside every
-				// vault). Either way the script's own URL sits in its plugin
-				// folder, so the house convention for loading a sibling —
-				// `new URL('x.js', document.currentScript.src)`, what the
-				// Charts plugin does — works in both scopes. (A bare relative
-				// fetch resolves against the NOTE's URL, in both scopes.)
-				const pluginTags = previewPluginScripts(session.vaults.root, vaultSettings, globalPluginsDir)
-					.map((p) => (p.vaultRel
-						? `/${sid}/${p.vaultRel.split('/').map(encodeURIComponent).join('/')}`
-						: `/__clew_plugin_file__/${sid}/${encodeURIComponent(p.id)}/${encodeURIComponent(p.file)}`))
-					.map((src) => `<script src="${src}"></script>`)
-					.join('');
-				// Vault scripts: <vault>/.clew/scripts/*.js load into EVERY
-				// rendered note (alphabetical) — shared custom elements and
-				// helpers, the JS twin of the .clew/snippets CSS convention.
-				// Same trust surface as the inline <script>s notes can already
-				// carry; per-note "Script:" metadata still works alongside.
-				let vaultScriptTags = '';
-				try {
-					vaultScriptTags = fs.readdirSync(path.join(session.vaults.root, '.clew', 'scripts'))
-						.filter((f) => f.endsWith('.js')).sort()
-						.map((f) => `<script src="/${sid}/.clew/scripts/${encodeURIComponent(f)}"></script>`)
-						.join('');
-				} catch { /* no scripts folder */ }
-				const injected = html
-					.replace(/<head([^>]*)>/i, `<head$1><script src="/__clew_preview__/api.js"></script>`)
-					.replace(
-						/<\/body>/i,
-						`<script src="/__clew_preview__/client.js"></script>${vaultScriptTags}${pluginTags}</body>`,
-					);
+				const injected = wrapPreviewDocument(html, { session, sid: pathname.slice(0, slash) });
 				return new Response(injected, { headers: headers('text/html') });
 			}
 

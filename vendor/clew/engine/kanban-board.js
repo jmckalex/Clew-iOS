@@ -32,6 +32,7 @@
 //
 // In source mode a board is just markdown, which is the point of the format.
 import fs from 'node:fs';
+import { currentFilePath } from './vault-model.js';
 
 const CARD_RE = /^[-*+] \[( |x|X)\] (.*)$/;
 
@@ -114,7 +115,7 @@ export function renderBoard(board) {
 // is embedded into another note later.
 const cache = new Map();
 function boardFor() {
-	const file = global.current_file;
+	const file = currentFilePath();
 	if (!file) return null;
 	if (!cache.has(file)) {
 		let board = null;

@@ -8,7 +8,7 @@
 	"author": "J. McKenzie Alexander",
 	"scripts": {
 		"build": "node scripts/build.js",
-		"test": "node --test",
+		"test": "node --import ./tests/hooks/register.mjs --test",
 		"sync-upstream": "node scripts/sync-upstream.js",
 		"sync-mptikz": "node scripts/stage-mptikz.js",
 		"dev": "node scripts/dev-server.js"

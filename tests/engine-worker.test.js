@@ -146,3 +146,46 @@ test('a kanban-plugin board note renders as a board', () => {
 	// Cards keep their true source lines — the checkbox write path.
 	assert.match(html, /data-source-line="\d+"[^>]*data-source-path="Features\/Project Board\.md"|data-task-path|type="checkbox"/);
 });
+
+// ---- the live-edit sync: @reveal and TeX fragments through the worker -----
+
+test('@reveal[…]: the Environments registry entry serves a vault deck as an iframe', () => {
+	const html = flat(render('Guide/Links and Embeds.md'));
+	// The seed vault's demo deck (Attachments/demo-deck/index.html): a
+	// folder target resolves to its index, session-scoped like every vault
+	// URL, with the author's height.
+	assert.match(html, /<iframe class="reveal-embed"[^>]*src="[^"]*Attachments\/demo-deck\/index\.html"/);
+	assert.match(html, /height:\s*260px/);
+	// Not in the vault → refused BY NAME, never a blank frame.
+	const vault = fs.mkdtempSync(path.join(os.tmpdir(), 'clew-reveal-'));
+	fs.writeFileSync(path.join(vault, 'Deck.md'), '# Deck\n\n@reveal[Talks/nowhere]\n');
+	const missing = renderIn(vault, 'Deck.md');
+	assert.ok(!missing.includes('<iframe'), 'no frame for a target that is not there');
+	assert.match(missing, /nowhere/);
+	fs.rmSync(vault, { recursive: true, force: true });
+});
+
+test('TeX fragments: CLEW_TEX_FRAGMENTS reaches figures.js — the vault list, the global list, and the refusal', () => {
+	// The seed vault's Diagrams note asks for `math macros` (a ```latex
+	// snippet) and `math macros, diagram colours` (a ```tikz); its
+	// vault-settings.json defines both, so with the harness's default
+	// options the fragments' text lands in the figures' preambles.
+	const html = flat(render('Features/Diagrams.md'));
+	assert.match(html, /newcommand\{\\R\}\{\\mathbb\{R\}\}/, 'the vault fragment reached a figure');
+	assert.match(html, /definecolor\{clewink\}/, 'and the second one');
+	assert.ok(!html.includes('clew-figure-refused'), 'nothing refused when every name is defined');
+	// No fragments anywhere: refused by name, in place, everything else renders.
+	const bare = flat(render('Features/Diagrams.md', '--vault-options', '{}'));
+	assert.match(bare, /clew-figure-refused[^<]*TeX fragment not defined here: “math macros”/);
+	assert.match(bare, /TeX fragments not defined here: “math macros”, “diagram colours”/);
+	assert.ok(!bare.includes('definecolor{clewink}'));
+	// The global scope alone satisfies both — the env carries both lists and
+	// tex-fragments.js resolves them (a vault fragment would shadow it).
+	const globals = JSON.stringify([
+		{ name: 'Math Macros', text: '\\newcommand{\\R}{\\mathbb{R}}\\newcommand{\\E}{\\mathbb{E}}\\DeclareMathOperator*{\\argmax}{arg\\,max}' },
+		{ name: 'diagram colours', text: '\\definecolor{clewink}{HTML}{6C5CE7}' },
+	]);
+	const viaGlobal = flat(render('Features/Diagrams.md', '--vault-options', '{}', '--global-fragments', globals));
+	assert.ok(!viaGlobal.includes('clew-figure-refused'), 'the global list is consulted (case-insensitive names)');
+	assert.match(viaGlobal, /definecolor\{clewink\}/);
+});

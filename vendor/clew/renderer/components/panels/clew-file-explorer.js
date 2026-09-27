@@ -12,6 +12,7 @@
 // collapse; context menus offer create/rename/trash/reveal; renames are
 // inline. (Drag-to-move folders/files arrives with M3.)
 import { ClewElement } from '../base/clew-element.js';
+import { extractAnnotations } from '../../pdf-annotations.js';
 import { vaultStore, isNotePath } from '../../state/vault-store.js';
 import { isViewablePath, isCanvasPath } from '../../lib/file-types.js';
 import { icon } from '../../lib/icons.js';
@@ -23,10 +24,23 @@ import { newMarkdownFile, emptyScene } from '../../../shared/excalidraw-file.js'
 import { bookmarkStore } from '../../state/bookmark-store.js';
 import { settingsStore } from '../../state/settings-store.js';
 import * as actions from '../../commands/actions.js';
+import { flattenTree, visibleRange, scrollTopFor } from '../../lib/tree-window.js';
 
 class ClewFileExplorer extends ClewElement {
 	#collapsed = new Set();
 	#pendingRename = null;
+	// ---- windowing --------------------------------------------------------
+	// Only the rows on screen exist in the DOM. The tree is drawn flat (depth
+	// is padding), so the row height is uniform and any scroll position has
+	// an index — see lib/tree-window.js for the arithmetic and why: a vault
+	// with a library in it had 20,503 rows and took 23.5s to appear.
+	#rows = [];          // [{ entry, depth }], the flattened visible tree
+	#rowHeight = 0;      // measured once per render, not assumed
+	#scroller = null;    // .file-tree — its own scroll container (panels.css)
+	#sizer = null;       // holds the full height; rows are absolute inside it
+	#painted = null;     // the range currently in the DOM
+	#renaming = false;   // an inline rename must not be repainted away
+	#resizeObserver = null;
 
 	subscribe() {
 		this.listen(vaultStore, 'tree-changed', () => this.render());
@@ -64,25 +78,114 @@ class ClewFileExplorer extends ClewElement {
 		);
 		header.append(title, actions);
 
+		// Keep the reader where they were: a tree-changed redraw (a file saved
+		// somewhere else in the vault, say) must not jump the explorer home.
+		const keepScroll = this.#scroller?.scrollTop ?? 0;
+
 		const treeEl = document.createElement('div');
 		treeEl.className = 'file-tree';
-		if (vaultStore.tree) {
-			this.#renderEntries(vaultStore.tree, treeEl, 0);
-		}
+		const sizer = document.createElement('div');
+		sizer.className = 'file-tree-sizer';
+		treeEl.append(sizer);
+		// The background of the tree is the vault root as a drop target and as
+		// a context menu; with windowing the sizer is usually what the pointer
+		// actually lands on, so both count as "not a row".
 		treeEl.addEventListener('contextmenu', (e) => {
-			if (e.target === treeEl) {
+			if (e.target === treeEl || e.target === sizer) {
 				e.preventDefault();
 				this.#rootMenu(e.clientX, e.clientY);
 			}
 		});
+		treeEl.addEventListener('scroll', () => this.#paint(), { passive: true });
 
 		this.replaceChildren(header, treeEl);
+		this.#scroller = treeEl;
+		this.#sizer = sizer;
+		this.#painted = null;
+		this.#rows = flattenTree(vaultStore.tree, this.#collapsed);
+		this.#rowHeight = this.#measureRowHeight();
+		sizer.style.height = `${this.#rows.length * this.#rowHeight}px`;
+		treeEl.scrollTop = keepScroll;
+		this.#paint();
+
+		// The sidebar is resizable, and a taller panel shows more rows.
+		this.#resizeObserver?.disconnect();
+		this.#resizeObserver = new ResizeObserver(() => this.#paint());
+		this.#resizeObserver.observe(treeEl);
 
 		if (this.#pendingRename) {
-			const row = this.querySelector(`.tree-item[data-path="${CSS.escape(this.#pendingRename)}"]`);
+			const path = this.#pendingRename;
 			this.#pendingRename = null;
+			const row = this.#revealRow(path);
 			if (row) this.#startRename(row);
 		}
+	}
+
+	cleanup() {
+		this.#resizeObserver?.disconnect();
+		this.#resizeObserver = null;
+	}
+
+	/**
+	 * One row's height, measured rather than assumed: the row is a flex box
+	 * of text, so a theme or a font change moves it, and every index in the
+	 * window depends on it being right.
+	 */
+	#measureRowHeight() {
+		const probe = document.createElement('div');
+		probe.className = 'tree-item is-file';
+		probe.style.visibility = 'hidden';
+		const name = document.createElement('span');
+		name.className = 'tree-name';
+		name.textContent = 'Ag';
+		probe.append(name);
+		this.#sizer.append(probe);
+		const height = probe.offsetHeight;
+		probe.remove();
+		return height || 22; // detached or display:none — a sane row height
+	}
+
+	/** Build exactly the rows the viewport needs, and no others. */
+	#paint() {
+		if (!this.#scroller || !this.#sizer || this.#renaming) return;
+		const range = visibleRange({
+			scrollTop: this.#scroller.scrollTop,
+			viewportHeight: this.#scroller.clientHeight,
+			rowHeight: this.#rowHeight,
+			total: this.#rows.length,
+		});
+		if (this.#painted && this.#painted.first === range.first && this.#painted.last === range.last) return;
+		this.#painted = range;
+		const rows = [];
+		for (let i = range.first; i < range.last; i++) {
+			const { entry, depth } = this.#rows[i];
+			const row = this.#buildRow(entry, depth);
+			row.style.top = `${i * this.#rowHeight}px`;
+			rows.push(row);
+		}
+		this.#sizer.replaceChildren(...rows);
+	}
+
+	/**
+	 * Scroll a path into view and return its row, building the window around
+	 * it — "Rename…" on a row the user right-clicked is always on screen, but
+	 * a note just created by the palette need not be.
+	 */
+	#revealRow(path) {
+		const index = this.#rows.findIndex((r) => r.entry.path === path);
+		if (index < 0) return null;
+		const top = scrollTopFor({
+			index,
+			scrollTop: this.#scroller.scrollTop,
+			viewportHeight: this.#scroller.clientHeight,
+			rowHeight: this.#rowHeight,
+		});
+		if (top !== null) {
+			this.#scroller.scrollTop = top;
+			this.#painted = null;
+			this.#paint();
+		}
+		return this.#sizer.querySelector(`.tree-item[data-path="${CSS.escape(path)}"]`);
 	}
 
 	#actionButton(titleText, iconName, onClick) {
@@ -94,54 +197,49 @@ class ClewFileExplorer extends ClewElement {
 		return button;
 	}
 
-	#renderEntries(entries, container, depth) {
-		for (const entry of entries) {
-			const row = document.createElement('div');
-			row.className = `tree-item is-${entry.type}`;
-			row.dataset.path = entry.path;
-			row.style.paddingLeft = `${10 + depth * 18}px`;
+	/** One row. The same element the explorer always drew, positioned by index. */
+	#buildRow(entry, depth) {
+		const row = document.createElement('div');
+		row.className = `tree-item is-${entry.type}`;
+		row.dataset.path = entry.path;
+		row.style.paddingLeft = `${10 + depth * 18}px`;
 
-			if (entry.type === 'folder') {
-				const chevron = document.createElement('span');
-				chevron.className = 'tree-chevron';
-				chevron.append(icon(this.#collapsed.has(entry.path) ? 'chevron-right' : 'chevron-down'));
-				row.append(chevron);
-			}
-
-			const name = document.createElement('span');
-			name.className = 'tree-name';
-			name.textContent = entry.type === 'file' ? entry.name.replace(/\.(md|jmd|canvas)$/i, '') : entry.name;
-			row.append(name);
-
-			const activePath = workspaceStore.activeTab()?.path;
-			if (entry.type === 'file' && entry.path === activePath) row.classList.add('is-active');
-
-			row.addEventListener('click', (e) => {
-				if (this.#dragJustEnded) return;
-				if (entry.type === 'folder') {
-					this.#toggleFolder(entry.path);
-					return;
-				}
-				// Default per the explorer setting (new tab, Obsidian-style
-				// replace available); ⌘/Ctrl-click inverts it. A file already
-				// open in the group focuses its existing tab either way.
-				const newTabDefault = settingsStore.get('explorerOpenMode') !== 'replace';
-				const newTab = (e.metaKey || e.ctrlKey) ? !newTabDefault : newTabDefault;
-				this.#openEntry(entry, { newTab });
-			});
-			row.addEventListener('pointerdown', (e) => this.#maybeStartDrag(e, entry, row));
-			row.addEventListener('contextmenu', (e) => {
-				e.preventDefault();
-				e.stopPropagation();
-				this.#itemMenu(entry, e.clientX, e.clientY);
-			});
-
-			container.append(row);
-
-			if (entry.type === 'folder' && !this.#collapsed.has(entry.path)) {
-				this.#renderEntries(entry.children, container, depth + 1);
-			}
+		if (entry.type === 'folder') {
+			const chevron = document.createElement('span');
+			chevron.className = 'tree-chevron';
+			chevron.append(icon(this.#collapsed.has(entry.path) ? 'chevron-right' : 'chevron-down'));
+			row.append(chevron);
 		}
+
+		const name = document.createElement('span');
+		name.className = 'tree-name';
+		name.textContent = entry.type === 'file' ? entry.name.replace(/\.(md|jmd|canvas)$/i, '') : entry.name;
+		row.append(name);
+
+		const activePath = workspaceStore.activeTab()?.path;
+		if (entry.type === 'file' && entry.path === activePath) row.classList.add('is-active');
+
+		row.addEventListener('click', (e) => {
+			if (this.#dragJustEnded) return;
+			if (entry.type === 'folder') {
+				this.#toggleFolder(entry.path);
+				return;
+			}
+			// Default per the explorer setting (new tab, Obsidian-style
+			// replace available); ⌘/Ctrl-click inverts it. A file already
+			// open in the group focuses its existing tab either way.
+			const newTabDefault = settingsStore.get('explorerOpenMode') !== 'replace';
+			const newTab = (e.metaKey || e.ctrlKey) ? !newTabDefault : newTabDefault;
+			this.#openEntry(entry, { newTab });
+		});
+		row.addEventListener('pointerdown', (e) => this.#maybeStartDrag(e, entry, row));
+		row.addEventListener('contextmenu', (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			this.#itemMenu(entry, e.clientX, e.clientY);
+		});
+
+		return row;
 	}
 
 	#openEntry(entry, opts = {}) {
@@ -349,6 +447,10 @@ class ClewFileExplorer extends ClewElement {
 				} },
 				{ separator: true },
 			);
+			// A PDF's highlights and notes, as a note beside it (§5.15).
+			if (/\.pdf$/i.test(entry.path)) {
+				items.push({ label: 'Extract annotations to a note', click: () => extractAnnotations(entry.path) }, { separator: true });
+			}
 		}
 		if (entry.type === 'folder') {
 			items.push(
@@ -360,7 +462,7 @@ class ClewFileExplorer extends ClewElement {
 			);
 		}
 		items.push(
-			{ label: 'Rename…', click: () => this.#startRename(this.querySelector(`.tree-item[data-path="${CSS.escape(entry.path)}"]`)) },
+			{ label: 'Rename…', click: () => this.#startRename(this.#revealRow(entry.path)) },
 			{ label: 'Reveal in Finder', click: () => ipc.invoke(CH.FS_REVEAL, { path: entry.path }) },
 			{ separator: true },
 			{ label: 'Delete', danger: true, click: () => this.#trash(entry) },
@@ -396,6 +498,9 @@ class ClewFileExplorer extends ClewElement {
 
 	#startRename(row) {
 		if (!row) return;
+		// Windowing would otherwise rebuild this row — and the input inside
+		// it — the moment the list scrolled a pixel.
+		this.#renaming = true;
 		const path = row.dataset.path;
 		const isFile = row.classList.contains('is-file');
 		const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
@@ -415,6 +520,7 @@ class ClewFileExplorer extends ClewElement {
 		const commit = async () => {
 			if (done) return;
 			done = true;
+			this.#renaming = false;
 			const newStem = input.value.trim();
 			if (!newStem || newStem === stem || newStem.includes('/')) {
 				this.render();
@@ -427,7 +533,7 @@ class ClewFileExplorer extends ClewElement {
 		input.addEventListener('keydown', (e) => {
 			e.stopPropagation();
 			if (e.key === 'Enter') commit();
-			if (e.key === 'Escape') { done = true; this.render(); }
+			if (e.key === 'Escape') { done = true; this.#renaming = false; this.render(); }
 		});
 		input.addEventListener('click', (e) => e.stopPropagation());
 	}

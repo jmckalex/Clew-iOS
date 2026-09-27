@@ -458,3 +458,79 @@ body.is-tab-dragging .office-dock { pointer-events: none; opacity: 0.35; }
 	align-items: center;
 	font-size: 10px;
 }
+
+/* ---- the shell panel, pinned under the workspace ----
+   The centre of the window is a COLUMN: the workspace takes what it can,
+   and the shell sits beneath it at a height the user drags. Hidden is
+   `display: none` rather than a zero height, so xterm's own fit() never
+   measures a collapsed box and settles on 1×1. */
+.center-column {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+	min-height: 0;
+}
+.shell-resizer {
+	flex: none;
+	height: 3px;
+	cursor: row-resize;
+	background: transparent;
+	border-top: 1px solid var(--clew-border);
+}
+.shell-resizer:hover { background: var(--clew-accent); }
+
+clew-shell-panel {
+	display: none;
+	flex: none;
+	flex-direction: column;
+	min-height: 0;
+	overflow: hidden;
+	background: var(--clew-bg-primary);
+	border-top: 1px solid var(--clew-border);
+}
+clew-shell-panel.is-open { display: flex; }
+
+.shell-header {
+	flex: none;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 3px 8px 3px 12px;
+	background: var(--clew-bg-secondary);
+	border-bottom: 1px solid var(--clew-border);
+	font-size: 11px;
+	text-transform: uppercase;
+	letter-spacing: 0.06em;
+	color: var(--clew-text-muted);
+	user-select: none;
+}
+.shell-title { flex: 1; }
+.shell-header .shell-cwd {
+	flex: none;
+	text-transform: none;
+	letter-spacing: 0;
+	opacity: 0.8;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	max-width: 50%;
+}
+.shell-close {
+	font-size: 11px;
+	line-height: 1;
+	padding: 2px 5px;
+	border-radius: 4px;
+	color: var(--clew-text-muted);
+}
+.shell-close:hover { background: var(--clew-hover); color: var(--clew-text-normal); }
+
+/* xterm draws into this; it must have a real size before fit() runs. */
+.shell-grid {
+	flex: 1;
+	min-height: 0;
+	padding: 4px 6px 0 10px;
+	overflow: hidden;
+}
+.shell-grid .xterm { height: 100%; }
+.shell-grid .xterm-viewport { background: transparent !important; }

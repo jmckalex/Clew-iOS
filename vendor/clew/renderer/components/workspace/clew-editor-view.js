@@ -17,6 +17,18 @@ import { uiStore } from '../../state/ui-store.js';
 import { debounce } from '../../lib/debounce.js';
 import { scrollSyncBus, makeSuppressor } from '../../preview/scroll-sync.js';
 import { EditorView } from '@codemirror/view';
+import { settingsStore } from '../../state/settings-store.js';
+import { vaultSettingsStore } from '../../state/vault-settings-store.js';
+import { liveModel } from '../../editor/live/model.js';
+import { deriveState } from '../../editor/toolbar/toolbar-state.js';
+import { activeCellOf } from '../../editor/live/active-cell.js';
+import '../../editor/toolbar/clew-editor-toolbar.js';
+
+/** Is the formatting bar shown in this mode, under the setting? */
+export function toolbarShown(mode) {
+	const setting = settingsStore.get('editorToolbar') ?? 'live';
+	return setting === 'always' ? mode !== 'reading' : setting === 'live' && mode === 'live';
+}
 
 class ClewEditorView extends ClewElement {
 	tabId = null;
@@ -44,6 +56,7 @@ class ClewEditorView extends ClewElement {
 		if (!this.isConnected || this.tabId !== tabId || !entry.view) return;
 
 		this.replaceChildren(entry.view.dom);
+		this.#applyMode();
 		this.#restoreViewState(entry.view);
 		this.#syncConflictBanner();
 
@@ -55,6 +68,26 @@ class ClewEditorView extends ClewElement {
 		this.listen(editorPool, 'conflict-changed', ({ tabId: changed }) => {
 			if (changed === this.tabId) this.#syncConflictBanner();
 		});
+		// Source ↔ live is a flip of THIS view (the tab group keeps it
+		// mounted for both), so the mode is followed here.
+		this.listen(workspaceStore, 'layout-changed', () => {
+			this.#applyMode();
+			// Back to an editor jump's origin (tree.js#recordAnchorJump).
+			const saved = workspaceStore.findTab(this.tabId)?.tab.view;
+			const view = editorPool.get(this.tabId)?.view;
+			if (saved?.pendingLine && view && saved.mode !== 'reading') {
+				const line = saved.pendingLine;
+				delete saved.pendingLine;
+				this.#landOn(view, line);
+			}
+		});
+		this.listen(settingsStore, 'settings-changed', (key) => {
+			if (key === 'editorToolbar') this.#syncToolbar();
+		});
+		this.listen(editorPool, 'view-update', ({ tabId: changed }) => {
+			if (changed === this.tabId) this.#scheduleToolbarState();
+		});
+		this.addEventListener('toolbar-escape', () => editorPool.get(this.tabId)?.view?.focus());
 
 		// Scroll sync with preview panes showing the same note.
 		this.#scrollDOM = entry.view.scrollDOM;
@@ -76,6 +109,68 @@ class ClewEditorView extends ClewElement {
 			entry.view.dom.removeEventListener('focusin', this.#onFocusIn);
 			entry.view.dom.removeEventListener('focusout', this.#onFocusOut);
 		}
+	}
+
+	/** Put the pooled editor in this tab's mode: source or live edit. */
+	#applyMode() {
+		const tab = workspaceStore.findTab(this.tabId)?.tab;
+		if (!tab || tab.view.mode === 'reading') return;
+		const wanted = tab.view.mode === 'live' ? 'live' : 'source';
+		const applied = editorPool.setMode(this.tabId, wanted);
+		this.dataset.mode = applied ?? wanted;
+		this.#syncBigDocNotice(wanted === 'live' && applied === 'source');
+		this.#syncToolbar();
+	}
+
+	#toolbar = null;
+	#toolbarRaf = 0;
+
+	/** Mount or drop the formatting bar (setting × mode), then fill it. */
+	#syncToolbar() {
+		const tab = workspaceStore.findTab(this.tabId)?.tab;
+		const entry = editorPool.get(this.tabId);
+		const want = Boolean(tab && entry?.view && toolbarShown(tab.view.mode));
+		if (!want) {
+			this.#toolbar?.remove();
+			this.#toolbar = null;
+			return;
+		}
+		if (!this.#toolbar) {
+			this.#toolbar = document.createElement('clew-editor-toolbar');
+			this.#toolbar.tabId = this.tabId;
+			this.insertBefore(this.#toolbar, entry.view.dom);
+		}
+		this.#scheduleToolbarState();
+	}
+
+	/** The toolbar reflects the cursor — once per frame at most. */
+	#scheduleToolbarState() {
+		if (!this.#toolbar || this.#toolbarRaf) return;
+		this.#toolbarRaf = requestAnimationFrame(() => {
+			this.#toolbarRaf = 0;
+			const entry = editorPool.get(this.tabId);
+			const tab = workspaceStore.findTab(this.tabId)?.tab;
+			if (!this.#toolbar || !entry?.view || !tab) return;
+			const normalSyntax = vaultSettingsStore.get('normalSyntax') === true;
+			const model = liveModel(entry.view.state, { normalSyntax });
+			this.#toolbar.setState(deriveState(entry.view.state, model, {
+				mode: tab.view.mode, normalSyntax, inCell: Boolean(activeCellOf(entry.view.state)),
+			}));
+		});
+	}
+
+	/** The toolbar element, if shown (view:focus-toolbar). */
+	get toolbar() { return this.#toolbar; }
+
+	/** Live edit refuses a very large document; say so where it shows. The
+	 *  tab keeps `mode: 'live'`, so a smaller revision turns it back on. */
+	#syncBigDocNotice(show) {
+		this.querySelector(':scope > .live-refused-banner')?.remove();
+		if (!show) return;
+		const banner = document.createElement('div');
+		banner.className = 'conflict-banner live-refused-banner';
+		banner.textContent = 'Live edit is off for documents over 500 KB — showing source.';
+		this.prepend(banner);
 	}
 
 	/** Show/hide the "file changed on disk" banner for an unresolved conflict. */

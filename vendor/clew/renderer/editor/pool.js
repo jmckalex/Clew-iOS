@@ -18,7 +18,25 @@ import { EditorView } from '@codemirror/view';
 import { Emitter } from '../lib/emitter.js';
 import { debounce } from '../lib/debounce.js';
 import { ipc, CH } from '../ipc.js';
-import { makeNoteState } from './editor.js';
+import { makeNoteState, markdownCompartment } from './editor.js';
+import { noteMarkdown } from './jmd/markdown-config.js';
+import { vaultSettingsStore } from '../state/vault-settings-store.js';
+import { settingsStore } from '../state/settings-store.js';
+import { liveCompartment, liveEdit } from './live/index.js';
+import { destroyCellEditor } from './live/table-cell-editor.js';
+import { minimalChange } from './minimal-change.js';
+import { readLiveConfig } from './live/config.js';
+import { setViewNotePath } from './link-hover.js';
+import { pluginEngineDeclarations, onPluginEngineDeclarations } from '../plugins.js';
+
+/** Live edit refuses documents above this size (plan §9); source mode
+ *  degrades on its own past the same threshold (jmd/overlay.js). */
+export const LIVE_BIG_DOC = 500000;
+const LIVE_SETTINGS = new Set(['liveReveal', 'liveRenderMath', 'liveRenderFences', 'liveRenderEmbeds', 'liveFrameCap']);
+const liveConfig = () => readLiveConfig(settingsStore, vaultSettingsStore, pluginEngineDeclarations());
+
+/** The vault's dialect switch, as the grammar wants it. */
+const normalSyntax = () => vaultSettingsStore.get('normalSyntax') === true;
 
 const AUTOSAVE_MS = 1000;
 const STATE_CACHE_LIMIT = 25;
@@ -30,6 +48,64 @@ class EditorPool extends Emitter {
 	/** Undo history across navigation: path -> {state, handlerRef}. The cached
 	 *  state is only reused when the file's content still matches it. */
 	#stateCache = new Map();
+
+	constructor() {
+		super();
+		// A normalSyntax flip changes the grammar: reconfigure every open
+		// editor in place (undo history survives — it is a Compartment), and
+		// drop the banked states, which hold the old grammar.
+		vaultSettingsStore.on('vault-settings-changed', (key) => {
+			if (key !== 'normalSyntax') return;
+			const effects = markdownCompartment.reconfigure(noteMarkdown({ normalSyntax: normalSyntax() }));
+			for (const entry of this.#entries.values()) entry.view?.dispatch({ effects });
+			this.#stateCache.clear();
+			this.reconfigureLive();
+		});
+		settingsStore.on('settings-changed', (key) => {
+			if (LIVE_SETTINGS.has(key)) this.reconfigureLive();
+		});
+		// A plugin declaring fences or numbered environments came or went.
+		onPluginEngineDeclarations(() => this.reconfigureLive());
+	}
+
+	/**
+	 * Put a tab's editor in source or live edit: a reconfiguration of the
+	 * live compartment of the SAME view (live/index.js). Returns the mode
+	 * actually applied — 'source' for a live request over a document larger
+	 * than LIVE_BIG_DOC, which the caller tells the user about.
+	 *
+	 * @param {string} tabId
+	 * @param {'source'|'live'} mode
+	 * @returns {'source'|'live'|null} null when the tab has no editor yet
+	 */
+	setMode(tabId, mode) {
+		const entry = this.#entries.get(tabId);
+		if (!entry?.view) return null;
+		const effective = mode === 'live' && entry.view.state.doc.length <= LIVE_BIG_DOC ? 'live' : 'source';
+		if (entry.mode !== effective) {
+			entry.mode = effective;
+			entry.view.dispatch({
+				effects: liveCompartment.reconfigure(effective === 'live' ? liveEdit({ ...liveConfig(), notePath: entry.path, tabId }) : []),
+			});
+			this.emit('mode-changed', { tabId, mode: effective });
+		}
+		return effective;
+	}
+
+	/** The mode a tab's editor is in ('source' | 'live'), or null. */
+	modeOf(tabId) {
+		return this.#entries.get(tabId)?.mode ?? null;
+	}
+
+	/** Live settings changed: rebuild every live editor's bundle. */
+	reconfigureLive() {
+		const config = liveConfig();
+		for (const [tabId, entry] of this.#entries) {
+			if (entry.mode === 'live' && entry.view) {
+				entry.view.dispatch({ effects: liveCompartment.reconfigure(liveEdit({ ...config, notePath: entry.path, tabId })) });
+			}
+		}
+	}
 
 	/**
 	 * Get (creating or re-pointing as needed) the editor for a note tab.
@@ -56,7 +132,10 @@ class EditorPool extends Emitter {
 
 		const generation = entry.generation;
 		entry.path = path;
-		const content = await ipc.invoke(CH.NOTE_READ, { path }).catch(() => '');
+		const [content] = await Promise.all([
+			ipc.invoke(CH.NOTE_READ, { path }).catch(() => ''),
+			vaultSettingsStore.ready(),
+		]);
 		// The tab may have navigated again (or closed) while we read.
 		if (this.#entries.get(tabId) !== entry || entry.generation !== generation) return entry;
 
@@ -70,9 +149,12 @@ class EditorPool extends Emitter {
 			this.#stateCache.delete(path); // it's live again
 		} else {
 			handlerRef = { fn: null };
-			state = makeNoteState(content, handlerRef);
+			state = makeNoteState(content, handlerRef, { normalSyntax: normalSyntax() });
 		}
 		handlerRef.fn = (update) => {
+			// Selection and doc changes, for what reflects the cursor (the
+			// editor toolbar, the selection bubble).
+			if (update.docChanged || update.selectionSet || update.focusChanged) this.emit('view-update', { tabId, update });
 			if (!update.docChanged) return;
 			this.#setDirty(tabId, true);
 			// While a conflict banner is up, auto-save stays paused so typing
@@ -83,6 +165,10 @@ class EditorPool extends Emitter {
 
 		if (entry.view) entry.view.setState(state);
 		else entry.view = new EditorView({ state });
+		setViewNotePath(entry.view, path);
+		// A cached state carries whatever its live compartment held when it
+		// was banked; the next setMode decides afresh.
+		entry.mode = null;
 		entry.handlerRef = handlerRef;
 		entry.dirty = false;
 		entry.conflict = null;
@@ -168,11 +254,10 @@ class EditorPool extends Emitter {
 
 	#reload(tabId, entry, content) {
 		const { view } = entry;
-		const selection = view.state.selection;
-		view.dispatch({
-			changes: { from: 0, to: view.state.doc.length, insert: content },
-			selection: selection.main.anchor <= content.length ? selection : undefined,
-		});
+		// The smallest change, not a wholesale replace: the cursor, and a
+		// table cell being edited in place, map through it and survive.
+		const change = minimalChange(view.state.doc.toString(), content);
+		if (change) view.dispatch({ changes: change });
 		entry.lastWrittenText = content;
 		entry.save.cancel();
 		this.#setDirty(tabId, false);
@@ -207,7 +292,10 @@ class EditorPool extends Emitter {
 			if (p?.startsWith(fromPath + '/')) return toPath + p.slice(fromPath.length);
 			return p;
 		};
-		for (const entry of this.#entries.values()) entry.path = remap(entry.path);
+		for (const entry of this.#entries.values()) {
+			entry.path = remap(entry.path);
+			if (entry.view) setViewNotePath(entry.view, entry.path);
+		}
 		for (const [path, cached] of [...this.#stateCache]) {
 			const next = remap(path);
 			if (next !== path) {
@@ -223,6 +311,7 @@ class EditorPool extends Emitter {
 		entry.save.flush();
 		entry.save.cancel();
 		this.#cacheState(entry);
+		if (entry.view) destroyCellEditor(entry.view);
 		entry.view?.destroy();
 		this.#entries.delete(tabId);
 	}

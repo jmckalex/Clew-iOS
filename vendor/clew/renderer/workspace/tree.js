@@ -14,8 +14,13 @@
 //
 //   SplitNode    { type:'split', id, dir:'row'|'col', sizes:[…], children:[…] }
 //   TabGroupNode { type:'tabs',  id, tabs:[Tab], activeTabId }
-//   Tab          { id, kind:'note'|…, path?, view:{mode,cursor?,scrollTop?},
+//   Tab          { id, kind:'note'|…, path?, view:{mode,editMode?,cursor?,scrollTop?},
 //                  history:{back:[], forward:[]} }
+//
+// A note tab's `view.mode` is 'source' | 'live' | 'reading'; `view.editMode`
+// is the EDITING mode it last used ('source' | 'live'), which is where ⌘E
+// returns to from reading. Absent (a workspace saved before live edit
+// existed) means the caller's default.
 
 let idCounter = 1;
 const nextId = (prefix) => `${prefix}${idCounter++}`;
@@ -53,6 +58,9 @@ export function createInitialState() {
 			left: { open: true, width: 260, activeTool: 'files' },
 			right: { open: true, width: 290, activeTool: 'backlinks' },
 		},
+		// The shell panel under the workspace: closed until asked for, its
+		// height remembered per vault the way a sidebar's width is.
+		shell: { open: false, height: 220 },
 		// File-explorer folders the user has closed. Absence means open, so a
 		// vault seen for the first time greets you fully expanded.
 		collapsedFolders: [],
@@ -163,7 +171,10 @@ function openPath(state, path, kind, { newTab = false, defaultMode = null } = {}
 	// The new-tab default mode applies only to freshly created note tabs;
 	// navigation-in-place inherits the pane's mode, and explicit per-call
 	// modes are applied by the caller (openWikilink, the note API).
-	if (kind === 'note' && defaultMode) tab.view.mode = defaultMode;
+	if (kind === 'note' && defaultMode) {
+		tab.view.mode = defaultMode;
+		if (defaultMode !== 'reading') tab.view.editMode = defaultMode;
+	}
 	return openTab(state, group.id, tab);
 }
 
@@ -274,6 +285,7 @@ export function splitWithClone(state, targetGroupId, edge, tabId) {
 	}
 	const clone = createTab(source.kind, source.path);
 	clone.view = { ...clone.view, mode: source.view?.mode ?? clone.view.mode };
+	if (source.view?.editMode) clone.view.editMode = source.view.editMode;
 	const newGroup = splitGroup(state, targetGroupId, edge, clone);
 	normalize(state);
 	return newGroup;
@@ -332,7 +344,9 @@ export function navigateTab(state, tabId, path, kind = 'note') {
 	tab.history.forward = [];
 	tab.path = path;
 	tab.kind = kind;
-	tab.view = { mode: tab.view.mode };
+	tab.view = tab.view.editMode
+		? { mode: tab.view.mode, editMode: tab.view.editMode }
+		: { mode: tab.view.mode };
 }
 
 /**
@@ -340,11 +354,16 @@ export function navigateTab(state, tabId, path, kind = 'note') {
  * the spot the reader left becomes a Back entry. Same path, same kind —
  * only the remembered line differs, which restore() carries in `view`.
  */
-export function recordAnchorJump(state, tabId, fromLine, toLine) {
+export function recordAnchorJump(state, tabId, fromLine, toLine, { editor = false } = {}) {
 	const found = findTab(state.root, tabId);
 	if (!found || found.tab.pinned) return false;
 	const { tab } = found;
-	tab.history.back.push({ path: tab.path, kind: tab.kind, view: { ...tab.view, cursorLine: fromLine } });
+	// An EDITOR jump (a cross-reference chip, jump-to-label) leaves a
+	// pendingLine in the entry: the editor view lands on it when Back
+	// restores it (clew-editor-view.js), as inverse search does.
+	const back = { ...tab.view, cursorLine: fromLine };
+	if (editor) back.pendingLine = fromLine;
+	tab.history.back.push({ path: tab.path, kind: tab.kind, view: back });
 	if (tab.history.back.length > HISTORY_LIMIT) tab.history.back.shift();
 	tab.history.forward = [];
 	tab.view = { ...tab.view, cursorLine: toLine };
@@ -450,6 +469,9 @@ export function deserialize(json, { noteExists = () => true } = {}) {
 	state.sidebars.left ??= { open: true, width: 260, activeTool: 'files' };
 	state.sidebars.left.activeTool ??= 'files';
 	state.sidebars.right ??= { open: true, width: 290, activeTool: 'backlinks' };
+	// The shell panel under the workspace: closed until asked for, and its
+	// height remembered per vault like a sidebar's width.
+	state.shell ??= { open: false, height: 220 };
 	// Workspaces saved before folder state was remembered simply have none.
 	// Paths for folders that have since gone are KEPT, not pruned: a folder
 	// restored from the Trash (or arriving with a git checkout) should come

@@ -11,6 +11,7 @@
 // Shared UI actions, callable from the interim global keymap, the preview
 // bridge (forwarded chords), and — later — the real command registry.
 import { workspaceStore } from '../state/workspace-store.js';
+import { settingsStore } from '../state/settings-store.js';
 import { vaultStore, isNotePath } from '../state/vault-store.js';
 import { editorPool } from '../editor/pool.js';
 import { createTab } from '../workspace/tree.js';
@@ -62,11 +63,44 @@ export function closeOtherPane() {
 	for (const id of closed) editorPool.close(id);
 }
 
+/** The editing mode a tab without one of its own returns to (settings). */
+export function defaultEditMode() {
+	return settingsStore.get('defaultEditMode') === 'live' ? 'live' : 'source';
+}
+
+/** The editing mode this tab last used: 'source' or 'live'. */
+export function editModeOf(tab) {
+	return tab?.view?.editMode === 'live' || tab?.view?.editMode === 'source'
+		? tab.view.editMode : defaultEditMode();
+}
+
+/** ⌘E: reading ↔ the tab's own editing mode (source or live). */
 export function toggleReadingMode() {
 	const tab = workspaceStore.activeTab();
 	if (tab?.kind !== 'note') return;
-	if (tab.view.mode !== 'reading') editorPool.flush(tab.id);
-	workspaceStore.setTabMode(tab.id, tab.view.mode === 'reading' ? 'source' : 'reading');
+	if (tab.view.mode === 'reading') {
+		workspaceStore.setTabMode(tab.id, editModeOf(tab));
+	} else {
+		editorPool.flush(tab.id);
+		workspaceStore.setTabMode(tab.id, 'reading');
+	}
+}
+
+/** ⌘⇧E: source ↔ live. From reading it goes to the OTHER editing mode —
+ *  the chord names a flip, and reading has nothing of its own to flip. */
+export function toggleLiveEdit() {
+	const tab = workspaceStore.activeTab();
+	if (tab?.kind !== 'note') return;
+	const current = tab.view.mode === 'reading' ? editModeOf(tab) : tab.view.mode;
+	setViewMode(current === 'live' ? 'source' : 'live');
+}
+
+/** Put the active note tab in one of the three modes. */
+export function setViewMode(mode) {
+	const tab = workspaceStore.activeTab();
+	if (tab?.kind !== 'note' || !['source', 'live', 'reading'].includes(mode)) return;
+	if (mode === 'reading' && tab.view.mode !== 'reading') editorPool.flush(tab.id);
+	workspaceStore.setTabMode(tab.id, mode);
 }
 
 function openSingletonTab(kind) {
@@ -144,7 +178,12 @@ export async function openWikilink(target, { newTab = false, mode } = {}) {
 		const filePath = vaultStore.resolveFileName(name);
 		if (filePath) {
 			if (isCanvasPath(filePath)) workspaceStore.openCanvas(filePath, { newTab });
-			else workspaceStore.openFile(filePath, { newTab });
+			else {
+				const tab = workspaceStore.openFile(filePath, { newTab });
+				// `[[paper.pdf#page=12]]` (§5.15): open, or scroll, there.
+				const page = /^page=(\d+)$/.exec(heading ?? '')?.[1];
+				if (page && /\.pdf$/i.test(filePath) && tab) showPdfPage(tab.id, Number(page));
+			}
 			return;
 		}
 	}
@@ -212,10 +251,10 @@ export function jumpToLine(tabId, line) {
 	}
 }
 
-/** Open a note in source mode with the cursor on `line`. */
+/** Open a note in its editing mode with the cursor on `line`. */
 export function openNoteAtLine(path, line) {
 	const tab = workspaceStore.openNote(path);
-	workspaceStore.setTabMode(tab.id, 'source');
+	workspaceStore.setTabMode(tab.id, editModeOf(tab));
 	jumpToLine(tab.id, line);
 }
 
@@ -410,3 +449,29 @@ export function splitTarget(target) {
 }
 
 export { isNotePath };
+
+/**
+ * Put a PDF tab on `page`: remembered in the tab (a viewer built later opens
+ * there) and told to a viewer already showing (pdf-page.js scrolls).
+ */
+export function showPdfPage(tabId, page) {
+	workspaceStore.updateTabView(tabId, { pdfPage: page });
+	// The tab's view may be rebuilt as it activates, its viewer still
+	// loading: ask until the viewer says it is there (pdf-page.js answers
+	// once its document is open), for a few seconds.
+	let done = false;
+	const onMessage = (event) => {
+		if (event.data?.source === 'clew-preview' && event.data.type === 'pdf-page-shown' && event.data.page === page) done = true;
+	};
+	window.addEventListener('message', onMessage);
+	let tries = 0;
+	const ask = () => {
+		if (done || tries++ > 40) { window.removeEventListener('message', onMessage); return; }
+		for (const frame of document.querySelectorAll('clew-file-view iframe.pdf-frame')) {
+			if (frame.closest('clew-file-view')?.tabId !== tabId) continue;
+			frame.contentWindow?.postMessage({ source: 'clew-preview-host', type: 'pdf-page', page }, '*');
+		}
+		setTimeout(ask, 250);
+	};
+	ask();
+}

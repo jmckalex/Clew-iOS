@@ -1,6 +1,8 @@
 # Diagrams
 
-Mermaid renders client-side in the preview. Obsidian's fence syntax works:
+Mermaid renders client-side in the preview. Obsidian's fence syntax works
+— and while the cursor is inside one of these blocks, in source mode or
+live edit, a pane beside it shows the diagram as you type:
 
 ```mermaid
 graph LR
@@ -265,6 +267,41 @@ a snippet wants `\nopagenumbers`:
 \centerline{\bf Plain \TeX\ still works:
   $\displaystyle\sum_{n=1}^\infty {1 \over n^2} = {\pi^2 \over 6}$}
 ```
+
+## Sharing a preamble: fragments
+
+Figures in one note usually want the same preamble — your own macros, a
+colour, a package. Rather than copy it into every fence, write it once in
+**Settings → TeX fragments**, give it a name, and ask for it by name:
+
+```latex clew-fragments='math macros'
+For $X \sim \mathcal{N}(0,1)$: $\E[X] = 0$, and
+$\argmax_{x \in \R} e^{-x^2} = 0$.
+```
+
+Nothing in that fence defines `\E`, `\R` or `\argmax` — they come from
+this vault's **math macros** fragment, which you can read and change in
+Settings. A fragment can carry the packages it needs, too: that one
+starts with `\usepackage{amsmath,amssymb}`. A ` ```latex ` snippet gets
+those two from Clew anyway, but a TikZ picture is wrapped by the figure
+library and gets neither — so a fragment used by both brings its own, or
+`\DeclareMathOperator` and `\mathbb` are undefined in the picture.
+
+Several names are separated by commas and are inserted in the order you
+write them:
+
+```tikz clew-fragments='math macros, diagram colours'
+\fill[clewink] (0,0) circle (0.35) node[right=10pt] {$\R$};
+\draw[->,thick,clewink] (1.6,0) -- (3.2,0) node[right] {$\E[X]$};
+```
+
+There are two lists. The **global** fragments follow you from vault to
+vault; **this vault's** travel with the vault, which is why the two
+figures above draw the same on any machine that opens this demo. Where
+both define a name, the vault's wins. Edit a fragment and every figure
+using it is typeset again; ask for a name nothing defines and Clew says
+which name it could not find rather than typesetting the figure without
+it.
 
 ## In the note's own typeface
 

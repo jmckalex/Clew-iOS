@@ -16,6 +16,8 @@ rendered; **⌘O** finds any note; **⌘P** lists every command.
 - [[Vaults and Files]] — vaults, the explorer, moving files, edits from
   other apps
 - [[Editing]] — the editor, dialect highlighting, completions, undo
+- [[Live Edit]] — the markup put away until the cursor needs it, and
+  the editor toolbar
 - [[Reading Mode]] — rendering, inverse search, checkboxes, scroll sync
 - [[Links and Embeds]] — wikilinks, transclusion, media embeds
 - [[Attachments and Files]] — pasting images, PDF and media viewers

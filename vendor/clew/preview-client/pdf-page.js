@@ -22,10 +22,29 @@ const onStatus = (text) => {
 	status.style.opacity = text ? '1' : '0';
 };
 
+let viewer = null;
+
+/** Scroll to `page` once the viewer has laid its pages out: a scroll asked
+ *  for too early lands nowhere (measured — it worked only when something
+ *  slowed the page down), so try until the current page says so. */
+async function showPage(page) {
+	for (let i = 0; i < 20; i += 1) {
+		viewer?.scrollToPage?.(page);
+		await new Promise((r) => setTimeout(r, 250));
+		if (viewer?.currentPage?.() === page) return true;
+	}
+	return false;
+}
 if (!src) {
 	onStatus('no PDF given');
 } else {
-	createViewer({ target: root, src, onStatus }).catch((err) => {
+	createViewer({ target: root, src, onStatus }).then((handle) => {
+		viewer = handle;
+		window.__clewPdfHandle = handle;   // scenarios
+		// `[[paper.pdf#page=12]]` (§5.15): open there.
+		const page = Number(params.get('page'));
+		if (page > 1) showPage(page);
+	}).catch((err) => {
 		console.warn('[clew pdf] page viewer failed:', err);
 		window.__clewPdfError = String(err?.message ?? err);
 		onStatus('viewer failed');
@@ -39,5 +58,22 @@ window.addEventListener('message', (event) => {
 	const msg = event.data;
 	if (msg?.source === 'clew-preview-host' && msg.type === 'theme') {
 		document.documentElement.dataset.theme = msg.theme;
+	}
+	// The host asks for the annotations (renderer/pdf-annotations.js) or a
+	// page (a page anchor into an open tab) — the app page only, never
+	// another frame that happens to hold a reference to this one.
+	if (event.source !== window.parent) return;
+	if (msg?.source === 'clew-preview-host' && msg.type === 'pdf-page' && viewer?.scrollToPage) {
+		showPage(msg.page).then((ok) => {
+			if (ok) window.parent.postMessage({ source: 'clew-preview', type: 'pdf-page-shown', page: msg.page }, '*');
+		});
+	}
+	if (msg?.source === 'clew-preview-host' && msg.type === 'test-create-annotations') {
+		viewer?.createAnnotations?.(msg.specs ?? []).then((made) => window.parent.postMessage({ source: 'clew-preview', type: 'test-created', made }, '*'));
+	}
+	if (msg?.source === 'clew-preview-host' && msg.type === 'list-annotations') {
+		const reply = (annotations, error) => window.parent.postMessage({ source: 'clew-preview', type: 'annotations', requestId: msg.requestId, annotations, error }, '*');
+		if (!viewer?.listAnnotations) reply([], 'The viewer is still loading');
+		else viewer.listAnnotations().then((a) => reply(a, null), (err) => reply([], String(err?.message ?? err)));
 	}
 });

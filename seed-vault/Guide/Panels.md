@@ -23,4 +23,14 @@ The **right sidebar** tools all track the active note:
 - **Outline** — the note's heading tree; click to jump.
 - **Graph** — a local graph of the active note's neighborhood.
 
+Under the workspace there is one more, and it is not a sidebar tool:
+**the shell panel** (⌃\`, or View → Shell Panel). It is a terminal
+running your own login shell, started in this vault's folder — so `ls`,
+`grep`, `git status` and a build all happen where the notes are. Drag its
+top edge to resize it; the height is remembered per vault. One shell per
+window, and it keeps running while the panel is hidden: start something
+slow, press ⌃\`, carry on writing, and press it again to see how it got
+on. Pressing ⌃\` while the caret is *in* the terminal closes the panel
+rather than typing a backtick.
+
 See also: [[Search]], [[Graph View]].

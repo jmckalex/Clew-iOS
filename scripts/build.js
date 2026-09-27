@@ -124,6 +124,20 @@ const webroot = path.join(dist, 'webroot');
 const rendererPatches = {
 	name: 'clew-renderer-patches',
 	setup(builder) {
+		// Upstream's renderer reaches its engine mirror by a relative path
+		// (`../../../../vendor/jmarkdown/src/crossref.js` from editor/live/),
+		// which counts on the app living at <repo>/src. Here the app is
+		// mirrored one level deeper (vendor/clew), so the same path lands on
+		// a vendor/vendor/… that does not exist. Re-root it onto this repo's
+		// vendor/jmarkdown — the one place the two layouts differ that an
+		// import can see. tests/hooks/vendor-jmarkdown.mjs is the same rule
+		// for node --test. (Upstream candidate: an import map or a package
+		// self-reference would make the engine reachable by name.)
+		builder.onResolve({ filter: /^(?:\.\.\/)+vendor\/jmarkdown\// }, (args) => {
+			if (!args.importer.startsWith(path.join(root, 'vendor', 'clew') + path.sep)) return undefined;
+			const rest = args.path.replace(/^(?:\.\.\/)+vendor\/jmarkdown\//, '');
+			return { path: path.join(root, 'vendor', 'jmarkdown', rest) };
+		});
 		// Auto-focusing the editor pops the on-screen keyboard on every note
 		// open; on coarse-pointer devices a tap focuses deliberately instead.
 		builder.onLoad({ filter: /vendor\/clew\/renderer\/components\/workspace\/clew-editor-view\.js$/ }, (args) => ({
@@ -258,6 +272,41 @@ const rendererPatches = {
 				"\t\tif (anchorTarget && this.#engagedId !== anchorTarget.id) {\n");
 			return { contents: src, loader: 'js' };
 		});
+		// The shell panel cannot exist on iOS (no PTY), so its command — and
+		// with it the Ctrl-` chord and the palette entry — is dropped from the
+		// registry. The panel element stays in the DOM, closed (ipc.js forces
+		// `shell.open = false` on WORKSPACE_LOAD), and its xterm imports
+		// resolve to src/shim/xterm-stub.js.
+		builder.onLoad({ filter: /vendor\/clew\/renderer\/commands\/builtin\.js$/ }, (args) => ({
+			contents: patched('builtin.js', fs.readFileSync(args.path, 'utf8'),
+				"\t\t{ id: 'shell:toggle', name: 'Toggle shell panel', hotkeys: ['Ctrl-`'], when: needsVault,\n"
+				+ "\t\t\trun: () => {\n"
+				+ "\t\t\t\tconst open = !workspaceStore.shell.open;\n"
+				+ "\t\t\t\tworkspaceStore.setShell({ open });\n"
+				+ "\t\t\t\tif (open) {\n"
+				+ "\t\t\t\t\t// Opening it should put the caret in it; nobody toggles a\n"
+				+ "\t\t\t\t\t// terminal open in order to keep typing somewhere else.\n"
+				+ "\t\t\t\t\trequestAnimationFrame(() => document.querySelector('clew-shell-panel')?.focusTerminal());\n"
+				+ "\t\t\t\t}\n"
+				+ "\t\t\t} },\n",
+				''),
+			loader: 'js',
+		}));
+		// The renderer's vault-settings store (grammar, live-edit config,
+		// TeX-fragment warnings) is loaded ONLY in the EV_VAULT_OPENED
+		// handler. iOS boots through the VAULT_CURRENT branch — desktop's
+		// window-reload path — which never fires that event, so the store
+		// would stay `{}` every launch and the first editors would take the
+		// wrong grammar (the pool awaits ready(), which starts resolved). Load
+		// it there too, before the workspace restores. Upstream candidate: a
+		// desktop reload has the same hole.
+		builder.onLoad({ filter: /vendor\/clew\/renderer\/main\.js$/ }, (args) => ({
+			contents: patched('renderer/main.js', fs.readFileSync(args.path, 'utf8'),
+				'\t\tif (vault.watchCap) watchCapNotice(vault.watchCap);\n',
+				'\t\tif (vault.watchCap) watchCapNotice(vault.watchCap);\n'
+				+ '\t\tawait vaultSettingsStore.load();\n'),
+			loader: 'js',
+		}));
 		// WebKit + custom schemes: when the workspace reconciler moves a
 		// freshly inserted preview iframe, the reinserted frame's window
 		// proxy goes stale — its document loads and runs, but postMessage is
@@ -286,6 +335,7 @@ const rendererPatches = {
 // `Buffer`. Only that identifier is injected — the worker's globals.js also
 // installs process/global, which the app page must never see.
 const bufferInject = [path.join(shims, 'buffer-inject.js')];
+const xtermStub = path.join(root, 'src', 'shim', 'xterm-stub.js');
 
 export async function buildAppBundle({ minify = true } = {}) {
 	// The renderer runs unmodified; the entry evaluates the shim first. The
@@ -298,7 +348,10 @@ export async function buildAppBundle({ minify = true } = {}) {
 		format: 'esm',
 		target: 'safari16',
 		outfile: path.join(webroot, 'bundle.js'),
-		alias: builtinAlias,
+		// The shell panel's terminal emulator is aliased to an inert stub: a
+		// PTY cannot exist on iOS, and clew-shell-panel.js imports both
+		// packages at module scope (see src/shim/xterm-stub.js).
+		alias: { ...builtinAlias, '@xterm/xterm': xtermStub, '@xterm/addon-fit': xtermStub },
 		inject: bufferInject,
 		plugins: [rendererPatches],
 		minify,

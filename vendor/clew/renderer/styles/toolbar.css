@@ -1,0 +1,142 @@
+/* Clew — the editor toolbar and its popovers (docs/dev/live-edit.md §6).
+   Every colour a --clew-* variable. */
+
+.preview-host { flex-direction: column; }
+.preview-host > .preview-frame { flex: 1; min-height: 0; }
+
+.editor-toolbar {
+	flex: none;
+	display: flex;
+	align-items: center;
+	gap: 0;
+	height: 36px;
+	padding: 0 8px;
+	background: var(--clew-bg-secondary);
+	border-bottom: 1px solid var(--clew-border);
+	font-family: var(--clew-ui-font);
+	overflow: hidden;
+	user-select: none;
+}
+.toolbar-group { display: flex; align-items: center; gap: 1px; }
+.toolbar-group[hidden] { display: none; }
+.toolbar-group + .toolbar-group:not(.is-end)::before {
+	content: '';
+	width: 1px;
+	height: 18px;
+	margin: 0 4px;
+	background: var(--clew-border);
+}
+.toolbar-group.is-end { margin-left: auto; }
+.toolbar-button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 4px;
+	min-width: 28px;
+	height: 28px;
+	padding: 0 6px;
+	border: none;
+	border-radius: 5px;
+	background: transparent;
+	color: var(--clew-text-muted);
+	font: inherit;
+	font-size: 12.5px;
+	cursor: pointer;
+}
+.toolbar-button .ui-icon { width: 15px; height: 15px; fill: currentColor; }
+.toolbar-button:hover:not([disabled]) { background: var(--clew-hover); color: var(--clew-text-normal); }
+.toolbar-button:focus-visible { outline: 2px solid var(--clew-accent); outline-offset: -2px; }
+.toolbar-button[aria-pressed='true'] { color: var(--clew-accent); background: var(--clew-active-item); }
+.toolbar-button[disabled] { opacity: 0.35; cursor: default; }
+.toolbar-button[hidden] { display: none; }
+.toolbar-dropdown { color: var(--clew-text-normal); }
+.toolbar-text { text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.toolbar-caret { width: 9px !important; height: 9px !important; opacity: 0.6; }
+.toolbar-segmented { display: inline-flex; background: var(--clew-bg-tertiary); border-radius: 6px; padding: 1px; }
+.toolbar-segmented .toolbar-button { height: 26px; }
+.toolbar-more[hidden] { display: none; }
+
+/* ---- popovers ---- */
+.clew-popover {
+	position: fixed;
+	z-index: 1000;
+	min-width: 180px;
+	max-width: 320px;
+	padding: 4px;
+	background: var(--clew-bg-secondary);
+	border: 1px solid var(--clew-border);
+	border-radius: 8px;
+	box-shadow: 0 8px 24px var(--clew-shadow);
+	font-family: var(--clew-ui-font);
+	font-size: 13px;
+	color: var(--clew-text-normal);
+}
+.popover-list { display: flex; flex-direction: column; }
+.popover-scroll { max-height: 260px; overflow-y: auto; }
+.popover-item {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 5px 8px;
+	border: none;
+	border-radius: 5px;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+.popover-item:hover, .popover-item:focus { background: var(--clew-hover); outline: none; }
+.popover-item.is-checked { color: var(--clew-accent); }
+.popover-item[disabled] { opacity: 0.4; cursor: default; }
+.popover-label { flex: 1; }
+.popover-chord { color: var(--clew-text-faint); font-size: 11px; }
+.popover-item .ui-icon, .popover-icon svg { width: 14px; height: 14px; fill: currentColor; }
+.popover-icon { color: var(--callout); display: inline-flex; }
+.popover-separator { height: 1px; margin: 4px 2px; background: var(--clew-border); }
+.popover-heading { padding: 6px 8px 2px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--clew-text-faint); }
+.popover-form { display: flex; flex-direction: column; gap: 6px; padding: 4px; }
+.popover-input, .popover-select {
+	padding: 5px 8px;
+	border: 1px solid var(--clew-border);
+	border-radius: 5px;
+	background: var(--clew-bg-primary);
+	color: var(--clew-text-normal);
+	font: inherit;
+}
+.popover-select { margin: 2px 2px 6px; }
+.popover-submit { align-self: flex-end; padding: 4px 12px; border: none; border-radius: 5px; background: var(--clew-accent); color: var(--clew-text-on-accent); font: inherit; cursor: pointer; }
+.popover-table { padding: 4px; }
+.popover-caption { text-align: center; font-size: 12px; color: var(--clew-text-muted); margin-bottom: 4px; }
+.popover-grid { display: grid; grid-template-columns: repeat(8, 18px); gap: 3px; }
+.popover-grid-cell { width: 18px; height: 18px; padding: 0; border: 1px solid var(--clew-border); border-radius: 3px; background: var(--clew-bg-primary); cursor: pointer; }
+.popover-grid-cell.is-lit { background: var(--clew-active-item); border-color: var(--clew-accent); }
+
+/* ---- the selection bubble ---- */
+clew-selection-bubble {
+	position: fixed;
+	z-index: 900;
+	display: flex;
+	gap: 1px;
+	padding: 3px;
+	background: var(--clew-bg-secondary);
+	border: 1px solid var(--clew-border);
+	border-radius: 8px;
+	box-shadow: 0 6px 18px var(--clew-shadow);
+}
+clew-selection-bubble[hidden] { display: none; }
+clew-selection-bubble .toolbar-button { min-width: 26px; height: 26px; }
+
+/* ---- Settings → Editor toolbar → groups ---- */
+.toolbar-group-row { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+.toolbar-group-row span { flex: 1; }
+.toolbar-group-row button, .toolbar-groups-reset {
+	border: 1px solid var(--clew-border);
+	border-radius: 4px;
+	background: var(--clew-bg-primary);
+	color: var(--clew-text-muted);
+	font-size: 11px;
+	padding: 1px 6px;
+	cursor: pointer;
+}
+.toolbar-groups-reset { align-self: flex-start; margin-top: 6px; }

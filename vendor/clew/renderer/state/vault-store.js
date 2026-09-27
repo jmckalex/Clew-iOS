@@ -69,6 +69,33 @@ class VaultStore extends Emitter {
 		return this.index[path]?.blocks ?? [];
 	}
 
+	/** Cross-reference labels in a note: [{key, kind, line, col, title, host}]
+	 *  — see note-metadata.js. */
+	labelsFor(path) {
+		return this.index[path]?.labels ?? [];
+	}
+
+	/** The citations in a note: [{key, line, command, pandoc}] (§5.14). */
+	citationsOf(path) {
+		return this.index[path]?.citations ?? [];
+	}
+
+	/**
+	 * Every note citing `key`, first line of each: [{path, line}], sorted by
+	 * path. Pandoc forms count only under the vault's `pandocCitations`.
+	 *
+	 * @param {string} key
+	 * @param {{ pandoc?: boolean }} [options]
+	 */
+	citedBy(key, { pandoc = false } = {}) {
+		const out = [];
+		for (const [path, meta] of Object.entries(this.index)) {
+			const hit = (meta.citations ?? []).find((c) => c.key === key && (pandoc || !c.pandoc));
+			if (hit) out.push({ path, line: hit.line });
+		}
+		return out.sort((a, b) => a.path.localeCompare(b.path));
+	}
+
 	/** Map of tag -> {count, notes:[path]} over the whole vault (nested tags kept whole). */
 	tagIndex() {
 		const map = new Map();

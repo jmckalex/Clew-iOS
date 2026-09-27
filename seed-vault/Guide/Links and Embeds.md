@@ -112,3 +112,24 @@ width`x`height, or an alt text and then a size:
 
 Renaming or moving a note rewrites every link to it, across the whole
 vault. The backlinks panel shows who links *here* — see [[Panels]].
+
+## Embedding a presentation
+
+`@reveal[…]` puts a slide deck in the note, running:
+
+@reveal[Attachments/demo-deck]{height=260px}
+
+That one is a deliberately tiny stand-in — three slides of plain HTML, so
+the demo vault carries no presentation library. The target is either a
+path in the vault (an HTML file, or a folder holding `index.html` — what
+a reveal.js export looks like) or an `http(s)` URL, which is the form to
+use for a deck your web server builds rather than stores.
+
+Size it with `{width=…}`, `{height=…}` or `{aspect=4:3}`, and reach for
+`{style="…"}` for anything else. Quote a value containing a slash —
+`aspect="4/3"` — because the dialect's attribute syntax ends an unquoted
+value at the first non-word character.
+
+`@reveal+[…]` on its own line is the block form, and
+`@begin(reveal)…@end(reveal)` the environment form; all three take the
+same attributes.

@@ -13,6 +13,7 @@
 import { ClewElement } from '../base/clew-element.js';
 import { fileKind } from '../../lib/file-types.js';
 import { vaultFileUrl, pdfViewerUrl, excalidrawUrl } from '../../lib/preview-url.js';
+import { workspaceStore } from '../../state/workspace-store.js';
 import { officeDock } from '../../office-dock.js';
 import { ipc, CH } from '../../ipc.js';
 
@@ -57,7 +58,9 @@ class ClewFileView extends ClewElement {
 			el = document.createElement('iframe');
 			el.className = 'pdf-frame';
 			el.allow = 'fullscreen';
-			el.src = pdfViewerUrl(url);
+			// A page anchor the tab was opened at (actions.openWikilink).
+			const page = workspaceStore.findTab(this.tabId)?.tab.view.pdfPage ?? null;
+			el.src = pdfViewerUrl(url, { page });
 		} else if (kind === 'office') {
 			// ZetaOffice (LibreOffice wasm). The iframe itself belongs to the
 			// office dock (an overlay that survives tab switches — see

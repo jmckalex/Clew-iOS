@@ -14,6 +14,7 @@ import { ipc, CH } from './ipc.js';
 import { vaultStore } from './state/vault-store.js';
 import { workspaceStore } from './state/workspace-store.js';
 import { settingsStore } from './state/settings-store.js';
+import { vaultSettingsStore } from './state/vault-settings-store.js';
 import { bookmarkStore } from './state/bookmark-store.js';
 import { editorPool } from './editor/pool.js';
 import * as actions from './commands/actions.js';
@@ -25,11 +26,17 @@ import { initPlugins } from './plugins.js';
 import { installPdfSaveBridge, installOfficeSaveBridge, installOfficeThumbBridge, installExcalidrawSaveBridge, installExcalidrawLibraryBridge, installExcalidrawResolveBridge } from './pdf-save.js';
 import { officeDock } from './office-dock.js';
 import './components/chrome/clew-app.js';
+import './editor/toolbar/clew-selection-bubble.js';
+import { linkPreview } from './editor/link-preview.js';
+import { previewPane } from './editor/preview-pane.js';
 
 // ---- IPC events → stores --------------------------------------------------
 
 ipc.on(CH.EV_VAULT_OPENED, async ({ vault, tree }) => {
 	editorPool.flushAll();
+	// Before the workspace restores: the editors it opens await this (the
+	// grammar depends on the vault's normalSyntax).
+	vaultSettingsStore.load();
 	setPreviewSession(vault?.sessionId);
 	vaultStore.setVault(vault);
 	vaultStore.setTree(tree);
@@ -58,6 +65,16 @@ async function applySnippets() {
 }
 
 ipc.on(CH.EV_TREE_CHANGED, ({ tree }) => vaultStore.setTree(tree));
+// The vault was too big to watch whole (a library folder, usually). Say so
+// once, by name: what is not watched does not refresh by itself, and the
+// alternative to the budget is an app that cannot render at all — past
+// ~10,240 open descriptors the render worker cannot even be forked.
+function watchCapNotice({ watched, skipped, first }) {
+	import('./plugins.js').then(({ notice }) => notice(
+		`Watching ${watched.toLocaleString()} files in this vault; ${skipped.toLocaleString()}+ more are not watched`
+		+ (first ? ` (from ${first})` : '') + '. Changes there will not refresh on their own.', 9000));
+}
+ipc.on(CH.EV_WATCH_CAPPED, watchCapNotice);
 ipc.on(CH.EV_FILE_CHANGED, ({ path }) => editorPool.externalChange(path));
 ipc.on(CH.EV_INDEX_SNAPSHOT, (snapshot) => vaultStore.setIndex(snapshot));
 ipc.on(CH.EV_INDEX_PATCH, ({ path, entry }) => vaultStore.patchIndex(path, entry));
@@ -96,8 +113,17 @@ officeDock.init();
 // ---- dev hook -------------------------------------------------------------
 
 // Exposed for dev-tools poking and the CLEW_SMOKE scenario scripts.
-window.__clew = { workspaceStore, vaultStore, editorPool, settingsStore, ipc, actions, officeDock };
+// One selection bubble per window (docs/dev/live-edit.md §6.7).
+document.body.append(document.createElement('clew-selection-bubble'));
+linkPreview(); // <clew-link-preview>, the window's one link popover
+previewPane(); // <clew-preview-pane>, the window's one live preview pane
+
+window.__clew = { linkPreview, previewPane, workspaceStore, vaultStore, vaultSettingsStore, editorPool, settingsStore, ipc, actions, officeDock };
+// Live edit's in-place table cells, for scenarios (smoke/live-table-edit-scenario.js).
+import('./editor/live/table-cell-editor.js').then((m) => { window.__clew.activeCellView = m.activeCellView; });
 import('./commands/registry.js').then((registry) => { window.__clew.registry = registry; });
+import('./editor/live/numbering.js').then((m) => { window.__clew.numbering = m; });
+import('./pdf-annotations.js').then((m) => { window.__clew.pdfAnnotations = m; });
 
 // ---- boot -----------------------------------------------------------------
 
@@ -108,6 +134,9 @@ import('./commands/registry.js').then((registry) => { window.__clew.registry = r
 	if (vault) {
 		setPreviewSession(vault.sessionId);
 		vaultStore.setVault(vault);
+		// The watcher may have finished — and given up — before this window
+		// existed to be told, which a fast scan makes likely.
+		if (vault.watchCap) watchCapNotice(vault.watchCap);
 		vaultStore.setTree(await ipc.invoke(CH.VAULT_TREE).catch(() => null));
 		const index = await ipc.invoke(CH.INDEX_GET).catch(() => null);
 		if (index) vaultStore.setIndex(index);

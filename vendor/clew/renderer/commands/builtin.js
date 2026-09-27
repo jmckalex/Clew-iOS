@@ -12,7 +12,8 @@
 // once at boot. Chord notation is CodeMirror's ('Mod-Shift-p').
 import { registerCommand, buildContext, allCommands, isEnabled, effectiveKeymap } from './registry.js';
 import { openSearchPanel } from '@codemirror/search';
-import { registerFormatCommands, activeEditorView, needsEditor } from './format.js';
+import { deleteGroupForward } from '@codemirror/commands';
+import { registerFormatCommands, activeEditorView, activeMainView, formatTableKeepingCell, needsEditor } from './format.js';
 import { formatTableAtCursor } from '../editor/tables.js';
 import { fillAtCursor } from '../editor/fill.js';
 import { blockRefEdit, blockRefLink } from '../editor/block-ids.js';
@@ -26,6 +27,7 @@ import { settingsStore } from '../state/settings-store.js';
 import { bookmarkStore } from '../state/bookmark-store.js';
 import { editorPool } from '../editor/pool.js';
 import { openQuickSwitcher } from '../components/modals/clew-quick-switcher.js';
+import { extractAnnotations } from '../pdf-annotations.js';
 import { openListModal } from '../components/modals/list-modal.js';
 import { openHistoryModal } from '../components/modals/clew-history-modal.js';
 import { ipc, CH } from '../ipc.js';
@@ -125,14 +127,26 @@ export function registerBuiltinCommands() {
 			run: () => copyBlockReference() },
 		{ id: 'editor:format-table', name: 'Format table at cursor', when: needsEditor,
 			run: () => {
-				const view = activeEditorView();
-				if (view) formatTableAtCursor(view);
+				// The note's editor, not a cell being edited in place — a
+				// reflow is a whole-table change (and keeps editing the cell).
+				const view = activeMainView();
+				if (view && !formatTableKeepingCell(view)) formatTableAtCursor(view);
 			} },
 		{ id: 'editor:fill-paragraph', name: 'Fill paragraph (hard-wrap)', hotkeys: ['Alt-q'],
 			when: needsEditor,
 			run: () => {
 				const view = activeEditorView();
 				if (view) fillAtCursor(view, settingsStore.get('fillColumn') ?? 72);
+			} },
+		// The forward twin of mac's own ⌥⌫, on the Emacs letter. A command
+		// rather than a keymap entry so the palette and the hotkey editor
+		// see it — and so the dispatcher claims the chord before CodeMirror
+		// can type the Option character it produces on mac (`∂`).
+		{ id: 'editor:delete-word-forward', name: 'Delete word forward', hotkeys: ['Alt-d'],
+			when: needsEditor,
+			run: () => {
+				const view = activeEditorView();
+				if (view) deleteGroupForward(view);
 			} },
 		{ id: 'file:save', name: 'Save note', hotkeys: ['Mod-s'], when: needsNote,
 			run: (ctx) => editorPool.flush(ctx.activeTab.id) },
@@ -151,6 +165,10 @@ export function registerBuiltinCommands() {
 			} },
 
 		// navigation
+		// §5.15: the active PDF tab's annotations, as a note beside it.
+		{ id: 'pdf:extract-annotations', name: 'PDF: extract annotations to a note',
+			when: (ctx) => ctx.activeTabKind === 'file' && /\.pdf$/i.test(ctx.activeTab?.path ?? ''),
+			run: (ctx) => extractAnnotations(ctx.activeTab.path) },
 		{ id: 'nav:quick-switcher', name: 'Open quick switcher', hotkeys: ['Mod-o'], when: needsVault,
 			inModal: false, run: () => openQuickSwitcher() },
 		{ id: 'nav:back', name: 'Navigate back', hotkeys: ['Mod-[', 'Mod-Alt-ArrowLeft'], when: needsVault,
@@ -201,9 +219,50 @@ export function registerBuiltinCommands() {
 			run: () => actions.closeOtherPane() },
 		{ id: 'workspace:toggle-mode', name: 'Toggle reading mode', hotkeys: ['Mod-e'], when: needsNote,
 			run: () => actions.toggleReadingMode() },
-		{ id: 'workspace:toggle-left-sidebar', name: 'Toggle left sidebar', hotkeys: ['Mod-b'],
+		// Live edit (docs/dev/live-edit.md): ⌘⇧E flips source ↔ live;
+		// the three explicit modes are for the menu's radios and the palette.
+		{ id: 'workspace:toggle-live', name: 'Toggle live edit / source', hotkeys: ['Mod-Shift-e'], when: needsNote,
+			run: () => actions.toggleLiveEdit() },
+		{ id: 'workspace:mode-source', name: 'View mode: source', when: needsNote,
+			run: () => actions.setViewMode('source') },
+		{ id: 'workspace:mode-live', name: 'View mode: live edit', when: needsNote,
+			run: () => actions.setViewMode('live') },
+		{ id: 'workspace:mode-reading', name: 'View mode: reading', when: needsNote,
+			run: () => actions.setViewMode('reading') },
+		// The editor toolbar (docs/dev/live-edit.md §6.8): hide/show, remembering
+		// which of 'live'/'always' it was; and a keyboard way in.
+		{ id: 'view:toggle-toolbar', name: 'Toggle editor toolbar',
+			run: () => {
+				const now = settingsStore.get('editorToolbar') ?? 'live';
+				if (now === 'never') settingsStore.set('editorToolbar', settingsStore.get('editorToolbarPrev') ?? 'live');
+				else {
+					settingsStore.set('editorToolbarPrev', now);
+					settingsStore.set('editorToolbar', 'never');
+				}
+			} },
+		{ id: 'view:focus-toolbar', name: 'Focus editor toolbar', hotkeys: ['Alt-Shift-t'], when: needsNote,
+			run: () => {
+				const tab = workspaceStore.activeTab();
+				const host = [...document.querySelectorAll('clew-editor-view, clew-preview-view')].find((v) => v.tabId === tab?.id);
+				host?.querySelector('clew-editor-toolbar')?.focusFirst();
+			} },
+		// The shell panel. Ctrl-` is every editor's terminal chord, and it is
+		// free here — Clew's own chords are all Mod-based.
+		{ id: 'shell:toggle', name: 'Toggle shell panel', hotkeys: ['Ctrl-`'], when: needsVault,
+			run: () => {
+				const open = !workspaceStore.shell.open;
+				workspaceStore.setShell({ open });
+				if (open) {
+					// Opening it should put the caret in it; nobody toggles a
+					// terminal open in order to keep typing somewhere else.
+					requestAnimationFrame(() => document.querySelector('clew-shell-panel')?.focusTerminal());
+				}
+			} },
+		// ⌘B / ⌘⇧B are strong and intense (format.js) — the chord every editor
+		// gives bold; the sidebars moved to ⌘⌥B / ⌘⌥⇧B (2026-09-27).
+		{ id: 'workspace:toggle-left-sidebar', name: 'Toggle left sidebar', hotkeys: ['Mod-Alt-b'],
 			run: () => toggleSidebar('left') },
-		{ id: 'workspace:toggle-right-sidebar', name: 'Toggle right sidebar', hotkeys: ['Mod-Shift-b'],
+		{ id: 'workspace:toggle-right-sidebar', name: 'Toggle right sidebar', hotkeys: ['Mod-Alt-Shift-b'],
 			run: () => toggleSidebar('right') },
 
 		// editing
@@ -285,7 +344,7 @@ export function openCommandPalette() {
 	openListModal({ placeholder: 'Run a command…', items });
 }
 
-function prettifyChord(chord) {
+export function prettifyChord(chord) {
 	const isMac = navigator.platform.startsWith('Mac');
 	return chord
 		.replace('Mod', isMac ? '⌘' : 'Ctrl')
@@ -293,6 +352,8 @@ function prettifyChord(chord) {
 		.replace('Shift', '⇧')
 		.replace('ArrowLeft', '←')
 		.replace('ArrowRight', '→')
+		.replace('ArrowUp', '↑')
+		.replace('ArrowDown', '↓')
 		.replaceAll('-', isMac ? '' : '+');
 }
 

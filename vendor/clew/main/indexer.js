@@ -18,9 +18,12 @@ import { extractNoteMetadata, extractDrawingMetadata } from '../shared/note-meta
 import { isExcalidrawPath } from '../shared/excalidraw-file.js';
 import { CH, NOTE_EXTENSIONS } from '../shared/channels.js';
 import { direntKind, shouldRecurse, walkGuard, writeFileAtomic } from './fs-utils.js';
+import { compileExcludes } from './vault-excludes.js';
 
-const IGNORED_DIRS = new Set(['.obsidian', '.clew', '.git', 'node_modules', '.trash']);
-const CACHE_VERSION = 1;
+// The ignore rules live in vault-excludes.js now — one list, consulted by
+// every walk, and overridable per vault. This file used to keep a second
+// copy of it, which is exactly how two walks come to disagree.
+const CACHE_VERSION = 3; // 2: labels (cross-references); 3: citations
 
 // Drawings are indexed alongside notes. A .excalidraw.md already qualified by
 // extension (and was being scanned as raw markdown, so its base64 blob was
@@ -39,8 +42,14 @@ export class Indexer {
 	#nameMap = new Map(); // lowercased basename -> [relPath]
 	#saveTimer = null;
 
-	openVault(root) {
+	/**
+	 * @param {string} root
+	 * @param {{ isUnindexed(rel: string): boolean }} [excludes] the vault's own
+	 *   lists (vault-excludes.js); everything is indexed without them.
+	 */
+	openVault(root, excludes = null) {
 		this.root = root;
+		this.excludes = excludes ?? compileExcludes({});
 		this.notes.clear();
 		const cache = this.#loadCache();
 		this.#scanAll(cache);
@@ -69,8 +78,8 @@ export class Indexer {
 			let entries;
 			try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
 			for (const entry of entries) {
-				if (entry.name.startsWith('.') || IGNORED_DIRS.has(entry.name)) continue;
 				const childRel = rel ? `${rel}/${entry.name}` : entry.name;
+				if (this.excludes.isUnindexed(childRel)) continue;
 				const kind = direntKind(dir, entry);
 				if (kind === 'dir') {
 					const abs = path.join(dir, entry.name);
@@ -178,7 +187,7 @@ export class Indexer {
 	// ---- incremental updates (wired to the vault watcher) -----------------
 
 	onFileChanged(relPath) {
-		if (!this.root || !isNote(relPath)) return;
+		if (!this.root || !isNote(relPath) || this.excludes.isUnindexed(relPath)) return;
 		const meta = this.#scanOne(relPath);
 		if (!meta) return;
 		for (const link of meta.links) {

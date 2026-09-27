@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>A tiny deck</title>
+<style>
+	/* Self-contained on purpose: the demo vault ships inside the app, so a
+	   deck here cannot fetch a presentation library from anywhere. What it
+	   demonstrates is the EMBED — a real deck would be a reveal.js export
+	   or a URL your own server hosts. */
+	html, body { margin: 0; height: 100%; font-family: 'Avenir Next', Avenir, 'Segoe UI', system-ui, sans-serif; }
+	body { display: grid; place-items: center; background: #1a1a2e; color: #eee; }
+	.slides { position: relative; width: 100%; height: 100%; }
+	section { position: absolute; inset: 0; display: grid; place-content: center; gap: 0.4em;
+		text-align: center; opacity: 0; transition: opacity 0.25s; padding: 2em; }
+	section:target, section:first-of-type:not(:target ~ *) { opacity: 1; }
+	h1 { font-size: 2.2em; margin: 0; }
+	p { margin: 0; color: #a9a9c9; }
+	nav { position: absolute; bottom: 1em; right: 1.2em; font-size: 1.6em; }
+	nav a { color: #8b7ec8; text-decoration: none; padding: 0 0.2em; }
+</style>
+</head>
+<body>
+<div class="slides">
+	<section id="s1"><h1>A tiny deck</h1><p>embedded with <code>@reveal[…]</code></p></section>
+	<section id="s2"><h1>Second slide</h1><p>the arrows below move between them</p></section>
+	<section id="s3"><h1>Third slide</h1><p>a real deck would be a reveal.js export</p></section>
+</div>
+<nav><a href="#s1">1</a><a href="#s2">2</a><a href="#s3">3</a></nav>
+</body>
+</html>

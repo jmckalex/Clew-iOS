@@ -31,6 +31,12 @@
 // the one thing this file adds to that pass is a MetaPost grammar, which
 // highlight.js does not ship.
 //
+// Every TeX one of them also takes `clew-fragments='math macros, colours'`:
+// named preamble text, written once in Settings → TeX fragments and inserted
+// into the figure's preamble here, so the same \newcommand block does not
+// have to be copied into every fence (applyTexFragments, below;
+// tex-fragments.js owns the names and which scope wins).
+//
 // The last three ALREADY work in jmarkdown: vendor/jmarkdown/src/tikz.js and
 // metapost.js shell out to the user's own lualatex/mpost + dvisvgm and cache
 // an SVG in a TiKZ/ or MetaPost/ folder beside the note. That path is
@@ -60,6 +66,7 @@ import { createRequire } from 'node:module';
 import {
 	METAPOST_CONSTANTS, METAPOST_KEYWORDS, METAPOST_OPERATORS, METAPOST_TYPES,
 } from './metapost-words.js';
+import { collectFragments, fragmentNames, fragmentSets, resolveFragments } from './tex-fragments.js';
 
 // The TikZ libraries the DIRECTIVES promise. vendor/jmarkdown/src/tikz.js
 // loads exactly this list for every :::TiKZ / @begin(TiKZ) body, so a note
@@ -90,6 +97,12 @@ const FIGURE_ATTRS = new Set([
 	'tex', 'prologues', 'fonts', 'cache', 'alt', 'show-console',
 ]);
 
+// `clew-fragments` is not one of them and never reaches the element: it is
+// resolved into `preamble` (or into the source) by applyTexFragments before
+// the element is built, so the figure's identity is the TEXT it got, not the
+// name it asked by — rename a fragment and nothing re-typesets; edit one and
+// everything using it does.
+//
 // Two more the native path implemented as CSS, which this one keeps: `scale`
 // (a transform) and `width`. Its `embed` and `empty-cache` have nothing left
 // to mean here — the SVG is always inline, and a content-addressed cache is
@@ -262,9 +275,15 @@ export function noteFontPreamble(kind, faces = noteFontFaces()) {
 
 const LUA_ENGINES = new Set(['lualatex', 'luatex']);
 
-/** Put `lines` into a complete document's preamble, right after its \documentclass. */
+/**
+ * Put `lines` into a complete document's preamble, right after its
+ * \documentclass. The spaces TeX allows around the options and the class
+ * name are allowed here too: not matching would drop the lines silently,
+ * and both callers (font=note, clew-fragments) would then produce a
+ * document missing exactly what the author asked for.
+ */
 function afterDocumentclass(source, lines) {
-	return source.replace(/\\documentclass(?:\[[^\]]*\])?\{[^}]*\}/, (m) => `${m}\n${lines}`);
+	return source.replace(/\\documentclass\s*(?:\[[^\]]*\]\s*)?\{[^}]*\}/, (m) => `${m}\n${lines}`);
 }
 
 /**
@@ -293,6 +312,74 @@ function applyNoteFont(kind, source, attrs) {
 	// lines go — which is why the mark below cannot be read off the source.
 	out.preamble = [block, out.preamble].filter(Boolean).join('\n');
 	return { source, attrs: out, applied: true };
+}
+
+// ---- clew-fragments: preamble text asked for by name -----------------------
+
+/**
+ * `clew-fragments='math macros, colours'` on any TeX block: the named
+ * fragments' text is inserted into the figure's preamble, so a note's
+ * figures share one copy of the macros instead of each carrying their own.
+ * The fragments are written in Settings → TeX fragments and resolved by
+ * tex-fragments.js (this vault's shadow the global ones).
+ *
+ * Where the text goes is the same three-way choice `font=note` makes, and
+ * for the same reasons — except that fragments go in LAST, after the font
+ * block and after the packages Clew adds, because they are the author's own
+ * code and TeX's rule is that the last definition wins:
+ *
+ *   a complete document        after its own \documentclass
+ *   a ```latex snippet, tikz   the `preamble` attribute, which the wrapper
+ *                              (ours or the library's) writes out last
+ *   plain ```tex               the top of the source (there is no preamble)
+ *
+ * An author's own `preamble=` on the same block stays LAST of all: the
+ * fence is more specific than a fragment it names.
+ *
+ * Returns the rewritten source and attrs, or a `refusal` message instead —
+ * a name nothing defines is refused BY NAME rather than typeset without it,
+ * because the figure would otherwise fail deep inside TeX with an undefined
+ * control sequence and a console the author has to read backwards.
+ */
+export function applyTexFragments(kind, source, attrs, table = null) {
+	const { 'clew-fragments': asked, ...rest } = attrs;
+	const names = fragmentNames(asked);
+	if (names.length === 0) return { source, attrs: rest, refusal: null };
+	if (kind === 'metapost') {
+		return {
+			source, attrs: rest,
+			refusal: 'clew-fragments is TeX preamble text, and a MetaPost figure has no '
+				+ 'preamble: the TeX a MetaPost file needs goes in its own verbatimtex … '
+				+ 'etex block. Fragments work on ```latex, ```tex and ```tikz blocks.',
+		};
+	}
+	const { text, missing } = collectFragments(names, table ?? resolveFragments(fragmentSets()));
+	if (missing.length > 0) {
+		const which = missing.map((name) => `“${name}”`).join(', ');
+		return {
+			source, attrs: rest,
+			refusal: `${missing.length > 1 ? 'TeX fragments' : 'TeX fragment'} not defined `
+				+ `here: ${which}. Fragments are written in Settings → TeX fragments — this `
+				+ 'vault\'s travel with the vault, the global ones are yours on this machine.',
+		};
+	}
+	if (!text) return { source, attrs: rest, refusal: null };
+	if (isLatexDocument(source)) return { source: afterDocumentclass(source, text), attrs: rest, refusal: null };
+	if (kind === 'tex') return { source: `${text}\n${source}`, attrs: rest, refusal: null };
+	return {
+		source,
+		attrs: { ...rest, preamble: [text, rest.preamble].filter(Boolean).join('\n') },
+		refusal: null,
+	};
+}
+
+/**
+ * A block that asked for something this file will not do: the message in
+ * place of the figure, rather than a picture quietly missing its macros.
+ * Styled beside the figures themselves in preview.css.
+ */
+export function figureRefusal(message) {
+	return `<div class="clew-figure-refused">${escapeHtml(message)}</div>\n`;
 }
 
 /**
@@ -375,6 +462,12 @@ export function figureElement(kind, rawSource, rawAttrs = {}) {
 	let source = String(rawSource ?? '').replace(/^\n+/, '').replace(/\s+$/, '');
 	let attrs = { ...rawAttrs };
 	if (kind === 'tikz') ({ source, attrs } = unwrapTikzJax(source, attrs));
+	// Named fragments BEFORE the wrapper: a snippet's text rides in the
+	// `preamble` attribute the wrapper writes out (so it lands last in the
+	// preamble), a complete document's goes after its own \documentclass.
+	const fragments = applyTexFragments(kind, source, attrs);
+	if (fragments.refusal) return figureRefusal(fragments.refusal);
+	({ source, attrs } = fragments);
 	if (spec.wrap) {
 		({ source, attrs } = spec.wrap(source, attrs));
 		// The kind's engine, unless the author named one (or the wrapper did).

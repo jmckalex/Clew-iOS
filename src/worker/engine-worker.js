@@ -44,6 +44,7 @@ import * as metaBind from '../../vendor/clew/engine/meta-bind.js';
 import * as callouts from '../../vendor/clew/engine/callouts.js';
 import * as kanbanBoard from '../../vendor/clew/engine/kanban-board.js';
 import * as figures from '../../vendor/clew/engine/figures.js';
+import * as revealEmbed from '../../vendor/clew/engine/reveal-embed.js';
 
 // One entry per file the generated config NAMES; each module's own imports
 // (dataview's dv-expr/dv-functions/dataview-js/vault-model, bases' share of
@@ -62,6 +63,9 @@ globalThis.__jmdExtensionRegistry = {
 	// Both the Extensions line (fences + directive) and the Environments
 	// line (@begin handlers) name this one file.
 	'/engine-assets/figures.js': figures,
+	// @reveal[…]: an Environments-only entry (inline, block and @begin forms
+	// from the one definition).
+	'/engine-assets/reveal-embed.js': revealEmbed,
 };
 
 // Enabled vault plugins' engine surfaces: the config names them by absolute

@@ -21,15 +21,16 @@ import * as officeThumbs from './office-thumbs.js';
 import { CH } from '../shared/channels.js';
 import { settings } from './settings.js';
 import { appMenu } from './menu.js';
-import { sessionFor } from './session.js';
+import { allSessions, sessionFor } from './session.js';
 import { openVaultAnywhere, openVaultDialog, createVaultDialog, openDemoVault } from './main.js';
 import { propagateRename } from './rename-links.js';
 import { exportNote } from './export.js';
 import { exportSite } from './export-site.js';
-import { parseBib } from '../shared/bib.js';
+import { parseBib, bibFilePath } from '../shared/bib.js';
 import { direntKind, shouldRecurse, walkGuard, writeFileAtomic } from './fs-utils.js';
 import { listSnapshots, readSnapshot } from './history.js';
 import { listPlugins } from './plugins.js';
+import { ShellSessions } from './shell-core.js';
 import { paths } from './paths.js';
 import { planOpen, pathFromFileUrl } from './open-file.js';
 import fs from 'node:fs';
@@ -42,6 +43,27 @@ const sanitizeStateName = (name) => {
 	if (!/^[\w-]+\.json$/.test(name)) throw new Error(`Bad state name: ${name}`);
 	return name;
 };
+
+/** Every window's shell, keyed by session id (main/shell-core.js). */
+export const shells = new ShellSessions();
+
+/**
+ * Where an entry's BibTeX `file` field points (§5.14): relative to its .bib's
+ * folder first, then the vault root; `inVault` paths are vault-relative (a
+ * Clew PDF tab), others absolute (the OS, through the open-file guard).
+ *
+ * @returns {{ path: string, inVault: boolean, exists: boolean } | null}
+ */
+function resolveBibFile(value, bibDir, root) {
+	const raw = bibFilePath(value);
+	if (!raw) return null;
+	const candidates = nodePath.isAbsolute(raw) ? [raw] : [nodePath.join(bibDir, raw), nodePath.join(root, raw)];
+	const found = candidates.find((p) => { try { return fs.statSync(p).isFile(); } catch { return false; } });
+	const abs = found ?? candidates[0];
+	const rel = nodePath.relative(root, abs);
+	const inVault = !rel.startsWith('..') && !nodePath.isAbsolute(rel);
+	return { path: inVault ? rel.split(nodePath.sep).join('/') : abs, inVault, exists: Boolean(found) };
+}
 
 export function registerIpc() {
 	// Session-scoped handler: fn(session, payload, event).
@@ -110,15 +132,18 @@ export function registerIpc() {
 		if (!s.vaults.isOpen) return [];
 		const out = [];
 		const seen = walkGuard(s.vaults.root);
-		const walk = (dir) => {
+		const walk = (dir, rel) => {
 			let entries;
 			try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
 			for (const entry of entries) {
-				if (entry.name.startsWith('.') || ['node_modules', '.trash'].includes(entry.name)) continue;
+				const childRel = rel ? `${rel}/${entry.name}` : entry.name;
+				// A .bib inside a library folder is that library's, not this
+				// vault's: completion should never offer it.
+				if (s.vaults.excludes.isUnindexed(childRel)) continue;
 				const abs = nodePath.join(dir, entry.name);
 				const kind = direntKind(dir, entry);
 				if (kind === 'dir') {
-					if (shouldRecurse(abs, seen)) walk(abs);
+					if (shouldRecurse(abs, seen)) walk(abs, childRel);
 				} else if (kind === 'file' && entry.name.toLowerCase().endsWith('.bib')) {
 					const mtimeMs = fs.statSync(abs).mtimeMs;
 					const cached = bibCache.get(abs);
@@ -127,11 +152,11 @@ export function registerIpc() {
 						: parseBib(fs.readFileSync(abs, 'utf8'));
 					bibCache.set(abs, { mtimeMs, entries: parsed });
 					const rel = nodePath.relative(s.vaults.root, abs);
-					out.push(...parsed.map((e) => ({ ...e, file: rel })));
+					out.push(...parsed.map((e) => ({ ...e, bib: rel, pdf: resolveBibFile(e.file, dir, s.vaults.root) })));
 				}
 			}
 		};
-		walk(s.vaults.root);
+		walk(s.vaults.root, '');
 		return out;
 	});
 
@@ -213,7 +238,15 @@ export function registerIpc() {
 	handle(CH.WORKSPACE_LOAD, (s) => s.vaults.loadState('workspace.json'));
 	handle(CH.WORKSPACE_SAVE, (s, state) => s.vaults.saveState('workspace.json', state));
 	handleGlobal(CH.SETTINGS_GET, () => settings.get());
-	handleGlobal(CH.SETTINGS_SET, ({ key, value }) => settings.set(key, value));
+	handleGlobal(CH.SETTINGS_SET, ({ key, value }) => {
+		settings.set(key, value);
+		// The global TeX fragments are read at worker spawn, and every window
+		// has its own worker — so a change here reconfigures them ALL, not
+		// just the sender's. (Nothing else app-global reaches the engine.)
+		if (key === 'texFragments') {
+			for (const session of allSessions()) session.renderService.reconfigure({});
+		}
+	});
 	handle(CH.VSTATE_LOAD, (s, { name }) => s.vaults.loadState(sanitizeStateName(name)));
 	handle(CH.VSTATE_SAVE, (s, { name, data }) => s.vaults.saveState(sanitizeStateName(name), data));
 
@@ -230,11 +263,40 @@ export function registerIpc() {
 		if (key === 'bibliography' || key === 'bibliographyStyle') {
 			s.renderService.reconfigure({ [key]: value });
 		}
+		// The exclusion lists (vault-excludes.js): every walk in the app was
+		// made under the old rules, so tree, watcher and index all go again.
+		if (key === 'hidden' || key === 'unindexed') {
+			s.vaults.reloadExcludes();
+			s.indexer.openVault(s.vaults.root, s.vaults.excludes);
+		}
+		// This vault's TeX fragments: the worker reads them at spawn, so the
+		// standby has to go and the open previews re-render (engine/
+		// tex-fragments.js, engine/figures.js#applyTexFragments).
+		if (key === 'texFragments') s.renderService.reconfigure({ texFragments: value });
 		// Plugin toggles change the engine config (engine surfaces) and the
 		// preview injection; re-render open previews with the new set.
 		if (key === 'plugins') s.renderService.reconfigure({ plugins: value });
 		return current;
 	});
+
+	// ---- the shell panel ---------------------------------------------------
+	// Keyed by the window's session id, so a shell belongs to its window and
+	// is reaped when the window goes. It starts at the vault root and stays
+	// alive while the panel is hidden — a build running behind a closed
+	// panel is the whole point of keeping it.
+	handle(CH.SHELL_OPEN, (s) => {
+		if (!s.vaults.isOpen) return { ok: false, error: 'no vault open' };
+		if (shells.has(s.id)) return { ok: true, running: true };
+		const info = shells.open(s.id, {
+			cwd: s.vaults.root,
+			onData: (data) => s.send(CH.EV_SHELL_DATA, { data }),
+			onExit: (end) => s.send(CH.EV_SHELL_EXIT, end),
+		});
+		return { ok: true, running: false, ...info };
+	});
+	handle(CH.SHELL_WRITE, (s, { data }) => ({ ok: shells.write(s.id, String(data ?? '')) }));
+	handle(CH.SHELL_RESIZE, (s, { cols, rows }) => ({ ok: shells.resize(s.id, cols, rows) }));
+	handle(CH.SHELL_CLOSE, (s) => ({ ok: shells.close(s.id) }));
 
 	handle(CH.PLUGINS_LIST, (s) => {
 		if (!s.vaults.isOpen) return { plugins: [], enabled: [], globalDir: paths.globalPlugins };

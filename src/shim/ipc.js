@@ -4,7 +4,7 @@
 // bridge. Installs window.clew with exact preload semantics: invoke returns
 // a promise; on returns an unsubscribe function; handlers get payload only.
 import { CH } from '../../vendor/clew/shared/channels.js';
-import { parseBib } from '../../vendor/clew/shared/bib.js';
+import { parseBib, bibFilePath } from '../../vendor/clew/shared/bib.js';
 import { Indexer } from '../../vendor/clew/main/indexer.js';
 import { SearchService } from '../../vendor/clew/main/search.js';
 import { KvStore, KV_FILE } from '../../vendor/clew/main/kv-store.js';
@@ -23,6 +23,28 @@ import { bridgeCall, toBase64 } from './native-bridge.js';
 import { ARM_SCRIPT, READY_PROBE, LIGHT_THEME_SCRIPT, PAPER_SIZES } from './print-pdf.js';
 
 const SESSION_ID = 's1';
+
+/**
+ * Where an entry's BibTeX `file` field points (upstream ipc.js, verbatim
+ * over the mirror): relative to its .bib's folder first, then the vault
+ * root; `inVault` paths are vault-relative (a Clew PDF tab), others
+ * absolute. On iOS an absolute path names something outside the sandbox,
+ * which SHELL_OPEN_PATH refuses with a reason — so it is reported exactly
+ * as upstream would, `inVault: false, exists: false`, and the Library
+ * shows the same "not found" state a desktop shows for a moved file.
+ *
+ * @returns {{ path: string, inVault: boolean, exists: boolean } | null}
+ */
+function resolveBibFile(value, bibDir, root) {
+	const raw = bibFilePath(value);
+	if (!raw) return null;
+	const candidates = nodePath.isAbsolute(raw) ? [raw] : [nodePath.join(bibDir, raw), nodePath.join(root, raw)];
+	const found = candidates.find((p) => { try { return fs.statSync(p).isFile(); } catch { return false; } });
+	const abs = found ?? candidates[0];
+	const rel = nodePath.relative(root, abs);
+	const inVault = !rel.startsWith('..') && !nodePath.isAbsolute(rel);
+	return { path: inVault ? rel.split(nodePath.sep).join('/') : abs, inVault, exists: Boolean(found) };
+}
 
 export function createClewShim({ workerFactory, assetLoader } = {}) {
 	// ---- event plumbing ---------------------------------------------------
@@ -67,7 +89,9 @@ export function createClewShim({ workerFactory, assetLoader } = {}) {
 	vaults.hooks = {
 		onOpen: (root) => {
 			renderService.openVault(root);
-			indexer.openVault(root);
+			// The vault's exclusion lists (vault-excludes.js): what is
+			// `unindexed` is walked past, exactly as upstream's session.js.
+			indexer.openVault(root, vaults.excludes);
 			kvStore.open(root);
 		},
 		onClose: () => {
@@ -213,28 +237,35 @@ export function createClewShim({ workerFactory, assetLoader } = {}) {
 		[CH.SEARCH]: ({ query }) => searchService.search(query),
 		[CH.UNLINKED_MENTIONS]: ({ path }) => searchService.unlinkedMentions(path),
 
+		// Citations as objects (upstream b52b9e1): every entry carries the
+		// .bib it came from (`bib`) and where its `file` field points
+		// (`pdf`), in upstream's shape — the old `file: rel` key is gone.
+		// A .bib inside an `unindexed` folder is that library's, not this
+		// vault's: completion never offers it.
 		[CH.BIB_ENTRIES]: () => {
 			if (!vaults.isOpen) return [];
 			const out = [];
 			const seen = walkGuard(VAULT_ROOT);
-			const walk = (dir) => {
+			const walk = (dir, rel) => {
 				let entries;
 				try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
 				for (const entry of entries) {
-					if (entry.name.startsWith('.') || ['node_modules', '.trash'].includes(entry.name)) continue;
+					const childRel = rel ? `${rel}/${entry.name}` : entry.name;
+					if (vaults.excludes.isUnindexed(childRel)) continue;
 					const abs = nodePath.join(dir, entry.name);
 					const kind = direntKind(dir, entry);
 					if (kind === 'dir') {
-						if (shouldRecurse(abs, seen)) walk(abs);
+						if (shouldRecurse(abs, seen)) walk(abs, childRel);
 					} else if (kind === 'file' && entry.name.toLowerCase().endsWith('.bib')) {
-						const rel = abs.slice(VAULT_ROOT.length + 1);
 						try {
-							out.push(...parseBib(String(vfs.read(abs))).map((e) => ({ ...e, file: rel })));
+							out.push(...parseBib(String(vfs.read(abs))).map((e) => ({
+								...e, bib: childRel, pdf: resolveBibFile(e.file, dir, VAULT_ROOT),
+							})));
 						} catch { /* unreadable bib */ }
 					}
 				}
 			};
-			walk(VAULT_ROOT);
+			walk(VAULT_ROOT, '');
 			return out;
 		},
 
@@ -384,10 +415,25 @@ export function createClewShim({ workerFactory, assetLoader } = {}) {
 			return { ok: true };
 		},
 
-		[CH.WORKSPACE_LOAD]: () => vaults.loadState('workspace.json'),
+		// A workspace saved on the desktop may have the shell panel open; the
+		// panel is a dead surface here (no PTY — see SHELL_OPEN), so it is
+		// forced closed on the way in rather than restored as a blank strip.
+		[CH.WORKSPACE_LOAD]: () => {
+			const state = vaults.loadState('workspace.json');
+			if (state && typeof state === 'object' && state.shell && typeof state.shell === 'object') {
+				state.shell = { ...state.shell, open: false };
+			}
+			return state;
+		},
 		[CH.WORKSPACE_SAVE]: (state) => vaults.saveState('workspace.json', state),
 		[CH.SETTINGS_GET]: () => settings.get(),
-		[CH.SETTINGS_SET]: ({ key, value }) => settings.set(key, value),
+		[CH.SETTINGS_SET]: ({ key, value }) => {
+			settings.set(key, value);
+			// The global TeX fragments are read at worker spawn: a change here
+			// retires the standby and re-renders the open previews (upstream
+			// ipc.js does this for every window; there is one here).
+			if (key === 'texFragments') renderService.reconfigure({});
+		},
 		[CH.VSTATE_LOAD]: ({ name }) => vaults.loadState(sanitizeStateName(name)),
 		[CH.VSTATE_SAVE]: ({ name, data }) => vaults.saveState(sanitizeStateName(name), data),
 
@@ -408,9 +454,31 @@ export function createClewShim({ workerFactory, assetLoader } = {}) {
 			if (key === 'bibliography' || key === 'bibliographyStyle') {
 				renderService.reconfigure({ [key]: value });
 			}
+			// The exclusion lists (vault-excludes.js): every walk in the app
+			// was made under the old rules, so the tree and the index go again.
+			if (key === 'hidden' || key === 'unindexed') {
+				vaults.reloadExcludes();
+				indexer.openVault(VAULT_ROOT, vaults.excludes);
+			}
+			// This vault's TeX fragments: the worker reads them at spawn, so
+			// the standby has to go and the open previews re-render.
+			if (key === 'texFragments') renderService.reconfigure({ texFragments: value });
 			if (key === 'plugins') renderService.reconfigure({ plugins: value });
 			return current;
 		},
+
+		// ---- the shell panel ----------------------------------------------
+		// Upstream spawns a real shell in a pty per window (main/shell-core.js).
+		// Nothing of the kind can exist on iOS, so the four channels answer
+		// with upstream's own failure shapes — `{ ok: false, error }` is what
+		// the panel prints in red if it is ever opened — and the two events
+		// never fire. The panel cannot be opened from here anyway: its command
+		// is dropped from the registry (scripts/build.js) and WORKSPACE_LOAD
+		// forces it closed.
+		[CH.SHELL_OPEN]: () => ({ ok: false, error: 'A shell is not available on iOS' }),
+		[CH.SHELL_WRITE]: () => ({ ok: false }),
+		[CH.SHELL_RESIZE]: () => ({ ok: false }),
+		[CH.SHELL_CLOSE]: () => ({ ok: false }),
 
 		// Both roots, exactly as upstream: the vault's own .clew/plugins/ and
 		// the global folder (Documents/Plugins here), mirrored under

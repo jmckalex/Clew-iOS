@@ -13,7 +13,7 @@
 // workers); windows/vaults open and close independently. Opening a vault
 // focuses the window that already shows it, fills the current window if it
 // is vaultless (the welcome screen), and otherwise makes a new window.
-import { app, BrowserWindow, clipboard, dialog, session as electronSession, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, Menu, session as electronSession, shell } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -360,8 +360,10 @@ if (process.env.CLEW_SMOKE) {
 				// cross-origin iframe (an OOPIF), and sendInputEvent never
 				// routes there (measured 2026-09-01) while the debugger's
 				// Input domain hit-tests properly. A scenario queues
-				// window.__clewSmokeInput = [{click:{x,y}} | {text:'abc'} |
-				// {combo:{key:'s',modifiers:2}} | {wait:ms}] (modifiers CDP
+				// window.__clewSmokeInput = [{click:{x,y}} | {move:{x,y}} | {text:'abc'} |
+				// {combo:{key:'s',modifiers:2}} | {wait:ms}] — a click may carry
+				// `modifiers` too, e.g. {click:{x,y},modifiers:4}; and
+				// {wheel:{x,y,deltaY}} scrolls (modifiers CDP
 				// bitmask: Alt 1, Ctrl 2, Meta 4, Shift 8).
 				// window.__clewSmokeClipboard (string) preloads the clipboard;
 				// CLEW_SMOKE_CLIPBOARD=1 dumps clipboard text afterwards.
@@ -372,22 +374,62 @@ if (process.env.CLEW_SMOKE) {
 				if (Array.isArray(inputEvents)) {
 					const dbg = primary.webContents.debugger;
 					try { dbg.attach('1.3'); } catch { /* already attached */ }
+					// A named key needs its real keyCode: xterm — and any library
+					// reading the legacy `keyCode` rather than `key` — sees nothing
+					// otherwise, so an Enter dispatched with 0 never reaches a
+					// terminal as a carriage return.
+					const NAMED_KEYS = {
+						Enter: 13, Tab: 9, Backspace: 8, Escape: 27, Delete: 46,
+						ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40,
+						Home: 36, End: 35, PageUp: 33, PageDown: 34,
+					};
+					// And a punctuation character's keyCode is its US-layout KEY,
+					// not its charCode: `-` is 189, while 45 is Insert — which is
+					// what a terminal read it as, dropping every hyphen typed
+					// (measured 2026-09-25, the shell-panel scenario). Anything
+					// unlisted gets 0, so a library falls through to `key`.
+					const PUNCT_KEYS = {
+						';': 186, '=': 187, ',': 188, '-': 189, '.': 190, '/': 191,
+						'`': 192, '[': 219, '\\': 220, ']': 221, "'": 222,
+					};
 					const keyParams = (key, modifiers = 0) => {
 						const upper = key.length === 1 ? key.toUpperCase() : key;
-						const vk = key.length === 1 ? upper.charCodeAt(0) : 0;
+						const vk = key.length !== 1 ? (NAMED_KEYS[key] ?? 0)
+							: /[a-z0-9 ]/i.test(key) ? upper.charCodeAt(0)
+								: (PUNCT_KEYS[key] ?? 0);
 						return {
 							modifiers,
 							key,
-							code: /^[a-z]$/i.test(key) ? `Key${upper}` : undefined,
+							code: /^[a-z]$/i.test(key) ? `Key${upper}` : (NAMED_KEYS[key] ? key : undefined),
 							windowsVirtualKeyCode: vk,
 							nativeVirtualKeyCode: vk,
 						};
 					};
 					for (const ev of inputEvents) {
 						if (ev.wait) { await sleep(ev.wait); continue; }
+						if (ev.wheel) {
+							// {wheel:{x,y,deltaY}}: a real wheel tick at a point —
+							// the only way to prove a wheel over a cross-origin
+							// frame chains to the scroller beneath it.
+							const { x, y, deltaY = 0, deltaX = 0 } = ev.wheel;
+							await dbg.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', button: 'none', x, y });
+							await dbg.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', x, y, deltaX, deltaY });
+							continue;
+						}
+						if (ev.move) {
+							// {move:{x,y}, modifiers?}: the pointer to a point, nothing
+							// pressed — hover (link previews). `modifiers` (the CDP
+							// bitmask) makes it a ⌘-hover: e.metaKey in the page.
+							const { x, y } = ev.move;
+							await dbg.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', button: 'none', x, y, modifiers: ev.modifiers ?? 0 });
+							await sleep(ev.delay ?? 30);
+							continue;
+						}
 						if (ev.click || ev.tripleClick) {
 							const { x, y } = ev.click ?? ev.tripleClick;
-							const base = { x, y, pointerType: 'mouse' };
+							// `modifiers` on a click event (same CDP bitmask) makes it
+							// a ⌘-click etc. — e.metaKey in the page (inverse search).
+							const base = { x, y, pointerType: 'mouse', modifiers: ev.modifiers ?? 0 };
 							const clicks = ev.tripleClick ? 3 : 1;
 							await dbg.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', button: 'none', ...base });
 							for (let count = 1; count <= clicks; count++) {
@@ -437,6 +479,25 @@ if (process.env.CLEW_SMOKE) {
 				if (process.env.CLEW_SMOKE_CLIPBOARD) {
 					console.log('smoke-clipboard: ' + JSON.stringify(clipboard.readText()));
 				}
+				// CLEW_SMOKE_MENU=1: the application menu as the OS holds it —
+				// every item's trail, accelerator and enablement, one line each.
+				// A native menu is an OS-level window that capturePage cannot
+				// see, so this is the only assertion a menu change can carry.
+				// It reads the REAL menu, so it also proves the template built:
+				// a malformed accelerator throws inside buildFromTemplate.
+				if (process.env.CLEW_SMOKE_MENU) {
+					const walk = (items, trail) => {
+						for (const item of items) {
+							if (item.type === 'separator') continue;
+							const where = [...trail, item.label];
+							console.log('smoke-menu: ' + where.join(' > ')
+								+ (item.accelerator ? ` [${item.accelerator}]` : '')
+								+ (item.enabled === false ? ' (disabled)' : ''));
+							if (item.submenu) walk(item.submenu.items, where);
+						}
+					};
+					walk(Menu.getApplicationMenu()?.items ?? [], []);
+				}
 				// CLEW_SMOKE_CLOSE_WINDOW=1: drive a REAL window close after the
 				// scenario, so close-guard flows (dirty office tab + the
 				// CLEW_SMOKE_CONFIRM answer) are testable end-to-end. The window
@@ -448,12 +509,26 @@ if (process.env.CLEW_SMOKE) {
 				}
 				// Optionally drive the preview iframe's document (cross-origin from
 				// the app, but reachable from main via webFrameMain).
+				// CLEW_SMOKE_FRAME_MATCH=<substring>: run it in EVERY
+				// clew-preview:// frame whose URL contains the substring (live
+				// edit's block frames, `__clew_block__`), one after another; the
+				// script sees `SMOKE_FRAME` — the URL's last path segment — to
+				// prefix its lines with.
 				if (process.env.CLEW_SMOKE_FRAME_SCRIPT) {
 					const frameScript = fs.readFileSync(process.env.CLEW_SMOKE_FRAME_SCRIPT, 'utf8');
-					const frame = primary.webContents.mainFrame.frames
-						.find((f) => f.url.startsWith('clew-preview:'));
-					if (frame) await frame.executeJavaScript(`(async () => { ${frameScript} })()`);
-					else console.error('smoke: no preview frame found');
+					const match = process.env.CLEW_SMOKE_FRAME_MATCH;
+					const previews = primary.webContents.mainFrame.framesInSubtree
+						.filter((f) => f.url.startsWith('clew-preview:'));
+					const frames = match
+						? previews.filter((f) => f.url.includes(match))
+						: previews.filter((f) => f.parent === primary.webContents.mainFrame).slice(0, 1);
+					if (frames.length === 0) console.error('smoke: no preview frame found');
+					if (match) console.log(`smoke-frames: ${frames.length} matching ${match}`);
+					for (const frame of frames) {
+						const tag = new URL(frame.url).pathname.split('/').filter(Boolean).pop() ?? '';
+						await frame.executeJavaScript(
+							`(async () => { const SMOKE_FRAME = ${JSON.stringify(tag)}; ${frameScript} })()`);
+					}
 					await new Promise((r) => setTimeout(r, 1500));
 				}
 				await new Promise((r) => setTimeout(r, 800));

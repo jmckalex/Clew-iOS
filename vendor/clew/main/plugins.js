@@ -46,7 +46,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-export const PLUGIN_API_VERSION = 1;
+// 2: the renderer API gained `toolbar.addButton` (live edit).
+export const PLUGIN_API_VERSION = 2;
 
 const ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 

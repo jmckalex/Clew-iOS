@@ -94,14 +94,18 @@ function rewriteCanvasRefs({ oldRel, newRel, vaults }) {
 	};
 	let rewritten = 0;
 	const seen = walkGuard(vaults.root);
-	const walk = (dir) => {
+	// What is not indexed has no links Clew knows about, so there is nothing
+	// here to rewrite — and a library folder is not somewhere to go editing.
+	const excludes = vaults.excludes;
+	const walk = (dir, rel) => {
 		let entries;
 		try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
 		for (const entry of entries) {
-			if (entry.name.startsWith('.') || ['node_modules', '.trash'].includes(entry.name)) continue;
+			const childRel = rel ? `${rel}/${entry.name}` : entry.name;
+			if (excludes.isUnindexed(childRel)) continue;
 			const abs = path.join(dir, entry.name);
 			if (direntKind(dir, entry) === 'dir') {
-				if (shouldRecurse(abs, seen)) walk(abs);
+				if (shouldRecurse(abs, seen)) walk(abs, childRel);
 				continue;
 			}
 			if (!entry.name.toLowerCase().endsWith('.canvas')) continue;
@@ -123,6 +127,6 @@ function rewriteCanvasRefs({ oldRel, newRel, vaults }) {
 			}
 		}
 	};
-	walk(vaults.root);
+	walk(vaults.root, '');
 	return rewritten;
 }

@@ -20,23 +20,16 @@
 // `@end(…)` line stays visible (jmacs renders a vertical ellipsis
 // between the two kept lines; here the closer line simply remains).
 import { foldService } from '@codemirror/language';
-import { scanJmarkdown } from './jmarkdown-scan.js';
+import { scanFor } from './scan-cache.js';
 
 // Same threshold as overlay.js: a document this large is not scanned
 // per fold-gutter query. (The overlay's windowed scan is anchored to
 // the viewport, which a fold query is not, so folding just bows out.)
 const BIG_DOC = 500000;
 
-/** Scanned folds per document, memoised by Text reference. */
-const foldCache = new WeakMap();
-
+/** Scanned folds per document (the shared scan, memoised by Text). */
 function foldsFor(doc) {
-	let folds = foldCache.get(doc);
-	if (!folds) {
-		folds = scanJmarkdown(doc.toString()).folds;
-		foldCache.set(doc, folds);
-	}
-	return folds;
+	return scanFor(doc).folds;
 }
 
 /**

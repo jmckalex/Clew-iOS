@@ -5,7 +5,7 @@
 // must not clobber the test runner's) and handy as a dev CLI:
 //
 //   node tools/render-note.mjs <vault-dir> <note-rel-path> [--fragment]
-//                              [--vault-options '<json>']
+//                              [--vault-options '<json>'] [--global-fragments '<json>']
 //
 // The engine config and the text-file rule come from src/shim/engine-config.js
 // — the SAME module the app's render service uses. They used to be hand-copied
@@ -20,6 +20,10 @@ import { engineExtensionEntries } from '../vendor/clew/main/plugins.js';
 const [vaultDir, noteRel, ...flags] = process.argv.slice(2);
 const fragment = flags.includes('--fragment');
 const optionsAt = flags.indexOf('--vault-options');
+// The app-level `texFragments` list (global scope), for the CLEW_TEX_FRAGMENTS
+// arc: `--global-fragments '[{"name":…,"text":…}]'`.
+const fragmentsAt = flags.indexOf('--global-fragments');
+const globalTexFragments = fragmentsAt !== -1 ? JSON.parse(flags[fragmentsAt + 1] ?? '[]') : [];
 if (!vaultDir || !noteRel) {
 	console.error('usage: node tools/render-note.mjs <vault-dir> <note-rel-path> [--fragment]');
 	process.exit(2);
@@ -110,7 +114,7 @@ send({
 	type: 'init',
 	files,
 	cwd: '/vault/.clew/engine',
-	env: engineEnv({ vaultRoot: '/vault', sessionId: 's1', vaultOptions }),
+	env: engineEnv({ vaultRoot: '/vault', sessionId: 's1', vaultOptions, globalTexFragments }),
 });
 const ready = await waiter;
 if (ready.type !== 'ready') {

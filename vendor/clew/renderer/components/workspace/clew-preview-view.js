@@ -16,11 +16,14 @@ import { workspaceStore } from '../../state/workspace-store.js';
 import { settingsStore } from '../../state/settings-store.js';
 import { ipc, CH } from '../../ipc.js';
 import * as actions from '../../commands/actions.js';
-import { effectiveChords, runChord } from '../../commands/registry.js';
-import { openExternal } from '../../lib/external-links.js';
-import { handleApiRequest } from '../../note-api.js';
+import { effectiveChords } from '../../commands/registry.js';
+import { handlePreviewMessage } from '../../editor/live/frame-host.js';
+import { linkPreview } from '../../editor/link-preview.js';
+import { previewMode, vaultResolvers } from '../../editor/link-hover.js';
+import { parseTarget, previewSpec } from '../../editor/link-at.js';
 import { scrollSyncBus, makeSuppressor } from '../../preview/scroll-sync.js';
 import { previewUrl } from '../../lib/preview-url.js';
+import '../../editor/toolbar/clew-editor-toolbar.js';
 
 const HOST_SOURCE = 'clew-preview-host';
 
@@ -57,8 +60,10 @@ class ClewPreviewView extends ClewElement {
 			this.#suppressor.suppress();
 			this.#post({ type: 'scroll-to-line', line, behavior: 'auto' });
 		});
-		this.listen(settingsStore, 'settings-changed', () => {
+		this.listen(settingsStore, 'settings-changed', (key) => {
 			this.#post({ type: 'theme', theme: document.body.dataset.theme ?? 'dark' });
+			if (key === 'editorToolbar') this.#syncModeBar();
+			if (key === 'sidenotes') this.#post({ type: 'sidenotes', mode: settingsStore.get('sidenotes') ?? 'auto' });
 		});
 		// Back/Forward over anchor jumps restore a same-path entry, which the
 		// tab group deliberately does not rebuild — scroll the live document.
@@ -91,6 +96,24 @@ class ClewPreviewView extends ClewElement {
 		this.#iframe.allow = 'fullscreen';
 		this.#iframe.src = previewUrl(this.path);
 		this.replaceChildren(this.#iframe);
+		this.#syncModeBar();
+	}
+
+	/**
+	 * Reading mode's slim bar: only the mode switch, so the three modes are
+	 * one click apart from every state (docs/dev/live-edit.md §6.5) — unless the
+	 * toolbar is turned off altogether.
+	 */
+	#syncModeBar() {
+		const want = (settingsStore.get('editorToolbar') ?? 'live') !== 'never';
+		const bar = this.querySelector(':scope > clew-editor-toolbar');
+		if (!want) { bar?.remove(); return; }
+		if (bar) return;
+		const slim = document.createElement('clew-editor-toolbar');
+		slim.slim = true;
+		slim.tabId = this.tabId;
+		this.prepend(slim);
+		slim.setState({ mode: 'reading', inline: new Set(), blockType: 'paragraph' });
 	}
 
 	#post(msg) {
@@ -131,6 +154,7 @@ class ClewPreviewView extends ClewElement {
 				// never reaches the app window's dispatcher on its own.
 				// (Rebinding hotkeys mid-session refreshes on next reload.)
 				this.#post({ type: 'app-chords', chords: effectiveChords() });
+				this.#post({ type: 'sidenotes', mode: settingsStore.get('sidenotes') ?? 'auto' });
 				// Land where the editor's cursor was when reading mode opened.
 				const cursorLine = workspaceStore.findTab(this.tabId)?.tab.view.cursorLine;
 				this.#lastCursorLine = Number.isFinite(cursorLine) ? cursorLine : null;
@@ -141,15 +165,6 @@ class ClewPreviewView extends ClewElement {
 				for (const queued of this.#pending.splice(0)) this.#post(queued);
 				break;
 			}
-			case 'link-click':
-				actions.openWikilink(msg.target, { newTab: msg.newTab, mode: 'reading' });
-				break;
-			case 'external-link':
-				openExternal(msg.url);
-				break;
-			case 'open-external-file':
-				actions.openFileExternally(msg.path);
-				break;
 			case 'anchor-jump':
 				// A TOC click is browser-style navigation: the spot you left
 				// becomes a history entry, so Back returns you to it.
@@ -157,58 +172,15 @@ class ClewPreviewView extends ClewElement {
 				workspaceStore.recordAnchorJump(this.tabId, msg.fromLine, msg.toLine);
 				break;
 			case 'source-line-click': {
-				// Inverse search: flip this tab to source mode at the clicked line.
+				// Inverse search: flip this tab to its editing mode at the
+				// clicked line.
 				const found = workspaceStore.findTab(this.tabId);
 				if (found) {
 					found.tab.view.pendingLine = Math.max(1, msg.line);
-					workspaceStore.setTabMode(this.tabId, 'source');
+					workspaceStore.setTabMode(this.tabId, actions.editModeOf(found.tab));
 				}
 				break;
 			}
-			case 'embed-collapse':
-				// A disclosable embed was folded or unfolded — the state
-				// belongs in the note, on the line it was rendered from.
-				actions.setEmbedCollapsed(this.path, msg.line, msg.collapsed);
-				break;
-			case 'checkbox-toggle':
-				actions.toggleTaskLine(this.path, msg.line, msg.checked);
-				break;
-			case 'task-toggle':
-				// A ```tasks fence item — the toggle belongs to its source note.
-				actions.toggleTaskLine(msg.path, msg.line, msg.checked);
-				break;
-			case 'field-edit':
-				// Editable query cell / kanban drag → write the source note.
-				actions.editNoteField(msg.path, msg.field, msg.value, msg.fieldSource);
-				break;
-			case 'api-request':
-				handleApiRequest(msg, { sourcePath: this.path })
-					.then((response) => this.#post(response));
-				break;
-			case 'focused':
-				// A click inside the iframe never reaches the app's pane
-				// focus tracking — treat it like clicking into an editor.
-				workspaceStore.activateTab(this.tabId);
-				break;
-			case 'chord': {
-				// Chords forwarded from this iframe must act on THIS pane,
-				// not whichever group the app last saw a pointerdown in.
-				workspaceStore.activateTab(this.tabId);
-				const key = msg.key;
-				if (key === 'e') actions.toggleReadingMode();
-				else if (key === 'w' && msg.shift) actions.closeCurrentPane();
-				else if (key === 'w') actions.closeActiveTab();
-				else if (key === 't') actions.newTab();
-				else if (key === '\\') actions.splitActive(msg.shift ? 'bottom' : 'right');
-				break;
-			}
-			case 'app-chord':
-				// The general forwarding path: any registered chord, run
-				// through the registry with its usual gates — same as if the
-				// keydown had happened in the app window, acting on this pane.
-				workspaceStore.activateTab(this.tabId);
-				runChord(msg.chord);
-				break;
 			case 'morph-failed':
 				this.#clientReady = false;
 				if (this.#iframe) this.#iframe.src = previewUrl(this.path) + '?t=' + Date.now();
@@ -227,6 +199,29 @@ class ClewPreviewView extends ClewElement {
 					scrollSyncBus.emit('scroll', { path: this.path, line: msg.line, from: 'preview' });
 				}
 				break;
+			case 'link-hover': {
+				// Hover previews (§5.11): the popover is the window's, so the
+				// link's rect moves from the frame's coordinates to ours.
+				const mode = previewMode();
+				if (mode === 'off' || (mode === 'mod' && !msg.mod)) { linkPreview().unhover(); break; }
+				const frame = this.#iframe.getBoundingClientRect();
+				const r = msg.rect;
+				const rect = { left: frame.left + r.left, right: frame.left + r.right, top: frame.top + r.top, bottom: frame.top + r.bottom };
+				const link = msg.cite
+					? { kind: 'cite', command: 'cite', keys: String(msg.cite).split(/[,;]\s*/).filter(Boolean), from: 0, to: 0 }
+					: parseTarget(msg.target);
+				linkPreview().hover(previewSpec(link, vaultResolvers(this.path)), rect, this.path, { now: mode === 'mod' });
+				break;
+			}
+			case 'link-unhover':
+				if (msg.scrolled) linkPreview().hide();
+				else linkPreview().unhover();
+				break;
+			default:
+				// Everything a block document shares (live/frame-host.js).
+				handlePreviewMessage(msg, {
+					mode: 'note', tabId: this.tabId, path: this.path, post: (m) => this.#post(m),
+				});
 		}
 	};
 }

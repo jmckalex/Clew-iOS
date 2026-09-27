@@ -31,6 +31,36 @@ async function bibEntries() {
 	return cache;
 }
 
+/**
+ * A citation key's short label (`Knuth 1984`) and title, from the vault's
+ * .bib files — synchronous, so live edit's chips can ask while drawing.
+ * Null until the entries have loaded (the first ask starts the load; the
+ * next redraw picks it up) and for a key no .bib defines.
+ *
+ * @param {string} key
+ * @returns {{ label: string, title: string }|null}
+ */
+/** Resolves once the vault's .bib entries are loaded (for a redraw). */
+export function citationsReady() {
+	return bibEntries().then(() => undefined, () => undefined);
+}
+
+export function citationLabel(key) {
+	if (!cache) { bibEntries().catch(() => {}); return null; }
+	const entry = cache.find((e) => e.key === key);
+	if (!entry) return null;
+	const first = String(entry.authors ?? '').split(/\s+and\s+|;/)[0].trim();
+	const surname = first.includes(',') ? first.split(',')[0].trim() : first.split(/\s+/).pop();
+	const label = [surname, entry.year].filter(Boolean).join(' ') || key;
+	return { label, title: entry.title ?? '' };
+}
+
+/** Every entry in the vault's .bib files (the References panel's Library,
+ *  §5.14), from the same cache completion uses. */
+export function allBibEntries() {
+	return bibEntries();
+}
+
 export async function citationCompletions(context) {
 	const line = context.state.doc.lineAt(context.pos);
 	const before = line.text.slice(0, context.pos - line.from);
