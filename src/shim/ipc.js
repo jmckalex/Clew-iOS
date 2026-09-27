@@ -574,6 +574,16 @@ export function createClewShim({ workerFactory, assetLoader } = {}) {
 	const native = {
 		renderNote: (rel) => renderService.ensureRendered(rel),
 		renderFragment: (text) => renderService.renderFragment(text),
+		// Live edit's block frames (SchemeHandler.swift `__clew_block__`):
+		// POST {text, sourcePath} → the document's key; GET by key → the
+		// HTML, or null once evicted (a 404, and the frame layer POSTs
+		// again). A sourcePath that escapes the vault is refused here —
+		// resolve() throws — which the handler answers as 403.
+		renderBlock: async (text, sourcePath) => {
+			if (sourcePath != null) vaults.resolve(sourcePath);
+			return renderService.renderBlock(text, { sourcePath: sourcePath ?? null });
+		},
+		blockDocument: (key) => renderService.blockDocument(key) ?? null,
 		externalDiff: (diff) => vaults.applyExternalDiff(diff),
 		flush: () => vaults.flush(),
 		sessionId: SESSION_ID,

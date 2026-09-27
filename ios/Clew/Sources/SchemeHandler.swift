@@ -8,6 +8,8 @@
 //   clew-preview://vault/__clew_preview__/…          preview client / note API
 //   clew-preview://vault/<sid>/<note>.md.html        rendered note (via JS)
 //   clew-preview://vault/<sid>/__clew_fragment__     POST md → body html
+//   clew-preview://vault/<sid>/__clew_block__        POST {text, sourcePath} → {hash}
+//   clew-preview://vault/<sid>/__clew_block__/<hash> GET  a live-edit block document
 //   clew-preview://vault/<sid>/<any path>            real file from the vault
 //
 // Rendered notes come from the JS RenderService (window.__clewNative) —
@@ -202,9 +204,41 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 		let vaultRel = String(rel[rel.index(after: slash)...])
 		guard !vaultRel.isEmpty else { return fail(task, "empty path") }
 
+		// Both POST routes refuse an http(s) Origin (a canvas web node, say):
+		// the callers are the app page and clew-preview documents, whose
+		// origins are custom schemes. Port of protocol.js's guard, on both
+		// routes for parity (upstream has it on the block route only).
+		if task.request.httpMethod == "POST",
+			let origin = task.request.value(forHTTPHeaderField: "Origin"),
+			origin.range(of: #"^https?:"#, options: [.regularExpression, .caseInsensitive]) != nil {
+			return fail(task, "Forbidden", status: 403)
+		}
+
 		if vaultRel == "__clew_fragment__", task.request.httpMethod == "POST" {
 			let text = task.request.httpBody.flatMap { String(data: $0, encoding: .utf8) } ?? ""
 			return renderFragment(task, markdown: text)
+		}
+
+		// Live edit's block frames (docs/dev/live-edit.md §7.2, protocol.js).
+		// POST `{text, sourcePath}` renders the snippet as a FULL preview
+		// document through the JS render service and answers `{hash}`; GET
+		// `__clew_block__/<hash>` serves that document with the same client
+		// injection a note gets, marked `data-clew-block` so the client
+		// reports its size instead of its scroll. Same size limit as
+		// fragments; an evicted hash is a 404 and the frame layer POSTs again.
+		if vaultRel == "__clew_block__", task.request.httpMethod == "POST" {
+			let body = task.request.httpBody ?? Data()
+			guard body.count <= 100_000 else { return fail(task, "Too large", status: 413) }
+			guard let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+				let text = json["text"] as? String else {
+				return fail(task, "Bad request", status: 400)
+			}
+			let sourcePath = json["sourcePath"] as? String
+			return renderBlock(task, text: text, sourcePath: sourcePath)
+		}
+		if vaultRel.hasPrefix("__clew_block__/"), task.request.httpMethod == "GET" {
+			let hash = String(vaultRel.dropFirst("__clew_block__/".count))
+			return serveBlock(task, hash: hash, sid: String(rel[..<slash]))
 		}
 
 		if vaultRel.range(of: #"\.(md|jmd)\.html$"#, options: [.regularExpression, .caseInsensitive]) != nil {
@@ -256,6 +290,46 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 			switch result {
 			case .success(let value):
 				self.respondData(task, data: Data(((value as? String) ?? "").utf8), mime: "text/html")
+			case .failure(let error):
+				self.fail(task, error.localizedDescription, status: 500)
+			}
+		}
+	}
+
+	private func renderBlock(_ task: WKURLSchemeTask, text: String, sourcePath: String?) {
+		// Every key becomes a parameter of the async function callNative
+		// builds, so the argument must be present even when there is no
+		// source note: an empty string, which the script reads as null.
+		let args: [String: Any] = ["text": text, "sourcePath": sourcePath ?? ""]
+		callNative("return await window.__clewNative.renderBlock(text, sourcePath || null);", args: args) { [weak self] result in
+			guard let self, !self.isStopped(task) else { return }
+			switch result {
+			case .success(let value):
+				guard let hash = value as? String else { return self.fail(task, "no hash", status: 500) }
+				let payload = try! JSONSerialization.data(withJSONObject: ["hash": hash])
+				self.respondData(task, data: payload, mime: "application/json")
+			case .failure(let error):
+				// vaults.resolve() refused the sourcePath: outside the vault.
+				// WebKit wraps a thrown JS error as WKErrorDomain 4 with the
+				// message in userInfo, not in localizedDescription.
+				let message = Self.jsErrorMessage(error)
+				let forbidden = message.contains("escapes vault") || message.contains("No vault open")
+				self.fail(task, message, status: forbidden ? 403 : 500)
+			}
+		}
+	}
+
+	private func serveBlock(_ task: WKURLSchemeTask, hash: String, sid: String) {
+		guard hash.range(of: #"^[0-9a-f]{1,40}$"#, options: .regularExpression) != nil else {
+			return fail(task, "Not found", status: 404)
+		}
+		callNative("return await window.__clewNative.blockDocument(hash);", args: ["hash": hash]) { [weak self] result in
+			guard let self, !self.isStopped(task) else { return }
+			switch result {
+			case .success(let value):
+				guard let html = value as? String else { return self.fail(task, "Not found", status: 404) }
+				let injected = self.injectClientScripts(into: html, sid: sid, block: true)
+				self.respondData(task, data: Data(injected.utf8), mime: "text/html")
 			case .failure(let error):
 				self.fail(task, error.localizedDescription, status: 500)
 			}
@@ -325,11 +399,18 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 		return surfaces
 	}
 
-	/// Port of protocol.js script injection: the note API into <head>, the
-	/// client bridge + vault scripts + enabled preview-surface plugin
-	/// scripts before </body>.
-	private func injectClientScripts(into html: String, sid: String) -> String {
+	/// Port of protocol.js script injection (wrapPreviewDocument): the note
+	/// API into <head>, the client bridge + vault scripts + enabled
+	/// preview-surface plugin scripts before </body>. One function for notes
+	/// and live edit's block documents, so the two cannot drift; a block is
+	/// marked `data-clew-block` on its <html>, which is what makes the client
+	/// report its height instead of its scroll.
+	private func injectClientScripts(into html: String, sid: String, block: Bool = false) -> String {
 		var out = html
+		if block, let htmlRange = out.range(of: "<html[^>]*>", options: [.regularExpression, .caseInsensitive]) {
+			let tag = String(out[htmlRange])
+			out.replaceSubrange(htmlRange, with: String(tag.dropLast()) + " data-clew-block=\"1\">")
+		}
 		if let headRange = out.range(of: "<head[^>]*>", options: [.regularExpression, .caseInsensitive]) {
 			out.replaceSubrange(headRange, with: out[headRange] + "<script src=\"/__clew_preview__/api.js\"></script>")
 		}
@@ -427,6 +508,16 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 	private func fail(_ task: WKURLSchemeTask, _ message: String, status: Int = 500) {
 		respond(task, status: status, data: Data(message.utf8),
 			headers: baseHeaders(mime: "text/plain"))
+	}
+
+	/// The JavaScript error's own message, when callAsyncJavaScript fails
+	/// on a thrown exception (WKErrorDomain code 4 carries it in userInfo).
+	private static func jsErrorMessage(_ error: Error) -> String {
+		let ns = error as NSError
+		if let message = ns.userInfo["WKJavaScriptExceptionMessage"] as? String, !message.isEmpty {
+			return message
+		}
+		return ns.localizedDescription
 	}
 
 	private static func escapeHtml(_ text: String) -> String {

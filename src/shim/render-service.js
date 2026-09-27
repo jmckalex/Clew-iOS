@@ -11,6 +11,7 @@ import { vfs } from '../worker/shims/vfs.js';
 import { VAULT_ROOT, GLOBAL_PLUGINS_ROOT } from './vault-manager.js';
 import { engineConfig, engineEnv, isTextPath } from './engine-config.js';
 import { engineExtensionEntries } from '../../vendor/clew/main/plugins.js';
+import { isDependentFragment } from '../../vendor/clew/shared/fragment-deps.js';
 import { settings } from './settings.js';
 
 const REBUILD_DEBOUNCE_MS = 300;
@@ -57,8 +58,16 @@ export class RenderService {
 	 *  typeset against files the engine was never told about. */
 	noteFontsReady = Promise.resolve();
 	#notes = new Map(); // rel -> {mtimeMs, html, hasQueries, inflight, dirty}
+	/** fragment cache: key → html string (canvas cards, live-edit blocks; bounded) */
 	#fragments = new Map();
 	#fragmentInflight = new Map();
+	/** Bumped on every file change: a DEPENDENT fragment's key carries it, so
+	 *  a cached render of `![[Note]]` is never served after Note changed. */
+	#fragmentEpoch = 0;
+	/** Bumped on every reconfigure: in EVERY fragment key, so a block whose
+	 *  rendering changed with the config (normalSyntax, a TeX fragment, a
+	 *  plugin) gets a NEW hash — a caller comparing hashes sees the change. */
+	#configGeneration = 0;
 	#rebuildTimers = new Map();
 
 	constructor({ workerFactory, assetLoader } = {}) {
@@ -98,6 +107,8 @@ export class RenderService {
 		this.#spawnStandby();
 		this.#notes.clear();
 		this.#fragments.clear();
+		this.#fragmentEpoch++;
+		this.#configGeneration++;
 		for (const rel of this.#subscribed.keys()) {
 			this.render(rel).catch(() => {});
 		}
@@ -287,31 +298,93 @@ export class RenderService {
 		throw new Error(result.message);
 	}
 
-	/** Markdown snippet → body HTML (canvas cards), content-hash cached. */
-	async renderFragment(text) {
-		if (!this.#open) throw new Error('no vault open');
-		const key = sha1ish(text);
+	/**
+	 * Markdown snippet → body HTML (canvas cards). Fragment mode: body HTML
+	 * only, no template. Same worker pipeline and engine config as note
+	 * renders, so a card renders exactly like the same text would in a
+	 * note. Cached by content hash — a canvas reopening re-renders nothing —
+	 * unless the text reads other files (fragment-deps.js), whose key then
+	 * carries the file epoch so any file change retires it.
+	 *
+	 * `sourcePath` (vault-relative) is the note the snippet belongs to. It is
+	 * part of the key and rides into the worker's vfs as `<key>.source`
+	 * beside the temp `<key>.md`, which engine/vault-model.js#currentFilePath
+	 * reads — so Dataview `this`, Bases' `this.file`, Meta Bind and a kanban
+	 * board see the note. Desktop's render-service.js, with the temp files
+	 * handed to the worker as extra snapshot entries instead of written to
+	 * disk (the worker has no disk).
+	 *
+	 * @param {string} text
+	 * @param {{ sourcePath?: string|null, dependent?: boolean }} [options]
+	 * @returns {Promise<string>} the body HTML
+	 */
+	renderFragment(text, options = {}) {
+		return this.#cachedBuild(text, { ...options, document: false });
+	}
+
+	/**
+	 * Render a snippet as a FULL preview document — the engine's own
+	 * template, exactly as a note gets it (MathJax config, mermaid, CSS) —
+	 * for live edit's block frames. SchemeHandler.swift serves it at
+	 * `__clew_block__/<key>` with the preview client injected. Resolves to
+	 * the key; `blockDocument(key)` returns the HTML while it is cached.
+	 *
+	 * @param {string} text
+	 * @param {{ sourcePath?: string|null, dependent?: boolean }} [options]
+	 * @returns {Promise<string>} the block's key
+	 */
+	async renderBlock(text, options = {}) {
+		const key = this.#fragmentKey(text, { ...options, document: true });
+		await this.#cachedBuild(text, { ...options, document: true });
+		return key;
+	}
+
+	/** A built block document by key, or undefined once evicted. */
+	blockDocument(key) {
+		return this.#fragments.get(key);
+	}
+
+	#fragmentKey(text, { sourcePath = null, dependent = isDependentFragment(text), document = false }) {
+		return sha1ish(`${document ? 'doc' : 'frag'}\0${this.#configGeneration}\0${sourcePath ?? ''}\0${dependent ? this.#fragmentEpoch : ''}\0${text}`);
+	}
+
+	#cachedBuild(text, options) {
+		if (!this.#open) return Promise.reject(new Error('no vault open'));
+		const key = this.#fragmentKey(text, options);
 		const cached = this.#fragments.get(key);
-		if (cached !== undefined) return cached;
+		if (cached !== undefined) return Promise.resolve(cached);
 		const inflight = this.#fragmentInflight.get(key);
 		if (inflight) return inflight;
-		const job = (async () => {
-			const file = `${VAULT_ROOT}/.clew/cache/fragments/${key}.md`;
-			const result = await this.#runBuild(file, {
-				to: 'html',
-				output: `${VAULT_ROOT}/.clew/cache/fragments/${key}.html`,
-				fragment: true,
-				normalSyntax: this.#vaultOptions.normalSyntax === true,
-			}, { [file]: text });
-			if (result.type !== 'done') throw new Error(result.message);
-			if (this.#fragments.size > 500) {
-				for (const k of [...this.#fragments.keys()].slice(0, 250)) this.#fragments.delete(k);
-			}
-			this.#fragments.set(key, result.html);
-			return result.html;
-		})().finally(() => this.#fragmentInflight.delete(key));
+		const job = this.#buildFragment(key, text, options).finally(() => {
+			this.#fragmentInflight.delete(key);
+		});
 		this.#fragmentInflight.set(key, job);
 		return job;
+	}
+
+	async #buildFragment(key, text, { sourcePath = null, document = false } = {}) {
+		const dir = `${VAULT_ROOT}/.clew/cache/fragments`;
+		const mdFile = `${dir}/${key}.md`;
+		// The temp note and, when the snippet belongs to a note, the sidecar
+		// vault-model.js#currentFilePath reads — both as extra vfs entries
+		// for this one build (#snapshot excludes .clew/, so nothing else ever
+		// sees them). Same directory as desktop, which is what the engine's
+		// check `dirname(file) === <root>/.clew/cache/fragments` keys on.
+		const extra = { [mdFile]: text };
+		if (sourcePath) extra[`${dir}/${key}.source`] = sourcePath;
+		const result = await this.#runBuild(mdFile, {
+			to: 'html',
+			output: `${dir}/${key}.html`,
+			fragment: !document,
+			normalSyntax: this.#vaultOptions.normalSyntax === true,
+		}, extra);
+		if (result.type !== 'done') throw new Error(result.message);
+		// Bounded cache: drop the oldest half when it grows past 500 entries.
+		if (this.#fragments.size > 500) {
+			for (const k of [...this.#fragments.keys()].slice(0, 250)) this.#fragments.delete(k);
+		}
+		this.#fragments.set(key, result.html);
+		return result.html;
 	}
 
 	// ---- subscriptions ----------------------------------------------------
@@ -327,6 +400,7 @@ export class RenderService {
 	}
 
 	onFileChanged(rel) {
+		this.#fragmentEpoch++;
 		if (this.#subscribed.has(rel)) {
 			clearTimeout(this.#rebuildTimers.get(rel));
 			this.#rebuildTimers.set(rel, setTimeout(() => {

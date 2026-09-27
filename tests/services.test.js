@@ -736,3 +736,63 @@ test('the iOS settings defaults carry every key upstream defines, with the plan\
 	assert.equal(all.sidenotes, 'auto');
 	assert.equal(all.slashCommands, true);
 });
+
+// ---- live-edit block frames (plan §2.2): keys, sidecars, eviction ----------
+
+test('renderBlock builds a FULL document from a temp note + .source sidecar in the fragments dir, keyed for reuse', async () => {
+	const builds = workerBuilds.length;
+	const hash = await native.renderBlock('# A block\n\nwith $x$', 'Guide/Editing Notes.md');
+	assert.match(hash, /^[0-9a-f]+$/, 'a hex key, safe in a URL');
+	assert.equal(native.blockDocument(hash), '<html>fake</html>', 'served by key while cached');
+	assert.equal(workerBuilds.length, builds + 1);
+	const build = workerBuilds.at(-1);
+	assert.equal(build.options.fragment, false, 'a block is a whole document (template, MathJax config)');
+	assert.equal(build.file, `/vault/.clew/cache/fragments/${hash}.md`, 'where vault-model.js#currentFilePath looks');
+	assert.equal(build.files[build.file], '# A block\n\nwith $x$');
+	assert.equal(build.files[`/vault/.clew/cache/fragments/${hash}.source`], 'Guide/Editing Notes.md',
+		'the sidecar that makes Dataview `this` the owning note');
+	// Beside the fragment pair, the only .clew content in a snapshot is the
+	// engine config and the enabled plugins' engine surfaces (#snapshot).
+	assert.ok(!Object.keys(build.files).some((f) => f.startsWith('/vault/.clew/')
+		&& !/\/\.clew\/(cache\/fragments|engine|plugins)\//.test(f)), 'nothing else under .clew rides along');
+	// Same text, same note: the cached key, no build.
+	assert.equal(await native.renderBlock('# A block\n\nwith $x$', 'Guide/Editing Notes.md'), hash);
+	assert.equal(workerBuilds.length, builds + 1, 'served from the cache');
+	// A different owning note is a different document (Dataview `this` differs).
+	assert.notEqual(await native.renderBlock('# A block\n\nwith $x$', 'Welcome.md'), hash);
+	// A canvas card of the same text is a fragment, not a document: its own key.
+	await native.renderFragment('# A block\n\nwith $x$');
+	const frag = workerBuilds.at(-1);
+	assert.equal(frag.options.fragment, true);
+	assert.ok(!Object.keys(frag.files).some((f) => f.endsWith('.source')), 'no sidecar without a source note');
+	assert.notEqual(frag.file, build.file, 'frag and doc keys never collide');
+});
+
+test('a dependent block\'s key moves with every file change; an independent one\'s does not', async () => {
+	const dependent = await native.renderBlock('![[Welcome]]', 'Inbox.md');
+	const plain = await native.renderBlock('just *text*', 'Inbox.md');
+	await clew.invoke(CH.NOTE_WRITE, { path: 'Tasks.md', content: '# Tasks\n\n- [ ] one\n' });
+	await settle();
+	assert.notEqual(await native.renderBlock('![[Welcome]]', 'Inbox.md'), dependent, 'an embed re-renders after any change');
+	assert.equal(await native.renderBlock('just *text*', 'Inbox.md'), plain, 'plain text is content-addressed');
+	assert.equal(native.blockDocument(dependent), '<html>fake</html>', 'the old document stays served until evicted');
+});
+
+test('a reconfigure retires every block: new keys, old documents gone', async () => {
+	const before = await native.renderBlock('reconfigure me', 'Inbox.md');
+	await clew.invoke(CH.VAULT_SETTINGS_SET, { key: 'normalSyntax', value: true });
+	await settle();
+	const after = await native.renderBlock('reconfigure me', 'Inbox.md');
+	assert.notEqual(after, before, 'the configuration generation is in the key');
+	assert.equal(native.blockDocument(before), null, 'evicted — the handler answers 404 and the frame POSTs again');
+	assert.equal(native.blockDocument(after), '<html>fake</html>');
+	assert.equal(native.blockDocument('deadbeef'), null);
+	await clew.invoke(CH.VAULT_SETTINGS_SET, { key: 'normalSyntax', value: false });
+	await settle();
+});
+
+test('a block whose source note escapes the vault is refused', async () => {
+	await assert.rejects(native.renderBlock('x', '../outside.md'), /escapes vault/);
+	// No source note at all is fine (an anonymous block).
+	assert.match(await native.renderBlock('anonymous', null), /^[0-9a-f]+$/);
+});
