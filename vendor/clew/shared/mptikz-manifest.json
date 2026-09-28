@@ -1,11 +1,11 @@
 {
-	"comment": "The mp-tikz-wasm build Clew ships: MetaPost 2.11, pdfTeX, LuaTeX and dvisvgm compiled to WebAssembly, with the TeX bundles their kpathsea reads (74 MB unpacked, ~37 MB as this archive). Unlike the ZetaOffice pins, this one is a VERSIONED GitHub release, so a hash mismatch means the wrong file, not a new upstream build. v0.2.1, published 2026-09-17: spath3 in the bundles, wrapped TikZ figures keeping their standalone border, and the LuaTeX rule fix — every DVI rule (\\sqrt, \\frac, \\hrule …) trapped the wasm module under both LuaTeX formats, a call-arity mismatch in the engine's back-end dispatch table that native C tolerates and WebAssembly does not, fixed by a luatex patch there. Digest and size confirmed against the published asset (`gh release view v0.2.1 --json assets`). Earlier digests: 2c303539… was a 0.2.1 build before the rule fix, never published; 0.2.0 (a7255429800f196b31a92bdf5dc278c467c32974abb6522a089f041c0955be68) lacked spath3 and cropped classic arrowheads. scripts/stage-mptikz.js prefers the owner's local master build (~/Source/mp-tikz-wasm/dist) and falls back to this archive; dist/ inside it is what lands in mptikz-assets/.",
-	"version": "0.2.1",
-	"tag": "v0.2.1",
+	"comment": "The mp-tikz-wasm build Clew ships: MetaPost 2.11, pdfTeX, LuaTeX and dvisvgm compiled to WebAssembly, with the TeX bundles their kpathsea reads (74 MB unpacked, ~37 MB as this archive). Unlike the ZetaOffice pins, this one is a VERSIONED GitHub release, so a hash mismatch means the wrong file, not a new upstream build. v0.3.0, published 2026-09-28: the opt-in `opentype` bundle (fontspec, luaotfload, the Latin Modern faces — what `font=note` needs; `bundles/index.json` lists it, so preview-client/figures.js asks for `+opentype` on marked figures), plain-LuaTeX support and `fonts: 'woff2'`, live custom elements, data-replace, the svg.attributes TikZ library, and chemfig/circuitikz/tikz-3dplot; the engines are unchanged from 0.2.1. A bare tikzcd/circuitikz/\\chemfig/\\schemestart body is wrapped differently than before, so those figures get new hashes and re-render once. Digest and size confirmed against the published asset by scripts/stage-mptikz.js's own download-and-verify on the day of the pin. Earlier: v0.2.1, published 2026-09-17: spath3 in the bundles, wrapped TikZ figures keeping their standalone border, and the LuaTeX rule fix — every DVI rule (\\sqrt, \\frac, \\hrule …) trapped the wasm module under both LuaTeX formats, a call-arity mismatch in the engine's back-end dispatch table that native C tolerates and WebAssembly does not, fixed by a luatex patch there. Its digest was confirmed the same way (`gh release view v0.2.1 --json assets`). Earlier digests: 2c303539… was a 0.2.1 build before the rule fix, never published; 0.2.0 (a7255429800f196b31a92bdf5dc278c467c32974abb6522a089f041c0955be68) lacked spath3 and cropped classic arrowheads. scripts/stage-mptikz.js prefers the owner's local master build (~/Source/mp-tikz-wasm/dist) and falls back to this archive; dist/ inside it is what lands in mptikz-assets/.",
+	"version": "0.3.0",
+	"tag": "v0.3.0",
 	"repo": "jmckalex/mp-tikz-wasm",
-	"archive": "mp-tikz-wasm-0.2.1.tar.gz",
-	"url": "https://github.com/jmckalex/mp-tikz-wasm/releases/download/v0.2.1/mp-tikz-wasm-0.2.1.tar.gz",
-	"sha256": "5ddff6361e88f1368e15817b1d2691f6946940b50762c54eb1ce18b2a8603ad7",
-	"bytes": 37205263,
-	"unpackedDir": "mp-tikz-wasm-0.2.1/dist"
+	"archive": "mp-tikz-wasm-0.3.0.tar.gz",
+	"url": "https://github.com/jmckalex/mp-tikz-wasm/releases/download/v0.3.0/mp-tikz-wasm-0.3.0.tar.gz",
+	"sha256": "4a3a61b3760042d191dbf23d2169a776981be1caad9ec1d2b05cd6729c4d141b",
+	"bytes": 44229933,
+	"unpackedDir": "mp-tikz-wasm-0.3.0/dist"
 }

@@ -56,9 +56,17 @@ simulator from a clean install.
   (they read the `.bib` files directly). Follow-up: bundle citation-js
   into the worker through the require registry, as highlight.js is
   (README known gaps).
-- **`font=note`** and the **canvas engage convention** are as the last
-  handover left them: on `main`, unpushed, the fonts still gated on an
-  mp-tikz-wasm release past v0.2.1 for CI.
+- **mp-tikz-wasm 0.3.0 is pinned** (this session, after the sync): the
+  library session published v0.3.0 (the `opentype` bundle, plain-LuaTeX,
+  `fonts: 'woff2'`; engines unchanged from 0.2.1), the Clew-app session
+  pinned it in `src/shared/mptikz-manifest.json` (368bfd7, pushed), and
+  the mirror here carries that manifest. The archive's size and digest
+  were verified independently here; the local engines are restaged from
+  the same build; two never-cached font=note figures typeset on them in
+  the simulator. So a cloud build from this tip ships font=note figures —
+  the gate the last two handovers named is gone.
+- **The canvas engage convention** is as the last handover left it: on
+  `main`, unpushed, device-proven.
 
 ## 2. Decisions the owner should know about (all reversible)
 
@@ -114,14 +122,15 @@ simulator from a clean install.
 
 1. **Fast-forward `main` to `live-p5-verify`, then push — the owner's
    call** (§0). Pushing releases 0.11 + fontnote + canvas + live edit in
-   one TestFlight build, with font=note figures refused by name until
-   mp-tikz-wasm 0.3.0 is pinned (`scripts/stage-mptikz.js`).
+   one TestFlight build, font=note figures included now that 0.3.0 is
+   pinned — CI's clean clone downloads the release and checks its digest
+   (`scripts/stage-mptikz.js --require`).
 2. **citation-js in the worker** (§1, README): the one feature-shaped
    follow-up this sync surfaced. Bundle it through
    `src/worker/shims/require-registry.js`; measure the bundle size
    (citation-js + `@citation-js/plugin-csl` + the engine's CSL files).
-3. **Device pass of §3**, plus the fontnote device check that still
-   waits on a build carrying the `opentype` bundle.
+3. **Device pass of §3**, plus the fontnote device check (the Diagrams
+   note's last two figures, a 12pt document) on the first cloud build.
 4. Upstream candidates from this sync are in PORT-PLAN: the boot path
    loading the vault-settings store, floaters reading the visual
    viewport, `Origin` parity, a package self-reference for the engine
