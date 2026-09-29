@@ -1,13 +1,16 @@
-# Handover — 2026-09-30 (the 0.11.1 sync: verified in the simulator; the push waits on the owner's decision)
+# Handover — 2026-09-30 (the 0.11.1 sync is pushed; its cloud build succeeded)
 
 **NOW (2026-09-30, overnight):** the upstream 0.11.1 sync ran p1 → p4 on
 `sync111-p1-vendor … sync111-p4-verify` — vendor at Clew-app `84f975e`
 (local there), the caller token on iOS, the scene-PDF relay guard,
 RENDER_HTML. Every check in `UPSTREAM-0.11.1-PLAN.md` passed in the
 simulator (its STATUS line has the results and what the simulator could
-not prove); 680 tests. `main` is fast-forwarded to the p4 tip; the push
-is the owner's decision, relayed by Clew-boss ("push overnight if ALL
-checks pass"). Sections below that describe the live-edit sync are its
+not prove); 680 tests. **Pushed** on the owner's decision relayed by
+Clew-boss ("push overnight if ALL checks pass"): origin/main = `e79b158`,
+and its Xcode Cloud build SUCCEEDED (23:11–23:19 UTC,
+https://github.com/jmckalex/Clew-iOS/runs/109664532923). The owner adds it
+to TestFlight Internal, then tries the four iPad-only checks (the plan's
+STATUS line). Sections below that describe the live-edit sync are its
 history; §4.5 and §5–§6 are current.
 
 Session-rollover state, upstream-style: rewritten each session, kept
