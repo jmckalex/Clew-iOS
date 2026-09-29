@@ -13,11 +13,17 @@ stand as the plan wrote them (§2).
 
 ## 0. THE ONE RULE
 
-**Never `git push` without the owner's explicit OK.** The Xcode Cloud
-workflow builds and ships to TestFlight on every push to `main` — a push
-IS a release. Commit locally freely; the owner verifies on their iPad
-first. A docs-only commit carries `[ci skip]` in its message so a push of
-it spends no cloud build. (Also in Claude's memory.)
+**Never `git push` without an explicit OK** — the owner's, or (since
+2026-09-29, the owner's own delegation) the coordinating session
+Clew-boss's. The Xcode Cloud workflow builds and ships to TestFlight on
+every push to `main` — a push IS a release. Commit locally freely. A
+docs-only commit carries `[ci skip]` in its message so a push of it
+spends no cloud build — and the marker works ANYWHERE in the message,
+body included: a commit meant to build must never quote it (fbb56f4 did,
+and sat unbuilt; 7a34dd3, an empty marker-free commit, built). A real
+build shows a "Clew | Default | Archive - iOS" check run on the commit
+within seconds (`gh api repos/jmckalex/Clew-iOS/commits/<sha>/check-runs`).
+(Also in Claude's memory.)
 
 ## 1. Where things stand
 
@@ -221,23 +227,35 @@ TestFlight Internal (§4.1). Tests **677 green**.
    lands on the text the pane mirrors, a tall diagram keeps its own
    scroll. Needs `data-overflows` on the pane where `preview-pane.js`
    sets the body height (l.221 at `83532b2`: `h + padding > MAX_H`;
-   cleared where the height is, l.195) — asked upstream via Clew-boss; a build patch
+   cleared where the height is, l.195) — LANDED upstream as `f47080b` (Clew-app
+   main), measured true/false/true in its preview-pane-wheel scenario; a build patch
    there otherwise — plus one ios.css rule. Measure on the simulator:
    a drag over a fitting pane scrolls the note; a tall diagram scrolls
    in the pane. The full notices and the candidate numbering are in
    `~/Source/Clew/SYNC-LEDGER.md` (the coordinator's ledger).
    Both fix branches (`fix-bridge-main-frame`, `citation-js-worker`)
    are merged into `main` and pushed.
-5. TestFlight group / external testers / the manual's DNS — unchanged
+5. **Protocol caller token (design, with Clew-app).** Desktop hardened
+   its protocol (random session ids `b561983`; cross-origin reads only
+   for clew-preview://vault and null `3575f24`). Refusing `Origin: null`
+   on the render POSTs could not work there (no desktop render POST
+   carries an Origin), so the owner chose a per-session token the app
+   page gets over IPC and hands to preview documents, required on the
+   render POSTs, enforced the same way on both platforms. Clew-app sends
+   the proposal; iOS reviews it for WebKit (sandboxed frames send
+   `Origin: null`, measured) and the scheme handler. Building iOS's side
+   and parity (random ids, narrower ACAO in `SchemeHandler.swift`) waits
+   on the owner's direct approval.
+6. TestFlight group / external testers / the manual's DNS — unchanged
    from the last handover.
-6. Follow-ups seen, not requested: 44 pt explorer rows (none exist; the
+7. Follow-ups seen, not requested: 44 pt explorer rows (none exist; the
    virtualised explorer measures a probe row so a rule is safe to add);
    `excalidraw`/`base`/`bibtex` in `VaultStore.swift`'s text set (the
    shim's `TEXT_EXT` has them); Swift-side pruning of `hidden` paths from
    the snapshot; a touch route to link previews; persisting frame
    heights across reopenings (upstream's own follow-on); canvas toolbar
    undo/redo; a THIRD-PARTY-NOTICES surface.
-7. Deferred, unchanged: `\citefile`; native CJK font download; Xiaolai
+8. Deferred, unchanged: `\citefile`; native CJK font download; Xiaolai
    prune; ```kanban touch drag; "Move to folder…"; empty folders in the
    explorer; iCloud conflict surfacing; stale recents pruning; ZetaOffice.
 
