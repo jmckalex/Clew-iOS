@@ -64,6 +64,16 @@ test('citations: a vault-wide bibliography in a bundled CSL style (ajp)', () => 
 	assert.match(html, /class="csl-entry">Alexander, J McKenzie \(2023\) <i>The Open Society as an Enemy<\/i>/);
 });
 
+test('tabbing: the ```tabbing fence and @begin(tabbing) both render through the worker\'s registry', () => {
+	const html = flat(render('Guide/Tabbing.md'));
+	const blocks = html.match(/<div[^>]*class="clew-tabbing"/g) ?? [];
+	// Five real fences (a sixth sits inside a ````markdown example) and one
+	// @begin(tabbing) — the Environments line names the same file.
+	assert.equal(blocks.length, 6, 'every fence and the environment');
+	assert.match(html, /<div data-source-line="95" class="clew-tabbing"/, 'the @begin(tabbing) environment');
+	assert.ok(!html.includes('@begin(tabbing)\n'), 'no environment left raw');
+});
+
 test('query fences scan the vault at render time', () => {
 	const html = render('Features/Queries.md');
 	assert.match(html, /clew-query/);

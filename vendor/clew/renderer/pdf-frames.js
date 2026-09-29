@@ -45,22 +45,48 @@ window.addEventListener('message', (event) => {
 	for (const check of [...waiters]) check();
 });
 
+/**
+ * Whether `frame` holds the viewer document `win`: it IS the frame's
+ * document, or lives somewhere under it — a canvas scene's viewer is a frame
+ * inside a note's frame, and reports to this window directly (pdf-core.js
+ * posts to window.top). `parent` is readable across origins.
+ */
+function holds(frame, win) {
+	const own = frame.contentWindow;
+	if (!own) return false;
+	for (let w = win, depth = 0; w && depth < 8; depth++) {
+		if (w === own) return true;
+		let up = null;
+		try { up = w.parent; } catch { return false; }
+		if (!up || up === w) return false;
+		w = up;
+	}
+	return false;
+}
+
+/** The dirty viewer documents that `frames` hold. */
+const dirtyUnder = (frames) => [...dirty].filter((win) => frames.some((f) => holds(f, win)));
+
 /** The frames at or under `root` whose PDF viewers hold an unsaved edit. */
 export function unsavedFrames(root) {
 	const frames = root instanceof HTMLIFrameElement ? [root] : [...root.querySelectorAll('iframe')];
-	return frames.filter((f) => f.contentWindow && dirty.has(f.contentWindow));
+	return frames.filter((f) => [...dirty].some((win) => holds(f, win)));
 }
 
 /** Resolves once none of `frames` holds an unsaved edit, or after `ms`. */
 function flushed(frames, ms) {
-	for (const f of frames) f.contentWindow?.postMessage({ source: 'clew-pdf-host', type: 'pdf-flush' }, '*');
+	// Asked of each dirty VIEWER, however deep: a note's frame does not pass
+	// a flush on to a scene's viewer inside it, and need not.
+	for (const win of dirtyUnder(frames)) {
+		try { win.postMessage({ source: 'clew-pdf-host', type: 'pdf-flush' }, '*'); } catch { /* gone */ }
+	}
 	return new Promise((resolve) => {
 		const finish = (clean) => {
 			waiters.delete(check);
 			clearTimeout(timer);
 			resolve(clean);
 		};
-		const check = () => { if (!frames.some((f) => f.contentWindow && dirty.has(f.contentWindow))) finish(true); };
+		const check = () => { if (dirtyUnder(frames).length === 0) finish(true); };
 		const timer = setTimeout(() => finish(false), ms);
 		waiters.add(check);
 		check();
@@ -82,7 +108,7 @@ export function retire(el) {
 	el.style.display = 'none';   // display:none keeps an iframe loaded
 	el.inert = true;
 	flushed(frames, LINGER_MS).then(() => {
-		for (const f of frames) if (f.contentWindow) dirty.delete(f.contentWindow);
+		for (const win of dirtyUnder(frames)) dirty.delete(win);
 		el.remove();
 	});
 	return true;

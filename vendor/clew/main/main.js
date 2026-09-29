@@ -71,7 +71,11 @@ export function createWindow(vaultPath = null) {
 			contextIsolation: true,
 			nodeIntegration: false,
 			backgroundThrottling: !smokeHidden,
-			plugins: true, // Chromium's built-in PDF viewer
+			// Chromium's built-in PDF viewer. Clew's own PDF surfaces are all
+			// EmbedPDF now, canvas scenes included; what still reaches the
+			// plugin is a raw PDF iframe — a portal's miniature, and any
+			// `<iframe src="x.pdf">` a note writes itself — so it stays.
+			plugins: true,
 			webviewTag: true, // canvas web-page nodes
 		},
 	});

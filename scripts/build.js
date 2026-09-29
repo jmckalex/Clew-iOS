@@ -258,26 +258,6 @@ const rendererPatches = {
 				''),
 			loader: 'js',
 		}));
-		// WebKit + custom schemes: when the workspace reconciler moves a
-		// freshly inserted preview iframe, the reinserted frame's window
-		// proxy goes stale — its document loads and runs, but postMessage is
-		// silently dropped in BOTH directions, so the host↔preview bridge
-		// (re-renders, theme, scroll sync, checkboxes) never comes up. If the
-		// client hasn't said 'ready' shortly after render(), rebuild the
-		// iframe once the DOM has settled — a never-moved frame works.
-		builder.onLoad({ filter: /vendor\/clew\/renderer\/components\/workspace\/clew-preview-view\.js$/ }, (args) => ({
-			contents: patched('clew-preview-view.js',
-				patched('clew-preview-view.js', fs.readFileSync(args.path, 'utf8'),
-					'ipc.invoke(CH.RENDER_SUBSCRIBE, { path: this.path }).catch(() => {});',
-					'if (!this.__iosSubscribed) { this.__iosSubscribed = true; ipc.invoke(CH.RENDER_SUBSCRIBE, { path: this.path }).catch(() => {}); }'),
-					'this.replaceChildren(this.#iframe);',
-					'this.replaceChildren(this.#iframe);\n'
-					+ '\t\tclearTimeout(this.__iosReadyTimer);\n'
-					+ '\t\tthis.__iosReadyTimer = setTimeout(() => {\n'
-					+ '\t\t\tif (!this.#clientReady && this.isConnected) this.render();\n'
-					+ '\t\t}, 2500);'),
-			loader: 'js',
-		}));
 	},
 };
 
@@ -312,67 +292,20 @@ export async function buildAppBundle({ minify = true } = {}) {
 	});
 }
 
-// iOS-only additions to the preview-side bundles. Real sources in
-// src/preview/, appended so they share the bundle's module scope and run in
-// the document they belong to.
-//
-//  - pdf-touch.js goes into BOTH client.js (note embeds) and pdf-page.js
-//    (file tabs, canvas nodes): the Pencil finger-pan convention, which has
-//    no desktop equivalent.
-//  - pdf-scene-embeds.js goes into client.js only: raw <embed> PDFs inside
-//    .canvas-embed-scene, which WebKit shows as one static page.
-//  - embed-scroll.js goes into client.js only: a note embedded in a canvas
-//    node cannot scroll its root scroller under the canvas's scale
-//    transform, so on request it scrolls its body instead.
-const readPreviewModule = (name) =>
-	fs.readFileSync(path.join(root, 'src', 'preview', name), 'utf8');
-const iosPdfTouch = readPreviewModule('pdf-touch.js');
-const iosPdfSceneEmbeds = readPreviewModule('pdf-scene-embeds.js');
-const iosEmbedScroll = readPreviewModule('embed-scroll.js');
+// The one iOS-only addition to the preview-side bundles, from src/preview/,
+// appended so it runs in the document it belongs to: embed-scroll.js, in
+// client.js — a note embedded in a canvas node cannot scroll its root
+// scroller under the canvas's scale transform, so on request it scrolls its
+// body instead. (The Pencil convention and the viewer handles went upstream
+// as preview-client/pdf-pen.js and pdf-handles.js, 12b1734; scene PDFs
+// through pdf-page.html, 71180c6.)
+const iosEmbedScroll = fs.readFileSync(path.join(root, 'src', 'preview', 'embed-scroll.js'), 'utf8');
 
 const previewClientPatches = {
 	name: 'clew-preview-client-patches',
 	setup(builder) {
-		// WebKit can move/restore a preview iframe during workspace
-		// reconciliation without re-running its scripts — the client's
-		// one-shot 'ready' is lost and the host↔preview bridge never opens.
-		// Re-announce on pageshow (fires on WebKit document restores) so the
-		// handshake always completes.
 		builder.onLoad({ filter: /vendor\/clew\/preview-client\/client\.js$/ }, (args) => ({
-			contents: patched('preview-client/client.js', fs.readFileSync(args.path, 'utf8'),
-				"post({ type: 'ready' });",
-				"post({ type: 'ready' });\n"
-				+ "window.addEventListener('pageshow', () => post({ type: 'ready' }));\n"
-				+ iosPdfTouch + iosPdfSceneEmbeds + iosEmbedScroll),
-			loader: 'js',
-		}));
-		// Both PDF surfaces build their viewer here, so one hook reaches all
-		// three. pdf-embed.js publishes its own viewers on
-		// window.__clewPdfViewers, but pdf-page.js keeps its handle private —
-		// and the touch layer needs the annotation capability from every
-		// surface, not just embeds. (Upstream candidate: publish handles from
-		// pdf-core itself; the smoke hooks beside this line already exist for
-		// the same reason.)
-		builder.onLoad({ filter: /vendor\/clew\/preview-client\/pdf-core\.js$/ }, (args) => ({
-			contents: patched('preview-client/pdf-core.js', fs.readFileSync(args.path, 'utf8'),
-				'\t// Spike instrumentation.\n'
-				+ '\twindow.__clewPdfReady = (window.__clewPdfReady ?? 0) + 1;',
-				'\t(window.__clewPdfHandles ??= new Set()).add(handle);\n'
-				+ '\t// Spike instrumentation.\n'
-				+ '\twindow.__clewPdfReady = (window.__clewPdfReady ?? 0) + 1;'),
-			loader: 'js',
-		}));
-	},
-};
-
-const previewPagePatches = {
-	name: 'clew-preview-page-patches',
-	setup(builder) {
-		previewClientPatches.setup(builder);
-		// The standalone viewer page gets the Pencil layer too — it is the
-		// surface a file tab and a canvas PDF node both load.
-		builder.onLoad({ filter: /vendor\/clew\/preview-client\/pdf-page\.js$/ }, (args) => ({
-			contents: fs.readFileSync(args.path, 'utf8') + iosPdfTouch,
+			contents: fs.readFileSync(args.path, 'utf8') + iosEmbedScroll,
 			loader: 'js',
 		}));
 	},
@@ -390,7 +323,7 @@ export async function buildPreviewClients({ minify = true } = {}) {
 			format: 'iife',
 			target: 'safari16',
 			outfile: path.join(webroot, 'preview-client', name),
-			plugins: [previewPagePatches],
+			plugins: [previewClientPatches],
 			minify,
 			logLevel: 'warning',
 			metafile: true,

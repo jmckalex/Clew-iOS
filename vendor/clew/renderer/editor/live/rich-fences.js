@@ -17,6 +17,7 @@
 // Every name here is one the engine (or a Clew engine extension in
 // src/engine/) claims: obsidian-fences.js (mermaid, leaflet), figures.js
 // (tikz, latex, tex, metapost), query-fences.js (query, tasks, kanban),
+// tabbing.js (tabbing),
 // dataview.js / dataview-js.js / bases.js, admonitions (`ad-*`), meta-bind.
 // A plugin's engine surface can claim more (the Charts plugin's ```chart);
 // plugins do not declare their fence names, so the caller passes them in.
@@ -24,7 +25,7 @@
 /** Fence languages the engine renders into something other than code. */
 export const RICH_FENCES = new Set([
 	'mermaid', 'tikz', 'latex', 'tex', 'metapost', 'leaflet',
-	'query', 'tasks', 'kanban', 'dataview', 'dataviewjs', 'base',
+	'query', 'tasks', 'kanban', 'dataview', 'dataviewjs', 'base', 'tabbing',
 	'meta-bind', 'meta-bind-button', 'meta-bind-embed', 'meta-bind-js', 'meta-bind-js-view',
 ]);
 
@@ -35,7 +36,7 @@ export const RICH_DIRECTIVES = new Set([
 
 /** `@begin(name)` environments the engine renders richly. */
 export const RICH_ENVIRONMENTS = new Set([
-	'TiKZ', 'tikz', 'tikzpicture', 'metapost', 'mermaid', 'reveal',
+	'TiKZ', 'tikz', 'tikzpicture', 'metapost', 'mermaid', 'reveal', 'tabbing',
 ]);
 
 /**

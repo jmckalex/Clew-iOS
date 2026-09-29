@@ -14,9 +14,11 @@
 // pages are documents. window.__clewAssetBase (set by the exporter, per
 // page depth) points leaflet at the copied assets.
 import { initLeafletMaps } from './leaflet-maps.js';
+import { initTabbing } from './tabbing.js';
 import { installAnchorClicks } from './anchors.js';
 
 initLeafletMaps();
+initTabbing();
 // Hand-written `#anchor` TOCs vs the engine's toc-<slug> heading ids — the
 // same resolution reading mode does (anchors.js), for static pages.
 installAnchorClicks();

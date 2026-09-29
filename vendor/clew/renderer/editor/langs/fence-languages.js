@@ -23,11 +23,13 @@
 import { StreamLanguage } from '@codemirror/language';
 import { texMode } from './tex-mode.js';
 import { metapostMode } from './metapost-mode.js';
+import { tabbingMode } from './tabbing-mode.js';
 
 const tex = StreamLanguage.define(texMode);
 const metapost = StreamLanguage.define(metapostMode);
+const tabbing = StreamLanguage.define(tabbingMode);
 
-const LANGUAGES = { tikz: tex, latex: tex, tex, metapost };
+const LANGUAGES = { tikz: tex, latex: tex, tex, metapost, tabbing };
 
 /**
  * @param {string} info the fence's language word, as lang-markdown passes it

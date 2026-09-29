@@ -241,7 +241,13 @@ function nodeEl(node, nstyle) {
 		if (IMAGE_EXT.test(node.file)) {
 			el.innerHTML = `<img src="${src}" alt="">`;
 		} else if (node.file.toLowerCase().endsWith('.pdf')) {
-			el.innerHTML = `<embed src="${src}" type="application/pdf">`;
+			// The standard viewer page, as a canvas tab's PDF node has —
+			// paging, search, annotating (saved through window.top, one frame
+			// deeper than a tab's viewer; pdf-core.js). It was Chromium's own
+			// plugin, which could not annotate and which WebKit shows as one
+			// still page.
+			const viewer = `/__clew_assets__/clewpdf/pdf-page.html?src=${encodeURIComponent(src)}`;
+			el.innerHTML = `<iframe class="canvas-embed-pdf" src="${escapeXml(viewer)}" allow="fullscreen"></iframe>`;
 		} else if (VIDEO_EXT.test(node.file)) {
 			el.innerHTML = `<video controls src="${src}"></video>`;
 		} else if (AUDIO_EXT.test(node.file)) {

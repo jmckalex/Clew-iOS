@@ -22,7 +22,7 @@ import { OFFICE_EXT } from '../../../shared/file-types.js';
 
 /** Per-kind heights before a frame has reported its own (plan §7.6). */
 const DEFAULT_HEIGHT = {
-	mermaid: 240, tikz: 200, latex: 200, tex: 200, metapost: 200, TiKZ: 200, tikzpicture: 200,
+	mermaid: 240, tabbing: 120, tikz: 200, latex: 200, tex: 200, metapost: 200, TiKZ: 200, tikzpicture: 200,
 	leaflet: 400, query: 200, tasks: 200, kanban: 240, dataview: 200, dataviewjs: 200, base: 200,
 	reveal: 520, pdf: 480, office: 320, canvas: 320, excalidraw: 320, video: 240, audio: 54,
 };

@@ -245,7 +245,8 @@ function decorate(map, el, config, photoPins) {
 }
 
 // Shift-click two points to measure the distance between them (unit: /
-// scale: config keys); Escape or a third shift-click starts over.
+// scale: config keys); a third shift-click starts a new measurement — the old
+// line and readout go with it — and Escape clears it.
 function wireDistanceTool(map, config) {
 	const L = window.L;
 	const UNITS = { m: [1, 'm'], km: [0.001, 'km'], mi: [0.000621371, 'mi'], ft: [3.28084, 'ft'] };
@@ -261,8 +262,13 @@ function wireDistanceTool(map, config) {
 	};
 	map.on('click', (e) => {
 		if (!e.originalEvent.shiftKey) return;
-		if (first && line) clear();
 		if (!first) {
+			// A new measurement: a finished one's line and readout go first.
+			// (This tested `first && line` — true after the FIRST click, so the
+			// second click always started over and no distance ever showed,
+			// while a finished measurement's line and readout were never
+			// cleared.)
+			clear();
 			first = e.latlng;
 			line = L.polyline([first, first], { dashArray: '6 6', weight: 2, color: '#fb464c' }).addTo(map);
 			return;

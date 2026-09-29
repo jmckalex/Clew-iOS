@@ -95,6 +95,9 @@ export function engineConfig({ vaultRoot = '/vault', vaultOptions = {}, engineEx
 			// engine's own rules, which is what lets the directive win.
 			'tikzFence, metapostFence, latexFence, texFence, tikzDirective from /engine-assets/figures.js',
 			'queryFence, tasksFence, kanbanFence from /engine-assets/query-fences.js',
+			// ```tabbing — LaTeX's tabbing, laid out in the preview
+			// (engine/tabbing.js; preview-client/tabbing.js measures).
+			'tabbingFence from /engine-assets/tabbing.js',
 			'tableBeforeAnchor, blockAnchorLine, blockAnchor from /engine-assets/block-refs.js',
 			// Obsidian's Dataview, for vaults that arrive carrying it.
 			'dataviewFence, dataviewJsFence, dataviewInline from /engine-assets/dataview.js',
@@ -135,6 +138,8 @@ export function engineConfig({ vaultRoot = '/vault', vaultOptions = {}, engineEx
 			// @reveal[…] — a presentation in an iframe. One registry entry
 			// serves the inline, block and @begin forms (reveal-embed.js).
 			'reveal from /engine-assets/reveal-embed.js',
+			// @begin(tabbing): the same body as the ```tabbing fence.
+			'tabbing from /engine-assets/tabbing.js',
 		],
 		...biblifyConfig(vaultRoot, vaultOptions),
 		'MathJax': { 'src': '/__clew_assets__/mathjax/tex-svg.js' },

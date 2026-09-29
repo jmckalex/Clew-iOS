@@ -25,6 +25,7 @@ rendered; **⌘O** finds any note; **⌘P** lists every command.
 - [[Panels]] — backlinks, outgoing links, tags, outline, bookmarks
 - [[Properties]] — frontmatter as typed, editable rows
 - [[Callouts]] — `> [!note]` boxes, titles, and folding
+- [[Tabbing]] — text lined up at tab stops, LaTeX's `tabbing` environment
 - [[Canvas]] — an infinite board of notes, web pages, PDFs, ink, and
   shapes ([[Demo Canvas.canvas]])
 - [[Drawings]] — Excalidraw, for the drawings an Obsidian vault is full of

@@ -60,19 +60,22 @@ window.addEventListener('message', (event) => {
 		document.documentElement.dataset.theme = msg.theme;
 	}
 	// The host asks for the annotations (renderer/pdf-annotations.js) or a
-	// page (a page anchor into an open tab) — the app page only, never
-	// another frame that happens to hold a reference to this one.
-	if (event.source !== window.parent) return;
+	// page (a page anchor into an open tab) — the app page only (window.top;
+	// a tab's viewer has it as its parent, a canvas scene's viewer inside a
+	// note does not), or this page's own parent; never another frame that
+	// happens to hold a reference to this one. Answers go back to the asker.
+	if (event.source !== window.parent && event.source !== window.top) return;
+	const asker = event.source;
 	if (msg?.source === 'clew-preview-host' && msg.type === 'pdf-page' && viewer?.scrollToPage) {
 		showPage(msg.page).then((ok) => {
-			if (ok) window.parent.postMessage({ source: 'clew-preview', type: 'pdf-page-shown', page: msg.page }, '*');
+			if (ok) asker.postMessage({ source: 'clew-preview', type: 'pdf-page-shown', page: msg.page }, '*');
 		});
 	}
 	if (msg?.source === 'clew-preview-host' && msg.type === 'test-create-annotations') {
-		viewer?.createAnnotations?.(msg.specs ?? []).then((made) => window.parent.postMessage({ source: 'clew-preview', type: 'test-created', made }, '*'));
+		viewer?.createAnnotations?.(msg.specs ?? []).then((made) => asker.postMessage({ source: 'clew-preview', type: 'test-created', made }, '*'));
 	}
 	if (msg?.source === 'clew-preview-host' && msg.type === 'list-annotations') {
-		const reply = (annotations, error) => window.parent.postMessage({ source: 'clew-preview', type: 'annotations', requestId: msg.requestId, annotations, error }, '*');
+		const reply = (annotations, error) => asker.postMessage({ source: 'clew-preview', type: 'annotations', requestId: msg.requestId, annotations, error }, '*');
 		if (!viewer?.listAnnotations) reply([], 'The viewer is still loading');
 		else viewer.listAnnotations().then((a) => reply(a, null), (err) => reply([], String(err?.message ?? err)));
 	}

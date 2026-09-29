@@ -26,6 +26,9 @@ import { previewUrl } from '../../lib/preview-url.js';
 import '../../editor/toolbar/clew-editor-toolbar.js';
 
 const HOST_SOURCE = 'clew-preview-host';
+/** After the frame's `load`, a client that has not said 'ready' within this
+ *  long never will — its message was lost (see #watchReady). */
+const READY_AFTER_LOAD_MS = 1500;
 
 class ClewPreviewView extends ClewElement {
 	tabId = null;
@@ -35,6 +38,8 @@ class ClewPreviewView extends ClewElement {
 	#pending = [];
 	#suppressor = makeSuppressor();
 	#lastCursorLine = null;
+	#readyWatch = null;
+	#watchdogSpentOn = null;   // the note a rebuild was spent on (once per element and note)
 
 	subscribe() {
 		this.listen({ on: ipc.on }, CH.EV_RENDER_DONE, ({ path }) => {
@@ -78,6 +83,7 @@ class ClewPreviewView extends ClewElement {
 	}
 
 	cleanup() {
+		clearTimeout(this.#readyWatch);
 		window.removeEventListener('message', this.#onMessage);
 		ipc.invoke(CH.RENDER_UNSUBSCRIBE, { path: this.path }).catch(() => {});
 	}
@@ -85,18 +91,60 @@ class ClewPreviewView extends ClewElement {
 	render() {
 		this.classList.add('preview-host');
 		ipc.invoke(CH.RENDER_SUBSCRIBE, { path: this.path }).catch(() => {});
-		this.#iframe = document.createElement('iframe');
-		this.#iframe.className = 'preview-frame';
-		// No sandbox attribute: it would block Chromium's PDF viewer plugin for
-		// ![[x.pdf]] embeds. Isolation still holds — previews load from the
-		// clew-preview:// origin (the app is file://), window.open is denied
-		// globally, and main blocks all main-frame navigation after load.
+		this.replaceChildren();
+		this.#buildFrame();
+		this.#syncModeBar();
+	}
+
+	/** The preview iframe — built by render(), and rebuilt by the watchdog. */
+	#buildFrame() {
+		clearTimeout(this.#readyWatch);
+		// A new frame has not said 'ready', whatever the last one did: until
+		// it does, messages queue (#post) instead of going to a document that
+		// is still loading — and the watchdog below can tell a lost 'ready'.
+		this.#clientReady = false;
+		const old = this.#iframe;
+		const frame = document.createElement('iframe');
+		frame.className = 'preview-frame';
+		// No sandbox attribute, and the reason is fetch (CLAUDE.md): a
+		// sandboxed frame has an opaque origin, and a preview document fetches
+		// clew-preview:// URLs constantly — canvas scenes, maps' data, plugins
+		// reading their own note. (It used to be Chromium's PDF plugin; PDFs
+		// are EmbedPDF now.) Isolation holds without it — previews load from
+		// the clew-preview:// origin, not the app's; window.open is denied
+		// globally; main blocks every main-frame navigation after load.
 		// EmbedPDF's fullscreen control calls requestFullscreen() inside this
 		// frame, which is refused unless the frame is allowed it.
-		this.#iframe.allow = 'fullscreen';
-		this.#iframe.src = previewUrl(this.path);
-		this.replaceChildren(this.#iframe);
-		this.#syncModeBar();
+		frame.allow = 'fullscreen';
+		frame.addEventListener('load', () => this.#watchReady(frame));
+		frame.src = previewUrl(this.path);
+		this.#iframe = frame;
+		if (old?.parentNode === this) old.replaceWith(frame);
+		else this.append(frame);
+	}
+
+	/**
+	 * The stuck-preview watchdog, keyed on LOAD (item 12; the iOS session's
+	 * finding): WebKit can hand a custom-scheme iframe that the workspace
+	 * moved in the DOM a stale window proxy, and postMessage is then dropped
+	 * silently BOTH ways — the document loads and runs, but its 'ready' never
+	 * arrives and the bridge (re-renders, theme, scroll sync) never opens.
+	 * The client posts 'ready' as it runs, before `load`, so a frame that has
+	 * loaded and still not said it, a moment later, lost it: rebuild the frame
+	 * — ONCE per element and note, so a frame that is stuck for another reason
+	 * is not rebuilt forever. Never a retiring view (pdf-frames.js#retire),
+	 * whose document may be holding an unsaved annotation. Chromium does not
+	 * lose the message; there, this never fires.
+	 */
+	#watchReady(frame) {
+		if (this.#clientReady || frame !== this.#iframe) return;
+		clearTimeout(this.#readyWatch);
+		this.#readyWatch = setTimeout(() => {
+			if (this.#clientReady || frame !== this.#iframe || !this.isConnected) return;
+			if (this.hasAttribute('data-clew-retiring') || this.#watchdogSpentOn === this.path) return;
+			this.#watchdogSpentOn = this.path;
+			this.#buildFrame();
+		}, READY_AFTER_LOAD_MS);
 	}
 
 	/**
@@ -148,6 +196,7 @@ class ClewPreviewView extends ClewElement {
 		switch (msg.type) {
 			case 'ready': {
 				this.#clientReady = true;
+				clearTimeout(this.#readyWatch);
 				this.#post({ type: 'theme', theme: document.body.dataset.theme ?? 'dark' });
 				// The app's chords, so the iframe can forward EVERY app
 				// shortcut rather than a hardcoded few — an iframe keydown
