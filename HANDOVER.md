@@ -22,21 +22,23 @@ it spends no cloud build. (Also in Claude's memory.)
 ## 1. Where things stand
 
 ```
-origin/main = e46a5ce   the 0.11 sync — TestFlight 0.1.0 (6), on the owner's iPad
- main = e7f1b25         + fontnote-p1…p3, canvas-engage-touch, the live-edit plan   (local)
+origin/main = main = faa3023   PUSHED 2026-09-29 — the 0.11 sync + fontnote + canvas engage + live edit + the 0.3.0 pin
    live-p1-vendor  90d0017   vendor at ccf8dca; shell stubbed; excludes, citations, TeX fragments, @reveal
    live-p2-frames  0c3e867   block frames: __clew_block__ endpoints, block documents, keyed fragments
    live-p3-touch   06ed5cd   touch: long-press is the source, link-at, floaters read the visual viewport
-   live-p5-verify  <this>    the sweep + docs                                          ← TIP
+   live-p5-verify  faa3023   the sweep + docs + the mp-tikz-wasm 0.3.0 pin              = main
 ```
 
 (`live-p4-platform` was verification only — citations, PDF annotations,
 TeX fragments, `@reveal`, exclusion lists, the explorer, sidenotes, the
 guide — and changed no source, so it was folded into p5's record and the
-branch dropped.) **`main` has NOT been fast-forwarded to `live-p5-verify`
-yet** — that is the owner's first call (§4.1). Working tree clean, tests
-**675 green**, `npm run build` and `xcodebuild` clean, the app on the
-simulator from a clean install.
+branch dropped.) `main` was fast-forwarded to `live-p5-verify` and
+pushed on 2026-09-29 at the owner's instruction, so Xcode Cloud is
+building it: the first TestFlight build carrying live edit, font=note
+(from the pinned 0.3.0 release) and the canvas engage work. It will land
+in App Store Connect ▸ Clew Notes ▸ TestFlight and, as of the last
+check, NOT in any tester group by itself (§4.1). Working tree clean,
+tests **675 green**.
 
 - **The live-edit sync** (this session): vendor/ and seed-vault/ at
   upstream **`ccf8dca`** (77 commits: live edit, the shell panel, vault
@@ -120,11 +122,11 @@ simulator from a clean install.
 
 ## 4. Open items
 
-1. **Fast-forward `main` to `live-p5-verify`, then push — the owner's
-   call** (§0). Pushing releases 0.11 + fontnote + canvas + live edit in
-   one TestFlight build, font=note figures included now that 0.3.0 is
-   pinned — CI's clean clone downloads the release and checks its digest
-   (`scripts/stage-mptikz.js --require`).
+1. **The cloud build of faa3023**: check it archived (CI's clean clone
+   downloads mp-tikz-wasm 0.3.0 and checks its digest — a first for that
+   release), then add the build to the Internal group on its TestFlight
+   page or turn on the group's automatic distribution (memory:
+   clew-ios-release-pipeline). Then the device pass (§3).
 2. **citation-js in the worker** (§1, README): the one feature-shaped
    follow-up this sync surfaced. Bundle it through
    `src/worker/shims/require-registry.js`; measure the bundle size
