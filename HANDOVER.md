@@ -231,7 +231,16 @@ TestFlight Internal (§4.1). Tests **677 green**.
    main), measured true/false/true in its preview-pane-wheel scenario; a build patch
    there otherwise — plus one ios.css rule. Measure on the simulator:
    a drag over a fitting pane scrolls the note; a tall diagram scrolls
-   in the pane. The full notices and the candidate numbering are in
+   in the pane. Then `707ed87`: a live block frame renders under its
+   note's citation keys — `shared/citation-keys.js` reads the engine's 8
+   citation keys from a note's header, `main/citation-header.js` makes a
+   fenced header (bibliography path absolute), desktop's
+   `render-service.renderBlock` prepends it, `frame-layer.js` re-renders
+   frames when a save changes the keys. **At the sync, the iOS block
+   render path (`src/shim/render-service.js#renderBlock`) must prepend
+   `citationHeader(noteText, noteDir)` the same way**
+   (`citation-header.js` needs only `node:path`, already aliased). The
+   full notices and the candidate numbering are in
    `~/Source/Clew/SYNC-LEDGER.md` (the coordinator's ledger).
    Both fix branches (`fix-bridge-main-frame`, `citation-js-worker`)
    are merged into `main` and pushed.
@@ -245,7 +254,20 @@ TestFlight Internal (§4.1). Tests **677 green**.
    the proposal; iOS reviews it for WebKit (sandboxed frames send
    `Origin: null`, measured) and the scheme handler. Building iOS's side
    and parity (random ids, narrower ACAO in `SchemeHandler.swift`) waits
-   on the owner's direct approval.
+   on the owner's direct approval. **Measured 2026-09-29** (a throwaway
+   build, reverted): WebKit sends `Origin: clew-app://app` from the app
+   page, NO Origin on a same-origin preview document's render POST (the
+   canvas scene's cards), `clew-preview://vault` on preview documents'
+   CORS-mode GETs, `null` from a sandboxed frame. ACAO narrowed to
+   `clew-app://app` on both schemes broke no consumer (Diagrams, maps,
+   EmbedPDF, Excalidraw, canvas scene, MathJax, media, charts, live
+   block frames) and blocked every null-frame read — but a null frame's
+   POST still ran the engine (CORS blocks the reader, not the request),
+   so the token check is needed here too. iOS's position sent to
+   Clew-app: deliver the token by handshake (host → the frame that said
+   'ready'), not in the served HTML; no `Content-Type: application/json`
+   on the render POSTs (it forces an OPTIONS preflight the handler does
+   not answer); sid + token random per vault open.
 6. TestFlight group / external testers / the manual's DNS — unchanged
    from the last handover.
 7. Follow-ups seen, not requested: 44 pt explorer rows (none exist; the
