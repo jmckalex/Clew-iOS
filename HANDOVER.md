@@ -142,11 +142,14 @@ they cost no cloud build whenever they are pushed.
    (citation-js + `@citation-js/plugin-csl` + the engine's CSL files).
 3. **Device pass of §3**, plus the fontnote device check (the Diagrams
    note's last two figures, a 12pt document) on the first cloud build.
-4. Upstream candidates from this sync are in PORT-PLAN: the boot path
-   loading the vault-settings store, floaters reading the visual
-   viewport, `Origin` parity, a package self-reference for the engine
-   mirror, "long-press as ⌥" as a question, and the References panel
-   not refreshing when the exclusion lists change.
+4. Upstream candidates are in PORT-PLAN, now with Clew-app's verdicts
+   (reviewed at `e88aff6` on 2026-09-29, relayed by the coordinating
+   session `Clew-boss` in `~/Source/Clew`): nothing landed yet; most are
+   agreed and wait on the owner; the `Origin`-parity item was wrong and
+   is withdrawn; the References-panel item is probably not a gap (the
+   shim runs desktop's event chain) — one simulator check at the next
+   sync. The coordinator says it will announce each landing with the
+   patch it retires.
 5. TestFlight group / external testers / the manual's DNS — unchanged
    from the last handover.
 6. Follow-ups seen, not requested: 44 pt explorer rows (none exist; the

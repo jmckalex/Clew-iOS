@@ -335,10 +335,30 @@ Ranked; items 1–5 are in scope for the first working build, 6–10 tracked:
 Behaviour that is not actually iOS-specific and would be better living in
 the golden master than forked here:
 
+Clew-app reviewed this list at `e88aff6` (2026-09-29, via the coordinating
+session) and has implemented none of it yet. Agreed and small, waiting on
+the owner: the boot path's greeting and settings load, same-second snapshot
+ordering, `downloadEngine`'s repaint, `dataviewJs` reconfigure, the engaged
+canvas node (it would retire canvas-view patches 2–4), floaters on the
+visual viewport, and the `pdf-core.js` viewer handles (with the Pencil
+convention, if wanted). Where upstream disagreed or redirected, the item
+says so. One item was withdrawn: an `Origin`-guard "parity" claim — the
+vendored `main/protocol.js` guards both POST routes alike (l.328–335 and
+349–355); this list had it wrong.
+
 - **A registry hook in the engine** for config-named extensions, instead of
   the build patching `metadata-header.js`'s dynamic imports (see above).
+  *Upstream: agreed, but it belongs in the jmarkdown master, as an importer
+  hook that also carries this port's import-from-source path for plugin
+  engine surfaces.*
 - **Rebuild a preview iframe that never reports ready** — the WebKit
   moved-iframe fix, currently a `clew-preview-view` build patch.
+  *Upstream: not as written — a desktop cold render legitimately takes
+  over 2.5 s (`protocol.js` awaits `ensureRendered()`), so a clock started
+  at insertion would rebuild healthy frames. It would take a watchdog keyed
+  on the frame's `load` event (loaded but never said ready, once per
+  element). The `client.js` half — re-posting `ready` on `pageshow` — can
+  go up on its own.*
 - **The Pencil pan convention** (`src/preview/pdf-touch.js`): once a pen
   pointer has been seen in a document, fingers pan the PDF and only the
   Pencil draws. It self-arms on a `pen` event, so a desktop that never sees
@@ -387,26 +407,35 @@ the golden master than forked here:
   a WKWebView's software keyboard shrinks only `visualViewport`, so
   "below the anchor" lands under the keyboard. Reading `visualViewport`'s
   edges gives the same numbers on desktop (two guarded patches here).
-- **`Origin` guard parity on the two POST routes.** `protocol.js` refuses
-  an http(s) `Origin` on `__clew_block__` but not on `__clew_fragment__`;
-  the Swift handler guards both.
 - **A package self-reference for the engine mirror.** `editor/live/
   numbering.js` reaches `vendor/jmarkdown/src/crossref.js` by a relative
   path that counts on the app living at `<repo>/src`; any other layout
   (this mirror keeps the app at `vendor/clew`) has to re-root it (an
   esbuild `onResolve` and a `node --import` hook here). An import map or
   a package self-reference would make the engine reachable by name.
+  *Upstream proposes a `package.json` `imports` entry,
+  `"#jmarkdown/*": "./vendor/jmarkdown/src/*"`, with this repo carrying the
+  same map pointed at its own `vendor/jmarkdown` — which would retire the
+  `onResolve` re-root and `tests/hooks/vendor-jmarkdown.mjs`.*
 - **"Long-press as ⌥" as a question for upstream's touch story.** Live
   mode's click semantics are mouse-shaped (click follows, ⌥ places the
   caret, ⌘ opens a tab); the port maps a long-press onto ⌥. If upstream
   ever runs on a touch surface of its own, that convention — and a touch
   route to link previews, which have none — is the decision to take.
-- **The References panel does not refresh when the exclusion lists
-  change.** It fetches `BIB_ENTRIES` once; after `unindexed` gains a
-  library folder the shim's scan excludes that folder's `.bib` (measured
-  in the services suite) but the open panel keeps showing its entries
-  until it is reopened. A `vault-settings-changed` listener would fix it
-  on desktop too.
+  *Upstream: deferred; it stays in `ios-ui.js`.*
+- **The References panel and the exclusion lists — probably no gap;
+  check at the next sync.** This entry used to say the open panel keeps a
+  newly-unindexed library's entries until it is reopened. Only the scan's
+  exclusion was measured (services suite); the panel claim was inferred.
+  Upstream traced desktop (2026-09-29): `reloadExcludes()` emits
+  `EV_TREE_CHANGED`, on which `complete/citations.js` drops its cache; the
+  re-index sends `EV_INDEX_SNAPSHOT`; the panel's Library mode redraws on
+  `index-changed` and refetches `BIB_ENTRIES`, which honours
+  `isUnindexed`. The shim runs the same chain — `VAULT_SETTINGS_SET` calls
+  `vault-manager.js#reloadExcludes` (which sends the tree event) and the
+  vendored `Indexer#openVault` (which sends the snapshot through the
+  shim's `send`). Left open: the panel's Note mode listens to neither
+  event, on either side. One simulator check at the next sync settles it.
 - **Canvas-embed scene PDFs.** Upstream still emits a raw
   `<embed type="application/pdf">` inside `.canvas-embed-scene`, relying on
   Chromium's plugin; every other PDF surface went through `pdf-page.html` in
@@ -415,6 +444,7 @@ the golden master than forked here:
   answer to the save relay, since a scene viewer is one frame deeper than
   `pdf-core.js`'s `window.parent` assumption. (The Excalidraw page already
   solves the same problem by posting to `window.top`.)
+  *Upstream: agreed in principle; needs a decision.*
 
 ### Decisions taken on iOS that diverge from desktop
 
