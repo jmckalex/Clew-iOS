@@ -164,9 +164,14 @@ are pushed.
    breaking: the `renderer/main.js` settings-load patch and `ios-ui.js`'s
    Welcome copy (`9b97ff9` — drop both, check for no second Welcome
    tab); the shim's own `dataviewJs` reconfigure (`055d46b`); the
-   history services test can assert order again (`0d17da7`). The full
-   notice and the candidate numbering are in
-   `~/Source/Clew/SYNC-LEDGER.md` (the coordinator's ledger).
+   history services test can assert order again (`0d17da7`). Then
+   `fc2c79f..6c63132` (0.11.1, and `7a0cb6f`: an unused bare Esc in a
+   preview posts `{type:'escape'}` and the canvas disengages the card
+   that sent it) breaks nothing — the `client.js` `ready` anchor and
+   canvas patch 1's anchor are each still unique at `6c63132`
+   (checked). Verify phase: a hardware-keyboard Esc on the iPad leaves an
+   engaged note card. The full notices and the candidate numbering are
+   in `~/Source/Clew/SYNC-LEDGER.md` (the coordinator's ledger).
 5. TestFlight group / external testers / the manual's DNS — unchanged
    from the last handover.
 6. Follow-ups seen, not requested: 44 pt explorer rows (none exist; the
