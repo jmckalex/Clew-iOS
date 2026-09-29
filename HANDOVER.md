@@ -187,9 +187,22 @@ are pushed.
    scenePhase → `flushEditors`; `install-shim.js` visibilitychange) never
    takes a `beginBackgroundTask`, so a slow PDF save may be cut off by
    suspension — measure, and if so wrap the background transition in a
-   background task until the web side reports flushed. The full notices
+   background task until the web side reports flushed. Then
+   `1956d89..c386829` (the two-row live-edit toolbar) touches no anchor,
+   but **`src/ios/styles/ios.css` must change in the same sync**: drop
+   `body.is-ios .editor-toolbar { height: 44px }` (it outranks the new
+   rows × `--toolbar-row` height and clips row 2) and set
+   `--toolbar-row: 44px` instead; button sizes stay ours. The bar drops
+   to one row plus … while `visualViewport.height` <
+   `--toolbar-two-row-min-height` (560 px default, tunable in ios.css) —
+   measure on the simulator: Clew-app expects landscape with the keyboard
+   up (~450 pt) to get one row and portrait to keep two. The full notices
    and the candidate numbering are in `~/Source/Clew/SYNC-LEDGER.md`
    (the coordinator's ledger).
+   **Open branches (unmerged, unpushed):** `fix-bridge-main-frame`
+   (8ceb533, the native bridge answers the app page only — a security
+   fix; the owner decides the release) and `citation-js-worker`
+   (3771169, citations in reading mode).
 5. TestFlight group / external testers / the manual's DNS — unchanged
    from the last handover.
 6. Follow-ups seen, not requested: 44 pt explorer rows (none exist; the
