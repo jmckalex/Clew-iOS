@@ -278,7 +278,14 @@ TestFlight Internal (§4.1). Tests **677 green**.
    (refuse null/http(s) on the POSTs) + ACAO echo for `clew-app://app`
    with `Vary: Origin` on both schemes; random sid (not "s1") + token in
    Swift, to the app page via VAULT_CURRENT; the token self-post in
-   PrintPDF; the shared client half arrives with a sync.
+   PrintPDF; the shared client half arrives with a sync (Clew-boss has
+   suggested to the owner folding the iOS half into the next sync).
+   **Owner's decision (2026-09-29):** no desktop measurement of
+   null-origin reads; desktop closes that gap by design, moving its app
+   page to its own `clew-app://` origin (option (c)). That becomes the
+   first section of the frame-bridge design, worked out with iOS next —
+   bring what `clew-app://` taught here: CSP, the storage origin, print,
+   the navigation guards (`WebHost.swift` decidePolicyFor).
 6. TestFlight group / external testers / the manual's DNS — unchanged
    from the last handover.
 7. Follow-ups seen, not requested: 44 pt explorer rows (none exist; the
