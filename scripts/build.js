@@ -10,6 +10,7 @@ import { build } from 'esbuild';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ENGINE_CSL_FILES } from '../src/shim/engine-config.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const dist = path.join(root, 'dist');
@@ -550,6 +551,9 @@ export function stageStatic() {
 		'clew-template.html': 'vendor/clew/engine/clew-template.html',
 	})) {
 		copy(path.join(root, source), path.join(webroot, 'engine', name));
+	}
+	for (const name of ENGINE_CSL_FILES) {
+		copy(path.join(root, 'vendor', 'jmarkdown', 'src', 'csl', name), path.join(webroot, 'engine', 'csl', name));
 	}
 	copy(path.join(dist, 'engine-worker.js'), path.join(webroot, 'engine-worker.js'));
 	// Preview iframe assets, laid out like the desktop packaged app

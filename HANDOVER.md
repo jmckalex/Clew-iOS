@@ -59,9 +59,8 @@ are pushed.
   Biblify needs `citation-js` via `createRequire`, which the worker
   refuses — `\cite{}` renders empty, a `\fullcite{}` preview is blank).
   The live-mode chips, the References panel, Insert and completion work
-  (they read the `.bib` files directly). Follow-up: bundle citation-js
-  into the worker through the require registry, as highlight.js is
-  (README known gaps).
+  (they read the `.bib` files directly). **Fixed on branch
+  `citation-js-worker`** (§4.2).
 - **mp-tikz-wasm 0.3.0 is pinned** (this session, after the sync): the
   library session published v0.3.0 (the `opentype` bundle, plain-LuaTeX,
   `fonts: 'woff2'`; engines unchanged from 0.2.1), the Clew-app session
@@ -137,10 +136,18 @@ are pushed.
    stylesheets, the opentype bundle). Then the device pass (§3), which
    now includes the fontnote check: the Diagrams note's last two figures
    and a 12pt document.
-2. **citation-js in the worker** (§1, README): the one feature-shaped
-   follow-up this sync surfaced. Bundle it through
-   `src/worker/shims/require-registry.js`; measure the bundle size
-   (citation-js + `@citation-js/plugin-csl` + the engine's CSL files).
+2. **citation-js in the worker — DONE on branch `citation-js-worker`,
+   unmerged, unpushed.** The require registry carries `@citation-js/core`
+   + the BibTeX and CSL plugins (+694 KB minified / +168 KB gzip on a
+   2.99 MB worker; the umbrella package would be +1.9 MB, 1.1 MB of it
+   Wikidata tables Biblify never touches — output identical in all 8
+   named styles on the demo `refs.bib`). The engine's five CSL files are
+   staged to `/engine/csl/` (`ENGINE_CSL_FILES`). Worker spawn→ready
+   on the simulator ~157 → ~191 ms, paid by the pre-spawned standby.
+   Eager, not lazy: see the commit message. Simulator: all six cites and
+   the Chicago bibliography in `Features/Citations.md` render in reading
+   mode; live chips unchanged; a live block frame resolves cites when the
+   vault has a bibliography. Needs its device check with the next build.
 3. **Device pass of §3**, plus the fontnote device check (the Diagrams
    note's last two figures, a 12pt document) on the first cloud build.
 4. Upstream candidates are in PORT-PLAN, now with Clew-app's verdicts
@@ -272,9 +279,11 @@ are pushed.
 - **Block frames from the app page**: `fetch('clew-preview://vault/s1/
   __clew_block__', {method: 'POST', body: JSON.stringify({text,
   sourcePath})})` → `{hash}`; GET `…/__clew_block__/<hash>` → the
-  document (text/html, `data-clew-block="1"`). Biblify formats citations
-  client-side, so a fetched document's citation spans are empty — read
-  them from the loaded frame (the vault probe), not from the HTML.
+  document (text/html, `data-clew-block="1"`). Citations are formatted
+  at compile time, so the fetched HTML carries them — when the vault has
+  a bibliography. A block never sees its note's `Bibliography:` header
+  (a block renders from its own text, desktop too), so a header-only
+  bibliography leaves a block's cites unresolved.
 - **Sequencing**: Quick Look covering the app detaches the web view's
   window — a print issued while the sheet is up fails ("no window to
   print from"). Print first, or last with nothing covering the app.

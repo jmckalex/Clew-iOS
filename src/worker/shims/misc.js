@@ -116,10 +116,9 @@ export const fork = noProcesses('child_process.fork');
 // ---- module ---------------------------------------------------------------
 
 // createRequire: script blocks and biblify use require() for optional CJS
-// modules. Nothing on disk is requirable in the worker (biblify catches the
-// throw and degrades to unstyled citations; bundling citation-js is a
-// follow-up) — except what shims/require-registry.js maps onto modules the
-// bundle already carries (highlight.js, for figures.js's MetaPost grammar).
+// modules. Nothing on disk is requirable in the worker — except what
+// shims/require-registry.js maps onto modules the bundle already carries
+// (highlight.js for figures.js's MetaPost grammar, citation-js for biblify).
 export function createRequire() {
 	const require = (id) => {
 		const hit = globalThis.__jmdRequireRegistry?.[id];

@@ -64,13 +64,7 @@ xcrun simctl spawn booted log stream --predicate 'eventMessage CONTAINS "CLEWJS"
 
 Mathematica blocks (wolframscript), the LaTeX export and its PDF (the
 reading-view PDF works), site export, the shell panel (no PTY on iOS —
-stubbed, its command dropped), **formatted citations and bibliographies
-in reading mode** (the engine's Biblify needs `citation-js` through
-`createRequire`, which the render worker refuses — `\cite{}` renders
-empty and a `\fullcite{}` preview is blank; the live-mode chips, the
-References panel and citation completion work, since they read the
-`.bib` files directly; bundling citation-js into the worker through the
-require registry, as highlight.js is, is the follow-up),
+stubbed, its command dropped),
 the ZetaOffice runtime (office documents open read-only in Quick Look,
 and embeds show Quick Look thumbnails; editing them needs the desktop
 app), kanban drag on touch, touch-only file move (drag-to-move is

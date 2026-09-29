@@ -9,7 +9,7 @@
 // single result, while the replacement warms in the background.
 import { vfs } from '../worker/shims/vfs.js';
 import { VAULT_ROOT, GLOBAL_PLUGINS_ROOT } from './vault-manager.js';
-import { engineConfig, engineEnv, isTextPath } from './engine-config.js';
+import { engineConfig, engineEnv, isTextPath, ENGINE_CSL_FILES } from './engine-config.js';
 import { engineExtensionEntries } from '../../vendor/clew/main/plugins.js';
 import { isDependentFragment } from '../../vendor/clew/shared/fragment-deps.js';
 import { settings } from './settings.js';
@@ -88,6 +88,7 @@ export class RenderService {
 				const names = [
 					'default-template.html.mustache', 'default-template.tex.mustache',
 					'Biblify.js.mustache', 'jmarkdown.css', 'clew-template.html',
+					...ENGINE_CSL_FILES.map((name) => `csl/${name}`),
 				];
 				const texts = await Promise.all(names.map((n) => this.assetLoader(n)));
 				this.#assets = Object.fromEntries(names.map((n, i) => [`/engine/${n}`, texts[i]]));

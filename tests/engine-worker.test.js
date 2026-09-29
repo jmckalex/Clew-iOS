@@ -43,6 +43,27 @@ test('dialect: /italics/, *strong*, **intense**, ==highlight== render', () => {
 	assert.ok(html.includes('e^{i\\pi}+1=0'));
 });
 
+test('citations: citation-js resolves \\cite forms and the bibliography (chicago, from the note header)', () => {
+	// Before citation-js was in the worker's require registry, every cite
+	// rendered as an empty <span> and the bibliography as an empty <div>.
+	const html = flat(render('Features/Citations.md'));
+	assert.match(html, /A plain citation <span[^>]*>Lewis \(1969\)<\/span>/);
+	assert.match(html, /<span[^>]*>\(Skyrms 1996\)<\/span>/);
+	assert.match(html, /<span[^>]*>\(Maynard Smith and Price 1973, p\. ?17\)<\/span>/);
+	// chicago is one of the engine's five bundled CSL files (/engine/csl/).
+	assert.match(html, /class="csl-bib-body biblify-chicago-template"/);
+	assert.match(html, /class="csl-entry">Lewis, David\. 1969\. <i>Convention: A Philosophical Study<\/i>/);
+	assert.ok(!html.includes('<span class="biblify-cite" data-cite-cmd="\\cite{lewis1969}"></span>'), 'no unresolved placeholder');
+});
+
+test('citations: a vault-wide bibliography in a bundled CSL style (ajp)', () => {
+	const html = flat(render('Projects/Dialect Demo.md',
+		'--vault-options', JSON.stringify({ bibliography: 'Features/refs.bib', bibliographyStyle: 'ajp' })));
+	assert.match(html, /<span[^>]*data-bibtex="alexander2023"[^>]*>Alexander \(2023\)<\/span>/);
+	assert.match(html, /class="csl-bib-body biblify-ajp-template"/);
+	assert.match(html, /class="csl-entry">Alexander, J McKenzie \(2023\) <i>The Open Society as an Enemy<\/i>/);
+});
+
 test('query fences scan the vault at render time', () => {
 	const html = render('Features/Queries.md');
 	assert.match(html, /clew-query/);
