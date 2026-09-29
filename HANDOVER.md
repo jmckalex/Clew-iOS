@@ -432,7 +432,17 @@ pdf-page.js bundles; hook names kept, `__clewPdfTouch`): it retires the
 pdf-core handle patch and the `pdf-touch.js` appends into client.js and
 pdf-page.js. `pdf-scene-embeds.js` and `embed-scroll.js` stay ours — but
 upstream's item 15 (canvas scene PDFs, coming) will change the scene
-relay's ground. The next sync's range starts at `84f975e`. The manual
+relay's ground — and it did: Clew-app `71180c6` (local) routes canvas-scene
+PDFs through upstream's pdf-page.html (pdf-core posts saves and dirty
+reports to `window.top`; pdf-frames finds a dirty viewer at any depth and
+asks it to flush; pdf-page answers the app page as well as its parent;
+every sender stays on the preview origin, inside 2e45098's checks). It
+RETIRES `src/preview/pdf-scene-embeds.js` whole, relay and tonight's guard
+with it. At the sync, verify on WebKit that a scene viewer two frames deep
+saves AND flushes (desktop's measure: pdf-scene-scenario), and that
+nothing else of ours relays PDF messages. It also touches
+`clew-preview-view.js`, where our rebuild patch lives until f1816ae
+retires it. The next sync's range starts at `84f975e`. The manual
 now describes the pen convention (Clew-docs d215c8d); an "On iPad"
 sentence there must be measured first and go via Clew-boss.
 `patched()` throws on a missed anchor, so a stale patch fails the build
