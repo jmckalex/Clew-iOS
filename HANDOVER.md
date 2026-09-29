@@ -170,8 +170,26 @@ are pushed.
    that sent it) breaks nothing — the `client.js` `ready` anchor and
    canvas patch 1's anchor are each still unique at `6c63132`
    (checked). Verify phase: a hardware-keyboard Esc on the iPad leaves an
-   engaged note card. The full notices and the candidate numbering are
-   in `~/Source/Clew/SYNC-LEDGER.md` (the coordinator's ledger).
+   engaged note card. Then `6c63132..1956d89` (`1956d89`: PDF
+   annotations survive their viewer going — viewers report `pdf-dirty`
+   and save on `pdf-flush`; the new `renderer/pdf-frames.js#retire`
+   keeps an outgoing view `display:none` until clean, 10 s cap, used by
+   the tab-group body swap, the live frame layer and canvas card
+   removal; `pdf-embed.js#holdIfUnsaved`; a 3 s close guard; a window
+   close handshake in `office-dock.js`) breaks nothing — the `pdf-core`
+   "Spike instrumentation", `client.js` `ready`, `builtin.js`
+   `shell:toggle` and canvas patch 1 anchors are each still unique at
+   `1956d89` (checked). Verify phase, on WebKit: (a) a `display:none`
+   iframe stays loaded AND keeps running timers/wasm, so the retire path
+   can finish a save (tab switch, embed switch, live frame, canvas card);
+   (b) backgrounding mid-annotation saves. Suspected gap for (b): iOS has
+   no window-close handshake, and the Swift side (`ClewApp.swift`
+   scenePhase → `flushEditors`; `install-shim.js` visibilitychange) never
+   takes a `beginBackgroundTask`, so a slow PDF save may be cut off by
+   suspension — measure, and if so wrap the background transition in a
+   background task until the web side reports flushed. The full notices
+   and the candidate numbering are in `~/Source/Clew/SYNC-LEDGER.md`
+   (the coordinator's ledger).
 5. TestFlight group / external testers / the manual's DNS — unchanged
    from the last handover.
 6. Follow-ups seen, not requested: 44 pt explorer rows (none exist; the
