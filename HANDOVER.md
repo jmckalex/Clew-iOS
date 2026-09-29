@@ -263,11 +263,22 @@ TestFlight Internal (§4.1). Tests **677 green**.
    EmbedPDF, Excalidraw, canvas scene, MathJax, media, charts, live
    block frames) and blocked every null-frame read — but a null frame's
    POST still ran the engine (CORS blocks the reader, not the request),
-   so the token check is needed here too. iOS's position sent to
-   Clew-app: deliver the token by handshake (host → the frame that said
-   'ready'), not in the served HTML; no `Content-Type: application/json`
-   on the render POSTs (it forces an OPTIONS preflight the handler does
-   not answer); sid + token random per vault open.
+   so the token check is needed here too. **AGREED with Clew-app
+   (2026-09-29; `Clew-app/docs/dev/frame-bridge.md` §1):** never in the
+   served HTML — a client asks its parent lazily on its first POST
+   (retrying ~1 s, bounded, failing visibly: WebKit's stale-proxy bug
+   drops postMessage), the app page answers only its own child frames
+   (`event.origin === 'clew-preview://vault'`,
+   `event.source.parent === window`; targetOrigin
+   `clew-preview://vault`), nested cards relay by the same rule, a
+   top-level document (iOS: the Export-as-PDF view) gets a self-post;
+   JSON body `{token, text, sourcePath}` with NO Content-Type; 403 before
+   the engine; sid + token random per vault open. **iOS work, awaiting
+   the owner's approval:** SchemeHandler token check + Origin layer
+   (refuse null/http(s) on the POSTs) + ACAO echo for `clew-app://app`
+   with `Vary: Origin` on both schemes; random sid (not "s1") + token in
+   Swift, to the app page via VAULT_CURRENT; the token self-post in
+   PrintPDF; the shared client half arrives with a sync.
 6. TestFlight group / external testers / the manual's DNS — unchanged
    from the last handover.
 7. Follow-ups seen, not requested: 44 pt explorer rows (none exist; the
