@@ -60,8 +60,14 @@ final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 
 		case "vaultOpen":
 			guard let path = params["path"] as? String else { throw ClewError.badPayload }
+			// Every opening is a new session (a random sid and caller token),
+			// minted here on the main thread, where the scheme handler reads
+			// them. The reply is the only way out: the bridge answers the app
+			// page alone.
+			vaults.newSession()
+			let session: [String: Any] = ["sessionId": vaults.sessionId, "callerToken": vaults.callerToken]
 			// The snapshot reads every text file — off the main thread.
-			performIO(reply) { try self.vaults.openVault(path: path) }
+			performIO(reply) { try self.vaults.openVault(path: path).merging(session) { _, minted in minted } }
 
 		case "write":
 			guard let rel = params["rel"] as? String, let text = params["text"] as? String else {
@@ -139,7 +145,7 @@ final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 				return reply(nil, "no window to print from")
 			}
 			let request = PdfPrinter.Request(url: url, paperSize: params["paperSize"] as? String ?? "a4",
-				armScript: arm, readyProbe: probe, lightThemeScript: lightTheme)
+				armScript: arm, readyProbe: probe, lightThemeScript: lightTheme, callerToken: vaults.callerToken)
 			printer.print(request, schemeHandler: handler, in: window) { result in
 				switch result {
 				case .success(let data):

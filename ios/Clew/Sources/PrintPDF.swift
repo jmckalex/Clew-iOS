@@ -21,6 +21,9 @@ final class PdfPrinter: NSObject, WKNavigationDelegate {
 		let armScript: String
 		let readyProbe: String
 		let lightThemeScript: String
+		/// The session's caller token, for the document's render POSTs (a
+		/// canvas scene's cards): a top-level document has no host to ask.
+		let callerToken: String
 	}
 
 	/// PostScript points: the sizes upstream's printToPDF names.
@@ -77,7 +80,13 @@ final class PdfPrinter: NSObject, WKNavigationDelegate {
 		guard let request else { return finish(.failure(ClewError.printFailed("no request"))) }
 		webView.evaluateJavaScript(request.armScript) { _, _ in
 			webView.evaluateJavaScript(request.lightThemeScript) { _, _ in
-				self.poll()
+				// §1's self-post (Clew-app frame-bridge.md): at the top level
+				// `window.parent` is the document itself, which is the only
+				// sender its client believes. Hex only, so nothing to escape.
+				let token = request.callerToken.allSatisfy(\.isHexDigit) ? request.callerToken : ""
+				webView.evaluateJavaScript("window.postMessage({ source: 'clew-preview-host', type: 'caller-token', token: '\(token)' }, 'clew-preview://vault')") { _, _ in
+					self.poll()
+				}
 			}
 		}
 	}

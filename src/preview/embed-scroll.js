@@ -25,6 +25,9 @@ let clewEmbedScrollArmed = false;
 window.addEventListener('message', (event) => {
 	const msg = event.data;
 	if (!msg || msg.source !== 'clew-ios' || msg.type !== 'canvas-embed') return;
+	// Host messages come from the host: this document's parent (upstream's
+	// rule for preview documents, shared/message-guard.js).
+	if (event.source !== window.parent) return;
 	if (clewEmbedScrollArmed) return;
 	clewEmbedScrollArmed = true;
 	const style = document.createElement('style');

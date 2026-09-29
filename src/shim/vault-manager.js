@@ -47,6 +47,8 @@ export class VaultManager {
 	/** Real on-device path of the global plugin folder (bridge-side), or null. */
 	globalPluginsPath = null;
 	sessionId = null;
+	/** The session's caller token (Clew-app session.js); never in `info`. */
+	callerToken = null;
 	/** @type {(channel: string, payload: any) => void} */
 	send = () => {};
 	hooks = {};
@@ -74,13 +76,27 @@ export class VaultManager {
 			: null;
 	}
 
+	/** `info` plus the caller token: what the app page may be told about its
+	 *  own vault (upstream vault.js#ownInfo) — the vault-opened event and
+	 *  VAULT_CURRENT. The renderer's showVault takes the token off before any
+	 *  store sees the vault. */
+	get ownInfo() {
+		const info = this.info;
+		return info && this.callerToken ? { ...info, callerToken: this.callerToken } : info;
+	}
+
 	// ---- opening ----------------------------------------------------------
 
 	async open(vaultPath) {
 		this.close();
-		const { name, path: realPath, files, globalPlugins } = await bridgeCall('vaultOpen', { path: vaultPath });
+		const { name, path: realPath, files, globalPlugins, sessionId, callerToken } = await bridgeCall('vaultOpen', { path: vaultPath });
 		this.realPath = realPath;
 		this.name = name;
+		// Minted natively per opening: preview URLs carry the sid, and the
+		// render POSTs the token (SchemeHandler.swift checks both).
+		this.sessionId = sessionId ?? null;
+		this.callerToken = callerToken ?? null;
+		this.hooks.onSession?.(this.sessionId);
 		vfs.mkdir(VAULT_ROOT);
 		for (const [rel, entry] of Object.entries(files)) {
 			vfs.patch(`${VAULT_ROOT}/${rel}`, entry.text ?? '', entry.mtimeMs);
@@ -150,7 +166,7 @@ export class VaultManager {
 		};
 		settings.rememberVault(realPath);
 		this.hooks.onOpen?.(VAULT_ROOT);
-		this.send('clew:ev-vault-opened', { vault: this.info, tree: this.tree() });
+		this.send('clew:ev-vault-opened', { vault: this.ownInfo, tree: this.tree() });
 		return this.info;
 	}
 
@@ -162,6 +178,8 @@ export class VaultManager {
 		this.realPath = null;
 		this.name = null;
 		this.globalPluginsPath = null;
+		this.sessionId = null;
+		this.callerToken = null;
 		this.excludes = compileExcludes({});
 	}
 

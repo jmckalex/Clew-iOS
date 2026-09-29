@@ -45,6 +45,9 @@ const writeAtomic = (abs, data) => {
 	fs.renameSync(temp, abs);
 };
 
+// The session the fake native side minted last (sid + caller token).
+let fakeOpens = 0;
+let fakeSession = null;
 const fakeBridge = {
 	calls: [],
 	async call(method, params) {
@@ -52,7 +55,10 @@ const fakeBridge = {
 		switch (method) {
 			case 'vaultBootstrap': return { path: vaultDir };
 			case 'vaultOpen':
+				// A new session per opening, as VaultStore.swift#newSession.
+				fakeSession = { sessionId: `s${(++fakeOpens).toString(16).padStart(32, '0')}`, callerToken: 'ab'.repeat(32) };
 				return {
+					...fakeSession,
 					name: path.basename(params.path), path: params.path, files: listFiles(params.path),
 					...(globalDir && fs.existsSync(globalDir)
 						? { globalPlugins: { path: globalDir, files: listFiles(globalDir) } } : {}),
@@ -225,7 +231,24 @@ before(async () => {
 test('vault auto-opens through the bridge and reports info', async () => {
 	const vault = await clew.invoke(CH.VAULT_CURRENT);
 	assert.equal(vault.name, path.basename(vaultDir));
-	assert.equal(vault.sessionId, 's1');
+	assert.equal(vault.sessionId, fakeSession.sessionId, 'the sid the native side minted');
+});
+
+test('caller token: VAULT_CURRENT and the vault-opened event carry it; the open handlers\' answers and `info` do not', async () => {
+	const current = await clew.invoke(CH.VAULT_CURRENT);
+	assert.equal(current.callerToken, fakeSession.callerToken, 'the app page\'s own vault, token included');
+	let opened = null;
+	const off = clew.on('clew:ev-vault-opened', (payload) => { opened = payload; });
+	const answer = await clew.invoke('clew:vault-open-path', { path: vaultDir });
+	await new Promise((r) => setTimeout(r, 10));
+	off?.();
+	assert.ok(opened, 'the vault-opened event fired');
+	assert.equal(opened.vault.callerToken, fakeSession.callerToken, 'an in-app vault switch hands the renderer the NEW token');
+	assert.equal(opened.vault.sessionId, fakeSession.sessionId, 'and the new sid');
+	assert.equal(answer?.callerToken, undefined, 'the open handler answers with info, never the token');
+	assert.equal(services.vaults.info.callerToken, undefined, '`info` never holds it');
+	assert.equal(native.sessionId, fakeSession.sessionId, '__clewNative.sessionId follows the session');
+	assert.equal(services.renderService.sessionId, fakeSession.sessionId, 'the render service writes the new sid into preview URLs');
 });
 
 test('tree walks the mirror (folders first, alphabetical)', async () => {
@@ -579,7 +602,7 @@ test('export as PDF (reading view): the bridge prints this session\'s own previe
 	assert.deepEqual(result, { shared: true });
 	const [, params] = fakeBridge.calls.slice(mark).find(([m]) => m === 'printPdf') ?? [];
 	assert.ok(params, 'the bridge was asked to print');
-	assert.equal(params.url, 'clew-preview://vault/s1/Guide/Links%20and%20Embeds.md.html', 'the same document the reading pane shows');
+	assert.equal(params.url, `clew-preview://vault/${fakeSession.sessionId}/Guide/Links%20and%20Embeds.md.html`, 'the same document the reading pane shows, under this session\'s sid');
 	assert.equal(params.name, 'Links and Embeds.pdf');
 	assert.equal(params.paperSize, 'letter', 'the printPaperSize setting, as upstream');
 	assert.match(params.arm, /__clewPrintReady = true/, 'upstream\'s arm script');

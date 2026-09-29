@@ -188,6 +188,7 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 			// folder (port of protocol.js).
 			let parts = rel.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
 			guard parts.count >= 4 else { return fail(task, "bad plugin file path", status: 404) }
+			guard isCurrentSession(parts[1]) else { return fail(task, "Not found", status: 404) }
 			let id = parts[2]
 			guard let plugin = enabledPlugins().first(where: { $0.id == id && $0.scope == "global" }) else {
 				return fail(task, "not an enabled global plugin", status: 403)
@@ -199,24 +200,29 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 			return respondFile(task, fileURL: file, rangeHeader: nil)
 		}
 
-		// Everything else: /<sid>/<vault path>.
+		// Everything else: /<sid>/<vault path> — THIS session's sid only (a
+		// random one per vault open), so a frame not handed a URL cannot
+		// build one (Clew-app b561983).
 		guard let slash = rel.firstIndex(of: "/") else { return fail(task, "no session segment") }
+		guard isCurrentSession(String(rel[..<slash])) else { return fail(task, "Not found", status: 404) }
 		let vaultRel = String(rel[rel.index(after: slash)...])
 		guard !vaultRel.isEmpty else { return fail(task, "empty path") }
 
-		// Both POST routes refuse an http(s) Origin (a canvas web node, say):
-		// the callers are the app page and clew-preview documents, whose
-		// origins are custom schemes. Port of protocol.js's guard, on both
-		// routes for parity (upstream has it on the block route only).
-		if task.request.httpMethod == "POST",
-			let origin = task.request.value(forHTTPHeaderField: "Origin"),
-			origin.range(of: #"^https?:"#, options: [.regularExpression, .caseInsensitive]) != nil {
-			return fail(task, "Forbidden", status: 403)
+		// The render POSTs, in two layers. iOS's own first: WebKit delivers a
+		// real Origin — the app page sends clew-app://app, a same-origin
+		// preview document none, a sandboxed frame "null" (measured) — so
+		// anything but those is refused outright. Then the rule both
+		// platforms share: the session's caller token (readRenderBody).
+		if task.request.httpMethod == "POST" {
+			if let origin = task.request.value(forHTTPHeaderField: "Origin"),
+				!Self.renderOrigins.contains(origin) {
+				return fail(task, "Forbidden", status: 403)
+			}
 		}
 
 		if vaultRel == "__clew_fragment__", task.request.httpMethod == "POST" {
-			let text = task.request.httpBody.flatMap { String(data: $0, encoding: .utf8) } ?? ""
-			return renderFragment(task, markdown: text)
+			guard let body = readRenderBody(task) else { return }
+			return renderFragment(task, markdown: body.text)
 		}
 
 		// Live edit's block frames (docs/dev/live-edit.md §7.2, protocol.js).
@@ -227,14 +233,8 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 		// reports its size instead of its scroll. Same size limit as
 		// fragments; an evicted hash is a 404 and the frame layer POSTs again.
 		if vaultRel == "__clew_block__", task.request.httpMethod == "POST" {
-			let body = task.request.httpBody ?? Data()
-			guard body.count <= 100_000 else { return fail(task, "Too large", status: 413) }
-			guard let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
-				let text = json["text"] as? String else {
-				return fail(task, "Bad request", status: 400)
-			}
-			let sourcePath = json["sourcePath"] as? String
-			return renderBlock(task, text: text, sourcePath: sourcePath)
+			guard let body = readRenderBody(task) else { return }
+			return renderBlock(task, text: body.text, sourcePath: body.sourcePath)
 		}
 		if vaultRel.hasPrefix("__clew_block__/"), task.request.httpMethod == "GET" {
 			let hash = String(vaultRel.dropFirst("__clew_block__/".count))
@@ -283,8 +283,55 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 		}
 	}
 
+	// MARK: - The caller token
+
+	/// The Origins a render POST may carry (none at all is fine too).
+	private static let renderOrigins: Set<String> = ["clew-app://app", "clew-preview://vault"]
+
+	private func isCurrentSession(_ sid: String) -> Bool {
+		!vaults.sessionId.isEmpty && sid == vaults.sessionId
+	}
+
+	/// Port of Clew-app main/caller-token.js#readRenderBody, in its order:
+	/// over 100,000 characters (UTF-16, as JavaScript counts) → 413; not JSON,
+	/// or not an object → 400; the token does not match → 403, compared in
+	/// constant time; `text` not a string, or `sourcePath` neither null nor
+	/// a string → 400. The body is JSON whatever its Content-Type (callers
+	/// send none: a JSON type would make the request non-simple, and a
+	/// preflight is an OPTIONS request this handler does not answer).
+	/// Fails the task and returns nil when refused.
+	private func readRenderBody(_ task: WKURLSchemeTask) -> (text: String, sourcePath: String?)? {
+		// Decoded as desktop reads it: text, invalid bytes replaced.
+		let body = String(decoding: task.request.httpBody ?? Data(), as: UTF8.self)
+		guard body.utf16.count <= 100_000 else { fail(task, "Too large", status: 413); return nil }
+		let parsed = try? JSONSerialization.jsonObject(with: Data(body.utf8), options: [.fragmentsAllowed])
+		// JavaScript's `typeof x === 'object'` holds for arrays too: an array
+		// has no token, so it is refused as desktop refuses it — 403.
+		if parsed is [Any] { fail(task, "Forbidden", status: 403); return nil }
+		guard let object = parsed as? [String: Any] else { fail(task, "Bad request", status: 400); return nil }
+		guard Self.tokenMatches(vaults.callerToken, object["token"] as? String) else {
+			fail(task, "Forbidden", status: 403)
+			return nil
+		}
+		guard let text = object["text"] as? String else { fail(task, "Bad request", status: 400); return nil }
+		switch object["sourcePath"] {
+		case nil, is NSNull: return (text, nil)
+		case let path as String: return (text, path)
+		default: fail(task, "Bad request", status: 400); return nil
+		}
+	}
+
+	/// Constant-time: a wrong token takes as long to refuse as a nearly right one.
+	private static func tokenMatches(_ expected: String, _ given: String?) -> Bool {
+		guard !expected.isEmpty, let given else { return false }
+		let a = Array(expected.utf8), b = Array(given.utf8)
+		guard a.count == b.count else { return false }
+		var diff: UInt8 = 0
+		for i in 0..<a.count { diff |= a[i] ^ b[i] }
+		return diff == 0
+	}
+
 	private func renderFragment(_ task: WKURLSchemeTask, markdown: String) {
-		guard markdown.count <= 100_000 else { return fail(task, "too large", status: 413) }
 		callNative("return await window.__clewNative.renderFragment(text);", args: ["text": markdown]) { [weak self] result in
 			guard let self, !self.isStopped(task) else { return }
 			switch result {
@@ -449,7 +496,11 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 		var headers = [
 			"Content-Type": mime,
 			"Cache-Control": "no-store",
-			"Access-Control-Allow-Origin": "*",
+			// Cross-origin reads for the app page alone (agreed with Clew-app,
+			// frame-bridge.md §2.6; measured: every consumer still works, and a
+			// sandboxed frame reads nothing). Same-origin preview reads need
+			// none; a constant, so no Vary.
+			"Access-Control-Allow-Origin": "clew-app://app",
 			"Accept-Ranges": "bytes",
 		]
 		for (key, value) in extra { headers[key] = value }

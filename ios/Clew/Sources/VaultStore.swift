@@ -17,6 +17,7 @@
 // placeholders) is requested and awaited for text files at snapshot time,
 // and materialized on demand when the scheme handler serves binaries.
 import Foundation
+import Security
 
 final class VaultStore {
 	/// Absolute path of the currently open vault (set by vaultOpen).
@@ -27,6 +28,29 @@ final class VaultStore {
 	private var activeScopedURL: URL?
 
 	let ioQueue = DispatchQueue(label: "org.jmckalex.clew.vault-io", qos: .userInitiated)
+
+	// MARK: - The session (Clew-app main/session.js, main/caller-token.js)
+
+	/// The preview URLs' `/<sid>/` segment, random so a frame not handed a
+	/// URL cannot build one; empty until the first vault opens.
+	private(set) var sessionId = ""
+	/// The render POSTs' caller token: 32 random bytes, hex. Memory only —
+	/// never persisted, logged, or put in a URL; the app page receives it
+	/// through the bridge (main frame only), and hands it to its own frames.
+	private(set) var callerToken = ""
+
+	/// A new session for a vault opening: the old vault's preview URLs and
+	/// token die with it. Main thread (the scheme handler reads both there).
+	func newSession() {
+		sessionId = "s" + Self.randomHex(16)
+		callerToken = Self.randomHex(32)
+	}
+
+	private static func randomHex(_ count: Int) -> String {
+		var bytes = [UInt8](repeating: 0, count: count)
+		precondition(SecRandomCopyBytes(kSecRandomDefault, count, &bytes) == errSecSuccess, "no randomness")
+		return bytes.map { String(format: "%02x", $0) }.joined()
+	}
 
 	static let textExtensions: Set<String> = [
 		"md", "jmd", "bib", "canvas", "json", "css", "js", "mjs", "txt", "csl",

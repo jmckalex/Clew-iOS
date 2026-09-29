@@ -22,8 +22,6 @@ import { settings } from './settings.js';
 import { bridgeCall, toBase64 } from './native-bridge.js';
 import { ARM_SCRIPT, READY_PROBE, LIGHT_THEME_SCRIPT, PAPER_SIZES } from './print-pdf.js';
 
-const SESSION_ID = 's1';
-
 /**
  * Where an entry's BibTeX `file` field points (upstream ipc.js, verbatim
  * over the mirror): relative to its .bib's folder first, then the vault
@@ -62,10 +60,8 @@ export function createClewShim({ workerFactory, assetLoader } = {}) {
 
 	// ---- services (one session, wired like main/session.js) --------------
 	const vaults = new VaultManager();
-	vaults.sessionId = SESSION_ID;
 	const indexer = new Indexer();
 	const renderService = new RenderService({ workerFactory, assetLoader });
-	renderService.sessionId = SESSION_ID;
 	const kvStore = new KvStore();
 	const searchService = new SearchService({ vaults, indexer });
 
@@ -87,6 +83,9 @@ export function createClewShim({ workerFactory, assetLoader } = {}) {
 	kvStore.send = send;
 
 	vaults.hooks = {
+		// A random sid per vault opening (minted natively, VaultStore.swift):
+		// every preview URL the render service writes carries it.
+		onSession: (sid) => { renderService.sessionId = sid; },
 		onOpen: (root) => {
 			renderService.openVault(root);
 			// The vault's exclusion lists (vault-excludes.js): what is
@@ -177,11 +176,14 @@ export function createClewShim({ workerFactory, assetLoader } = {}) {
 			if (!demo?.path) return null;
 			return openVault(demo.path);
 		},
+		// The app page's own vault, token included (upstream ipc.js answers
+		// with vaults.ownInfo); the open handlers' answers never carry it.
 		[CH.VAULT_CURRENT]: async () => {
-			if (vaults.isOpen) return vaults.info;
+			if (vaults.isOpen) return vaults.ownInfo;
 			const boot = await bridgeCall('vaultBootstrap');
 			if (!boot?.path) return null;
-			return openVault(boot.path, { silent: true });
+			await openVault(boot.path, { silent: true });
+			return vaults.ownInfo;
 		},
 		[CH.VAULT_RECENT]: () => settings.get('recentVaults'),
 		[CH.VAULT_TREE]: () => vaults.tree(),
@@ -513,7 +515,7 @@ export function createClewShim({ workerFactory, assetLoader } = {}) {
 				const encoded = path.split('/').map(encodeURIComponent).join('/');
 				const paper = String(settings.get('printPaperSize') ?? 'a4').toLowerCase();
 				await bridgeCall('printPdf', {
-					url: `clew-preview://vault/${encodeURIComponent(SESSION_ID)}/${encoded}.html`,
+					url: `clew-preview://vault/${encodeURIComponent(vaults.sessionId)}/${encoded}.html`,
 					name: `${base}.pdf`,
 					paperSize: PAPER_SIZES.includes(paper) ? paper : 'a4',
 					arm: ARM_SCRIPT,
@@ -585,10 +587,10 @@ export function createClewShim({ workerFactory, assetLoader } = {}) {
 		blockDocument: (key) => renderService.blockDocument(key) ?? null,
 		externalDiff: (diff) => vaults.applyExternalDiff(diff),
 		flush: () => vaults.flush(),
-		sessionId: SESSION_ID,
+		get sessionId() { return vaults.sessionId; },
 	};
 
 	return { clew, native, send, services: { vaults, indexer, renderService, kvStore, searchService, settings } };
 }
 
-export { CH, SESSION_ID, VAULT_ROOT, toBase64 };
+export { CH, VAULT_ROOT, toBase64 };
