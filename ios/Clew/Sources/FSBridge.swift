@@ -17,6 +17,16 @@ final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 
 	func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage,
 		replyHandler: @escaping (Any?, String?) -> Void) {
+		// Only the app page may call the bridge. WebKit defines
+		// window.webkit.messageHandlers.clew in EVERY frame — the note
+		// previews, and any iframe a note embeds, sandboxed or remote — so
+		// without this guard an embedded page could write, trash or open
+		// anything (measured: a sandbox="allow-scripts" srcdoc frame inside a
+		// note got replies). Desktop's preload only reaches the main frame.
+		guard message.frameInfo.isMainFrame,
+			message.frameInfo.securityOrigin.protocol == "clew-app" else {
+			return replyHandler(nil, "the bridge answers the app page only")
+		}
 		guard let body = message.body as? [String: Any],
 			let method = body["method"] as? String else {
 			return replyHandler(nil, "malformed bridge call")
