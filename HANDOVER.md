@@ -280,6 +280,35 @@ TestFlight Internal (§4.1). Tests **677 green**.
    Swift, to the app page via VAULT_CURRENT; the token self-post in
    PrintPDF; the shared client half arrives with a sync (Clew-boss has
    suggested to the owner folding the iOS half into the next sync).
+   **Desktop built it: Clew-app `6cbe0d8`.** ⚠ Its shared files change
+   behaviour — syncing them WITHOUT the native half breaks canvas cards
+   and block frames on iOS, so the iOS half is part of that sync. The
+   shapes to match (from Clew-app, exact):
+   (1) VAULT_CURRENT's vault object carries `callerToken` (64 hex)
+   beside `sessionId` (`showVault` strips it before vaultStore) — the
+   shim's VAULT_CURRENT answer gets it from native;
+   (2) render POST bodies are JSON text, NO Content-Type:
+   `__clew_fragment__` `{token, text}` (was raw text), `__clew_block__`
+   `{token, text, sourcePath}`; desktop's order
+   (`main/caller-token.js#readRenderBody`): body > 100,000 chars → 413;
+   not JSON / not an object → 400; token mismatch → 403 (constant-time);
+   `text` not a string, or `sourcePath` neither null nor a string → 400 —
+   mirror it in `SchemeHandler.swift`, plus iOS's own Origin layer;
+   (3) handshake (`shared/caller-token.js`): ask
+   `{source:'clew-preview', type:'caller-token'}` to window.parent with
+   '*'; answer `{source:'clew-preview-host', type:'caller-token', token}`
+   with targetOrigin `clew-preview://vault`, only when
+   `event.origin === 'clew-preview://vault'` and
+   `event.source.parent === window`; believed only from window.parent;
+   retry 1 s × 5 then fail (canvas cards keep the instant render + a
+   warn), re-ask on pageshow;
+   (4) print: evaluate
+   `window.postMessage({ source: 'clew-preview-host', type: 'caller-token', token }, 'clew-preview://vault')`
+   in the Export-as-PDF view beside the light-theme script, right after
+   load; (5) reuse `tests/caller-token.test.js` and
+   `smoke/caller-token-scenario.js` — the scenario counts
+   `.callout-title` in canvas cards (the instant renderer cannot draw a
+   callout), so an engine-rendered card proves the token arrived.
    **Owner's decision (2026-09-29):** no desktop measurement of
    null-origin reads; desktop closes that gap by design, moving its app
    page to its own `clew-app://` origin (option (c)). That becomes the
