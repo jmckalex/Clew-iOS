@@ -39,9 +39,10 @@ of faa3023 SUCCEEDED** — the first build carrying live edit, font=note
 its digest checked out, which had never been exercised before) and the
 canvas engage work. As of this handover it is in App Store Connect ▸
 Clew Notes ▸ TestFlight but NOT yet in a tester group (§4.1); the owner
-is releasing it. Working tree clean, tests **675 green**. Two docs-only
-`[ci skip]` commits sit on local `main` ahead of origin (this file);
-they cost no cloud build whenever they are pushed.
+is releasing it. Working tree clean, tests **675 green**. Docs-only
+`[ci skip]` commits (this file, PORT-PLAN's upstream verdicts) sit on
+local `main` ahead of origin; they cost no cloud build whenever they
+are pushed.
 
 - **The live-edit sync** (this session): vendor/ and seed-vault/ at
   upstream **`ccf8dca`** (77 commits: live edit, the shell panel, vault
@@ -150,6 +151,22 @@ they cost no cloud build whenever they are pushed.
    shim runs desktop's event chain) — one simulator check at the next
    sync. The coordinator says it will announce each landing with the
    patch it retires.
+   **Next sync — the build breaks there, by design.** Clew-app
+   `e88aff6..fc2c79f` (on its local main, unpushed — `sync-upstream`
+   reads `../Clew-app`, so it takes them anyway) landed the quick-fix
+   round. `patched()` will throw on: `clew-canvas-view.js` patches 2 and
+   4 (drop 3 too — it still matches but would redraw twice; keep patch
+   1, the office Live choice) — `45dffd7`; `toolbar/popover.js` and
+   `chrome/floating-pane.js` ×2 — `43cc4e7`. And `89a6bb0` needs
+   `"imports": { "#jmarkdown/*": "./vendor/jmarkdown/src/*" }` in this
+   `package.json` in the same sync, which makes the `onResolve` re-root
+   and `tests/hooks/vendor-jmarkdown.mjs` dead. Retired without
+   breaking: the `renderer/main.js` settings-load patch and `ios-ui.js`'s
+   Welcome copy (`9b97ff9` — drop both, check for no second Welcome
+   tab); the shim's own `dataviewJs` reconfigure (`055d46b`); the
+   history services test can assert order again (`0d17da7`). The full
+   notice and the candidate numbering are in
+   `~/Source/Clew/SYNC-LEDGER.md` (the coordinator's ledger).
 5. TestFlight group / external testers / the manual's DNS — unchanged
    from the last handover.
 6. Follow-ups seen, not requested: 44 pt explorer rows (none exist; the
