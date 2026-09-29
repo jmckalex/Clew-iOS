@@ -425,7 +425,16 @@ all matching at Clew-app `84f975e`, plus one alias (`@xterm/*` →
 `f1816ae` (the stuck-preview watchdog, next sync) retires three more: the
 `client.js` pageshow patch, the `clew-preview-view` 2.5 s rebuild and its
 `__iosSubscribed` guard — confirm then that nothing of ours calls
-render() repeatedly.
+render() repeatedly. Clew-app `12b1734` (local) upstreams the Pencil
+convention and the viewer handles (`preview-client/pdf-handles.js`,
+`pdf-pen.js`, imported by pdf-core so it rides both the client.js and
+pdf-page.js bundles; hook names kept, `__clewPdfTouch`): it retires the
+pdf-core handle patch and the `pdf-touch.js` appends into client.js and
+pdf-page.js. `pdf-scene-embeds.js` and `embed-scroll.js` stay ours — but
+upstream's item 15 (canvas scene PDFs, coming) will change the scene
+relay's ground. The next sync's range starts at `84f975e`. The manual
+now describes the pen convention (Clew-docs d215c8d); an "On iPad"
+sentence there must be measured first and go via Clew-boss.
 `patched()` throws on a missed anchor, so a stale patch fails the build
 rather than silently reverting a fix.
 
