@@ -196,9 +196,25 @@ are pushed.
    to one row plus … while `visualViewport.height` <
    `--toolbar-two-row-min-height` (560 px default, tunable in ios.css) —
    measure on the simulator: Clew-app expects landscape with the keyboard
-   up (~450 pt) to get one row and portrait to keep two. The full notices
-   and the candidate numbering are in `~/Source/Clew/SYNC-LEDGER.md`
-   (the coordinator's ledger).
+   up (~450 pt) to get one row and portrait to keep two. Then
+   `c386829..83532b2` (menu chords, main only; the live preview pane
+   passes a wheel it cannot use to the note, and a 12 px sizing fix)
+   touches no anchor. **iPad gap it leaves, and the plan:** the pane is
+   fixed, outside the editor's scroller, so a finger drag that starts on
+   it scrolls nothing (the wheel handler does not cover touch; WebKit
+   chains a touch scroll up the DOM, and the pane's ancestors are not
+   the scroller). Neither forwarding touchmove (inertia by hand) nor a
+   blanket `pointer-events: none` (a tall diagram could not scroll): under
+   `(pointer: coarse)` the pane takes no pointer events UNLESS its content
+   overflows — drags fall through to the note with native inertia, a tap
+   lands on the text the pane mirrors, a tall diagram keeps its own
+   scroll. Needs `data-overflows` on the pane where `preview-pane.js`
+   sets the body height (l.221 at `83532b2`: `h + padding > MAX_H`;
+   cleared where the height is, l.195) — asked upstream via Clew-boss; a build patch
+   there otherwise — plus one ios.css rule. Measure on the simulator:
+   a drag over a fitting pane scrolls the note; a tall diagram scrolls
+   in the pane. The full notices and the candidate numbering are in
+   `~/Source/Clew/SYNC-LEDGER.md` (the coordinator's ledger).
    **Open branches (unmerged, unpushed):** `fix-bridge-main-frame`
    (8ceb533, the native bridge answers the app page only — a security
    fix; the owner decides the release) and `citation-js-worker`
