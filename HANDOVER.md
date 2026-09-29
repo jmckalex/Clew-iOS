@@ -1,4 +1,4 @@
-# Handover — 2026-09-27 (late) (the live-edit sync is done; the owner slept through it)
+# Handover — 2026-09-29 (the live-edit sync is pushed; the cloud build succeeded)
 
 Session-rollover state, upstream-style: rewritten each session, kept
 short. Durable architecture and build docs live in **README.md** and
@@ -33,12 +33,15 @@ origin/main = main = faa3023   PUSHED 2026-09-29 — the 0.11 sync + fontnote + 
 TeX fragments, `@reveal`, exclusion lists, the explorer, sidenotes, the
 guide — and changed no source, so it was folded into p5's record and the
 branch dropped.) `main` was fast-forwarded to `live-p5-verify` and
-pushed on 2026-09-29 at the owner's instruction, so Xcode Cloud is
-building it: the first TestFlight build carrying live edit, font=note
-(from the pinned 0.3.0 release) and the canvas engage work. It will land
-in App Store Connect ▸ Clew Notes ▸ TestFlight and, as of the last
-check, NOT in any tester group by itself (§4.1). Working tree clean,
-tests **675 green**.
+pushed on 2026-09-29 at the owner's instruction. **The Xcode Cloud build
+of faa3023 SUCCEEDED** — the first build carrying live edit, font=note
+(its clean clone downloaded the pinned mp-tikz-wasm 0.3.0 release and
+its digest checked out, which had never been exercised before) and the
+canvas engage work. As of this handover it is in App Store Connect ▸
+Clew Notes ▸ TestFlight but NOT yet in a tester group (§4.1); the owner
+is releasing it. Working tree clean, tests **675 green**. Two docs-only
+`[ci skip]` commits sit on local `main` ahead of origin (this file);
+they cost no cloud build whenever they are pushed.
 
 - **The live-edit sync** (this session): vendor/ and seed-vault/ at
   upstream **`ccf8dca`** (77 commits: live edit, the shell panel, vault
@@ -122,11 +125,17 @@ tests **675 green**.
 
 ## 4. Open items
 
-1. **The cloud build of faa3023**: check it archived (CI's clean clone
-   downloads mp-tikz-wasm 0.3.0 and checks its digest — a first for that
-   release), then add the build to the Internal group on its TestFlight
-   page or turn on the group's automatic distribution (memory:
-   clew-ios-release-pipeline). Then the device pass (§3).
+1. **Release the build to testers.** The cloud build archived; it does
+   not join a tester group by itself. On
+   https://appstoreconnect.apple.com/apps/6804827534/testflight/ios
+   (sign in as j.mckenzie.alexander@mac.com, not the iCloud ID) pick the
+   build of faa3023 under iOS Builds and add the Internal group — or,
+   once, turn on the Internal group's "Enable automatic distribution" so
+   every later cloud build goes out by itself. Processing took under an
+   hour for the 0.11 build; this one is larger (the live-edit
+   stylesheets, the opentype bundle). Then the device pass (§3), which
+   now includes the fontnote check: the Diagrams note's last two figures
+   and a 12pt document.
 2. **citation-js in the worker** (§1, README): the one feature-shaped
    follow-up this sync surfaced. Bundle it through
    `src/worker/shims/require-registry.js`; measure the bundle size
