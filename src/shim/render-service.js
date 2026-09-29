@@ -12,6 +12,7 @@ import { VAULT_ROOT, GLOBAL_PLUGINS_ROOT } from './vault-manager.js';
 import { engineConfig, engineEnv, isTextPath, ENGINE_CSL_FILES } from './engine-config.js';
 import { engineExtensionEntries } from '../../vendor/clew/main/plugins.js';
 import { isDependentFragment } from '../../vendor/clew/shared/fragment-deps.js';
+import { citationHeader } from '../../vendor/clew/main/citation-header.js';
 import { settings } from './settings.js';
 
 const REBUILD_DEBOUNCE_MS = 300;
@@ -335,9 +336,27 @@ export class RenderService {
 	 * @returns {Promise<string>} the block's key
 	 */
 	async renderBlock(text, options = {}) {
-		const key = this.#fragmentKey(text, { ...options, document: true });
-		await this.#cachedBuild(text, { ...options, document: true });
+		// The note's citation keys go in front, as upstream's render service
+		// does (707ed87, citation-header.js): a block renders on its own, and
+		// a `\cite` in it stayed raw while reading mode resolved it. They come
+		// from the note's file, so such a block is dependent — a saved header
+		// change reaches it.
+		const header = options.sourcePath ? this.#citationHeaderOf(options.sourcePath) : '';
+		const full = header + text;
+		const opts = { ...options, ...(header ? { dependent: true } : {}), document: true };
+		const key = this.#fragmentKey(full, opts);
+		await this.#cachedBuild(full, opts);
 		return key;
+	}
+
+	/** The source note's citation header, or '' (no note, no header, unreadable). */
+	#citationHeaderOf(sourcePath) {
+		try {
+			const abs = `${VAULT_ROOT}/${sourcePath}`;
+			return citationHeader(String(vfs.read(abs)), abs.slice(0, abs.lastIndexOf('/')));
+		} catch {
+			return '';
+		}
 	}
 
 	/** A built block document by key, or undefined once evicted. */

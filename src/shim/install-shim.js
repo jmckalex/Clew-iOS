@@ -17,3 +17,22 @@ document.addEventListener('visibilitychange', () => {
 		shim.native.flush();
 	}
 });
+
+// Suspension (ClewApp.swift, scenePhase → background): iOS may freeze the
+// app seconds after it leaves the screen, so Swift holds a background task
+// until this resolves — every editor flushed, every PDF viewer's unsaved
+// annotations saved and landed (upstream pdf-frames.js#flushAllPdf, the
+// promise desktop's window-close handshake awaits; a viewer reports clean
+// only once its PDF_WRITE has finished natively), and the queued vault
+// writes drained. iOS has no window close; this is its closest moment.
+window.__clewNative.flushForSuspension = async () => {
+	window.dispatchEvent(new Event('blur'));
+	try {
+		const { flushAllPdf } = await import('../../vendor/clew/renderer/pdf-frames.js');
+		await flushAllPdf(8000);
+	} catch (err) {
+		console.warn('[clew-ios] PDF flush on suspension:', err);
+	}
+	await shim.native.flush();
+	return true;
+};

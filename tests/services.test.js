@@ -802,6 +802,23 @@ test('a dependent block\'s key moves with every file change; an independent one\
 	assert.equal(native.blockDocument(dependent), '<html>fake</html>', 'the old document stays served until evicted');
 });
 
+test('a block renders under its note\'s citation keys (upstream 707ed87): header prepended, dependent on the note', async () => {
+	// Features/Citations.md's header names refs.bib (relative to Features/).
+	const cited = await native.renderBlock('> [!note]\n> As \\citet{lewis1969} argued.\n', 'Features/Citations.md');
+	const build = workerBuilds.at(-1);
+	const text = build.files[build.file];
+	assert.match(text, /^---\n/, 'a fenced header in front of the block');
+	assert.match(text, /Bibliography: \/vault\/Features\/refs\.bib/, 'the bibliography path made absolute against the note\'s folder');
+	assert.match(text, /\\citet\{lewis1969\}/, 'the block itself follows');
+	// No source note, or a note without citation keys: no header.
+	await native.renderBlock('> [!note]\n> plain\n', 'Inbox.md');
+	assert.doesNotMatch(workerBuilds.at(-1).files[workerBuilds.at(-1).file], /^---\n/, 'nothing to prepend');
+	// Dependent: a change to any file moves its key, as for an embed.
+	await clew.invoke(CH.NOTE_WRITE, { path: 'Tasks.md', content: '# Tasks\n\n- [ ] two\n' });
+	await settle();
+	assert.notEqual(await native.renderBlock('> [!note]\n> As \\citet{lewis1969} argued.\n', 'Features/Citations.md'), cited);
+});
+
 test('a reconfigure retires every block: new keys, old documents gone', async () => {
 	const before = await native.renderBlock('reconfigure me', 'Inbox.md');
 	await clew.invoke(CH.VAULT_SETTINGS_SET, { key: 'normalSyntax', value: true });

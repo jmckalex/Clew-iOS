@@ -85,6 +85,23 @@ final class WebHost: NSObject, ObservableObject {
 			completionHandler: nil)
 	}
 
+	/// Backgrounding: iOS may suspend the app seconds after it leaves the
+	/// screen, mid-save. Hold a background task until the page reports every
+	/// editor, PDF annotation and queued write flushed
+	/// (install-shim.js#flushForSuspension) — or 10 s, or iOS's own expiry.
+	func flushForSuspension() {
+		var task = UIBackgroundTaskIdentifier.invalid
+		let end = {
+			guard task != .invalid else { return }
+			UIApplication.shared.endBackgroundTask(task)
+			task = .invalid
+		}
+		task = UIApplication.shared.beginBackgroundTask(withName: "clew-flush", expirationHandler: end)
+		DispatchQueue.main.asyncAfter(deadline: .now() + 10, execute: end)
+		webView.callAsyncJavaScript("await window.__clewNative?.flushForSuspension?.(); return true;",
+			arguments: [:], in: nil, in: .page) { _ in end() }
+	}
+
 	func rescanVault() {
 		vaults.rescan { [weak self] diff in
 			guard let diff, let data = try? JSONSerialization.data(withJSONObject: diff),

@@ -19,10 +19,14 @@ struct ClewApp: App {
 		}
 		.onChange(of: scenePhase) { _, phase in
 			switch phase {
-			case .background, .inactive:
+			case .inactive:
 				// The web side flushes editors on visibilitychange too; this
 				// covers the case where scripts are already paused.
 				host.flushEditors()
+			case .background:
+				// …and on the way to suspension, a background task holds the
+				// app awake until the saves in flight have landed.
+				host.flushForSuspension()
 			case .active:
 				// External changes (Files app, iCloud) surface on foreground.
 				host.rescanVault()

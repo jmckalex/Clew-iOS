@@ -190,8 +190,11 @@ body.is-ios .canvas-embed:has(> iframe) > .canvas-node-title {
    has (toolbar-layout.js), so bigger buttons only mean more of them fold
    into overflow menus. The bubble is off by default on iOS (settings.js)
    but sized here for the reader who turns it on. */
+/* The bar's height is rows × --toolbar-row (upstream toolbar.css, c386829):
+   a fixed height here would clip the second row. One row + … below
+   --toolbar-two-row-min-height of visual viewport (560 px upstream). */
 body.is-ios .editor-toolbar {
-	height: 44px;
+	--toolbar-row: 44px;
 }
 body.is-ios .toolbar-button {
 	min-width: 36px;
@@ -253,4 +256,18 @@ body.is-ios .le-frame-edge::after {
 }
 body.is-ios .le-frame-edge:active {
 	background: var(--clew-active-item);
+}
+
+/* ---- the live preview pane under a finger ---- */
+/* The pane is fixed, outside the editor's scroller, so a drag that starts
+   on it scrolled nothing (upstream's wheel forwarding does not cover touch,
+   and WebKit chains a touch scroll up the DOM, where the scroller is not).
+   On a coarse pointer the pane takes no pointer events unless its content
+   overflows (data-overflows, upstream f47080b): a drag falls through to the
+   note with native momentum, a tap lands on the text it mirrors, and a tall
+   diagram keeps its own scroll. */
+@media (pointer: coarse) {
+	clew-preview-pane:not([data-overflows]) {
+		pointer-events: none;
+	}
 }
