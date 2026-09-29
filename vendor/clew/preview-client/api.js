@@ -47,7 +47,9 @@
 
 	window.addEventListener('message', (event) => {
 		const msg = event.data;
-		if (!msg || msg.source !== 'clew-preview-host') return;
+		// Answers and events come from the host this document asked — its
+		// parent — never from a frame the note embeds.
+		if (!msg || msg.source !== 'clew-preview-host' || event.source !== window.parent) return;
 		if (msg.type === 'api-response') {
 			const entry = pending.get(msg.id);
 			if (!entry) return;

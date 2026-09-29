@@ -26,6 +26,14 @@
 //
 // It is a mirror, not a document: the frame takes no pointer events (the
 // pane's body scrolls it), and it never takes focus.
+//
+// And it must not eat the wheel (owner's decision, 2026-09-29): the pane is
+// fixed, outside the editor's scroller, so a wheel over it reached nothing
+// and the note stood still. A wheel the pane's body can use — a diagram
+// taller than the pane — scrolls it, natively; any other wheel scrolls the
+// note. A gesture that began on the pane stays there until it pauses (the
+// browser's own scroll latching), so a trackpad's momentum does not jump to
+// the note halfway through.
 import { typesetTex, mathReady, mathLoaded } from '../lib/mathjax.js';
 import { FloatingPane } from '../components/chrome/floating-pane.js';
 import { workspaceStore } from '../state/workspace-store.js';
@@ -34,6 +42,8 @@ import { sameTarget } from './preview-target.js';
 
 const MIN_H = 60;
 const MAX_H = 420;
+/** A wheel gesture is over once its events pause this long. */
+const GESTURE_GAP_MS = 150;
 
 const sourceOf = (t) => t.tex ?? t.text;
 
@@ -45,6 +55,7 @@ class ClewPreviewPane extends FloatingPane {
 	#timer = null;
 	#dismissed = null;    // Escape: this target stays hidden until left
 	#renders = 0;         // engine renders applied (scenarios count them)
+	#latched = 0;         // a wheel gesture on the pane's own scroll: until when
 
 	connectedCallback() {
 		this.innerHTML = '';
@@ -61,6 +72,7 @@ class ClewPreviewPane extends FloatingPane {
 		this.frame.tabIndex = -1;
 		this.body.append(this.math, this.frame);
 		this.append(this.body, this.error);
+		this.addEventListener('wheel', this.#onWheel, { passive: false });
 		this.offLayout = workspaceStore.on('layout-changed', () => this.release());
 		this.offSettings = settingsStore.on('settings-changed', (key) => {
 			if (key === 'previewPane' && settingsStore.get('previewPane') === 'off') this.release();
@@ -68,10 +80,37 @@ class ClewPreviewPane extends FloatingPane {
 	}
 
 	disconnectedCallback() {
+		this.removeEventListener('wheel', this.#onWheel);
 		this.destroyPane();
 		this.offLayout?.();
 		this.offSettings?.();
 	}
+
+	/** The pane's own scroll first, as the browser does; the note otherwise. */
+	#onWheel = (e) => {
+		const now = performance.now();
+		const px = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? window.innerHeight : 1;
+		const dx = e.deltaX * px;
+		const dy = e.deltaY * px;
+		const body = this.body;
+		const math = this.math;
+		const canY = (el) => (dy > 0 ? el.scrollTop + el.clientHeight < el.scrollHeight - 1 : dy < 0 && el.scrollTop > 0);
+		const canX = (el) => (dx > 0 ? el.scrollLeft + el.clientWidth < el.scrollWidth - 1 : dx < 0 && el.scrollLeft > 0);
+		const bodyScrolls = getComputedStyle(body).overflowY !== 'hidden';
+		const own = Math.abs(dy) >= Math.abs(dx)
+			? bodyScrolls && canY(body)
+			: canX(math) || canX(body);
+		if (own) {
+			this.#latched = now + GESTURE_GAP_MS;   // native scroll; stay with it
+			return;
+		}
+		e.preventDefault();
+		if (now < this.#latched) {                // the pane's gesture, at its edge
+			this.#latched = now + GESTURE_GAP_MS;
+			return;
+		}
+		this.#view?.scrollDOM.scrollBy({ top: dy, left: dx });
+	};
 
 	/**
 	 * The cursor of `view` is in `target` (or in none: null).
@@ -154,6 +193,7 @@ class ClewPreviewPane extends FloatingPane {
 			}
 			this.#shown = source;
 			this.body.style.height = '';
+			this.removeAttribute('data-overflows');
 		} else {
 			if (this.hidden) this.error.hidden = true;
 			const result = await this.renderIntoFrame(target.text, this.#path, { morph: true });
@@ -174,7 +214,16 @@ class ClewPreviewPane extends FloatingPane {
 	#sizeFrame() {
 		const h = this.frameHeight ?? MIN_H;
 		this.frame.style.height = `${h}px`;
-		this.body.style.height = `${Math.min(MAX_H, Math.max(MIN_H, h))}px`;
+		// The body's own padding on top: sized to the frame alone, every
+		// diagram overflowed by it (12 px) — a phantom scroll that took the
+		// first wheel from the note.
+		const style = getComputedStyle(this.body);
+		const padding = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
+		this.body.style.height = `${Math.min(MAX_H, Math.max(MIN_H, h + padding))}px`;
+		// Whether the pane scrolls its own content: a touch port lets a drag
+		// over a pane that FITS fall through to the note (Clew-iOS, pointer:
+		// coarse → pointer-events: none unless [data-overflows]).
+		this.toggleAttribute('data-overflows', h + padding > MAX_H);
 	}
 
 	/**

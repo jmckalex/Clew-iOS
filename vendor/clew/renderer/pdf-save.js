@@ -21,11 +21,21 @@
 // vault.writePdf refuses anything that is not an existing .pdf inside the
 // vault, so the worst a hostile note could do with it is overwrite a PDF the
 // user already has — the same thing annotating does on purpose.
+//
+// Every bridge here acts only for a document on the preview origin, and
+// answers only that origin (shared/message-guard.js): any frame in the window
+// can post to window.top — a remote page a note embeds, a canvas web card —
+// and until 2026-09-29 each of these acted on whatever arrived. Not "a frame
+// the app created": the legitimate senders include NESTED ones (an office
+// live embed, an Excalidraw or PDF viewer inside a note, which post to
+// window.top), and a preview-origin document is vault content, trusted by
+// design.
 import { ipc } from './ipc.js';
 import { CH } from '../shared/channels.js';
 import { isExcalidrawPath } from '../shared/excalidraw-file.js';
 import { vaultStore } from './state/vault-store.js';
 import { vaultFileUrl } from './lib/preview-url.js';
+import { fromPreviewOrigin } from '../shared/message-guard.js';
 
 /**
  * Excalidraw saves, app-page side. The editor runs in an iframe under
@@ -39,9 +49,10 @@ import { vaultFileUrl } from './lib/preview-url.js';
 export function installExcalidrawSaveBridge() {
 	window.addEventListener('message', async (event) => {
 		const msg = event.data;
+		if (!fromPreviewOrigin(event)) return;
 		if (!msg || msg.source !== 'clew-excalidraw' || msg.type !== 'excalidraw-save') return;
 		const reply = (ok, error) => event.source?.postMessage(
-			{ source: 'clew-excalidraw-host', type: 'excalidraw-save-result', id: msg.id, ok, error }, '*');
+			{ source: 'clew-excalidraw-host', type: 'excalidraw-save-result', id: msg.id, ok, error }, event.origin);
 		if (!isExcalidrawPath(msg.path ?? '')) {
 			reply(false, 'not a drawing');
 			return;
@@ -64,9 +75,10 @@ export function installExcalidrawSaveBridge() {
 export function installExcalidrawLibraryBridge() {
 	window.addEventListener('message', async (event) => {
 		const msg = event.data;
+		if (!fromPreviewOrigin(event)) return;
 		if (!msg || msg.source !== 'clew-excalidraw') return;
 		const reply = (payload) => event.source?.postMessage(
-			{ source: 'clew-excalidraw-host', id: msg.id, ...payload }, '*');
+			{ source: 'clew-excalidraw-host', id: msg.id, ...payload }, event.origin);
 		try {
 			if (msg.type === 'excalidraw-library-load') {
 				reply({ type: 'excalidraw-library-result', items: await ipc.invoke(CH.EXCALIDRAW_LIB_GET) });
@@ -91,13 +103,14 @@ export function installExcalidrawLibraryBridge() {
 export function installExcalidrawResolveBridge() {
 	window.addEventListener('message', (event) => {
 		const msg = event.data;
+		if (!fromPreviewOrigin(event)) return;
 		if (!msg || msg.source !== 'clew-excalidraw' || msg.type !== 'excalidraw-resolve-files') return;
 		const paths = {};
 		for (const name of Array.isArray(msg.names) ? msg.names.slice(0, 500) : []) {
 			paths[String(name)] = vaultStore.resolveFileName(String(name));
 		}
 		event.source?.postMessage(
-			{ source: 'clew-excalidraw-host', type: 'excalidraw-resolve-result', id: msg.id, paths }, '*');
+			{ source: 'clew-excalidraw-host', type: 'excalidraw-resolve-result', id: msg.id, paths }, event.origin);
 	});
 }
 
@@ -110,9 +123,10 @@ export function installExcalidrawResolveBridge() {
 export function installOfficeSaveBridge() {
 	window.addEventListener('message', async (event) => {
 		const msg = event.data;
+		if (!fromPreviewOrigin(event)) return;
 		if (!msg || msg.source !== 'clew-zeta' || msg.type !== 'office-save') return;
 		const reply = (ok, error) => event.source?.postMessage(
-			{ source: 'clew-zeta-host', type: 'office-save-result', id: msg.id, ok, error }, '*');
+			{ source: 'clew-zeta-host', type: 'office-save-result', id: msg.id, ok, error }, event.origin);
 		try {
 			await ipc.invoke(CH.OFFICE_WRITE, { path: msg.path, bytes: msg.bytes });
 			reply(true);
@@ -132,9 +146,10 @@ export function installOfficeSaveBridge() {
 export function installOfficeThumbBridge() {
 	window.addEventListener('message', async (event) => {
 		const msg = event.data;
+		if (!fromPreviewOrigin(event)) return;
 		if (!msg || msg.source !== 'clew-office-embed' || msg.type !== 'office-thumb') return;
 		const reply = (payload) => event.source?.postMessage(
-			{ source: 'clew-office-embed-host', id: msg.id, ...payload }, '*');
+			{ source: 'clew-office-embed-host', id: msg.id, ...payload }, event.origin);
 		try {
 			const res = await ipc.invoke(CH.OFFICE_THUMBNAIL, { path: msg.path });
 			if (res?.ok) reply({ ok: true, url: `${vaultFileUrl(res.path)}?v=${res.stamp}` });
@@ -148,9 +163,10 @@ export function installOfficeThumbBridge() {
 export function installPdfSaveBridge() {
 	window.addEventListener('message', async (event) => {
 		const msg = event.data;
+		if (!fromPreviewOrigin(event)) return;
 		if (!msg || msg.source !== 'clew-pdf' || msg.type !== 'pdf-save') return;
 		const reply = (ok, error) => event.source?.postMessage(
-			{ source: 'clew-pdf-host', type: 'pdf-save-result', id: msg.id, ok, error }, '*');
+			{ source: 'clew-pdf-host', type: 'pdf-save-result', id: msg.id, ok, error }, event.origin);
 		try {
 			await ipc.invoke(CH.PDF_WRITE, { path: msg.path, bytes: msg.bytes });
 			reply(true);

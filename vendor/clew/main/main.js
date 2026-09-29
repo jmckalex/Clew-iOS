@@ -46,6 +46,17 @@ app.commandLine.appendSwitch('enable-features', 'SharedArrayBuffer');
 let quitting = false;
 const windowOrder = []; // creation order, for the smoke hook
 
+// Smoke runs stay out of the way of whoever is at the machine (owner's ask,
+// 2026-09-29): no window is shown, none takes focus, no Dock icon appears.
+// The page still lays out, paints and animates (background throttling is
+// off), capturePage still works, and the smoke hook turns on CDP focus
+// emulation so the page answers document.hasFocus() as a focused one would
+// — CodeMirror's hasFocus reads it, and the preview pane and the selection
+// bubble gate on that. CLEW_SMOKE_VISIBLE=1 puts the window on screen again,
+// to watch a run.
+const smokeHidden = Boolean(process.env.CLEW_SMOKE) && !process.env.CLEW_SMOKE_VISIBLE;
+if (smokeHidden) app.dock?.hide();
+
 export function createWindow(vaultPath = null) {
 	const win = new BrowserWindow({
 		width: 1280,
@@ -54,10 +65,12 @@ export function createWindow(vaultPath = null) {
 		minHeight: 400,
 		titleBarStyle: 'hiddenInset',
 		backgroundColor: '#1e1e1e',
+		show: !smokeHidden,
 		webPreferences: {
 			preload: path.join(distDir, 'preload', 'preload.cjs'),
 			contextIsolation: true,
 			nodeIntegration: false,
+			backgroundThrottling: !smokeHidden,
 			plugins: true, // Chromium's built-in PDF viewer
 			webviewTag: true, // canvas web-page nodes
 		},
@@ -163,14 +176,16 @@ export function openVaultAnywhere(vaultPath, { preferSession = null } = {}) {
 	const abs = path.resolve(vaultPath);
 	const existing = sessionForVault(abs);
 	if (existing) {
-		existing.win.show();
-		existing.win.focus();
+		if (!smokeHidden) {
+			existing.win.show();
+			existing.win.focus();
+		}
 		return existing;
 	}
 	settings.addOpenVault(abs);
 	if (preferSession && !preferSession.vaults.root && preferSession.win) {
 		preferSession.vaults.open(abs);
-		preferSession.win.focus();
+		if (!smokeHidden) preferSession.win.focus();
 		return preferSession;
 	}
 	return createWindow(abs);
@@ -342,6 +357,23 @@ if (process.env.CLEW_SMOKE) {
 		setTimeout(async () => {
 			try {
 				const primary = windowOrder[0];
+				// The input queue's key events never reach the native menu. CDP
+				// key events carry no characters, and Electron hands one the page
+				// leaves unhandled to the menu, where an empty key with ⌘ matches
+				// the FIRST item: every ⌘ chord a scenario sent — a bare Meta
+				// keydown is enough — opened "About Electron" on screen (measured
+				// 2026-09-29 in hidden runs; the hand-off does not depend on the
+				// window being shown). Nothing is lost: the renderer's dispatcher
+				// owns every chord (menu accelerators are display-only), and every
+				// chord from here matched About before anything else.
+				primary.webContents.setIgnoreMenuShortcuts(true);
+				// A hidden window is never focused, so the page is TOLD it is:
+				// held for the whole run (the input queue below reuses this
+				// attachment and must not detach it).
+				if (smokeHidden) {
+					try { primary.webContents.debugger.attach('1.3'); } catch { /* already attached */ }
+					await primary.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true });
+				}
 				// CLEW_SMOKE_LOG=1: every console message from every frame
 				// (previews included) to the terminal — wasm-boot debugging.
 				if (process.env.CLEW_SMOKE_LOG) {
@@ -473,7 +505,7 @@ if (process.env.CLEW_SMOKE) {
 						}
 						await sleep(ev.delay ?? 30);
 					}
-					try { dbg.detach(); } catch { /* fine */ }
+					if (!smokeHidden) try { dbg.detach(); } catch { /* fine */ }
 					await sleep(500);
 				}
 				if (process.env.CLEW_SMOKE_CLIPBOARD) {

@@ -36,7 +36,12 @@
 // Parity with the engine is ASSERTED by smoke/crossref-scenario.js, never
 // assumed. Numbering is per note in v1: the export of a jmarkdownProject
 // vault numbers the whole project.
-import { typedRefText as engineTypedRefText } from '../../../../vendor/jmarkdown/src/crossref.js';
+//
+// The engine is reached BY NAME — `#jmarkdown/…`, package.json's "imports"
+// map onto vendor/jmarkdown/src — not by a relative path, which counted on
+// the app living at <repo>/src; the iOS port mirrors it one level deeper and
+// maps the same name onto its own vendor/jmarkdown.
+import { typedRefText as engineTypedRefText } from '#jmarkdown/crossref.js';
 import { attrLabel, THEOREM_KINDS } from '../../../shared/note-metadata.js';
 
 /** The engine's sectioning ladder (sectioning.js — asserted equal by

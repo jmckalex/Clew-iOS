@@ -18,10 +18,11 @@ import { initCanvasEmbeds, refreshCanvasEmbeds, broadcastThemeToNested } from '.
 import { initLeafletMaps } from './leaflet-maps.js';
 import { initQueryInteract } from './query-interact.js';
 import { initMetaBind } from './meta-bind.js';
-import { initPdfEmbeds } from './pdf-embed.js';
+import { initPdfEmbeds, holdIfUnsaved } from './pdf-embed.js';
 import { initExcalidrawEmbeds } from './excalidraw-embed.js';
 import { initOfficeEmbeds } from './office-embed.js';
 import { figureMorph, initFigures, figuresPending } from './figures.js';
+import { fromWindow } from '../shared/message-guard.js';
 
 const HOST_SOURCE = 'clew-preview-host';
 const post = (msg) => window.parent.postMessage({ source: 'clew-preview', ...msg }, '*');
@@ -35,7 +36,11 @@ const BLOCK = document.documentElement.dataset.clewBlock === '1';
 
 window.addEventListener('message', (event) => {
 	const msg = event.data;
-	if (!msg || msg.source !== HOST_SOURCE) return;
+	// From the host — this document's PARENT — and nobody else: a frame this
+	// note embeds can post to its parent too, and a `render` from it would
+	// replace the note (shared/message-guard.js). In the print view the parent
+	// is this window itself, which is where main posts.
+	if (!msg || msg.source !== HOST_SOURCE || !fromWindow(event, window.parent)) return;
 	if (msg.type === 'render') applyRender(msg.html);
 	else if (msg.type === 'scroll-to-line') scrollToLine(msg.line, msg.behavior ?? 'auto');
 	else if (msg.type === 'theme') {
@@ -165,6 +170,9 @@ function applyRender(html) {
 				// animation or media playback down with it. Opt in to
 				// surviving by setting data-clew-keep on the element.
 				if (node.nodeType === 1 && node.hasAttribute?.('data-clew-keep')) return false;
+				// An embedded PDF viewer holding an unsaved annotation stays,
+				// hidden, until the edit is written (pdf-embed.js).
+				if (holdIfUnsaved(node)) return false;
 				return true;
 			},
 		});
@@ -350,6 +358,26 @@ window.addEventListener('keydown', (e) => {
 		e.preventDefault();
 		post({ type: 'chord', key, shift: e.shiftKey, alt: e.altKey });
 	}
+});
+
+// Esc belongs to the innermost thing that wants it, and this document's host
+// is the next one out: an ENGAGED canvas card leaves on it (builtin.js: one
+// press per step), which it could not while focus sat inside the card —
+// only chords above ever left this frame. So a bare Esc goes up UNLESS
+// something in here used it: whatever consumed it said so with
+// preventDefault (Web Awesome's widgets do; a map measurement does; a note
+// script can), a text field owns its own Esc, the PDF viewer owns every Esc
+// pressed inside it (EmbedPDF is vendored, and its handlers close menus
+// without saying so), and an open <dialog> closes first. Decided after the
+// event has been everywhere — a listener registered after this one may
+// still claim it. A host with no use for it ignores it.
+window.addEventListener('keydown', (e) => {
+	if (e.key !== 'Escape' || e.isComposing || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+	const owned = e.composedPath().some((el) => el instanceof Element
+		&& (el.matches('input, textarea, select') || el.isContentEditable
+			|| el.classList.contains('clew-pdf-inline')));
+	if (owned || document.querySelector('dialog[open]')) return;
+	setTimeout(() => { if (!e.defaultPrevented) post({ type: 'escape' }); }, 0);
 });
 
 // Clicking into the preview must focus its pane, exactly as clicking into an

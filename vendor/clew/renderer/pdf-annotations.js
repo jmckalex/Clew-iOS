@@ -19,7 +19,8 @@ import { ipc, CH } from './ipc.js';
 import { notice } from './plugins.js';
 import { annotationsNote, annotationsNotePath } from '../shared/pdf-annotations-note.js';
 
-const frameFor = (path) => [...document.querySelectorAll('clew-file-view')]
+// A view lingering while its PDF saves (pdf-frames.js) is not the tab's.
+const frameFor = (path) => [...document.querySelectorAll('clew-file-view:not([data-clew-retiring])')]
 	.find((v) => v.path === path)?.querySelector('iframe.pdf-frame') ?? null;
 
 /**

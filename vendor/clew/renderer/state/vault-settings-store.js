@@ -14,7 +14,8 @@
 // `normalSyntax` decides the markdown grammar (editor/jmd/markdown-config.js)
 // — and an editor cannot wait on an IPC round trip per keystroke.
 //
-// Loaded on every vault-opened (main.js); `ready()` is what anything built at
+// Loaded whenever a window shows its vault (main.js#showVault — on
+// vault-opened AND on a reload's boot); `ready()` is what anything built at
 // boot awaits (the editor pool does, before making a state). Every write goes
 // through `set`, which emits `vault-settings-changed` with the key and keeps
 // the older window-level `clew:vault-settings-changed` event alive for the

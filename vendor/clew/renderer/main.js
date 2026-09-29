@@ -19,6 +19,7 @@ import { bookmarkStore } from './state/bookmark-store.js';
 import { editorPool } from './editor/pool.js';
 import * as actions from './commands/actions.js';
 import { setPreviewSession } from './lib/preview-url.js';
+import { setCallerToken } from './lib/caller-token.js';
 import { registerBuiltinCommands } from './commands/builtin.js';
 import { installMenuBridge } from './commands/menu-bridge.js';
 import { installHotkeys } from './commands/registry.js';
@@ -32,14 +33,25 @@ import { previewPane } from './editor/preview-pane.js';
 
 // ---- IPC events → stores --------------------------------------------------
 
-ipc.on(CH.EV_VAULT_OPENED, async ({ vault, tree }) => {
-	editorPool.flushAll();
+// Everything a window does to put its vault on screen, whichever way the
+// vault arrived: main opening it (EV_VAULT_OPENED), or this window loading
+// while it was already open — a reload, and every launch of the iOS port
+// (VAULT_CURRENT, the boot below). ONE tail so the two cannot drift again:
+// the reload path used to skip the vault's settings, so its editors took the
+// grammar, the live config and the fragment warnings of `{}`, and it never
+// greeted.
+async function showVault(vault, tree, index = null) {
 	// Before the workspace restores: the editors it opens await this (the
 	// grammar depends on the vault's normalSyntax).
 	vaultSettingsStore.load();
 	setPreviewSession(vault?.sessionId);
-	vaultStore.setVault(vault);
+	// The caller token goes to the one module that uses it, and no further:
+	// nothing that stores or shows the vault holds it.
+	const { callerToken = null, ...info } = vault ?? {};
+	setCallerToken(callerToken);
+	vaultStore.setVault(vault ? info : vault);
 	vaultStore.setTree(tree);
+	if (index) vaultStore.setIndex(index);
 	await workspaceStore.restore((path) => vaultStore.pathExists(path));
 	// A vault opening for the first time (no saved workspace) greets with
 	// its own Welcome note when it has one, instead of an empty pane —
@@ -50,6 +62,11 @@ ipc.on(CH.EV_VAULT_OPENED, async ({ vault, tree }) => {
 	editorPool.reap(workspaceStore.openTabIds());
 	bookmarkStore.load();
 	applySnippets();
+}
+
+ipc.on(CH.EV_VAULT_OPENED, async ({ vault, tree }) => {
+	editorPool.flushAll();
+	await showVault(vault, tree);
 });
 
 // User CSS snippets from <vault>/.clew/snippets/*.css.
@@ -132,16 +149,11 @@ import('./pdf-annotations.js').then((m) => { window.__clew.pdfAnnotations = m; }
 	// After a window reload the vault may already be open in main.
 	const vault = await ipc.invoke(CH.VAULT_CURRENT).catch(() => null);
 	if (vault) {
-		setPreviewSession(vault.sessionId);
-		vaultStore.setVault(vault);
 		// The watcher may have finished — and given up — before this window
 		// existed to be told, which a fast scan makes likely.
 		if (vault.watchCap) watchCapNotice(vault.watchCap);
-		vaultStore.setTree(await ipc.invoke(CH.VAULT_TREE).catch(() => null));
+		const tree = await ipc.invoke(CH.VAULT_TREE).catch(() => null);
 		const index = await ipc.invoke(CH.INDEX_GET).catch(() => null);
-		if (index) vaultStore.setIndex(index);
-		await workspaceStore.restore((path) => vaultStore.pathExists(path));
-		bookmarkStore.load();
-		applySnippets();
+		await showVault(vault, tree, index);
 	}
 })();

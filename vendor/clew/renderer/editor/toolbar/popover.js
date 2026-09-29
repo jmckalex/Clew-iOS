@@ -12,6 +12,7 @@
 // above when it would leave the window, clamped horizontally. Closes on
 // Escape (focus back to the anchor), a pointerdown outside, or the window
 // losing focus. Arrow keys walk its items. Contents come from popovers.js.
+import { viewportEdges } from '../../lib/viewport.js';
 
 let current = null;
 
@@ -67,9 +68,10 @@ export function popoverOpen() { return current !== null; }
 function position(el, anchor) {
 	const a = anchor.getBoundingClientRect();
 	const r = el.getBoundingClientRect();
+	const { right, bottom } = viewportEdges();
 	let top = a.bottom + 4;
-	if (top + r.height > window.innerHeight - 8 && a.top - r.height - 4 > 8) top = a.top - r.height - 4;
-	const left = Math.max(8, Math.min(a.left, window.innerWidth - r.width - 8));
+	if (top + r.height > bottom - 8 && a.top - r.height - 4 > 8) top = a.top - r.height - 4;
+	const left = Math.max(8, Math.min(a.left, right - r.width - 8));
 	el.style.top = `${Math.round(top)}px`;
 	el.style.left = `${Math.round(left)}px`;
 }

@@ -231,7 +231,8 @@ function pushToVault() {
 	const id = ++saveSeq;
 	const onResult = (e) => {
 		const d = e.data ?? {};
-		if (d.source !== 'clew-zeta-host' || d.type !== 'office-save-result' || d.id !== id) return;
+		// From the window the save went to (window.top), no other.
+		if (d.source !== 'clew-zeta-host' || d.type !== 'office-save-result' || d.id !== id || e.source !== window.top) return;
 		window.removeEventListener('message', onResult);
 		if (d.ok) flash(`Saved ${vaultPath}`);
 		else fail(`vault save failed: ${d.error}`);

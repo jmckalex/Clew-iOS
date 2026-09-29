@@ -88,6 +88,25 @@ class ClewEditorView extends ClewElement {
 			if (changed === this.tabId) this.#scheduleToolbarState();
 		});
 		this.addEventListener('toolbar-escape', () => editorPool.get(this.tabId)?.view?.focus());
+		// The toolbar gaining or losing a row moves the editor's top edge by
+		// `delta`; move the scroll with it, so the text below the bar holds
+		// still on screen. A caret the NEW row now covers (on screen before,
+		// in the strip just hidden) is brought back; a caret already off
+		// screen stays where it is — scrolling to it jumped the note.
+		this.addEventListener('toolbar-resize', (e) => {
+			const view = editorPool.get(this.tabId)?.view;
+			const delta = e.detail.delta;
+			if (!view) return;
+			this.#suppressor.suppress();
+			view.scrollDOM.scrollTop += delta;
+			if (delta <= 0) return;
+			const head = view.state.selection.main.head;
+			const at = view.coordsAtPos(head);
+			const top = view.scrollDOM.getBoundingClientRect().top;
+			if (at && at.bottom > top - delta && at.top < top) {
+				view.dispatch({ effects: EditorView.scrollIntoView(head, { y: 'nearest' }) });
+			}
+		});
 
 		// Scroll sync with preview panes showing the same note.
 		this.#scrollDOM = entry.view.scrollDOM;

@@ -14,6 +14,7 @@
 // canvas view drives their render subscription and postMessage traffic.
 import { fileKind } from '../lib/file-types.js';
 import { vaultFileUrl, pdfViewerUrl, excalidrawUrl, zetaOfficeUrl } from '../lib/preview-url.js';
+import { renderPost } from '../lib/caller-token.js';
 import { isNotePath } from '../state/vault-store.js';
 import { previewUrl, fragmentUrl, previewOrigin } from '../lib/preview-url.js';
 import { renderCardHtml } from './card-markdown.js';
@@ -38,7 +39,7 @@ export function setCardText(el, text) {
 async function upgradeCard(el, text) {
 	if (!text.trim()) return;
 	try {
-		const response = await fetch(fragmentUrl(), { method: 'POST', body: text });
+		const response = await renderPost(fragmentUrl(), { text });
 		if (!response.ok) return;
 		const html = await response.text();
 		if (el.dataset.cardText !== text || !el.isConnected) return; // stale

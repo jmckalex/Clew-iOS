@@ -89,7 +89,7 @@ function compilePdf(texFile) {
  *
  * Prompts for a destination; returns { output } or { canceled: true }.
  */
-export async function exportNote({ win, vaults, sessionId, relPath, format, outFile }) {
+export async function exportNote({ win, vaults, sessionId, callerToken = null, relPath, format, outFile }) {
 	const abs = vaults.resolve(relPath);
 	// Exports honor the vault's standard-syntax choice, like previews do.
 	const normalSyntax = vaults.loadState('vault-settings.json')?.normalSyntax === true;
@@ -112,7 +112,7 @@ export async function exportNote({ win, vaults, sessionId, relPath, format, outF
 
 	if (format === 'print-pdf') {
 		await printNoteToPdf({
-			sessionId, relPath, outFile: filePath, paperSize: settings.get('printPaperSize'),
+			sessionId, callerToken, relPath, outFile: filePath, paperSize: settings.get('printPaperSize'),
 		});
 		return { output: filePath };
 	}

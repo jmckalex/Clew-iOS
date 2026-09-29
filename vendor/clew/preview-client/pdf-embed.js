@@ -60,11 +60,52 @@ function ensureStyles() {
 const viewers = new Set();
 window.__clewPdfViewers = viewers; // smoke-test hook
 
+// Scenarios: the host has this document's first viewer make annotations,
+// as pdf-page.js lets it in a PDF tab (smoke/pdf-flush-scenario.js) — the
+// app page only, never another frame holding a reference to this one.
+window.addEventListener('message', (event) => {
+	const msg = event.data;
+	if (event.source !== window.parent || msg?.source !== 'clew-preview-host' || msg.type !== 'test-create-annotations') return;
+	const inst = [...viewers].find((v) => v.handle?.createAnnotations);
+	(inst ? inst.handle.createAnnotations(msg.specs ?? []) : Promise.resolve(-1))
+		.then((made) => window.parent.postMessage({ source: 'clew-preview', type: 'test-created', made }, '*'));
+});
+
 function reapDetached() {
 	for (const inst of viewers) {
 		if (inst.host.isConnected) continue;
 		viewers.delete(inst);
 		inst.handle?.dispose();
+	}
+}
+
+/**
+ * A re-render is about to discard `node` (client.js's morph) — the note no
+ * longer embeds this PDF, say. If a viewer inside holds an unsaved
+ * annotation, keep the node, hidden but still ATTACHED — EmbedPDF stops
+ * working once detached (measured: a save started after removal never
+ * finished) — until the edit is written, then remove it. Returns whether it
+ * was kept; the morph must then leave it be.
+ */
+export function holdIfUnsaved(node) {
+	if (node.nodeType !== 1) return false;
+	if (node.hasAttribute('data-clew-held')) return true;
+	const held = [...viewers].filter((v) => v.handle?.isDirty?.() && (node === v.host || node.contains(v.host)));
+	if (held.length === 0) return false;
+	node.setAttribute('data-clew-held', '');
+	node.style.display = 'none';
+	Promise.all(held.map((v) => settled(v.handle))).finally(() => {
+		node.remove();
+		reapDetached();
+	});
+	return true;
+}
+
+/** Save now, and resolve once nothing is left unsaved (or after `ms`). */
+async function settled(handle, ms = 10_000) {
+	handle.flush?.();
+	for (const t0 = Date.now(); handle.isDirty?.() && Date.now() - t0 < ms;) {
+		await new Promise((resolve) => setTimeout(resolve, 50));
 	}
 }
 

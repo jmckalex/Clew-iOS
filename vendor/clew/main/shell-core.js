@@ -18,7 +18,8 @@
  * `node-pty` would mean a compiled module rebuilt for every Electron
  * version, on every platform Clew ships to. Instead the child is
  * `python3 -c <script>`, and the script calls stdlib `pty.fork()`, execs
- * the user's `$SHELL -i` in the slave, and runs a select loop proxying
+ * the user's `$SHELL -i` in the slave (a LOGIN shell on macOS — see
+ * loginShell), and runs a select loop proxying
  * between the pty master and its own stdio — which is wired to us. macOS
  * ships python3; so does every Linux distribution; the `pty` module is
  * stdlib. Nothing to build, nothing to rebuild.
@@ -55,10 +56,12 @@ export const PYTHON_PTY_SCRIPT =
 	// Electron may hand us an ignored SIGTERM; a kill must actually reap us.
 	+ 'signal.signal(signal.SIGTERM, signal.SIG_DFL)\n'
 	+ 'sh = sys.argv[1]\n'
-	+ "args = [sh, '-i']\n"
+	// argv[0] for the shell: `-zsh` makes it a login shell (shellArgv0).
+	+ 'argv0 = sys.argv[2] if len(sys.argv) > 2 else sh\n'
+	+ "args = [argv0, '-i']\n"
 	+ 'pid, fd = pty.fork()\n'
 	+ 'if pid == 0:\n'
-	+ '  os.execvp(args[0], args)\n'
+	+ '  os.execvp(sh, args)\n'
 	// Parent: proxy stdin (0) ↔ pty master (fd), plus the resize channel (3).
 	+ "rbuf = b''\n"
 	+ 'while True:\n'
@@ -93,6 +96,30 @@ export const PYTHON_PTY_SCRIPT =
 export function userShell(env = process.env, platform = process.platform) {
 	if (platform === 'win32') return env.COMSPEC || 'cmd.exe';
 	return env.SHELL || '/bin/sh';
+}
+
+/**
+ * Does the shell start as a LOGIN shell? On macOS, yes — as Terminal, iTerm
+ * and VS Code start theirs. An app opened from the Dock inherits launchd's
+ * bare PATH (/usr/bin:/bin:/usr/sbin:/sbin), and what extends it —
+ * path_helper in /etc/zprofile, `brew shellenv` in ~/.zprofile — runs only
+ * in a login shell; a plain `-i` shell read ~/.zshrc, so its aliases named
+ * commands it could not find (the owner's `ls` → `gls`, 2026-09-29).
+ * Elsewhere, no: a Linux desktop session has already exported the
+ * profile's PATH to the app, and a login bash reads ~/.bash_profile, which
+ * does not always source ~/.bashrc.
+ */
+export function loginShell(platform = process.platform) {
+	return platform === 'darwin';
+}
+
+/**
+ * argv[0] for the shell. A leading `-` is how login(1) marks a login shell,
+ * and every shell honours it — csh and tcsh included, which accept `-l`
+ * only as their sole argument.
+ */
+export function shellArgv0(shell, login) {
+	return login ? '-' + shell.split('/').pop() : shell;
 }
 
 /** `<cols>:<rows>\n` — the one line the resize sidechannel understands. */
@@ -138,19 +165,21 @@ export class ShellSessions {
 	 * @param {(data: string) => void} options.onData
 	 * @param {(info: { code: number|null, signal: string|null }) => void} options.onExit
 	 * @param {typeof spawn} [options.spawnFn] tests
+	 * @param {boolean} [options.login] start a login shell (loginShell)
 	 * @returns {{ pty: boolean, shell: string }}
 	 */
-	open(key, { cwd, onData, onExit, spawnFn = spawn, pty = hasPythonPty() }) {
+	open(key, { cwd, onData, onExit, spawnFn = spawn, pty = hasPythonPty(), login = loginShell() }) {
 		this.close(key);
 		const shell = userShell();
+		const argv0 = shellArgv0(shell, login);
 		const child = pty
-			? spawnFn('python3', ['-c', PYTHON_PTY_SCRIPT, shell], {
+			? spawnFn('python3', ['-c', PYTHON_PTY_SCRIPT, shell, argv0], {
 				cwd,
 				// fd 3 is the resize sidechannel the helper reads.
 				stdio: ['pipe', 'pipe', 'pipe', 'pipe'],
 				env: { ...process.env, TERM: 'xterm-256color' },
 			})
-			: spawnFn(shell, ['-i'], { cwd, stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env } });
+			: spawnFn(shell, ['-i'], { cwd, argv0, stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env } });
 
 		const record = { child, pty, shell, onData, onExit };
 		this.#sessions.set(key, record);

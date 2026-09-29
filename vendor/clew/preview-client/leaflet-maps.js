@@ -281,7 +281,12 @@ function wireDistanceTool(map, config) {
 		first = null;
 	});
 	map.getContainer().addEventListener('keydown', (e) => {
-		if (e.key === 'Escape') clear();
+		// A measurement in progress OWNS Esc — say so, or the note's host (an
+		// engaged canvas card) would take the same press as "leave".
+		if (e.key === 'Escape' && (first || line || control)) {
+			clear();
+			e.preventDefault();
+		}
 	});
 }
 

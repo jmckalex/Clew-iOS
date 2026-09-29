@@ -39,6 +39,8 @@ export class VaultManager {
 	/** Set by the owning VaultSession; rides in info/events so the renderer
 	 *  can build session-scoped clew-preview:// URLs. */
 	sessionId = null;
+	/** The session's caller token (session.js); never in `info`. */
+	callerToken = null;
 	#watcher = null;
 	#watchState = null;
 	#watchCap = null;
@@ -54,6 +56,18 @@ export class VaultManager {
 	hooks = {};
 
 	get isOpen() { return this.root !== null; }
+
+	/**
+	 * What THIS window may be told about its own vault: `info` plus the
+	 * caller token. Only the two paths that reach the session's own window
+	 * use it — the vault-opened event and VAULT_CURRENT — because the open
+	 * handlers also return `info` to a DIFFERENT window when the vault is
+	 * already open elsewhere (main.js#openVaultAnywhere).
+	 */
+	get ownInfo() {
+		const info = this.info;
+		return info && this.callerToken ? { ...info, callerToken: this.callerToken } : info;
+	}
 
 	get info() {
 		return this.root
@@ -89,9 +103,8 @@ export class VaultManager {
 		const tree = this.tree(duplicates, files);
 		this.#startWatcher(duplicates, files);
 		this.hooks.onOpen?.(abs);
-		const info = this.info;
-		this.send('clew:ev-vault-opened', { vault: info, tree });
-		return info;
+		this.send('clew:ev-vault-opened', { vault: this.ownInfo, tree });
+		return this.info;
 	}
 
 	/**

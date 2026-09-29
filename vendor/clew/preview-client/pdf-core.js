@@ -25,7 +25,8 @@ const pendingSaves = new Map();
 
 window.addEventListener('message', (event) => {
 	const msg = event.data;
-	if (!msg || msg.source !== 'clew-pdf-host' || msg.type !== 'pdf-save-result') return;
+	// From the window the save went to (window.parent), no other.
+	if (!msg || msg.source !== 'clew-pdf-host' || msg.type !== 'pdf-save-result' || event.source !== window.parent) return;
 	const pending = pendingSaves.get(msg.id);
 	if (!pending) return;
 	pendingSaves.delete(msg.id);
@@ -47,6 +48,26 @@ function saveToVault(rel, bytes) {
 	});
 }
 
+// ---- unsaved edits, as the host sees them ----------------------------------
+// A document that goes away takes a pending save with it, and nothing it does
+// while going — no export, no message — gets out (measured). So the HOST
+// keeps a document holding an unsaved edit alive, hidden, until the edit
+// lands (renderer/pdf-frames.js). This tells it when that changes, per
+// document (a note may embed several PDFs), and saves at once when asked.
+const liveHandles = new Set();
+let reportedDirty = false;
+function reportDirty() {
+	const dirty = [...liveHandles].some((h) => h.isDirty());
+	if (dirty === reportedDirty) return;
+	reportedDirty = dirty;
+	window.parent.postMessage({ source: 'clew-pdf', type: 'pdf-dirty', dirty }, '*');
+}
+window.addEventListener('message', (event) => {
+	const msg = event.data;
+	if (event.source !== window.parent || msg?.source !== 'clew-pdf-host' || msg.type !== 'pdf-flush') return;
+	for (const h of liveHandles) h.flush?.();
+});
+
 /** clew-preview://vault/<sid>/<path> → the vault-relative <path>. */
 export function vaultRelOf(src) {
 	const pathname = new URL(src, location.href).pathname;      // /<sid>/<rel>
@@ -61,8 +82,21 @@ export function vaultRelOf(src) {
  */
 export async function createViewer({ target, src, onStatus = () => {} }) {
 	const rel = vaultRelOf(src);
-	const handle = { target, container: null, saveTimer: null,
-		dispose() { clearTimeout(this.saveTimer); this.container?.destroy?.(); } };
+	const handle = {
+		target, container: null, saveTimer: null,
+		// An edit still waiting on the debounce is written before the viewer
+		// goes (a note re-rendered without its embed, say), not dropped.
+		dispose() {
+			this.unlisten?.();
+			liveHandles.delete(this);
+			const pending = this.flush?.();
+			clearTimeout(this.saveTimer);
+			const destroy = () => this.container?.destroy?.();
+			if (pending) pending.finally(destroy);
+			else destroy();
+			reportDirty();
+		},
+	};
 	const started = performance.now();
 
 	onStatus('loading…');
@@ -132,14 +166,44 @@ export async function createViewer({ target, src, onStatus = () => {} }) {
 			} finally {
 				saving = false;
 				if (saveAgain) { saveAgain = false; saveNow(); }
+				reportDirty();
 			}
 		};
 		handle.saveNow = saveNow;
+		// Unsaved: an edit waiting on the debounce, a save running, or one
+		// queued behind it. A FAILED save is not — the host must not keep a
+		// frame for ever over an edit that will not land.
+		handle.isDirty = () => Boolean(handle.saveTimer) || saving || saveAgain;
+		liveHandles.add(handle);
+		// The debounce keeps a burst of edits to one write; a pending edit is
+		// written at once when the document is hidden or unloads (owner's
+		// decision, 2026-09-29). visibilitychange is what this is FOR: a
+		// document that lives on hidden (a minimised window; an app WebKit
+		// suspends) finishes its save. pagehide is a last try only — a frame
+		// being REMOVED fires it, but its async export never completes and
+		// no message leaves it (measured), which is why the host keeps such
+		// a frame alive until the edit lands (renderer/pdf-frames.js) and
+		// asks for this flush itself.
+		handle.flush = () => {
+			if (!handle.saveTimer) return null;
+			clearTimeout(handle.saveTimer);
+			handle.saveTimer = null;
+			return saveNow();
+		};
+		const onHidden = () => { if (document.visibilityState === 'hidden') handle.flush(); };
+		const onPagehide = () => handle.flush();
+		document.addEventListener('visibilitychange', onHidden);
+		window.addEventListener('pagehide', onPagehide);
+		handle.unlisten = () => {
+			document.removeEventListener('visibilitychange', onHidden);
+			window.removeEventListener('pagehide', onPagehide);
+		};
 		annotationCap.onAnnotationEvent((event) => {
 			if (event?.type === 'loaded') { loadedResolve(); return; }   // opening a file is not a change
 			onStatus('unsaved');
 			clearTimeout(handle.saveTimer);
-			handle.saveTimer = setTimeout(saveNow, SAVE_DEBOUNCE_MS);
+			handle.saveTimer = setTimeout(() => { handle.saveTimer = null; saveNow(); }, SAVE_DEBOUNCE_MS);
+			reportDirty();
 		});
 	}
 
@@ -173,14 +237,8 @@ export async function createViewer({ target, src, onStatus = () => {} }) {
 		if (!annotationCap) return [];
 		await loaded;
 		// An edit still waiting on the autosave debounce is written NOW: the
-		// note is about to name these annotations, so the PDF must hold them
-		// (measured: a highlight made just before its tab was rebuilt was
-		// lost — a document that unloads takes its pending timer with it).
-		if (handle.saveTimer && handle.saveNow) {
-			clearTimeout(handle.saveTimer);
-			handle.saveTimer = null;
-			await handle.saveNow();
-		}
+		// note is about to name these annotations, so the PDF must hold them.
+		await handle.flush?.();
 		const out = [];
 		for (const tracked of annotationCap.getAnnotations()) {
 			const a = tracked?.object;

@@ -28,6 +28,7 @@ import { settings } from './settings.js';
 import { engineExtensionEntries } from './plugins.js';
 import { writeFileAtomic } from './fs-utils.js';
 import { isDependentFragment } from '../shared/fragment-deps.js';
+import { citationHeader } from './citation-header.js';
 
 const WORKER_PATH = paths.engineWorker;
 
@@ -446,9 +447,26 @@ export class RenderService {
 	 * @returns {Promise<string>} the block's key
 	 */
 	async renderBlock(text, options = {}) {
-		const key = this.#fragmentKey(text, { ...options, document: true });
-		await this.#cachedBuild(text, { ...options, document: true });
+		// The note's citation keys go in front (citation-header.js): a block
+		// renders on its own, and a `\cite` in it stayed raw while reading
+		// mode resolved it. They come from the note's file, so such a block is
+		// dependent — a saved header change reaches it.
+		const header = options.sourcePath ? this.#citationHeaderOf(options.sourcePath) : '';
+		const full = header + text;
+		const opts = { ...options, ...(header ? { dependent: true } : {}), document: true };
+		const key = this.#fragmentKey(full, opts);
+		await this.#cachedBuild(full, opts);
 		return key;
+	}
+
+	/** The source note's citation header, or '' (no note, no header, unreadable). */
+	#citationHeaderOf(sourcePath) {
+		try {
+			const abs = path.join(this.vaultRoot, sourcePath);
+			return citationHeader(fs.readFileSync(abs, 'utf8'), path.dirname(abs));
+		} catch {
+			return '';
+		}
 	}
 
 	/** A built block document by key, or undefined once evicted. */

@@ -83,7 +83,7 @@ export function registerIpc() {
 		await target.opened; // new windows open their vault after load
 		return target.vaults.info;
 	});
-	handle(CH.VAULT_CURRENT, (s) => s.vaults.info);
+	handle(CH.VAULT_CURRENT, (s) => s.vaults.ownInfo);
 	handleGlobal(CH.VAULT_RECENT, () => settings.get('recentVaults'));
 	handle(CH.VAULT_TREE, (s) => s.vaults.tree());
 
@@ -256,7 +256,11 @@ export function registerIpc() {
 		const current = s.vaults.loadState('vault-settings.json') ?? {};
 		current[key] = value;
 		s.vaults.saveState('vault-settings.json', current);
-		if (key === 'jmarkdownProject' || key === 'normalSyntax' || key === 'pandocCitations') {
+		// dataviewJs reaches the worker only at spawn (CLEW_DATAVIEW_JS), so
+		// it needs the fresh standby too — without it the toggle waited for
+		// the vault's next opening.
+		if (key === 'jmarkdownProject' || key === 'normalSyntax' || key === 'pandocCitations'
+			|| key === 'dataviewJs') {
 			s.renderService.reconfigure({ [key]: value === true });
 		}
 		// Bibliography settings rewrite the engine config the same way.
@@ -320,7 +324,7 @@ export function registerIpc() {
 	// sessionId: the reading-view PDF prints this session's own
 	// clew-preview:// document, and the protocol resolves it by sid.
 	handle(CH.EXPORT_NOTE, (s, { path, format, outFile }) =>
-		exportNote({ win: s.win, vaults: s.vaults, sessionId: s.id, relPath: path, format, outFile }));
+		exportNote({ win: s.win, vaults: s.vaults, sessionId: s.id, callerToken: s.callerToken, relPath: path, format, outFile }));
 
 	// The whole vault as a static website. `outDir` (smoke tests) skips the
 	// dialog; otherwise the user picks a folder and the site lands in a

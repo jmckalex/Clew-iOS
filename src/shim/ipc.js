@@ -442,10 +442,9 @@ export function createClewShim({ workerFactory, assetLoader } = {}) {
 			const current = vaults.loadState('vault-settings.json') ?? {};
 			current[key] = value;
 			vaults.saveState('vault-settings.json', current);
-			// `dataviewJs` is ours: upstream leaves it to the next vault open,
-			// which reads as an oversight — an immediate reconfigure is
-			// strictly better and this handler is iOS-owned. (Upstream
-			// candidate, recorded in PORT-PLAN.)
+			// The same list as upstream's ipc.js (dataviewJs joined it in
+			// 055d46b): these reach the worker only at spawn, so they need a
+			// fresh standby.
 			if (key === 'jmarkdownProject' || key === 'normalSyntax'
 				|| key === 'pandocCitations' || key === 'dataviewJs') {
 				renderService.reconfigure({ [key]: value === true });

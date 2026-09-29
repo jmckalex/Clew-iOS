@@ -20,6 +20,8 @@
 // from disconnectedCallback, and may override `onFrameSize(height)` and
 // `onFrameMessage(msg)`.
 import { blockUrl, blockDocumentUrl } from '../../lib/preview-url.js';
+import { renderPost } from '../../lib/caller-token.js';
+import { viewportEdges } from '../../lib/viewport.js';
 import { effectiveChords } from '../../commands/registry.js';
 import { settingsStore } from '../../state/settings-store.js';
 
@@ -94,7 +96,7 @@ export class FloatingPane extends HTMLElement {
 		const generation = ++this.#generation;
 		let hash;
 		try {
-			const response = await fetch(blockUrl(), { method: 'POST', body: JSON.stringify({ text, sourcePath }) });
+			const response = await renderPost(blockUrl(), { text, sourcePath });
 			if (!response.ok) throw new Error(String(response.status));
 			hash = (await response.json()).hash;
 		} catch {
@@ -160,11 +162,12 @@ export class FloatingPane extends HTMLElement {
 		const r = this.getBoundingClientRect();
 		const below = anchor.bottom + gap;
 		const above = anchor.top - gap - r.height;
-		const fitsBelow = below + r.height <= window.innerHeight - 8;
+		const edges = viewportEdges();
+		const fitsBelow = below + r.height <= edges.bottom - 8;
 		const fitsAbove = above >= 8;
 		const side = prefer === 'below' ? (fitsBelow || !fitsAbove ? 'below' : 'above') : (fitsAbove || !fitsBelow ? 'above' : 'below');
 		this.style.top = `${Math.round(side === 'below' ? below : above)}px`;
-		this.style.left = `${Math.round(Math.max(8, Math.min(left, window.innerWidth - r.width - 8)))}px`;
+		this.style.left = `${Math.round(Math.max(8, Math.min(left, edges.right - r.width - 8)))}px`;
 		return side;
 	}
 }

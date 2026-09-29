@@ -4,11 +4,14 @@
 	"version": "0.1.0",
 	"description": "iOS port of Clew — an open-source, Obsidian-style note app on the jmarkdown engine.",
 	"type": "module",
+	"imports": {
+		"#jmarkdown/*": "./vendor/jmarkdown/src/*"
+	},
 	"license": "GPL-3.0-or-later",
 	"author": "J. McKenzie Alexander",
 	"scripts": {
 		"build": "node scripts/build.js",
-		"test": "node --import ./tests/hooks/register.mjs --test",
+		"test": "node --test",
 		"sync-upstream": "node scripts/sync-upstream.js",
 		"sync-mptikz": "node scripts/stage-mptikz.js",
 		"dev": "node scripts/dev-server.js"

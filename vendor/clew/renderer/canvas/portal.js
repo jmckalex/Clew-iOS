@@ -18,6 +18,7 @@ import { parseCanvas, canvasBounds, nodeRect } from './canvas-model.js';
 import { shapeSvg, edgeSvg, strokeSvg } from './shape-svg.js';
 import { renderCardHtml } from './card-markdown.js';
 import { vaultFileUrl, previewUrl, fragmentUrl } from '../lib/preview-url.js';
+import { renderPost } from '../lib/caller-token.js';
 import { fileKind } from '../lib/file-types.js';
 import { isNotePath } from '../state/vault-store.js';
 import { ipc, CH } from '../ipc.js';
@@ -137,7 +138,7 @@ function portalNode(node, nstyle) {
 async function upgradeCard(el, text) {
 	if (!text.trim()) return;
 	try {
-		const response = await fetch(fragmentUrl(), { method: 'POST', body: text });
+		const response = await renderPost(fragmentUrl(), { text });
 		if (!response.ok) return;
 		const html = await response.text();
 		if (!el.isConnected) return;

@@ -21,6 +21,17 @@ import '../views/clew-graph-view.js';
 import '../views/clew-settings-view.js';
 import '../views/clew-file-view.js';
 import '../views/clew-canvas-view.js';
+import { retire } from '../../pdf-frames.js';
+
+/**
+ * Put `next` in the tab body. The outgoing view goes through retire(): if a
+ * PDF viewer in it holds an unsaved annotation, it lingers — hidden — until
+ * that is written (pdf-frames.js), while `next` shows at once.
+ */
+function show(body, next) {
+	for (const child of [...body.children]) if (!child.hasAttribute('data-clew-retiring')) retire(child);
+	body.append(next);
+}
 
 class ClewTabGroup extends ClewElement {
 	groupId = null;
@@ -68,7 +79,7 @@ class ClewTabGroup extends ClewElement {
 			this.#renderedTabId = null;
 			this.#renderedPath = null;
 			this.#renderedMode = null;
-			body.replaceChildren(this.#emptyState());
+			show(body, this.#emptyState());
 			return;
 		}
 		// Source and live edit are ONE view — the same pooled editor wearing
@@ -86,28 +97,28 @@ class ClewTabGroup extends ClewElement {
 			const view = document.createElement('clew-preview-view');
 			view.tabId = active.id;
 			view.path = active.path;
-			body.replaceChildren(view);
+			show(body, view);
 		} else if (active.kind === 'note') {
 			const view = document.createElement('clew-editor-view');
 			view.tabId = active.id;
 			view.path = active.path;
-			body.replaceChildren(view);
+			show(body, view);
 		} else if (active.kind === 'file') {
 			const view = document.createElement('clew-file-view');
 			view.tabId = active.id;
 			view.path = active.path;
-			body.replaceChildren(view);
+			show(body, view);
 		} else if (active.kind === 'canvas') {
 			const view = document.createElement('clew-canvas-view');
 			view.tabId = active.id;
 			view.path = active.path;
-			body.replaceChildren(view);
+			show(body, view);
 		} else if (active.kind === 'graph') {
-			body.replaceChildren(document.createElement('clew-graph-view'));
+			show(body, document.createElement('clew-graph-view'));
 		} else if (active.kind === 'settings') {
-			body.replaceChildren(document.createElement('clew-settings-view'));
+			show(body, document.createElement('clew-settings-view'));
 		} else {
-			body.replaceChildren(this.#emptyState());
+			show(body, this.#emptyState());
 		}
 	}
 

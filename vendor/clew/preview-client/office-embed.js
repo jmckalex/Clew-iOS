@@ -34,7 +34,8 @@ const holders = new Map(); // frameId → holder element on document.body
 
 window.addEventListener('message', (event) => {
 	const msg = event.data;
-	if (msg?.source !== 'clew-office-embed-host' || !pending.has(msg.id)) return;
+	// From the window the request went to (window.top), no other.
+	if (msg?.source !== 'clew-office-embed-host' || event.source !== window.top || !pending.has(msg.id)) return;
 	const el = pending.get(msg.id);
 	pending.delete(msg.id);
 	if (!el.isConnected) return;

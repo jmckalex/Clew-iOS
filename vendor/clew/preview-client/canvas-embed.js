@@ -17,6 +17,7 @@
 import { parseCanvas, canvasBounds, nodeRect } from '../renderer/canvas/canvas-model.js';
 import { shapeSvg, edgeSvg, strokeSvg, escapeXml } from '../renderer/canvas/shape-svg.js';
 import { renderCardHtml } from '../renderer/canvas/card-markdown.js';
+import { callerToken } from './caller-token.js';
 
 // Nesting guard: a canvas embed renders note nodes as iframes (?cdepth=N+1);
 // inside those, canvas embeds render as a plain title box, so a canvas that
@@ -286,7 +287,16 @@ function place(el, r) {
 async function upgradeCard(el, text) {
 	if (!text.trim()) return;
 	try {
-		const response = await fetch(`/${SID}/__clew_fragment__`, { method: 'POST', body: text });
+		// The fragment endpoint runs nothing without the caller token
+		// (caller-token.js), asked of the host on first use; if it never
+		// comes, the instant render stands and the console says why.
+		const token = await callerToken().catch((err) => {
+			console.warn(`Clew: canvas card left unrendered by the engine — ${err.message}`);
+			throw err;
+		});
+		const response = await fetch(`/${SID}/__clew_fragment__`, {
+			method: 'POST', body: JSON.stringify({ token, text }),
+		});
 		if (!response.ok) return;
 		const html = await response.text();
 		if (!el.isConnected) return;

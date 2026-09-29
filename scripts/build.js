@@ -125,20 +125,6 @@ const webroot = path.join(dist, 'webroot');
 const rendererPatches = {
 	name: 'clew-renderer-patches',
 	setup(builder) {
-		// Upstream's renderer reaches its engine mirror by a relative path
-		// (`../../../../vendor/jmarkdown/src/crossref.js` from editor/live/),
-		// which counts on the app living at <repo>/src. Here the app is
-		// mirrored one level deeper (vendor/clew), so the same path lands on
-		// a vendor/vendor/… that does not exist. Re-root it onto this repo's
-		// vendor/jmarkdown — the one place the two layouts differ that an
-		// import can see. tests/hooks/vendor-jmarkdown.mjs is the same rule
-		// for node --test. (Upstream candidate: an import map or a package
-		// self-reference would make the engine reachable by name.)
-		builder.onResolve({ filter: /^(?:\.\.\/)+vendor\/jmarkdown\// }, (args) => {
-			if (!args.importer.startsWith(path.join(root, 'vendor', 'clew') + path.sep)) return undefined;
-			const rest = args.path.replace(/^(?:\.\.\/)+vendor\/jmarkdown\//, '');
-			return { path: path.join(root, 'vendor', 'jmarkdown', rest) };
-		});
 		// Auto-focusing the editor pops the on-screen keyboard on every note
 		// open; on coarse-pointer devices a tap focuses deliberately instead.
 		builder.onLoad({ filter: /vendor\/clew\/renderer\/components\/workspace\/clew-editor-view\.js$/ }, (args) => ({
@@ -228,7 +214,8 @@ const rendererPatches = {
 				"external.textContent = engine.soffice ? 'Open in LibreOffice' : 'Open in Quick Look';"),
 			loader: 'js',
 		}));
-		// Three transforms on the canvas view, applied in order.
+		// One transform on the canvas view. (Patches 2–4 — an engaged node
+		// draws no handles or anchors — landed upstream as 45dffd7.)
 		builder.onLoad({ filter: /vendor\/clew\/renderer\/components\/views\/clew-canvas-view\.js$/ }, (args) => {
 			let src = fs.readFileSync(args.path, 'utf8');
 			// 1. A canvas office node's context menu offers a LIVE LibreOffice
@@ -249,28 +236,6 @@ const rendererPatches = {
 				+ "\t\t\t);\n"
 				+ "\t\t}\n",
 				'');
-			// 2. An engaged node's content owns its pointer events, so the
-			// resize handles drawn over its corners are a lie: a drag there
-			// goes to the content, not to the geometry. On touch that matters
-			// more than on desktop \u2014 engaging is a double tap (src/shim/
-			// ios-ui.js) and the handles vanishing is half of how you can see
-			// it happened, the border colour (ios.css) being the other half.
-			src = patched('clew-canvas-view.js', src,
-				"if (soloNode && this.#tool === 'select' && !this.#drag) handleRect(model.nodeRect(soloNode));",
-				"if (soloNode && this.#tool === 'select' && !this.#drag && this.#engagedId !== soloNode.id) handleRect(model.nodeRect(soloNode));");
-			// 3. \u2026 which only shows if the overlay is redrawn when the engaged
-			// node changes. #engage/#disengage just toggle a class today.
-			src = patched('clew-canvas-view.js', src,
-				"\t\tthis.#nodeEls.get(id)?.classList.add('is-engaged');\n",
-				"\t\tthis.#nodeEls.get(id)?.classList.add('is-engaged');\n\t\tthis.#syncOverlay();\n");
-			src = patched('clew-canvas-view.js', src,
-				"\t\tthis.#engagedId = null;\n",
-				"\t\tthis.#engagedId = null;\n\t\tthis.#syncOverlay();\n");
-			// 4. Same argument for the connection anchors: the side dots start
-			// an edge drag, which an engaged node's content swallows.
-			src = patched('clew-canvas-view.js', src,
-				"\t\tif (anchorTarget) {\n",
-				"\t\tif (anchorTarget && this.#engagedId !== anchorTarget.id) {\n");
 			return { contents: src, loader: 'js' };
 		});
 		// The shell panel cannot exist on iOS (no PTY), so its command — and
@@ -291,49 +256,6 @@ const rendererPatches = {
 				+ "\t\t\t\t}\n"
 				+ "\t\t\t} },\n",
 				''),
-			loader: 'js',
-		}));
-		// The renderer's vault-settings store (grammar, live-edit config,
-		// TeX-fragment warnings) is loaded ONLY in the EV_VAULT_OPENED
-		// handler. iOS boots through the VAULT_CURRENT branch — desktop's
-		// window-reload path — which never fires that event, so the store
-		// would stay `{}` every launch and the first editors would take the
-		// wrong grammar (the pool awaits ready(), which starts resolved). Load
-		// it there too, before the workspace restores. Upstream candidate: a
-		// desktop reload has the same hole.
-		builder.onLoad({ filter: /vendor\/clew\/renderer\/main\.js$/ }, (args) => ({
-			contents: patched('renderer/main.js', fs.readFileSync(args.path, 'utf8'),
-				'\t\tif (vault.watchCap) watchCapNotice(vault.watchCap);\n',
-				'\t\tif (vault.watchCap) watchCapNotice(vault.watchCap);\n'
-				+ '\t\tawait vaultSettingsStore.load();\n'),
-			loader: 'js',
-		}));
-		// Floaters clamp to window.innerWidth/innerHeight, and in a WKWebView
-		// the software keyboard shrinks neither — only the VISUAL viewport —
-		// so "below the anchor" can land under the keyboard. Both placement
-		// functions read the visual viewport's bottom and right edges
-		// instead; identical on desktop, where the two viewports agree
-		// (upstream candidate). The formatting popovers (popover.js) and the
-		// preview pane + link preview (floating-pane.js#placeAgainst).
-		builder.onLoad({ filter: /vendor\/clew\/renderer\/editor\/toolbar\/popover\.js$/ }, (args) => ({
-			contents: patched('toolbar/popover.js', fs.readFileSync(args.path, 'utf8'),
-				"\tif (top + r.height > window.innerHeight - 8 && a.top - r.height - 4 > 8) top = a.top - r.height - 4;\n"
-				+ "\tconst left = Math.max(8, Math.min(a.left, window.innerWidth - r.width - 8));\n",
-				"\tconst vv = window.visualViewport;\n"
-				+ "\tconst bottom = vv ? vv.offsetTop + vv.height : window.innerHeight;\n"
-				+ "\tconst right = vv ? vv.offsetLeft + vv.width : window.innerWidth;\n"
-				+ "\tif (top + r.height > bottom - 8 && a.top - r.height - 4 > 8) top = a.top - r.height - 4;\n"
-				+ "\tconst left = Math.max(8, Math.min(a.left, right - r.width - 8));\n"),
-			loader: 'js',
-		}));
-		builder.onLoad({ filter: /vendor\/clew\/renderer\/components\/chrome\/floating-pane\.js$/ }, (args) => ({
-			contents: patched('chrome/floating-pane.js',
-				patched('chrome/floating-pane.js', fs.readFileSync(args.path, 'utf8'),
-					"\t\tconst fitsBelow = below + r.height <= window.innerHeight - 8;\n",
-					"\t\tconst vv = window.visualViewport;\n"
-					+ "\t\tconst fitsBelow = below + r.height <= (vv ? vv.offsetTop + vv.height : window.innerHeight) - 8;\n"),
-				"\t\tthis.style.left = `${Math.round(Math.max(8, Math.min(left, window.innerWidth - r.width - 8)))}px`;\n",
-				"\t\tthis.style.left = `${Math.round(Math.max(8, Math.min(left, (vv ? vv.offsetLeft + vv.width : window.innerWidth) - r.width - 8)))}px`;\n"),
 			loader: 'js',
 		}));
 		// WebKit + custom schemes: when the workspace reconciler moves a

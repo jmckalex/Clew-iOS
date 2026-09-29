@@ -33,6 +33,8 @@ import { sessionById } from './session.js';
 import { previewPluginScripts, enabledPlugins } from './plugins.js';
 import { settings } from './settings.js';
 import { fontsDir, fallbackConfig } from './pdf-fonts.js';
+import { narrowCors } from './preview-cors.js';
+import { readRenderBody } from './caller-token.js';
 
 const MIME = {
 	'.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript',
@@ -215,7 +217,7 @@ export function installPreviewProtocol({ distDir, nodeModulesDir, engineAssetsDi
 		return out;
 	}
 
-	protocol.handle(PREVIEW_SCHEME, async (request) => {
+	const serve = async (request) => {
 		try {
 			const url = new URL(request.url);
 			const pathname = decodeURIComponent(url.pathname).replace(/^\/+/, '');
@@ -324,49 +326,41 @@ export function installPreviewProtocol({ distDir, nodeModulesDir, engineAssetsDi
 			}
 			const { vaults, renderService } = session;
 
-			// Canvas-card fragment rendering: POST markdown text, get body HTML.
-			// Origin-guarded: only the app (file:// sends "null") and preview
-			// documents (same scheme) may use it — a web page framed inside a
-			// canvas web node must NOT reach the engine (script blocks execute).
-			if (rel === '__clew_fragment__' && request.method === 'POST') {
+			// The render endpoints run the engine — script blocks execute — so
+			// they run nothing for a caller without the session's token
+			// (main/caller-token.js; docs/dev/frame-bridge.md §1): only the
+			// app page and the preview documents it hands the token to may use
+			// them, and no header can say which caller is which (this handler
+			// sees no Origin on these POSTs, measured). The Origin guard stays
+			// as a second layer. The body is JSON `{token, text, sourcePath?}`.
+			const readRender = async () => {
 				const origin = request.headers.get('origin') ?? '';
-				if (/^https?:/i.test(origin)) {
-					return new Response('Forbidden', { status: 403, headers: headers('text/plain') });
-				}
-				const text = await request.text();
-				if (text.length > 100_000) {
-					return new Response('Too large', { status: 413, headers: headers('text/plain') });
-				}
-				const html = await renderService.renderFragment(text);
+				if (/^https?:/i.test(origin)) return { status: 403, message: 'Forbidden' };
+				return readRenderBody(await request.text(), session.callerToken);
+			};
+			const refuse = ({ status, message }) =>
+				new Response(message, { status, headers: headers('text/plain') });
+
+			// Canvas-card fragment rendering: POST `{token, text}`, get body HTML.
+			if (rel === '__clew_fragment__' && request.method === 'POST') {
+				const body = await readRender();
+				if (body.status) return refuse(body);
+				const html = await renderService.renderFragment(body.text);
 				return new Response(html, { headers: headers('text/html') });
 			}
 
 			// Live edit's block frames (docs/dev/live-edit.md §7.2). POST
-			// `{text, sourcePath}` renders the snippet as a full preview
+			// `{token, text, sourcePath}` renders the snippet as a full preview
 			// document and answers `{hash}`; GET `__clew_block__/<hash>` serves
 			// that document with the same client injection a note gets, marked
 			// `data-clew-block` so the client reports its size instead of its
-			// scroll. Same origin guard and size limit as fragments. An
+			// scroll. Same token check and size limit as fragments; the GET's
+			// capability is its unguessable path, as every preview URL's is. An
 			// evicted hash is a 404: the caller POSTs again.
 			if (rel === '__clew_block__' && request.method === 'POST') {
-				const origin = request.headers.get('origin') ?? '';
-				if (/^https?:/i.test(origin)) {
-					return new Response('Forbidden', { status: 403, headers: headers('text/plain') });
-				}
-				const body = await request.text();
-				if (body.length > 100_000) {
-					return new Response('Too large', { status: 413, headers: headers('text/plain') });
-				}
-				let text;
-				let sourcePath = null;
-				try {
-					({ text, sourcePath = null } = JSON.parse(body));
-				} catch {
-					return new Response('Bad request', { status: 400, headers: headers('text/plain') });
-				}
-				if (typeof text !== 'string') {
-					return new Response('Bad request', { status: 400, headers: headers('text/plain') });
-				}
+				const body = await readRender();
+				if (body.status) return refuse(body);
+				const { text, sourcePath } = body;
 				if (sourcePath !== null) {
 					try { vaults.resolve(sourcePath); } catch {
 						return new Response('Forbidden', { status: 403, headers: headers('text/plain') });
@@ -410,5 +404,9 @@ export function installPreviewProtocol({ distDir, nodeModulesDir, engineAssetsDi
 			return new Response(`Preview error: ${String(err.message ?? err)}`,
 				{ status: 500, headers: { 'Content-Type': 'text/plain', 'Access-Control-Allow-Origin': '*' } });
 		}
-	});
+	};
+	// Every response leaves through the one rule for who may read it across
+	// origins (preview-cors.js): the preview documents and the app page; no
+	// other origin gets an Access-Control-Allow-Origin.
+	protocol.handle(PREVIEW_SCHEME, async (request) => narrowCors(request.headers.get('origin'), await serve(request)));
 }

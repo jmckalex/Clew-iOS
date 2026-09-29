@@ -97,10 +97,17 @@ export function snapshotBeforeWrite(root, rel, rawOptions, { force = false } = {
 			if (prev.equals(fs.readFileSync(abs))) return null;
 		}
 		const ext = path.extname(rel);
-		let name = stampFor(stat.mtimeMs) + ext;
-		for (let i = 1; existing.some((e) => e.name === name); i++) {
-			name = `${stampFor(stat.mtimeMs)}-${i}${ext}`;
-		}
+		const stamp = stampFor(stat.mtimeMs);
+		// A same-second copy takes the counter AFTER the highest in use, never
+		// the lowest free one: pruning frees low counters, and a reused one
+		// sorts the newest copy below its elders (entriesIn orders them by
+		// counter), so `newest` above would name an older version.
+		const sameSecond = existing.filter((e) => {
+			const base = path.basename(e.name, path.extname(e.name));
+			return base === stamp || base.startsWith(stamp + '-');
+		});
+		const name = sameSecond.length === 0 ? stamp + ext
+			: `${stamp}-${Math.max(...sameSecond.map((e) => e.counter)) + 1}${ext}`;
 		fs.mkdirSync(dir, { recursive: true });
 		fs.copyFileSync(abs, path.join(dir, name));
 		fs.utimesSync(path.join(dir, name), stat.mtime, stat.mtime);

@@ -35,11 +35,14 @@ import {
 } from './frames.js';
 import { handlePreviewMessage } from './frame-host.js';
 import { blockUrl, blockDocumentUrl } from '../../lib/preview-url.js';
+import { renderPost } from '../../lib/caller-token.js';
 import { effectiveChords } from '../../commands/registry.js';
 import { ipc, CH } from '../../ipc.js';
 import { settingsStore } from '../../state/settings-store.js';
 import { vaultSettingsStore } from '../../state/vault-settings-store.js';
 import { isDependentFragment } from '../../../shared/fragment-deps.js';
+import { retire } from '../../pdf-frames.js';
+import { citationLines } from '../../../shared/citation-keys.js';
 
 const HOST_SOURCE = 'clew-preview-host';
 const RESTALE_MS = 300;
@@ -50,10 +53,7 @@ const ENGINE_APP_KEYS = new Set(['texFragments']);
 
 /** POST a block's text; resolves to its document hash. */
 async function renderBlock(text, sourcePath) {
-	const response = await fetch(blockUrl(), {
-		method: 'POST',
-		body: JSON.stringify({ text, sourcePath }),
-	});
+	const response = await renderPost(blockUrl(), { text, sourcePath });
 	if (!response.ok) throw new Error(`block render failed (${response.status})`);
 	return (await response.json()).hash;
 }
@@ -70,6 +70,9 @@ class FrameLayer {
 		this.onMessage = (event) => this.#message(event);
 		window.addEventListener('message', this.onMessage);
 		this.offFile = ipc.on(CH.EV_FILE_CHANGED, ({ path }) => this.#fileChanged(path));
+		// Every block renders under the note's citation keys (main/
+		// citation-header.js); a save that changes them re-renders the frames.
+		this.citeKeys = this.#citationKeys();
 		this.offKv = ipc.on(CH.EV_KV_CHANGED, (payload) => this.#broadcast({ type: 'event', name: 'kv', payload }));
 		this.offTheme = settingsStore.on('settings-changed', (key) => {
 			if (key === 'theme') this.#broadcast({ type: 'theme', theme: document.body.dataset.theme ?? 'dark' });
@@ -106,7 +109,8 @@ class FrameLayer {
 		this.offVault?.();
 		clearTimeout(this.restaleTimer);
 		clearTimeout(this.allTimer);
-		this.layer.remove();
+		clearTimeout(this.citeTimer);
+		retire(this.layer);
 		this.records.clear();
 	}
 
@@ -141,7 +145,7 @@ class FrameLayer {
 		}
 		for (const [id, record] of this.records) {
 			if (!seen.has(id)) {
-				record.iframe?.remove();
+				if (record.iframe) retire(record.iframe);   // a PDF edit still saving keeps it, hidden
 				this.records.delete(id);
 			}
 		}
@@ -227,7 +231,7 @@ class FrameLayer {
 			.filter((r) => r.iframe && rank(r) < 2 && !protectedPin(r))
 			.sort((a, b) => (a.pinned - b.pinned) || (rank(a) - rank(b)) || (a.lastVisible - b.lastVisible))[0];
 		if (!victim) return false;
-		victim.iframe.remove();
+		retire(victim.iframe);
 		victim.iframe = null;
 		victim.ready = false;
 		victim.state = 'idle';
@@ -322,10 +326,28 @@ class FrameLayer {
 
 	/** Another file changed: blocks that read other files re-render. */
 	#fileChanged(path) {
-		if (path === this.config.notePath) return; // this note's own saves
+		if (path === this.config.notePath) {
+			// This note's own saves re-render nothing — unless its citation keys
+			// changed, which every one of its blocks renders under. Compared a
+			// beat later: a change made outside reaches the editor after this.
+			clearTimeout(this.citeTimer);
+			this.citeTimer = setTimeout(() => {
+				const keys = this.#citationKeys();
+				if (keys === this.citeKeys) return;
+				this.citeKeys = keys;
+				this.#restale({ all: true });
+			}, RESTALE_MS);
+			return;
+		}
 		if (![...this.records.values()].some((r) => r.dependent)) return;
 		clearTimeout(this.restaleTimer);
 		this.restaleTimer = setTimeout(() => this.#restale(), RESTALE_MS);
+	}
+
+	/** The note's citation keys, from its header (the top of the note). */
+	#citationKeys() {
+		const doc = this.view.state.doc;
+		return JSON.stringify(citationLines(doc.sliceString(0, Math.min(doc.length, 4096))));
 	}
 
 	/** Every frame re-renders (the engine was reconfigured), debounced — a

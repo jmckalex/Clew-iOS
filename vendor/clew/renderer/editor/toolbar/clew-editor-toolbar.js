@@ -17,10 +17,17 @@
 //     its selection; popovers that need typing take focus and give it back.
 //   - State (pressed, enabled, the block label) is PATCHED from setState —
 //     no re-render per keystroke.
-//   - Width-aware: groups that do not fit go into a `…` menu, lowest
-//     priority first (toolbar-layout.js); the mode switch never goes.
+//   - Width-aware (toolbar-layout.js#layoutRows): too narrow for one row,
+//     it WRAPS onto a second, at group boundaries and in natural order, the
+//     mode switch ending row 1; only past two rows do groups go into a `…`
+//     menu, lowest priority first. One row while the visual viewport is
+//     short (--toolbar-two-row-min-height: an iPad with its keyboard up).
+//     A change of rows reports its height delta ('toolbar-resize') so the
+//     host can hold the text still.
 //   - Keyboard: roving tabindex — ⌥⇧T (view:focus-toolbar) enters, arrows
-//     move, Home/End jump, Enter/Space activate, Escape returns to the editor.
+//     move in VISUAL order across the rows (Up/Down to the nearest item of
+//     the other row), Home/End jump, Enter/Space activate, Escape returns to
+//     the editor.
 //
 // `slim`: reading mode's bar, which holds only the mode switch.
 import { runCommand, effectiveKeymap } from '../../commands/registry.js';
@@ -28,7 +35,7 @@ import { prettifyChord } from '../../commands/builtin.js';
 import { icon } from '../../lib/icons.js';
 import { settingsStore } from '../../state/settings-store.js';
 import { orderedGroups, labelOf } from './toolbar-spec.js';
-import { layoutGroups } from './toolbar-layout.js';
+import { layoutRows } from './toolbar-layout.js';
 import { openPopover, menuItem, menuHeading, menuSeparator } from './popover.js';
 import { buildPopover } from './popovers.js';
 
@@ -71,7 +78,10 @@ export class ClewEditorToolbar extends HTMLElement {
 	#groups = [];
 	#observer = null;
 	#widths = null;
+	#moreWidth = 32;
 	#overflow = [];
+	#rows = [];      // group ids per row, in visual order
+	#onViewport = () => this.#layout();
 
 	connectedCallback() {
 		this.setAttribute('role', 'toolbar');
@@ -85,12 +95,14 @@ export class ClewEditorToolbar extends HTMLElement {
 		this.rebuild();
 		this.#observer = new ResizeObserver(() => this.#layout());
 		this.#observer.observe(this);
+		window.visualViewport?.addEventListener('resize', this.#onViewport);
 	}
 
 	disconnectedCallback() {
 		toolbars.delete(this);
 		this.offSettings?.();
 		this.#observer?.disconnect();
+		window.visualViewport?.removeEventListener('resize', this.#onViewport);
 	}
 
 	/** Re-render from the spec (settings or plugin buttons changed). */
@@ -118,7 +130,11 @@ export class ClewEditorToolbar extends HTMLElement {
 		more.addEventListener('pointerdown', (e) => e.preventDefault());
 		more.addEventListener('click', () => this.#openOverflow(more));
 		this.more = more;
-		frag.append(more);
+		// Forces row 2: a full-width, zero-height flex item (hidden on one row).
+		const rowBreak = document.createElement('div');
+		rowBreak.className = 'toolbar-break';
+		rowBreak.style.order = '99';
+		frag.append(rowBreak, more);
 		this.replaceChildren(frag);
 		this.#roving();
 		this.setState(this.state);
@@ -198,22 +214,57 @@ export class ClewEditorToolbar extends HTMLElement {
 		this.#layout();
 	}
 
-	/** Which groups fit; the rest go into the `…` menu. */
+	/** Which groups fit on which row; past two rows, the `…` menu. */
 	#layout() {
 		if (!this.isConnected) return;
 		const groups = [...this.querySelectorAll(':scope > .toolbar-group')];
 		if (!this.#widths) {
-			// Measure every group once at full size (per rebuild).
+			// Measure every group once at full size, WITHOUT separators, and
+			// the … button as it is really drawn (per rebuild) — no desktop
+			// sizes assumed: iOS draws 36 px buttons.
+			this.classList.add('is-measuring');
 			for (const g of groups) g.hidden = false;
-			this.more.hidden = true;
+			this.more.hidden = false;
 			this.#widths = Object.fromEntries(groups.map((g) => [g.dataset.group, g.getBoundingClientRect().width]));
+			this.#moreWidth = this.more.getBoundingClientRect().width || 32;
+			this.more.hidden = true;
+			this.classList.remove('is-measuring');
 		}
-		const available = this.getBoundingClientRect().width - 16;
-		const { visible, overflow } = layoutGroups(this.#groups, this.#widths, available, { state: this.state, separator: 9, overflowButton: 32 });
-		for (const g of groups) g.hidden = !visible.includes(g.dataset.group);
+		const style = getComputedStyle(this);
+		const available = this.getBoundingClientRect().width
+			- (parseFloat(style.paddingLeft) || 0) - (parseFloat(style.paddingRight) || 0);
+		const tallEnough = (window.visualViewport?.height ?? window.innerHeight)
+			>= (parseFloat(style.getPropertyValue('--toolbar-two-row-min-height')) || 560);
+		const before = this.#rows.length || 1;
+		const { rows, visible, overflow } = layoutRows(this.#groups, this.#widths, available, {
+			state: this.state, separator: 9, overflowButton: this.#moreWidth,
+			maxRows: this.slim || !tallEnough ? 1 : 2, previousRows: before, hysteresis: 8,
+		});
+		const byId = new Map(groups.map((g) => [g.dataset.group, g]));
+		for (const g of groups) {
+			g.hidden = !visible.includes(g.dataset.group);
+			g.classList.remove('has-sep');
+		}
+		rows.forEach((row, r) => row.forEach((id, i) => {
+			const g = byId.get(id);
+			if (!g) return;
+			g.style.order = String(r * 100 + i + 1);
+			if (i > 0 && !g.classList.contains('is-end')) g.classList.add('has-sep');
+		}));
+		this.#rows = rows;
 		this.#overflow = overflow;
 		this.more.hidden = overflow.length === 0;
+		this.more.style.order = String((rows.length - 1) * 100 + 98);
+		this.more.classList.toggle('is-row-end', rows.length > 1);
+		this.querySelector(':scope > .toolbar-break').hidden = rows.length < 2;
 		this.dataset.overflow = overflow.join(' ');
+		this.dataset.rows = String(rows.length);
+		if (rows.length !== before) {
+			const height = this.getBoundingClientRect().height;
+			this.style.setProperty('--toolbar-rows', String(rows.length));
+			const delta = this.getBoundingClientRect().height - height;
+			if (delta) this.dispatchEvent(new CustomEvent('toolbar-resize', { bubbles: true, detail: { delta } }));
+		}
 	}
 
 	#openOverflow(anchor) {
@@ -244,8 +295,19 @@ export class ClewEditorToolbar extends HTMLElement {
 
 	// ---- keyboard: roving tabindex ----------------------------------------
 
+	/** Focusable controls in VISUAL order: row by row, … last. */
 	#focusable() {
-		return [...this.querySelectorAll('.toolbar-group:not([hidden]) .toolbar-button:not([disabled]):not([hidden]), .toolbar-more:not([hidden])')];
+		const usable = (b) => !b.disabled && !b.hidden;
+		const out = [];
+		for (const row of this.#rows.length ? this.#rows : [this.#groups.map((g) => g.id)]) {
+			for (const id of row) {
+				const g = this.querySelector(`:scope > .toolbar-group[data-group="${CSS.escape(id)}"]`);
+				if (!g || g.hidden) continue;
+				out.push(...[...g.querySelectorAll('.toolbar-button')].filter(usable));
+			}
+		}
+		if (!this.more.hidden) out.push(this.more);
+		return out;
 	}
 
 	#roving() {
@@ -267,6 +329,17 @@ export class ClewEditorToolbar extends HTMLElement {
 		let next = null;
 		if (e.key === 'ArrowRight') next = (at + 1) % items.length;
 		else if (e.key === 'ArrowLeft') next = (at - 1 + items.length) % items.length;
+		else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+			// The nearest control, by horizontal centre, on the other row.
+			const box = (el) => el.getBoundingClientRect();
+			const here = box(items[at]);
+			const x = here.left + here.width / 2;
+			const target = items.map((el, i) => ({ i, r: box(el) }))
+				.filter(({ r }) => (e.key === 'ArrowDown' ? r.top >= here.bottom - 1 : r.bottom <= here.top + 1))
+				.sort((a, b) => Math.abs(a.r.left + a.r.width / 2 - x) - Math.abs(b.r.left + b.r.width / 2 - x))[0];
+			if (!target) return;
+			next = target.i;
+		}
 		else if (e.key === 'Home') next = 0;
 		else if (e.key === 'End') next = items.length - 1;
 		else if (e.key === 'Escape') {

@@ -461,12 +461,13 @@ test('history: pruning removes old snapshots from disk, never the newest', async
 	}
 	await native.flush();
 	assert.equal(fs.readdirSync(historyDir(rel)).length, 2, 'count cap enforced on disk');
-	// Three saves inside one second share a stamp and differ by counter; a
-	// name freed by pruning is reused, so order WITHIN the second is not
-	// recency (upstream's semantics, run verbatim). Assert the survivors.
+	// Three saves inside one second share a stamp and differ by counter;
+	// since upstream 0d17da7 a new snapshot takes the counter after the
+	// highest, so the listing (newest first) tracks recency within the
+	// second too.
 	const listed = await clew.invoke(CH.HISTORY_LIST, { path: rel });
 	const survivors = await Promise.all(listed.map((s) => clew.invoke(CH.HISTORY_READ, { path: rel, id: s.id })));
-	assert.deepEqual(survivors.sort(), ['version 1\n', 'version 2\n'], 'the two most recent pre-images, the rest pruned');
+	assert.deepEqual(survivors, ['version 2\n', 'version 1\n'], 'the two most recent pre-images, newest first; the rest pruned');
 	const removes = fakeBridge.calls.filter(([m]) => m === 'remove');
 	assert.ok(removes.length >= 3, `pruning reached the bridge (${removes.length} removes)`);
 	assert.ok(removes.every(([, p]) => p.rel.startsWith('.clew/history/')), 'only ever history paths');

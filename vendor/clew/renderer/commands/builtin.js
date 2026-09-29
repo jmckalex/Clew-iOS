@@ -243,7 +243,7 @@ export function registerBuiltinCommands() {
 		{ id: 'view:focus-toolbar', name: 'Focus editor toolbar', hotkeys: ['Alt-Shift-t'], when: needsNote,
 			run: () => {
 				const tab = workspaceStore.activeTab();
-				const host = [...document.querySelectorAll('clew-editor-view, clew-preview-view')].find((v) => v.tabId === tab?.id);
+				const host = [...document.querySelectorAll('clew-editor-view:not([data-clew-retiring]), clew-preview-view:not([data-clew-retiring])')].find((v) => v.tabId === tab?.id);
 				host?.querySelector('clew-editor-toolbar')?.focusFirst();
 			} },
 		// The shell panel. Ctrl-` is every editor's terminal chord, and it is

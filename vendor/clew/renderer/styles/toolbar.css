@@ -4,12 +4,21 @@
 .preview-host { flex-direction: column; }
 .preview-host > .preview-frame { flex: 1; min-height: 0; }
 
+/* One row, or two when it is too narrow (clew-editor-toolbar.js): the height
+   is rows × --toolbar-row, and space-evenly centres each row in its band —
+   a zero-height .toolbar-break forces the second. A port with bigger touch
+   targets sets --toolbar-row (not a height); --toolbar-two-row-min-height is
+   the visual-viewport height below which it stays on one row plus `…`. */
 .editor-toolbar {
+	--toolbar-row: 36px;
+	--toolbar-two-row-min-height: 560px;
 	flex: none;
 	display: flex;
+	flex-wrap: wrap;
 	align-items: center;
+	align-content: space-evenly;
 	gap: 0;
-	height: 36px;
+	height: calc(var(--toolbar-rows, 1) * var(--toolbar-row));
 	padding: 0 8px;
 	background: var(--clew-bg-secondary);
 	border-bottom: 1px solid var(--clew-border);
@@ -19,14 +28,19 @@
 }
 .toolbar-group { display: flex; align-items: center; gap: 1px; }
 .toolbar-group[hidden] { display: none; }
-.toolbar-group + .toolbar-group:not(.is-end)::before {
+.toolbar-break { flex-basis: 100%; height: 0; }
+.toolbar-break[hidden] { display: none; }
+/* Separators follow the ROWS (the layout marks them), not DOM adjacency. */
+.toolbar-group.has-sep::before {
 	content: '';
 	width: 1px;
 	height: 18px;
 	margin: 0 4px;
 	background: var(--clew-border);
 }
+.editor-toolbar.is-measuring .toolbar-group::before { display: none; }
 .toolbar-group.is-end { margin-left: auto; }
+.toolbar-more.is-row-end { margin-left: auto; }
 .toolbar-button {
 	display: inline-flex;
 	align-items: center;

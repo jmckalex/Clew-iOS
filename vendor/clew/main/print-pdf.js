@@ -88,7 +88,7 @@ const READY_PROBE = `(() => {
  * A folded `![[Note|collapsed]]` embed prints folded. That is the promise of
  * "as displayed": what is on screen is what comes out.
  */
-export async function printNoteToPdf({ sessionId, relPath, outFile, paperSize = 'a4' }) {
+export async function printNoteToPdf({ sessionId, callerToken = null, relPath, outFile, paperSize = 'a4' }) {
 	const encoded = relPath.split('/').map(encodeURIComponent).join('/');
 	const url = `clew-preview://vault/${encodeURIComponent(sessionId)}/${encoded}.html`;
 
@@ -105,6 +105,15 @@ export async function printNoteToPdf({ sessionId, relPath, outFile, paperSize = 
 		await win.webContents.executeJavaScript(ARM_SCRIPT);
 		win.webContents.executeJavaScript(
 			`window.postMessage({ source: 'clew-preview-host', type: 'theme', theme: 'light' }, '*'); true;`);
+		// The caller token (docs/dev/frame-bridge.md §1): this page is TOP-level,
+		// with no host to answer its ask, so it is handed the token the same
+		// way — a canvas embed's cards render through the fragment endpoint,
+		// which runs nothing without it. At the top window.parent is window,
+		// so the client believes this post.
+		if (callerToken) {
+			win.webContents.executeJavaScript(`window.postMessage({ source: 'clew-preview-host', type: 'caller-token', `
+				+ `token: ${JSON.stringify(callerToken)} }, 'clew-preview://vault'); true;`);
+		}
 
 		const deadline = Date.now() + READY_TIMEOUT_MS;
 		for (;;) {

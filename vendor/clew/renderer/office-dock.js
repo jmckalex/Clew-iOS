@@ -33,6 +33,8 @@ import { Emitter } from './lib/emitter.js';
 import { ipc, CH } from './ipc.js';
 import { workspaceStore } from './state/workspace-store.js';
 import { zetaOfficeUrl } from './lib/preview-url.js';
+import { hasUnsavedPdf, flushAllPdf } from './pdf-frames.js';
+import { fromPreviewOrigin } from '../shared/message-guard.js';
 
 const SAVE_TIMEOUT = 20000; // a big spreadsheet store is seconds, not minutes
 const ECHO_WINDOW = 3000; // watcher events this close to our save are the save
@@ -117,7 +119,16 @@ class OfficeDock extends Emitter {
 		}, 700);
 		try {
 			this.#engine = await ipc.invoke(CH.OFFICE_ENGINE_DOWNLOAD);
-		} catch { /* status poll already painted the failure */ } finally {
+		} catch {
+			// A failed file resolves with lastError (zeta-assets.js); only a
+			// rejection lands here — the engine folder could not be made, or
+			// the call itself failed — and it can beat the first 700 ms poll,
+			// leaving the optimistic `downloading` to say "Starting…" for
+			// ever. Ask for the real state; if even that fails, stop claiming
+			// a download.
+			this.#engine = await ipc.invoke(CH.OFFICE_ENGINE_STATUS)
+				.catch(() => ({ ...(this.#engine ?? {}), downloading: false }));
+		} finally {
 			clearInterval(poll);
 			this.emit('changed');
 		}
@@ -276,6 +287,14 @@ class OfficeDock extends Emitter {
 	/** The window wants to close (main asked). Clean → yes; anything dirty
 	 *  — the office tab or any live embed — gets its dialog first. */
 	async #onCloseRequested() {
+		// This window's close question is asked here, so it is also where
+		// unsaved PDF annotations are written first: a closing window takes
+		// its viewer frames with it (pdf-frames.js). 'pending' holds main's
+		// fail-open timer while they save.
+		if (hasUnsavedPdf()) {
+			ipc.invoke(CH.WINDOW_CLOSE_RESOLVED, { proceed: 'pending' }).catch(() => {});
+			await flushAllPdf(10_000);
+		}
 		this.#sweepEmbeds();
 		const dirtyEmbeds = [...this.#embeds].filter(([, e]) => e.dirty).map(([w]) => w);
 		if (!this.#state?.dirty && dirtyEmbeds.length === 0) {
@@ -324,7 +343,9 @@ class OfficeDock extends Emitter {
 			}
 			return;
 		}
-		// Not the dock's frame: a live EMBED somewhere under this window.
+		// Not the dock's frame: a live EMBED somewhere under this window — on
+		// the preview origin, or it is not one of ours (shared/message-guard.js).
+		if (!fromPreviewOrigin(e)) return;
 		if (msg?.cmd === 'zeta-modified' && e.source) {
 			const entry = this.#embeds.get(e.source) ?? { dirty: false, waiters: [] };
 			entry.dirty = msg.state === true;
@@ -356,7 +377,7 @@ class OfficeDock extends Emitter {
 	/** The workspace tab whose view hosts this embed's window, if visible:
 	 *  walk the window's parent chain until an iframe of a view matches. */
 	#tabForEmbed(sourceWin) {
-		const views = document.querySelectorAll('clew-preview-view, clew-canvas-view');
+		const views = document.querySelectorAll('clew-preview-view:not([data-clew-retiring]), clew-canvas-view:not([data-clew-retiring])');
 		let w = sourceWin;
 		for (let depth = 0; w && depth < 5; depth++) {
 			for (const view of views) {
