@@ -338,16 +338,20 @@ Ranked; items 1–5 are in scope for the first working build, 6–10 tracked:
 Behaviour that is not actually iOS-specific and would be better living in
 the golden master than forked here:
 
-Clew-app reviewed this list at `e88aff6` (2026-09-29, via the coordinating
-session) and has implemented none of it yet. Agreed and small, waiting on
-the owner: the boot path's greeting and settings load, same-second snapshot
-ordering, `downloadEngine`'s repaint, `dataviewJs` reconfigure, the engaged
-canvas node (it would retire canvas-view patches 2–4), floaters on the
-visual viewport, and the `pdf-core.js` viewer handles (with the Pencil
-convention, if wanted). Where upstream disagreed or redirected, the item
-says so. One item was withdrawn: an `Origin`-guard "parity" claim — the
-vendored `main/protocol.js` guards both POST routes alike (l.328–335 and
-349–355); this list had it wrong.
+**Status after the 0.11.1 sync (2026-09-30, vendor at Clew-app `84f975e`):**
+LANDED upstream and ported — the boot path's greeting and settings load
+(9b97ff9), same-second snapshot order (0d17da7), `downloadEngine`'s repaint
+(5635f27), `dataviewJs` reconfigure (055d46b), the engaged canvas node
+(45dffd7, retired canvas-view patches 2–4), floaters on the visual viewport
+(43cc4e7), the engine reached as `#jmarkdown/*` (89a6bb0, retired the
+`onResolve` re-root and the test hook), `data-overflows` on the preview pane
+(f47080b). Next sync: the load-keyed preview watchdog (f1816ae) retires the
+`client.js` pageshow patch and the `clew-preview-view` rebuild. Still open:
+the engine registry hook (upstream: in the jmarkdown master), `pdf-core.js`
+viewer handles with the Pencil convention, canvas-embed scene PDFs,
+long-press as ⌥ (deferred). Withdrawn: the `Origin`-parity item (the list
+had it wrong). The References-panel item resolved differently: the iOS
+shim was simply missing `RENDER_HTML` (added in this sync).
 
 - **A registry hook in the engine** for config-named extensions, instead of
   the build patching `metadata-header.js`'s dynamic imports (see above).

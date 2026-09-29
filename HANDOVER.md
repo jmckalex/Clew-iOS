@@ -1,4 +1,14 @@
-# Handover — 2026-09-29 (the live-edit sync is pushed; the cloud build succeeded)
+# Handover — 2026-09-30 (the 0.11.1 sync: verified in the simulator; the push waits on the owner's decision)
+
+**NOW (2026-09-30, overnight):** the upstream 0.11.1 sync ran p1 → p4 on
+`sync111-p1-vendor … sync111-p4-verify` — vendor at Clew-app `84f975e`
+(local there), the caller token on iOS, the scene-PDF relay guard,
+RENDER_HTML. Every check in `UPSTREAM-0.11.1-PLAN.md` passed in the
+simulator (its STATUS line has the results and what the simulator could
+not prove); 680 tests. `main` is fast-forwarded to the p4 tip; the push
+is the owner's decision, relayed by Clew-boss ("push overnight if ALL
+checks pass"). Sections below that describe the live-edit sync are its
+history; §4.5 and §5–§6 are current.
 
 Session-rollover state, upstream-style: rewritten each session, kept
 short. Durable architecture and build docs live in **README.md** and
@@ -332,17 +342,28 @@ TestFlight Internal (§4.1). Tests **677 green**.
 
 ## 5. Verification kit (works, use it)
 
-- `npm test` — 675 green (`node --import ./tests/hooks/register.mjs
-  --test`: the hook re-roots the one relative `vendor/jmarkdown` import
-  upstream's renderer makes). `node tools/render-note.mjs <vault> <note>
+- `npm test` — 680 green, plain `node --test` (the engine is reached as
+  `#jmarkdown/*` through package.json's `imports`; the old resolver hook
+  is gone). `node tools/render-note.mjs <vault> <note>
   [--vault-options '<json>'] [--global-fragments '<json>']`.
+- **The session is random now** (`s` + 32 hex, per vault open): read it
+  from `__clewNative.sessionId`, never write `s1` — an unknown sid is a
+  404. The render POSTs need the caller token: JSON body
+  `{token, text[, sourcePath]}`, NO Content-Type, token from
+  `__clewShim.services.vaults.callerToken`. Cross-origin reads answer only
+  `clew-app://app`, so a sandboxed probe frame reads nothing.
+- Open a `.canvas` with `workspaceStore.openCanvas(path)` (`openFile`
+  gives a plain file tab). The Export-as-PDF web view has no console
+  forwarder: check it through the PDF (`tmp/<name>.pdf`, `pdftotext`).
+  `message` listeners from the smoke hook never fire — a page script in
+  `dist/webroot` (scratch, gitignored) can log; remove it after.
 - Smoke: `xcrun simctl launch <sim> org.jmckalex.clew.ios -ClewSmokeJS
   '<js>'` — **terminate the app first**; read via `xcrun simctl spawn
   <sim> log show --start "<date>" --predicate 'eventMessage CONTAINS
   "CLEWJS"'`. FUNCTION BODY; `return` an async IIFE; **do not declare a
   `const` twice** (one SyntaxError costs a launch); `git commit -F file`.
   Sub-frames relay too, prefixed with their path — block documents as
-  `[/s1/__clew_block__/<hash>]`.
+  `[/<sid>/__clew_block__/<hash>]`.
 - **The app container changes on every `simctl install`** but the vault
   in Documents survives an upgrade install; only `uninstall` wipes it.
   Re-read `get_app_container` after every install; write fixtures only
@@ -367,12 +388,13 @@ TestFlight Internal (§4.1). Tests **677 green**.
   so does the port's long-press (pointerdown, 650 ms, pointerup).
   **`document.hasFocus()` is false in a simctl-launched page**, so the
   preview pane never shows here.
-- **Block frames from the app page**: `fetch('clew-preview://vault/s1/
-  __clew_block__', {method: 'POST', body: JSON.stringify({text,
+- **Block frames from the app page**: `fetch('clew-preview://vault/<sid>/
+  __clew_block__', {method: 'POST', body: JSON.stringify({token, text,
   sourcePath})})` → `{hash}`; GET `…/__clew_block__/<hash>` → the
   document (text/html, `data-clew-block="1"`). Citations are formatted
-  at compile time, so the fetched HTML carries them — when the vault has
-  a bibliography. A block never sees its note's `Bibliography:` header
+  at compile time, so the fetched HTML carries them, and since 707ed87 a
+  block renders under its note's citation header (renderBlock prepends
+  it). Before that a block never saw its note's `Bibliography:` header
   (a block renders from its own text, desktop too), so a header-only
   bibliography leaves a block's cites unresolved.
 - **Sequencing**: Quick Look covering the app detaches the web view's
@@ -392,12 +414,15 @@ ios/Clew.xcodeproj -scheme Clew -destination 'id=<sim>' -derivedDataPath
 build/DerivedData build`. The sim used all session is
 `90DCB612-1B85-4E1A-A17A-DBEB98F6C36D` (iPad Pro 11-inch M4, iOS 18.1).
 
-**Twenty-two guarded patches** (`patched()` calls) in `scripts/build.js`,
-all anchored at `ccf8dca`, plus one `onResolve` (the engine-mirror
-relative import) and one alias (`@xterm/*` → `src/shim/xterm-stub.js`).
-New this sync: `builtin.js` (drop `shell:toggle`), `renderer/main.js`
-(await `vaultSettingsStore.load()` on the boot branch),
-`toolbar/popover.js` and `chrome/floating-pane.js` ×2 (visual viewport).
+**Fourteen guarded patches** (`patched()` calls) in `scripts/build.js`,
+all matching at Clew-app `84f975e`, plus one alias (`@xterm/*` →
+`src/shim/xterm-stub.js`). The 0.11.1 sync retired eight (canvas-view
+2–4, `renderer/main.js`, `toolbar/popover.js`, `chrome/floating-pane.js`
+×2) and the `onResolve` re-root — upstream absorbed each. Clew-app
+`f1816ae` (the stuck-preview watchdog, next sync) retires three more: the
+`client.js` pageshow patch, the `clew-preview-view` 2.5 s rebuild and its
+`__iosSubscribed` guard — confirm then that nothing of ours calls
+render() repeatedly.
 `patched()` throws on a missed anchor, so a stale patch fails the build
 rather than silently reverting a fix.
 

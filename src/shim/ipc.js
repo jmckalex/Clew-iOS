@@ -280,6 +280,14 @@ export function createClewShim({ workerFactory, assetLoader } = {}) {
 
 		[CH.RENDER_SUBSCRIBE]: ({ path }) => renderService.subscribe(path),
 		[CH.RENDER_UNSUBSCRIBE]: ({ path }) => renderService.unsubscribe(path),
+		// A note's rendered HTML — the References panel's "This note" feed
+		// (upstream b1b5790, renderedHtml). Missing here until 2026-09-30, so
+		// the panel said "Could not render this note" whenever a vault turned
+		// bibliographyPanel on. resolve() refuses a path outside the vault.
+		[CH.RENDER_HTML]: ({ path }) => {
+			vaults.resolve(path);
+			return renderService.ensureRendered(path);
+		},
 
 		// Annotation autosaves from every EmbedPDF surface (note embeds, the
 		// file tab, canvas nodes, canvas-embed scenes) land here via the

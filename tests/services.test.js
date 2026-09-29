@@ -819,6 +819,12 @@ test('a block renders under its note\'s citation keys (upstream 707ed87): header
 	assert.notEqual(await native.renderBlock('> [!note]\n> As \\citet{lewis1969} argued.\n', 'Features/Citations.md'), cited);
 });
 
+test('RENDER_HTML answers a note\'s rendered HTML (the References panel\'s note feed); a path outside the vault is refused', async () => {
+	const html = await clew.invoke('clew:render-html', { path: 'Welcome.md' });
+	assert.equal(typeof html, 'string', 'the rendered document');
+	await assert.rejects(clew.invoke('clew:render-html', { path: '../outside.md' }), 'a path escaping the vault');
+});
+
 test('a reconfigure retires every block: new keys, old documents gone', async () => {
 	const before = await native.renderBlock('reconfigure me', 'Inbox.md');
 	await clew.invoke(CH.VAULT_SETTINGS_SET, { key: 'normalSyntax', value: true });

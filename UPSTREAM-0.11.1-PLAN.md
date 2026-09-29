@@ -1,11 +1,53 @@
 # Upstream 0.11.1 sync — plan
 
-**STATUS: IN PROGRESS (2026-09-29).** Ordered by Clew-boss, whose
-instructions on syncs are the owner's (the owner's standing rule, given in
-this repo): port the range INCLUDING the iOS caller-token work, as one
-decision. Push: the owner decided "push overnight if ALL checks pass",
-relayed by Clew-boss after p4's report; anything red or a judgement call
-waits for the owner.
+**STATUS: EXECUTED 2026-09-30** — p1 `465b837`, p2 `70b4f11`, p3 `d0d3842`,
+p4 (this record + RENDER_HTML) on `sync111-p4-verify`; `main`
+fast-forwarded to it. Ordered by Clew-boss, whose instructions on syncs are
+the owner's (the owner's standing rule); push = the owner's decision
+("push overnight if ALL checks pass"), relayed by Clew-boss after p4.
+
+**Results (simulator, iPad Pro 11" M4, iOS 18.1; 680 tests):**
+- The four build breaks resolved; 14 guarded patches remain.
+- Token: random sid (`s` + 32 hex) and token (64 hex) per vault open; an
+  unknown sid → 404 (incl. `__clew_plugin_file__`); render POSTs in
+  desktop's order — no token 403, wrong 403, raw text 400, array 403,
+  > 100,000 chars 413, bad `text` 400, bad `sourcePath` 400, valid 200.
+  Engine-rendered callout cards in the canvas tab (app-page POSTs), the
+  canvas embed in a note (preview-document POSTs, lazy ask), and the
+  Export-as-PDF of that note (the self-post; read from the PDF's text).
+  Live block frames 2/2. A sandboxed frame: every read blocked, its POST
+  refused.
+- Step 0 senders: Excalidraw library load/save from `clew-preview://vault`
+  answered; PDF saves — a preview document's answered, a sandboxed frame's
+  refused, a same-origin non-viewer frame's DROPPED by the scene relay, a
+  scene viewer's relayed and answered. The Excalidraw library survives a
+  note embedding a drawing and the drawing's editor tab (1 → 1 → 1).
+- The consumer sweep matches the baseline (Diagrams 11/11, maps + tiles,
+  EmbedPDF, Excalidraw, canvas scene, MathJax, media, charts); the only
+  error is jsoncanvas.org's own script, as before.
+- Toolbar: 2 rows × 44 = 88 px on the tall viewport; forced short
+  (`--toolbar-two-row-min-height` 5000 px) → 1 row, 44 px; back to 2.
+- Preview pane on a coarse pointer: `pointer-events: none` when it fits,
+  `auto` with `[data-overflows]`.
+- Block citations under the note's header: "Lewis (1969)" (was empty).
+- Esc: a synthetic Escape from inside an engaged note card disengages it
+  (1 → 0); control without Esc stays engaged (1 → 1).
+- `display:none` preview frame: timers AND wasm keep running.
+- Suspension: backgrounding calls `flushForSuspension` (resolves `true`);
+  an edit made just before is on disk while the app is backgrounded.
+- References "This note": 4 entries, unchanged by an exclusion-list change —
+  after adding the MISSING `RENDER_HTML` handler (a pre-existing gap since
+  upstream b1b5790: the view said "Could not render this note" whenever a
+  vault turned `bibliographyPanel` on).
+- A clean install opens exactly one tab, Welcome.md. History same-second
+  order asserted (services test).
+
+**What the simulator cannot prove (the iPad):** a real hardware-keyboard
+Esc (the logic path is verified with a synthetic event); iOS suspending
+the app mid-save (the 1 s auto-save and the flush both land first here);
+the short viewport under a real software keyboard (forced via the CSS
+threshold instead); an actual PDF annotation save (the bridge path is
+exercised with a refused bogus path, not a real annotation).
 
 **PIN: Clew-app `84f975e`** — the commit right after `2e45098` (the message
 receiver fix, on `6cbe0d8`), which fixes the Excalidraw library data loss
