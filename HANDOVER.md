@@ -22,7 +22,10 @@ it spends no cloud build. (Also in Claude's memory.)
 ## 1. Where things stand
 
 ```
-origin/main = main = faa3023   PUSHED 2026-09-29 — the 0.11 sync + fontnote + canvas engage + live edit + the 0.3.0 pin
+origin/main = main              PUSHED 2026-09-29 (evening) — faa3023 + the bridge fix + citation-js, merged
+   fix-bridge-main-frame 8ceb533  the native bridge answers the app page only (security)
+   citation-js-worker    3771169  citations render in reading mode; CSL files staged
+faa3023                           PUSHED 2026-09-29 — the 0.11 sync + fontnote + canvas engage + live edit + the 0.3.0 pin
    live-p1-vendor  90d0017   vendor at ccf8dca; shell stubbed; excludes, citations, TeX fragments, @reveal
    live-p2-frames  0c3e867   block frames: __clew_block__ endpoints, block documents, keyed fragments
    live-p3-touch   06ed5cd   touch: long-press is the source, link-at, floaters read the visual viewport
@@ -37,12 +40,14 @@ pushed on 2026-09-29 at the owner's instruction. **The Xcode Cloud build
 of faa3023 SUCCEEDED** — the first build carrying live edit, font=note
 (its clean clone downloaded the pinned mp-tikz-wasm 0.3.0 release and
 its digest checked out, which had never been exercised before) and the
-canvas engage work. As of this handover it is in App Store Connect ▸
-Clew Notes ▸ TestFlight but NOT yet in a tester group (§4.1); the owner
-is releasing it. Working tree clean, tests **675 green**. Docs-only
-`[ci skip]` commits (this file, PORT-PLAN's upstream verdicts) sit on
-local `main` ahead of origin; they cost no cloud build whenever they
-are pushed.
+canvas engage work. **It must NOT go to testers**: it has the native
+bridge hole (any iframe in a note could call the Swift file bridge).
+Both fixes were merged into `main`, checked together in the simulator
+(the bridge refuses a note document and a sandboxed frame, the app page
+still answers; `Features/Citations.md` shows 6/6 cites and a 3-entry
+bibliography in reading mode) and pushed on 2026-09-29 on the owner's
+instruction relayed by Clew-boss. That cloud build is the one for
+TestFlight Internal (§4.1). Tests **677 green**.
 
 - **The live-edit sync** (this session): vendor/ and seed-vault/ at
   upstream **`ccf8dca`** (77 commits: live edit, the shell panel, vault
@@ -59,8 +64,7 @@ are pushed.
   Biblify needs `citation-js` via `createRequire`, which the worker
   refuses — `\cite{}` renders empty, a `\fullcite{}` preview is blank).
   The live-mode chips, the References panel, Insert and completion work
-  (they read the `.bib` files directly). **Fixed on branch
-  `citation-js-worker`** (§4.2).
+  (they read the `.bib` files directly). **Fixed and pushed** (§4.2).
 - **mp-tikz-wasm 0.3.0 is pinned** (this session, after the sync): the
   library session published v0.3.0 (the `opentype` bundle, plain-LuaTeX,
   `fonts: 'woff2'`; engines unchanged from 0.2.1), the Clew-app session
@@ -129,15 +133,15 @@ are pushed.
    not join a tester group by itself. On
    https://appstoreconnect.apple.com/apps/6804827534/testflight/ios
    (sign in as j.mckenzie.alexander@mac.com, not the iCloud ID) pick the
-   build of faa3023 under iOS Builds and add the Internal group — or,
+   build of the merged tip (NOT faa3023 — it has the bridge hole) under
+   iOS Builds and add the Internal group — or,
    once, turn on the Internal group's "Enable automatic distribution" so
    every later cloud build goes out by itself. Processing took under an
    hour for the 0.11 build; this one is larger (the live-edit
    stylesheets, the opentype bundle). Then the device pass (§3), which
    now includes the fontnote check: the Diagrams note's last two figures
    and a 12pt document.
-2. **citation-js in the worker — DONE on branch `citation-js-worker`,
-   unmerged, unpushed.** The require registry carries `@citation-js/core`
+2. **citation-js in the worker — DONE, merged and pushed.** The require registry carries `@citation-js/core`
    + the BibTeX and CSL plugins (+694 KB minified / +168 KB gzip on a
    2.99 MB worker; the umbrella package would be +1.9 MB, 1.1 MB of it
    Wikidata tables Biblify never touches — output identical in all 8
@@ -222,10 +226,8 @@ are pushed.
    a drag over a fitting pane scrolls the note; a tall diagram scrolls
    in the pane. The full notices and the candidate numbering are in
    `~/Source/Clew/SYNC-LEDGER.md` (the coordinator's ledger).
-   **Open branches (unmerged, unpushed):** `fix-bridge-main-frame`
-   (8ceb533, the native bridge answers the app page only — a security
-   fix; the owner decides the release) and `citation-js-worker`
-   (3771169, citations in reading mode).
+   Both fix branches (`fix-bridge-main-frame`, `citation-js-worker`)
+   are merged into `main` and pushed.
 5. TestFlight group / external testers / the manual's DNS — unchanged
    from the last handover.
 6. Follow-ups seen, not requested: 44 pt explorer rows (none exist; the
