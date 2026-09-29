@@ -46,8 +46,10 @@ Architecture mapping (desktop → iOS):
 
 esbuild bundles `vendor/jmarkdown/src/index.js` for the browser cleanly —
 every third-party dep resolves (cheerio picks its browser build; citation-js
-is behind `createRequire` and degrades to a no-op; sync-request is dead
-code; @octokit unreferenced). The shim layer supplies `fs` (in-memory vfs
+is behind `createRequire`, which the worker answers from
+`src/worker/shims/require-registry.js` — core + the BibTeX and CSL plugins,
+not the umbrella package's DOI/RIS/Wikidata inputs, which Biblify never
+uses; sync-request is dead code; @octokit unreferenced). The shim layer supplies `fs` (in-memory vfs
 loaded per build with the vault's text files), `path`, `process`
 (`exit` throws, `stdin.isTTY` truthy, bare `argv` so the CLI guard stays
 off), `vm.runInThisContext` = indirect eval (worker CSP must allow it),
@@ -68,8 +70,9 @@ Two engine facts shape the host protocol (`src/shim/render-service.js`):
    (Upstream candidate: a registry hook in the engine itself.)
 
 Renders stay file-mode full documents (`data-source-line` needs it), so the
-vfs carries the template + `jmarkdown.css` + `Biblify.js.mustache` under a
-fixed `Jmarkdown app directory`, and the config is generated per vault just
+vfs carries the template + `jmarkdown.css` + `Biblify.js.mustache` + the
+engine's five bundled CSL files (`csl/`, listed in `engine-config.js`
+`ENGINE_CSL_FILES`) under a fixed `Jmarkdown app directory`, and the config is generated per vault just
 like `render-service.js#writeEngineConfig` does on desktop.
 
 ### Services layer (`src/shim/`)

@@ -14,7 +14,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { engineConfig, engineEnv, isTextPath } from '../src/shim/engine-config.js';
+import { engineConfig, engineEnv, isTextPath, ENGINE_CSL_FILES } from '../src/shim/engine-config.js';
 import { engineExtensionEntries } from '../vendor/clew/main/plugins.js';
 
 const [vaultDir, noteRel, ...flags] = process.argv.slice(2);
@@ -92,6 +92,9 @@ for (const [target, source] of Object.entries({
 	'/engine/clew-template.html': 'vendor/clew/engine/clew-template.html',
 })) {
 	files[target] = fs.readFileSync(path.join(root, source), 'utf8');
+}
+for (const name of ENGINE_CSL_FILES) {
+	files[`/engine/csl/${name}`] = fs.readFileSync(path.join(root, 'vendor/jmarkdown/src/csl', name), 'utf8');
 }
 
 // ---- emulate the Worker global surface -----------------------------------

@@ -28,6 +28,18 @@ export const isTextPath = (rel) => TEXT_EXT.test(rel);
 // is a custom .csl the engine registers by basename.
 const NAMED_BIB_STYLES = ['apa', 'chicago', 'harvard1', 'vancouver', 'bjps', 'ajp', 'econometrica', 'ergo'];
 
+// Those five CSL files (biblify-compile.js#BUNDLED_TEMPLATES reads them from
+// '<Jmarkdown app directory>/csl/', i.e. /engine/csl/ in the worker's vfs).
+// The build copies them to webroot/engine/csl/ and the render service
+// snapshots them into every worker, alongside the templates.
+export const ENGINE_CSL_FILES = [
+	'chicago-author-date-16th-edition.xml',
+	'australasian-journal-of-philosophy.xml',
+	'the-british-journal-for-the-philosophy-of-science.xml',
+	'econometrica.csl',
+	'ergo.csl',
+];
+
 // Vault-wide bibliography (vault-settings `bibliography` +
 // `bibliographyStyle`), resolved against the mirror root — the vault's
 // .bib/.csl files are text, so the snapshot already carries them. Per-note
