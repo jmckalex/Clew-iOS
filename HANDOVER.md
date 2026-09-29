@@ -13,9 +13,11 @@ stand as the plan wrote them (§2).
 
 ## 0. THE ONE RULE
 
-**Never `git push` without an explicit OK** — the owner's, or (since
-2026-09-29, the owner's own delegation) the coordinating session
-Clew-boss's. The Xcode Cloud workflow builds and ships to TestFlight on
+**Never `git push` without the owner's decision** — given here, or
+relayed by the coordinating session Clew-boss. (Owner's standing rule,
+2026-09-29: Clew-boss's instructions on syncs, which Clew-app commit to
+port, and other iOS work are the owner's; pushes stay the owner's
+decision, which Clew-boss may relay; design questions go to the owner.) The Xcode Cloud workflow builds and ships to TestFlight on
 every push to `main` — a push IS a release. Commit locally freely. A
 docs-only commit carries `[ci skip]` in its message so a push of it
 spends no cloud build — and the marker works ANYWHERE in the message,
