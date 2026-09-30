@@ -15,6 +15,19 @@
   src=x.pdf>` go blank until the shared rewrite lands — hence "with the
   sync"), and subframes no longer load clew-app:// (frame-bridge §2.7).
   `npm run test:swift` — 140 defensive tests (fakes only, never a network).
+- **Vault trust, native half — branch `trust-native-p1` (0582d76), chained
+  after `pdf-native-p1`, NOT pushed, merges WITH the next sync**
+  (Clew-app e8d32e6's interim guard): `VaultTrust.swift` (Application
+  Support store, desktop's semantics; identity `documents:<rel>` or
+  `path:<resolved>`, never a container path; creation-time fingerprint),
+  native migration (opened Documents vaults + bookmarked external ones),
+  demo/created trusted by construction, `trusted` in vaultOpen's reply,
+  bridge `vaultTrustGet/Set`. 23 tests in `npm run test:swift`; simulator:
+  migration, trust/revoke, and trust surviving an upgrade install. At the
+  sync: the shim maps VAULT_TRUST_GET/SET + events, engine-config sets
+  `Run note code` from `trusted`, refusals read from `[data-jmd-refused]`.
+  **The next sync's range starts at Clew-app `cd8c311`** (sync #2 took
+  84f975e..cd8c311), plus these two branches.
 - **Measured**: WebKit honours a CSP on WKURLSchemeHandler responses, the
   <meta> tag AND the response header (`script-src 'none'` blocked inline
   and external scripts) — frame-bridge §4.4 is enforceable on iOS.
