@@ -1,5 +1,24 @@
 # Handover — 2026-09-30 (sync #2 live; PDF, trust and keyboard fixes on branches for the next sync)
 
+**RESUME HERE (2026-09-30, evening; paused cleanly for a machine reboot):**
+- The tree is clean. Nothing is in progress, nothing is stashed, and the
+  simulator is shut down.
+- `main` = `171ed22` (local; origin/main = `09ce3f2`, sync #2, live). Only
+  `[ci skip]` HANDOVER commits sit ahead of origin.
+- Three branches are waiting. None is pushed, and ALL go in the NEXT sync:
+  - `fix-keyboard-layout` (`2eeb902`, off main)
+  - `pdf-native-p1` (`65d2708`)
+  - `trust-native-p1` (`0582d76`, chained after pdf-native-p1)
+- The next sync's range is Clew-app `cd8c311`..(PDF phase 3). Clew-boss
+  calls it after Clew-app's phase 3 lands. The tasks at that sync are in
+  the bullets below.
+- Pushes are TestFlight releases and need the OWNER's decision, which
+  arrives via Clew-boss. Never push on your own. Clew-boss may approve
+  syncs and iOS work. Design questions go to the owner through Clew-boss.
+  When a task finishes, report it to Clew-boss (SendMessage).
+- If `simctl` hangs, CoreSimulatorService is wedged. A reboot or
+  `killall -9 com.apple.CoreSimulator.CoreSimulatorService` clears it.
+
 **LATEST (2026-09-30, afternoon):**
 - **Sync #2 is LIVE**: origin/main = `09ce3f2` (vendor at Clew-app
   `cd8c311`), pushed on the owner's decision via Clew-boss; its Xcode
