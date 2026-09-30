@@ -1,4 +1,4 @@
-# Handover — 2026-09-30 (sync #2 live; the PDF Swift half on a branch)
+# Handover — 2026-09-30 (sync #2 live; PDF, trust and keyboard fixes on branches for the next sync)
 
 **LATEST (2026-09-30, afternoon):**
 - **Sync #2 is LIVE**: origin/main = `09ce3f2` (vendor at Clew-app
@@ -46,7 +46,20 @@
   kv store's first `clewdata.json`, and the shim's `saveRemotePdfCopy`
   (a native write) must patch the mirror and refresh the tree.
   **The next sync's range starts at Clew-app `cd8c311`** (sync #2 took
-  84f975e..cd8c311), plus these two branches.
+  84f975e..cd8c311), plus these two branches and `fix-keyboard-layout`.
+- **Keyboard fix — branch `fix-keyboard-layout` (2eeb902), off main,
+  NOT pushed; the owner decided (via Clew-boss) it goes out WITH the next
+  sync, not alone. Keep the branch as it is.** The owner's bug: iPadOS's
+  minimised keyboard bar (hardware keyboard attached, a text field
+  focused) — the web view ignored the keyboard safe area, so WebKit
+  scrolled the whole fixed page up and the toolbars went under the status
+  bar. Fix: `ClewApp` `.ignoresSafeArea(.container)` + the dark background
+  beside the bar; `WebHost` KVO pins the scroll view at (0,0). Simulator:
+  nudge snaps back; a fake 100pt keyboard shrinks innerHeight 1210→1110,
+  toolbar stays at 58; resting layout unchanged. At the sync: merge it
+  with the other two branches and the vendored range, and put the owner's
+  iPad check in p4's list (hardware keyboard attached, focus a text field,
+  the toolbars stay in reach).
 - **Measured**: WebKit honours a CSP on WKURLSchemeHandler responses, the
   <meta> tag AND the response header (`script-src 'none'` blocked inline
   and external scripts) — frame-bridge §4.4 is enforceable on iOS.
