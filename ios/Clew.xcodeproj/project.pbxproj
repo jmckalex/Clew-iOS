@@ -19,6 +19,10 @@
 		C1E0000000000000000000AB /* OfficeThumbs.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F0000000000000000000AB /* OfficeThumbs.swift */; };
 		C1E0000000000000000000AC /* PrintPDF.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F0000000000000000000AC /* PrintPDF.swift */; };
 		C1E0000000000000000000AD /* NoteFonts.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F0000000000000000000AD /* NoteFonts.swift */; };
+		C1E0000000000000000000AE /* RemotePdfPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F0000000000000000000AE /* RemotePdfPolicy.swift */; };
+		C1E0000000000000000000AF /* RemotePdfFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F0000000000000000000AF /* RemotePdfFetcher.swift */; };
+		C1E0000000000000000000B0 /* RemotePdfStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F0000000000000000000B0 /* RemotePdfStore.swift */; };
+		C1E0000000000000000000B1 /* VaultTrust.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F0000000000000000000B1 /* VaultTrust.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -36,6 +40,10 @@
 		C1F0000000000000000000AB /* OfficeThumbs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfficeThumbs.swift; sourceTree = "<group>"; };
 		C1F0000000000000000000AC /* PrintPDF.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrintPDF.swift; sourceTree = "<group>"; };
 		C1F0000000000000000000AD /* NoteFonts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteFonts.swift; sourceTree = "<group>"; };
+		C1F0000000000000000000AE /* RemotePdfPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemotePdfPolicy.swift; sourceTree = "<group>"; };
+		C1F0000000000000000000AF /* RemotePdfFetcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemotePdfFetcher.swift; sourceTree = "<group>"; };
+		C1F0000000000000000000B0 /* RemotePdfStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemotePdfStore.swift; sourceTree = "<group>"; };
+		C1F0000000000000000000B1 /* VaultTrust.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VaultTrust.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -89,6 +97,10 @@
 				C1F0000000000000000000AB /* OfficeThumbs.swift */,
 				C1F0000000000000000000AC /* PrintPDF.swift */,
 				C1F0000000000000000000AD /* NoteFonts.swift */,
+				C1F0000000000000000000AE /* RemotePdfPolicy.swift */,
+				C1F0000000000000000000AF /* RemotePdfFetcher.swift */,
+				C1F0000000000000000000B0 /* RemotePdfStore.swift */,
+				C1F0000000000000000000B1 /* VaultTrust.swift */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -192,6 +204,10 @@
 				C1E0000000000000000000AB /* OfficeThumbs.swift in Sources */,
 				C1E0000000000000000000AC /* PrintPDF.swift in Sources */,
 				C1E0000000000000000000AD /* NoteFonts.swift in Sources */,
+				C1E0000000000000000000AE /* RemotePdfPolicy.swift in Sources */,
+				C1E0000000000000000000AF /* RemotePdfFetcher.swift in Sources */,
+				C1E0000000000000000000B0 /* RemotePdfStore.swift in Sources */,
+				C1E0000000000000000000B1 /* VaultTrust.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

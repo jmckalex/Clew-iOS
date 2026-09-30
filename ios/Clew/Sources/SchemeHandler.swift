@@ -10,6 +10,7 @@
 //   clew-preview://vault/<sid>/__clew_fragment__     POST md → body html
 //   clew-preview://vault/<sid>/__clew_block__        POST {text, sourcePath} → {hash}
 //   clew-preview://vault/<sid>/__clew_block__/<hash> GET  a live-edit block document
+//   clew-preview://vault/<sid>/__clew_remote_pdf__/<hash> GET  a registered web PDF
 //   clew-preview://vault/<sid>/<any path>            real file from the vault
 //
 // Rendered notes come from the JS RenderService (window.__clewNative) —
@@ -207,6 +208,37 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 		guard isCurrentSession(String(rel[..<slash])) else { return fail(task, "Not found", status: 404) }
 		let vaultRel = String(rel[rel.index(after: slash)...])
 		guard !vaultRel.isEmpty else { return fail(task, "empty path") }
+
+		// A web PDF this session's render registered (RemotePdfStore; Clew-app
+		// docs/dev/pdf-unification.md §4): GET only, only a registered hash —
+		// no URL is ever named here, so nothing can ask Clew to fetch one. The
+		// cached copy at once, or the download's outcome when it lands; a
+		// failure is answered by name ("<code>: <detail>", 502), never by
+		// sending the frame to the URL.
+		if vaultRel.hasPrefix("__clew_remote_pdf__/") {
+			guard task.request.httpMethod == "GET" else { return fail(task, "Method not allowed", status: 405) }
+			let hash = String(vaultRel.dropFirst("__clew_remote_pdf__/".count))
+			let range = task.request.value(forHTTPHeaderField: "Range")
+			let known = RemotePdfStore.shared.serve(hash) { [weak self] served in
+				DispatchQueue.main.async {
+					guard let self, !self.isStopped(task) else { return }
+					switch served {
+					case .file(let file, let meta):
+						// The viewer (same origin) reads these; the app page is a
+						// cross-origin reader, so CORS must expose them to it.
+						var extra = ["Content-Type": "application/pdf",
+							"X-Clew-Fetched-At": ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: meta.fetchedAt)),
+							"Access-Control-Expose-Headers": "X-Clew-Fetched-At, X-Clew-Stale"]
+						if let stale = meta.staleReason { extra["X-Clew-Stale"] = stale }
+						self.respondFile(task, fileURL: file, rangeHeader: range, extra: extra)
+					case .failure(let error):
+						self.fail(task, "\(error.code): \(error.detail)", status: 502)
+					}
+				}
+			}
+			if !known { fail(task, "Not found", status: 404) }
+			return
+		}
 
 		// The render POSTs, in two layers. iOS's own first: WebKit delivers a
 		// real Origin — the app page sends clew-app://app, a same-origin

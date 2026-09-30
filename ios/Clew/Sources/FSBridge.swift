@@ -237,6 +237,59 @@ final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 				}
 			}
 
+		case "pdfThumbnail":
+			// A PDF's first page, from Quick Look, cached like office thumbs at
+			// the mirrored .clew/cache/pdf-thumbs/<rel>.png (pdf-unification §2).
+			guard let rel = params["rel"] as? String else { throw ClewError.badPayload }
+			vaults.ioQueue.async {
+				OfficeThumbs.pdfThumbnail(rel: rel, in: self.vaults) { result in
+					DispatchQueue.main.async { reply(result, nil) }
+				}
+			}
+
+		// ---- web PDFs (RemotePdfStore; pdf-unification §4, §8) ----------
+		// Only the app page reaches these (the bridge refuses every other
+		// frame), so only a render can register a URL.
+		case "registerRemotePdfs":
+			guard let urls = params["urls"] as? [String] else { throw ClewError.badPayload }
+			reply(RemotePdfStore.shared.register(Array(urls.prefix(200))), nil)
+
+		case "refreshRemotePdf":
+			guard let hash = params["hash"] as? String else { throw ClewError.badPayload }
+			let known = RemotePdfStore.shared.refresh(hash) { served in
+				DispatchQueue.main.async {
+					switch served {
+					case .file(_, let meta): reply(["ok": meta.staleReason == nil, "stale": meta.staleReason.map { $0 as Any } ?? NSNull()], nil)
+					case .failure(let error): reply(["ok": false, "error": error.code, "detail": error.detail], nil)
+					}
+				}
+			}
+			if !known { reply(["ok": false, "error": "not-registered"], nil) }
+
+		case "saveRemotePdfCopy":
+			guard let hash = params["hash"] as? String else { throw ClewError.badPayload }
+			let folder = params["folder"] as? String ?? "Attachments"
+			performIO(reply) { try RemotePdfStore.shared.saveCopy(hash, folder: folder, into: self.vaults) }
+
+		// ---- vault trust (VaultTrust.swift; the interim guard) -----------
+		// The CURRENT vault's standing, for Settings → This vault and the
+		// "Trust this vault" banner. Only the app page reaches these.
+		case "vaultTrustGet":
+			guard let path = vaults.currentVaultPath else { return reply(["open": false, "trusted": false], nil) }
+			let root = URL(fileURLWithPath: path, isDirectory: true)
+			reply(["open": true, "trusted": vaults.trust.isTrusted(root), "identity": vaults.trust.identity(root)], nil)
+
+		case "vaultTrustSet":
+			guard let trusted = params["trusted"] as? Bool, let path = vaults.currentVaultPath else { throw ClewError.badPayload }
+			let root = URL(fileURLWithPath: path, isDirectory: true)
+			if trusted { vaults.trust.trust(root) } else { vaults.trust.revoke(root) }
+			reply(["open": true, "trusted": vaults.trust.isTrusted(root), "identity": vaults.trust.identity(root)], nil)
+
+		case "pdfLeakCount":
+			// PDFs that reached a frame directly and were cancelled
+			// (WebHost's navigation-response check) — the sweep asserts zero.
+			reply(PdfLeaks.count, nil)
+
 		case "pickFolder":
 			// Anywhere Files can reach: iCloud Drive, Working Copy, other
 			// providers, or the app's own Documents. External folders get a

@@ -18,6 +18,9 @@ final class WebHost: NSObject, ObservableObject {
 
 		let config = WKWebViewConfiguration()
 		schemeHandler = SchemeHandler(vaults: vaults)
+		// Create the trust store here, on main, before any I/O-queue open
+		// can race to (and migrate the device's known vaults on first use).
+		_ = vaults.trust
 		config.setURLSchemeHandler(schemeHandler, forURLScheme: "clew-app")
 		config.setURLSchemeHandler(schemeHandler, forURLScheme: "clew-preview")
 
@@ -191,9 +194,33 @@ extension WebHost: WKUIDelegate, WKNavigationDelegate {
 			return
 		}
 		// Iframes: previews and canvas web nodes may load clew-preview and
-		// (sandboxed canvas web nodes) http(s).
-		decisionHandler(["clew-preview", "clew-app", "http", "https", "about", "blob"].contains(scheme) ? .allow : .cancel)
+		// (sandboxed canvas web nodes) http(s). Never the app origin: no frame
+		// may host the app page (the owner's call, frame-bridge §2.7 — the
+		// same rule as desktop's frame guard and frame-ancestors).
+		decisionHandler(["clew-preview", "http", "https", "about", "blob"].contains(scheme) ? .allow : .cancel)
 	}
+
+	/// A PDF that answers a FRAME's navigation directly is cancelled and
+	/// counted: every PDF is meant to open in pdf-page.html, which fetches
+	/// its bytes rather than navigating to them, so one arriving here is a
+	/// leak (pdf-unification §6 — desktop's `will-download` twin; WebKit has
+	/// no plugin to turn off, and would show one still page). Main-frame
+	/// responses are the app page's own.
+	func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse,
+		decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+		if !navigationResponse.isForMainFrame,
+			navigationResponse.response.mimeType?.lowercased() == "application/pdf" {
+			PdfLeaks.count += 1
+			NSLog("CLEW pdf-leak: a PDF reached a frame directly: %@", navigationResponse.response.url?.absoluteString ?? "?")
+			return decisionHandler(.cancel)
+		}
+		decisionHandler(.allow)
+	}
+}
+
+/// PDFs cancelled by the navigation-response check (the sweep asserts none).
+enum PdfLeaks {
+	static var count = 0
 }
 
 struct WebContainerView: UIViewRepresentable {
