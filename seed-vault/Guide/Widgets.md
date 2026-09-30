@@ -40,10 +40,28 @@ Obsidian's plugin will show its unknown-type error for those two. A
 binding can also reach *another* note's property:
 `INPUT[toggle:[[Some Note]]#done]`.
 
+A text or number field saves when you press Enter or move away from it; a
+`textArea` keeps Enter for its new lines and saves when you move away.
+
 Meta Bind's `class(…)` argument is honoured too —
 `INPUT[number(class(narrow)):pages]` puts your class on the control, so
 a [[Theming|vault script]] can restyle or resize one widget. (Number
 pickers are already sized for a few digits, not a text field's width.)
+
+## Locked widgets
+
+A value that must not change by accident — a grade, a signed-off date —
+takes Clew's `locked` argument. The widget shows its value but ignores
+clicks and typing until you press the padlock beside it; it locks again
+as soon as the edit is committed, when you move away, and whenever the
+note re-renders. Nothing is stored: every widget marked `locked` starts
+locked.
+
+The same rating, locked: INPUT[number(locked):rating]
+
+In Obsidian, Meta Bind skips an argument it does not know, so the same
+note still works there, just without the lock. Site exports show every
+widget disabled anyway, so they draw no padlock.
 
 ## Bound to text
 

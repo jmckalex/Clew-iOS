@@ -31,6 +31,14 @@
 // is HONORED — author classes land on the element, as the plugin does it,
 // so a vault script's stylesheet can size or restyle individual widgets.
 // In a site export widgets render disabled: a static page has no write path.
+//
+// `locked` (a bare argument, Clew's — owner's ask 2026-09-30, for a GRADE
+// that must not change by accident): `INPUT[number(locked):grade]` renders
+// the widget inert beside a padlock button, which unlocks it for one edit
+// — preview-client/meta-bind.js relocks it on commit, when focus leaves, and
+// every render emits it locked again, so no state is stored anywhere.
+// Obsidian's plugin skips an argument it does not know with a warning and
+// still renders the field, so such a note keeps working there (unlocked).
 import { display, coerceDate } from './dv-expr.js';
 import { currentPage, scanPages, resolvePath } from './vault-model.js';
 import { ID as BLOCK_ID } from './block-refs.js';
@@ -84,7 +92,10 @@ export function parseInputDeclaration(inner) {
 	const decl = { type: type.toLowerCase(), options: [], min: 0, max: 100, step: 1, file: null, prop: null };
 	for (const arg of head[2] ? splitArgs(head[2]) : []) {
 		const call = /^([A-Za-z][\w]*)\s*\(([\s\S]*)\)$/.exec(arg);
-		if (!call) continue;                       // bare flags (addLabels…) are cosmetic
+		if (!call) {
+			if (/^locked$/i.test(arg)) decl.locked = true;
+			continue;                              // other bare flags (addLabels…) are cosmetic
+		}
 		const [, name, value] = call;
 		if (name === 'option') {
 			const [v, label] = splitArgs(value);
@@ -140,6 +151,17 @@ export function blockTextOf(text, id) {
 
 const refusal = (text) => `<code class="clew-mb-refused">${esc(text)}</code>`;
 
+// A padlock, closed and open (the client shows one by aria-pressed). Inline
+// SVG rather than wa-icon, whose default library fetches from a CDN.
+const PADLOCK = '<svg class="clew-mb-lock-closed" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 7V5a3.5 3.5 0 0 1 7 0v2" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="3" y="7" width="10" height="7.5" rx="1.5" fill="currentColor"/></svg>'
+	+ '<svg class="clew-mb-lock-open" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 7V5a3.5 3.5 0 0 1 6.9-.8" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="3" y="7" width="10" height="7.5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>';
+
+/** A lockable widget: locked, beside the button that unlocks it for one edit. */
+function lockable(widget, prop) {
+	return `<span class="clew-mb-lockable">${widget}<button type="button" class="clew-mb-lock"`
+		+ ` aria-pressed="true" aria-label="Unlock ${esc(prop)}" title="Locked — click to edit">${PADLOCK}</button></span>`;
+}
+
 function boundPage(file) {
 	if (!file) return currentPage();
 	const target = file.replace(/^\[\[|\]\]$/g, '').split('|')[0].trim();
@@ -159,13 +181,25 @@ export function inputHtml(inner) {
 		return refusal(`INPUT[${inner}] — no ${decl.prop} block in “${page.path}”`);
 	}
 	const source = decl.block ? 'block' : page.sources?.[decl.prop] ?? 'fm';
-	const disabled = process.env.CLEW_SITE_EXPORT === '1' ? ' disabled' : '';
+	const siteExport = process.env.CLEW_SITE_EXPORT === '1';
+	// A site export has no write path: every widget is disabled and a lock
+	// would be a button that does nothing. progressBar only ever displays.
+	const locked = decl.locked === true && !siteExport && decl.type !== 'progressbar';
+	// Locked is `inert` — no click, focus or keystroke reaches it, shadow DOM
+	// included — and it is in the HTML, so a widget is locked before any
+	// script runs and every re-render (a morph syncs attributes) relocks it.
+	const disabled = siteExport ? ' disabled' : locked ? ' inert' : '';
 	const extra = decl.classes?.length ? ' ' + decl.classes.join(' ') : '';
 	const data = `class="clew-mb${esc(extra)}" data-edit-path="${esc(page.path)}"`
 		+ ` data-edit-field="${esc(decl.prop)}" data-edit-source="${esc(source)}"`;
 
 	if (global.isLatex) return esc(display(value ?? ''));
 
+	const widget = widgetHtml(decl, { data, value, disabled, extra, inner });
+	return locked ? lockable(widget, decl.prop) : widget;
+}
+
+function widgetHtml(decl, { data, value, disabled, extra, inner }) {
 	switch (decl.type) {
 		case 'toggle':
 			return `<wa-switch ${data}${value === true || value === 'true' ? ' checked' : ''}${disabled}></wa-switch>`;

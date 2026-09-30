@@ -78,6 +78,11 @@ class ClewSettingsView extends ClewElement {
 					[['auto', 'When the pane is wide enough'], ['on', 'Always'], ['off', 'Never']]),
 				this.#selectRow('PDF paper size (reading-view export)', 'printPaperSize',
 					[['a4', 'A4'], ['letter', 'US Letter'], ['legal', 'US Legal'], ['tabloid', 'Tabloid']]),
+				this.#textRow('Shell panel font', 'shellFont', 'e.g. MesloLGS NF — blank for the default'),
+				this.#hint('A monospace family for the shell panel — your terminal\'s, say. Blank uses '
+					+ 'Clew\'s monospace font. Prompt symbols (Powerline and Nerd Font glyphs) come from '
+					+ 'the common Nerd Font and Powerline families, tried after the monospace face when '
+					+ 'installed; name any other such font here.'),
 			]),
 			this.#section('Live edit', [
 				this.#selectRow('⌘E returns from reading mode to', 'defaultEditMode',
@@ -120,6 +125,7 @@ class ClewSettingsView extends ClewElement {
 
 	#vaultSection() {
 		const section = this.#section(`This vault (${vaultStore.vault?.name ?? '…'})`, []);
+		section.append(...this.#trustRow());
 		section.append(
 			...this.#vaultToggle('jmarkdownProject',
 				'jmarkdown project: render own-line [[file.md]] links as inclusions',
@@ -350,6 +356,34 @@ class ClewSettingsView extends ClewElement {
 		input.addEventListener('input', save);
 		input.addEventListener('blur', () => save.flush());
 		input.addEventListener('keydown', (e) => e.stopPropagation());
+		return [row, hint];
+	}
+
+	// Trust is this DEVICE's (main/vault-trust.js), not a vault setting, so it
+	// has its own channel rather than #vaultToggle's vault-settings.json.
+	#trustRow() {
+		const box = document.createElement('input');
+		box.type = 'checkbox';
+		box.disabled = true;
+		const row = this.#row('Trusted on this device: notes may run code', box);
+		const hint = document.createElement('p');
+		hint.className = 'settings-hint';
+		hint.textContent = 'Notes can make the engine run code while they render: script '
+			+ 'blocks, Math.… and calc(…) in prose, math.…(, Mathematica, and the Load … '
+			+ 'and Extension … header keys. In a vault this device has not trusted, each '
+			+ 'is refused by name where it stands. Vaults you opened before this setting '
+			+ 'existed, the demo vault and vaults you create are trusted; a vault someone '
+			+ 'sends you is not until you say so. Kept on this device, never in the vault. '
+			+ 'Vault scripts, plugins, dataviewjs and the Note API keep their own switches.';
+		const sync = () => ipc.invoke(CH.VAULT_TRUST_GET).then((state) => {
+			box.checked = state?.trusted === true;
+			box.disabled = false;
+		}).catch(() => {});
+		sync();
+		box.addEventListener('change', () => {
+			box.disabled = true;
+			ipc.invoke(CH.VAULT_TRUST_SET, { trusted: box.checked }).finally(sync);
+		});
 		return [row, hint];
 	}
 
@@ -694,6 +728,14 @@ class ClewSettingsView extends ClewElement {
 
 		refresh();
 		return [this.#row('LibreOffice engine', button), hint];
+	}
+
+	/** A settings-hint paragraph under the row before it. */
+	#hint(text) {
+		const hint = document.createElement('p');
+		hint.className = 'settings-hint';
+		hint.textContent = text;
+		return hint;
 	}
 
 	#row(label, control) {

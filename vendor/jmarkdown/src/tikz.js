@@ -7,7 +7,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 //import { config } from './utils.js';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import crypto from 'crypto';
 import { configManager } from './config-manager.js';
 import { requirePackage, addPreamble } from './preamble.js';
@@ -117,14 +117,16 @@ function createTiKZ(marker) {
 				try {
 					fs.writeFileSync(file_name, file_contents);
 					const opts = { cwd: TiKZ_directory };
-					let command = '';
+					// Argument arrays, no shell: the paths sit under the
+					// document's own folder, whose name is the document's to
+					// choose — in a shell string, `$(…)` in it ran as a command.
+					let args = ['--output-format=dvi', file_name];
 					//console.log(`Trying to process the TiKZ file with options ${opts}`);
-					command = `lualatex --output-format=dvi \"${file_name}\"`;
-					console.log(`Executing: ${command}`);
-					execSync(command, opts);
-					command = `dvisvgm --bbox=min ${LIBGS} --no-fonts=1 ${OPTIMISE} \"${dvi_name}\"`;
-					console.log(`Executing: ${command}`);
-					execSync(command, opts);
+					console.log(`Executing: lualatex ${args.join(' ')}`);
+					execFileSync('lualatex', args, opts);
+					args = ['--bbox=min', LIBGS, '--no-fonts=1', OPTIMISE, dvi_name];
+					console.log(`Executing: dvisvgm ${args.join(' ')}`);
+					execFileSync('dvisvgm', args, opts);
 					console.log("Cleaning up temporary files...")
 					const filesToDelete = [file_name, aux_name, dvi_name, log_name];
 					deleteFiles(filesToDelete);

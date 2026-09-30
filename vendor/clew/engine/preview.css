@@ -647,6 +647,27 @@ wa-color-picker.clew-mb { display: inline-block; }
 wa-progress-bar.clew-mb-display { display: inline-block; width: 160px; vertical-align: middle; }
 .clew-mb-slider { display: inline-flex; align-items: center; gap: 8px; vertical-align: middle; }
 .clew-mb-slider wa-slider, .clew-mb-slider input[type='range'] { width: 160px; }
+/* `INPUT[…(locked)…]` (engine/meta-bind.js): the widget and its padlock,
+   one group. Locked is `inert` (see preview-client/meta-bind.js), drawn as
+   the dimmed look a disabled control has, with the closed padlock saying
+   why. */
+.clew-mb-lockable { display: inline-flex; align-items: center; gap: 2px; vertical-align: middle; }
+.clew-mb-lockable > .clew-mb[inert] { opacity: 0.55; }
+.clew-mb-lock {
+	display: inline-flex; align-items: center; justify-content: center;
+	min-width: 32px; min-height: 32px; padding: 0;
+	border: none; border-radius: 6px; background: none;
+	color: var(--preview-muted); cursor: pointer;
+}
+.clew-mb-lock:hover { color: var(--preview-text); background: var(--preview-code-bg); }
+.clew-mb-lock:focus-visible { outline: 2px solid var(--preview-accent); outline-offset: 1px; }
+.clew-mb-lock svg { width: 15px; height: 15px; }
+.clew-mb-lock[aria-pressed='true'] .clew-mb-lock-open,
+.clew-mb-lock[aria-pressed='false'] .clew-mb-lock-closed { display: none; }
+.clew-mb-lock[aria-pressed='false'] { color: var(--preview-accent); }
+@media (pointer: coarse) {
+	.clew-mb-lock { min-width: 44px; min-height: 44px; }
+}
 .clew-mb-value { font-size: 0.85em; color: var(--preview-muted); min-width: 2em; }
 .clew-mb-view { border-bottom: 1px dotted var(--preview-muted); }
 .clew-mb-refused { color: var(--preview-muted); font-size: 0.85em; }
@@ -763,7 +784,10 @@ td.clew-q-cell:hover { background: rgba(168, 130, 255, 0.08); }
 /* ---- ```kanban ------------------------------------------------------------ */
 .clew-kanban {
 	display: flex;
-	gap: 12px;
+	/* 10, not 12: four 190 px columns then fit an 826 px iPad portrait pane
+	   (4 × 190 + 3 × 10 = 790 of 794 — iOS's columns are border-box); on
+	   desktop the difference does not show. */
+	gap: 10px;
 	align-items: flex-start;
 	overflow-x: auto;
 	margin: 0.8em 0;
@@ -791,6 +815,11 @@ td.clew-q-cell:hover { background: rgba(168, 130, 255, 0.08); }
 }
 .kanban-col {
 	flex: 1 0 190px;
+	/* The basis alone does not size the board in WebKit: its max-content
+	   comes from the CARDS, so a board of short cards stayed at the text
+	   column there (3 of 4 columns — measured on iPad). A min-width enters
+	   intrinsic sizing in both engines. */
+	min-width: 190px;
 	max-width: 260px;
 	background: color-mix(in srgb, var(--preview-border) 22%, transparent);
 	border: 1px solid var(--preview-border);
@@ -916,3 +945,19 @@ body.clew-sidenotes-on section.footnotes, body.clew-sidenotes-on .jmd-endnotes {
 }
 .clew-sidenote p { margin: 0 0 0.4em; }
 .clew-sidenote-number { font-weight: 600; color: var(--preview-accent); }
+
+/* A note's code the engine did not run, in a vault this device has not
+   trusted (jmarkdown note-code.js; main/vault-trust.js): the marker stands
+   where the output would have been, so it reads as a placeholder rather
+   than as the note's own prose. */
+.jmd-refused {
+	color: var(--preview-muted);
+	border: 1px dashed var(--preview-border);
+	border-radius: 4px;
+	padding: 0 0.35em;
+	font-size: 0.9em;
+}
+div.jmd-refused {
+	display: table;   /* a block, shrink-wrapped to its text */
+	margin: 0.3em 0;
+}

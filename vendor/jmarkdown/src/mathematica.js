@@ -2,11 +2,12 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 //import { config } from './utils.js';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import crypto from 'crypto';
 import { configManager } from './config-manager.js';
 import { registerBlockEnvironment } from './begin-end-core.js';
 import Mustache from 'mustache';
+import { noteCodeAllowed, refuseNoteCode } from './note-code.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,6 +19,32 @@ function ensureDirectoryExists(dirPath) {
 		fs.mkdirSync(dirPath, { recursive: true });
 		console.log(`Created directory: ${dirPath}`);
 	} 
+}
+
+/*
+	wolframscript, run WITHOUT a shell, its stdout written straight into
+	`outFile` when one is given — which is what the `> "file"` of the shell
+	commands this replaced did, file created first and all. The cache paths sit
+	under the document's own folder, and a folder name is the document's to
+	choose: interpolated into a shell string, a name holding `$(…)` or a
+	backtick ran as a command.
+
+	PAGE_WIDTH is what wolframscript has always been handed. The shell strings
+	read "SetOptions[$Output, PageWidth->100]" inside double quotes, where the
+	shell expanded `$Output` — an unset variable — to nothing. Passing
+	`$Output` intact would change the output of every cached computation, so
+	that is left for the owner to decide rather than done by a security fix.
+*/
+const PAGE_WIDTH = 'SetOptions[, PageWidth->100]';
+function wolframscript(args, { cwd, outFile } = {}) {
+	if (!outFile) return execFileSync('wolframscript', args, cwd ? { cwd } : {});
+	const fd = fs.openSync(outFile, 'w');
+	try {
+		execFileSync('wolframscript', args, { cwd, stdio: ['pipe', fd, 'inherit'] });
+	}
+	finally {
+		fs.closeSync(fd);
+	}
 }
 
 function generateHash(string) {
@@ -43,6 +70,12 @@ export function createMathematica(marker) {
 		marker: marker,
 		label: "Mathematica",
 		tokenizer: function(text, token) {
+			// `Run note code: false` (note-code.js): Wolfram Language is code,
+			// so nothing is written and wolframscript is never asked.
+			if (!noteCodeAllowed()) {
+				token['refused'] = true;
+				return token;
+			}
 			if (text.includes("DisplayMath")) {
 				token['DisplayMath'] = true;
 			}
@@ -81,20 +114,21 @@ export function createMathematica(marker) {
 			if (fs.existsSync(output_file) == false) {
 				try {
 					fs.writeFileSync(file_name, text);
-					const opts = { cwd: mathematica_directory };
+					const cwd = mathematica_directory;
+					const args = ['-c', PAGE_WIDTH, '-f', file_name, '-print'];
 					//console.log(`Trying to process the Mathematica file with options ${opts}`);
 					if (token?.attrs?.output?.toLowerCase() == 'svg') {
-						execSync(`wolframscript -c "SetOptions[$Output, PageWidth->100]" -f \"${file_name}\" -print -format SVG > \"${svg_name}\"`, opts);
+						wolframscript([...args, '-format', 'SVG'], { cwd, outFile: svg_name });
 					}
 					else if (token?.attrs?.output?.toLowerCase() == 'png') {
-						execSync(`wolframscript -c "SetOptions[$Output, PageWidth->100]" -f \"${file_name}\" -print -format PNG > \"${png_name}\"`, opts);
+						wolframscript([...args, '-format', 'PNG'], { cwd, outFile: png_name });
 					}
 					else if (token?.attrs?.output?.toLowerCase() == 'jpg' || token?.attrs?.output?.toLowerCase() == 'jpeg') {
-						execSync(`wolframscript -c "SetOptions[$Output, PageWidth->100]" -f \"${file_name}\" -print -format JPEG > \"${jpg_name}\"`, opts);
+						wolframscript([...args, '-format', 'JPEG'], { cwd, outFile: jpg_name });
 					}
 					else {
 						const output = file_name.replace('.m', '.txt');
-						execSync(`wolframscript -c "SetOptions[$Output, PageWidth->100]" -f \"${file_name}\" -print > \"${output}\"`, opts);
+						wolframscript(args, { cwd, outFile: output });
 					}
 				}
 				catch (error) {
@@ -119,6 +153,7 @@ export function createMathematica(marker) {
 		},
 		renderer(token) {
 			if (token.meta.name === "Mathematica") {
+				if (token['refused']) return refuseNoteCode('Mathematica', { block: true });
 				// The Mathematica directive emits an SVG <img>/<div>; suppress
 				// it in LaTeX mode rather than leaking raw HTML into the .tex.
 				if (global.isLatex) return '';
@@ -294,6 +329,17 @@ export const inlineMathematica = {
 	tokenizer(src, tokens) {
 		const match = /^⟦([\s\S]*?)⟧/.exec(src);
 		if (match) {
+			// `Run note code: false` (note-code.js): refused, even where a cached
+			// result exists — the rule is about the construct, not the cache.
+			if (!noteCodeAllowed()) {
+				return {
+					type: 'inlineMathematica',
+					raw: match[0],
+					code: match[1],
+					refused: true,
+					text: ''
+				};
+			}
 			const home_directory = configManager.get('Markdown file directory');
 			const mathematica_directory = path.join(home_directory, "Mathematica");
 			const opts = { cwd: mathematica_directory };
@@ -332,15 +378,15 @@ export const inlineMathematica = {
 			console.log(`Attempting to write file ${file_name} to disk`);
 			fs.writeFileSync(file_name, code_to_evaluate);
 
-			const output = execSync(`wolframscript -f \"${file_name}\" -print`).toString();
+			const output = wolframscript(['-f', file_name, '-print']).toString();
 			console.log(output);
 			if (output.includes("-Graphics-") || output.includes("-Graphics3D-") ) {
 				console.log("Attempting to generate SVG output for inline Mathematica code.");
-				execSync(`wolframscript -f \"${file_name}\" -print -format SVG > \"${svg_name}\"`, opts);
+				wolframscript(['-f', file_name, '-print', '-format', 'SVG'], { cwd: opts.cwd, outFile: svg_name });
 				output_file = `${hash}.svg`;
 			}
 			else {
-				execSync(`wolframscript -f \"${file_name}\" -print > \"${txt_name}\"`, opts);
+				wolframscript(['-f', file_name, '-print'], { cwd: opts.cwd, outFile: txt_name });
 				output_file = `${hash}.txt`;
 			}
 			
@@ -355,6 +401,7 @@ export const inlineMathematica = {
 		}
 	},
 	renderer(token) {
+		if (token.refused) return refuseNoteCode('Mathematica');
 		if (token.code.includes("InlineMath")) {
 			return "$" + fs.readFileSync(token.include, 'utf8') + "$";	
 		}

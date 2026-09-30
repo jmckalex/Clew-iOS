@@ -1,5 +1,6 @@
 import { runInThisContext } from './utils.js';
 import * as acorn from 'acorn';
+import { noteCodeAllowed, refuseNoteCode, noteCodeError } from './note-code.js';
 
 /*
 	This file defines several extensions which look for blocks of the form
@@ -88,6 +89,19 @@ const jmarkdown_script = {
 						let script = match[1]
 						let [tag, ...rest] = match[0].split('>');
 
+						// `Run note code: false` (note-code.js): the block is claimed,
+						// so its source never reaches the page, and neither kind runs.
+						if (!noteCodeAllowed()) {
+							const kind = tag.includes("jmarkdown-postprocess") ? 'jmarkdown-postprocess script' : 'jmarkdown script';
+							return {
+								type: 'jmarkdownScript',
+								raw: match[0],
+								text: match[1],
+								output: refuseNoteCode(kind, { block: true }),
+								tokens: []
+							};
+						}
+
 						// Use Acorn to validate the parsing
 						let exp;
 						try {
@@ -120,7 +134,21 @@ const jmarkdown_script = {
 						}
 						else {
 							global.output = '';
-							runInThisContext(script);
+							// A script that throws as it runs is shown in place, the
+							// way a parse error above is, and the build carries on
+							// (note-code.js). Whatever it set before it threw stays set.
+							try {
+								runInThisContext(script);
+							}
+							catch (error) {
+								return {
+									type: 'jmarkdownScript',
+									raw: match[0],
+									text: match[1],
+									output: noteCodeError('jmarkdown script', error, { block: true }),
+									tokens: []
+								};
+							}
 							let token = {
 								type: 'jmarkdownScript',
 								raw: match[0],

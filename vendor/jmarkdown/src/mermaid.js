@@ -7,10 +7,25 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { execSync } from 'child_process';
+import { execFileSync, execSync } from 'child_process';
 import { configManager } from './config-manager.js';
 import { requirePackage } from './preamble.js';
 import { registerBlockEnvironment } from './begin-end-core.js';
+
+// Run mmdc without a shell where a shell is the danger: the paths are under the
+// document's own folder, whose name is the document's to choose, and a POSIX
+// shell expands `$(…)` or a backtick even inside double quotes. On Windows mmdc
+// is an npm .cmd shim that only a shell can start, and there cmd.exe's double
+// quotes make & | < > literal and no file name can hold a `"` — so a quoted
+// string, as before.
+function runMmdc(file, args) {
+	if (process.platform === 'win32') {
+		execSync([file, ...args].map(a => `"${a}"`).join(' '), { stdio: 'ignore' });
+	}
+	else {
+		execFileSync(file, args, { stdio: 'ignore' });
+	}
+}
 
 // Locate mmdc once: a locally-installed mermaid-cli first, then one on PATH.
 // null means "not available" (skip mermaid in LaTeX).
@@ -23,7 +38,7 @@ function getMmdc() {
 	const candidates = [path.join(appDir, '..', 'node_modules', '.bin', 'mmdc'), 'mmdc'];
 	for (const candidate of candidates) {
 		try {
-			execSync(`"${candidate}" --version`, { stdio: 'ignore' });
+			runMmdc(candidate, ['--version']);
 			mmdcPath = candidate;
 			break;
 		} catch { /* try the next candidate */ }
@@ -47,7 +62,7 @@ function renderMermaidLatex(source) {
 		const mmd = path.join(dir, `${hash}.mmd`);
 		try {
 			fs.writeFileSync(mmd, source);
-			execSync(`"${mmdc}" -i "${mmd}" -o "${pdf}"`, { stdio: 'ignore' });
+			runMmdc(mmdc, ['-i', mmd, '-o', pdf]);
 		} catch (e) {
 			console.warn(`jmarkdown: mermaid render failed (${e.message}); skipping in LaTeX.`);
 			return '';

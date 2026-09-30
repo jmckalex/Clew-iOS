@@ -25,7 +25,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { execSync } from 'child_process';
+import { execFileSync, execSync } from 'child_process';
 import crypto from 'crypto';
 import { configManager } from './config-manager.js';
 import { requirePackage } from './preamble.js';
@@ -161,24 +161,24 @@ function renderMetapostHTML(source, attrs) {
 		const mpFile = path.join(dir, `${hash}.mp`);
 		try {
 			fs.writeFileSync(mpFile, fileContents);
-			execSync(`mpost -interaction=nonstopmode "${hash}.mp"`, { cwd: dir, stdio: 'ignore' });
+			execFileSync('mpost', ['-interaction=nonstopmode', `${hash}.mp`], { cwd: dir, stdio: 'ignore' });
 			const figures = producedFiles(dir, hash, 'mps');
 			if (figures.length === 0) throw new Error('mpost produced no figures');
 			try {
 				// A stale configured path (ghostscript upgrades rotate the
 				// versioned Cellar dir) must not scuttle the conversion.
 				const libgs = configManager.get('TiKZ libgs');
-				const gs = libgs && fs.existsSync(libgs) ? ` --libgs=${libgs}` : '';
+				const gs = libgs && fs.existsSync(libgs) ? [`--libgs=${libgs}`] : [];
 				for (const figure of figures) {
 					const svgName = figure.replace(/\.mps$/, '.svg');
-					execSync(`dvisvgm --eps --bbox=min${gs} --no-fonts=1 "${figure}" -o "${svgName}"`,
+					execFileSync('dvisvgm', ['--eps', '--bbox=min', ...gs, '--no-fonts=1', figure, '-o', svgName],
 						{ cwd: dir, stdio: 'ignore' });
 				}
 			} catch {
 				addWarning('dvisvgm unavailable — MetaPost labels may render with substituted fonts');
 				const legacy = `outputformat := "svg";\noutputtemplate := "%j-%c.svg";\n${body}\n`;
 				fs.writeFileSync(mpFile, legacy);
-				execSync(`mpost -interaction=nonstopmode "${hash}.mp"`, { cwd: dir, stdio: 'ignore' });
+				execFileSync('mpost', ['-interaction=nonstopmode', `${hash}.mp`], { cwd: dir, stdio: 'ignore' });
 			}
 			for (const figure of producedFiles(dir, hash, 'mps')) {
 				try { fs.unlinkSync(path.join(dir, figure)); } catch { /* converted or gone */ }
@@ -215,6 +215,10 @@ function renderMetapostLatex(source, attrs) {
 		const mpFile = path.join(dir, `${hash}.mp`);
 		try {
 			fs.writeFileSync(mpFile, body + '\n');
+			// Still a shell string, and safely so: the only argument is a hex hash.
+			// It has to be: TeX Live's mptopdf is a Perl script with no #! line
+			// that starts only through a shell's fallback for such files (it
+			// then re-execs perl itself), so execFile gets ENOEXEC.
 			execSync(`mptopdf "${hash}.mp"`, { cwd: dir, stdio: 'ignore' });
 			pdfs = producedFiles(dir, hash, 'pdf');
 			cleanupAux(dir, hash);

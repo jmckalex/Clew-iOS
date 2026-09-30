@@ -482,7 +482,16 @@ export function runPostprocessScripts(html) {
 	let configuration = `const $ = cheerio.load(html);`
 	runInThisContext(configuration);
 	for (let script of postprocessor_scripts) {
-		runInThisContext(script);
+		// A post-process script that throws is reported and skipped; the page
+		// is written without whatever it failed to do. It runs after the body
+		// is rendered, so there is no place in it for a marker — just the
+		// warning, worded like the markers' (note-code.js).
+		try {
+			runInThisContext(script);
+		}
+		catch (error) {
+			addWarning(`jmarkdown-postprocess script failed: ${error?.message ?? error}`);
+		}
 	}
 	return global.html;
 }

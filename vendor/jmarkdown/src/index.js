@@ -51,6 +51,7 @@ import './equations.js';
 import { gfmHeadingId, getHeadingList } from "marked-gfm-heading-id";
 import { createTOC } from './utils.js';
 import { metadata, processYAMLheader } from './metadata-header.js';
+import { headerRefusalsHTML } from './note-code.js';
 import processFileInclusions from './file-inclusion.js';
 import { processTemplate } from './html-template.js';
 import { processLatexTemplate } from './latex-template.js';
@@ -764,7 +765,9 @@ if (isLatex) {
 	// with no markers at all, the historical trailing "Endnotes" section). Done
 	// on the parsed body BEFORE the template/post-processor so cross-references
 	// inside note bodies still resolve.
-	const contentWithFootnotes = macrosHTML + fillEndnotes(content, 'html');
+	// Header keys refused under `Run note code: false` (note-code.js) have no
+	// place in the body of their own, so their markers stand at its top.
+	const contentWithFootnotes = macrosHTML + headerRefusalsHTML() + fillEndnotes(content, 'html');
 
 	let html = options.fragment ? contentWithFootnotes : processTemplate(contentWithFootnotes);
 

@@ -9,6 +9,7 @@ import path from 'path';
 import { configManager } from './config-manager.js';
 import Mustache from 'mustache';
 import { registerDirectives, registerExtensions } from './utils.js';
+import { noteCodeAllowed, refuseHeaderKey, resetHeaderRefusals } from './note-code.js';
 
 export let header_length = 0;
 
@@ -21,6 +22,9 @@ export let header_length = 0;
 const FROM_KEYWORD = /\s+from\s+/;
 
 export async function processYAMLheader(markdown) {
+	// Once per build: the header is read once, so its refusals start empty here.
+	resetHeaderRefusals();
+
 	// Accept an optional YAML-style `---` opening fence (Pandoc / Jekyll /
 	// Hugo / Obsidian convention) in addition to JMarkdown's native bare-key
 	// form. The closing `---` is already handled by the split-on-terminator
@@ -62,22 +66,26 @@ export async function processYAMLheader(markdown) {
 
 		const load_directives_key = Object.keys(metadata).find(k => k.toLowerCase() === "Load directives".toLowerCase());
 		if (load_directives_key) {
-			await loadDirectives();
+			if (noteCodeAllowed()) await loadDirectives();
+			else refuseHeaderKey(load_directives_key);
 		}
 
 		const load_extensions_key = Object.keys(metadata).find(k => k.toLowerCase() === "Load extensions".toLowerCase());
 		if (load_extensions_key) {
-			await loadExtensions();
+			if (noteCodeAllowed()) await loadExtensions();
+			else refuseHeaderKey(load_extensions_key);
 		}
 
 		const load_javascript_key = Object.keys(metadata).find(k => k.toLowerCase() === "Load javascript".toLowerCase());
 		if (load_javascript_key) {
-			await loadJavascript();
+			if (noteCodeAllowed()) await loadJavascript();
+			else refuseHeaderKey(load_javascript_key);
 		}
 
 		const load_environments_key = Object.keys(metadata).find(k => k.toLowerCase() === "Load environments".toLowerCase());
 		if (load_environments_key) {
-			await loadEnvironments();
+			if (noteCodeAllowed()) await loadEnvironments();
+			else refuseHeaderKey(load_environments_key);
 		}
 
 		const optionals_key = Object.keys(metadata).find(k => k.toLowerCase() === "Optionals".toLowerCase());
@@ -85,8 +93,15 @@ export async function processYAMLheader(markdown) {
 			parseOptionals(metadata[optionals_key]);
 		}
 
+		// `Extension …` keys build tokenizers from the header's own text. That
+		// runs no JavaScript, but the regexes are the document's, run over the
+		// whole document — so they are held back with the rest (note-code.js).
 		const extension_keys = Object.keys(metadata).filter(key => key.startsWith("Extension"));
 		for (let key of extension_keys) {
+			if (!noteCodeAllowed()) {
+				refuseHeaderKey(key);
+				continue;
+			}
 			let spec = metadata[key];
 			addExtension(spec, key);
 		}

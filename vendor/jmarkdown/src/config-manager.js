@@ -104,7 +104,13 @@ export const DEFAULT_CONFIG = {
 	// How a generic @begin(name) block renders in HTML (see src/begin-end.js):
 	// 'hyphenated' → hyphenated names become custom elements, others div.class;
 	// 'all' → always a custom element; 'none' → always a div.class.
-	'Block elements': 'hyphenated'
+	'Block elements': 'hyphenated',
+	// Whether a DOCUMENT may make the build run code: script blocks, function
+	// calls, math.…( expressions, Mathematica, and the Load …/Extension …
+	// header keys (src/note-code.js). A host rendering documents it did not
+	// write sets false, and each path refuses by name. Config only — a
+	// metadata header can never set it (mergeMetadata drops the key).
+	'Run note code': true
 };
 
 class ConfigManager {
@@ -322,6 +328,11 @@ class ConfigManager {
 				// reads configManager.get('Video mode' / 'Video poster') at
 				// render time.
 				this.config[formattedKey.replace(/_/g, ' ')] = value[0].trim().toLowerCase();
+				break;
+			case "Run_note_code":
+				// Never from a header: the switch exists so a host can keep a
+				// document it did not write from running code, and a document
+				// that could set it would simply switch itself back on.
 				break;
 			case "Math_macros":
 				// A multi-line metadata value arrives as one newline-joined

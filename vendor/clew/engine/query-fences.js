@@ -84,7 +84,13 @@ export function readFrontmatter(text) {
 }
 
 function clean(v) {
-	const s = String(v).trim().replace(/^["']|["']$/g, '');
+	const t = String(v).trim();
+	// A double-quoted value's escapes, as shared/frontmatter.js writes them —
+	// `\n` is a newline (a Meta Bind textArea's value). Repeated here, not
+	// imported: engine assets never import src/shared.
+	const s = /^".*"$/.test(t)
+		? t.slice(1, -1).replace(/\\([nrt"\\])/g, (_, c) => ({ n: '\n', r: '\r', t: '\t' })[c] ?? c)
+		: t.replace(/^["']|["']$/g, '');
 	if (/^-?\d+(\.\d+)?$/.test(s)) return Number(s);
 	if (s === 'true') return true;
 	if (s === 'false') return false;

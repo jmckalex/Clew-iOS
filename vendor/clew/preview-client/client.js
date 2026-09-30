@@ -101,6 +101,22 @@ function applyRender(html) {
 				// A Meta Bind widget mid-interaction must not be yanked back
 				// to the on-disk value by an unrelated re-render.
 				if (fromEl.classList?.contains('clew-mb') && fromEl === document.activeElement) return false;
+				// A LOCKED widget the user has just unlocked (preview-client/
+				// meta-bind.js) stays unlocked through an unrelated re-render —
+				// leaving ANOTHER widget writes it, and the re-render lands in
+				// the moment between the padlock and the widget taking focus
+				// (measured 2026-09-30: the grade relocked, the typing went
+				// nowhere). It relocks on its own commit and when focus leaves it.
+				if (fromEl.classList?.contains('clew-mb-lockable')) {
+					const open = fromEl.querySelector('.clew-mb-lock');
+					if (open?.getAttribute('aria-pressed') === 'false') {
+						toEl.querySelector('.clew-mb')?.removeAttribute('inert');
+						const button = toEl.querySelector('.clew-mb-lock');
+						for (const attr of ['aria-pressed', 'aria-label', 'title']) {
+							if (button && open.hasAttribute(attr)) button.setAttribute(attr, open.getAttribute(attr));
+						}
+					}
+				}
 				if (fromEl.classList?.contains('canvas-embed-scene')) return false;
 				// Hydrated office thumbnails are client-rendered (the incoming
 				// HTML carries an empty shell) — keep them unless the embed now

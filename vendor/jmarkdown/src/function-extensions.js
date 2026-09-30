@@ -6,6 +6,7 @@
 */
 
 import { runInThisContext, marked, registerExtension } from './utils.js';
+import { noteCodeAllowed, refuseNoteCode, noteCodeError } from './note-code.js';
 
 export default function export_to_jmarkdown(name, options = {}) {
 	const defaultOptions ={
@@ -54,9 +55,35 @@ function construct_simple_function_extension(name, options) {
 		tokenizer(src) {
 			const match = tokenizer_regexp.exec(src);
 			if (match) {
+				// `Run note code: false` (note-code.js): claimed, not run.
+				if (!noteCodeAllowed()) {
+					return {
+						type: `${name}`,
+						raw: match[0],
+						success: true,
+						text: refuseNoteCode(name, { block: extension_level === 'block' }),
+						tokens: []
+					};
+				}
 				let script = `${name}("${match[1]}")`;
-				script = script.replaceAll('\n', '\\n'); 
-				let output = runInThisContext(script);
+				script = script.replaceAll('\n', '\\n');
+				// The argument is spliced into a string literal as written, so
+				// a `"` in it (`shout(he said "hi")`) is a SyntaxError, and the
+				// function may throw on its own account. Either way the error
+				// stands in place and the build carries on (note-code.js).
+				let output;
+				try {
+					output = runInThisContext(script);
+				}
+				catch (error) {
+					return {
+						type: `${name}`,
+						raw: match[0],
+						success: false,
+						text: noteCodeError(name, error, { block: extension_level === 'block' }),
+						tokens: []
+					};
+				}
 
 				let token;
 				if (typeof output === "object" && output !== null) {
@@ -165,6 +192,20 @@ function construct_complex_function_extension(name, options) {
 		tokenizer(src) {
 			const regexp = new RegExp("^" + name + delimiter)
 			if (src.match(regexp)) {
+				// `Run note code: false` (note-code.js): the expression that would
+				// have run is claimed whole and refused; text that is no
+				// expression at all stays text.
+				if (!noteCodeAllowed()) {
+					const source = expressionSource(src);
+					if (source === null) return;
+					return {
+						type: `${name}`,
+						raw: source,
+						success: true,
+						text: refuseNoteCode(name),
+						tokens: []
+					};
+				}
 				try {
 					let exp;
 					try {
@@ -184,9 +225,8 @@ function construct_complex_function_extension(name, options) {
 					else if (exp.type == "MemberExpression") {
 						token = handleMemberExpression(exp, src, name);
 					}
-					else {
-						console.log(exp);
-					}
+					// Anything else (`Math.max(1, 2) + 3 is five.`) is left
+					// undefined: declined, so it stays prose.
 
 					if (token?.tokenize == 'block') {
 						this.lexer.blockTokens(token.text, token.tokens);
@@ -198,8 +238,23 @@ function construct_complex_function_extension(name, options) {
 				}
 				catch (error) {
 					if (error instanceof AcornParseError) {
-						const last_attempt = handlePossibleIrrelevantEndCharacter(error, src, name);
+						// The retry runs code too, and runs it here, inside this
+						// catch — so its errors must be caught again, or they
+						// escape the tokenizer and take the build down
+						// (`The value is Math.foo().` ending a paragraph).
+						let last_attempt;
+						try {
+							last_attempt = handlePossibleIrrelevantEndCharacter(error, src, name);
+						}
+						catch (retry_error) {
+							if (retry_error instanceof VMEvaluationError) {
+								return retry_error.token;
+							}
+							last_attempt = false;
+						}
 						if (last_attempt !== false) {
+							// It finally worked (or was declined as prose — undefined),
+							// so return it
 							// It finally worked, and last_attempt is a valid token, so return it
 							if (last_attempt?.tokenize == 'block') {
 								this.lexer.blockTokens(last_attempt.text, last_attempt.tokens);
@@ -312,53 +367,22 @@ function handleCallExpression(exp, src, name) {
 
 // Here we assume that a sequence expression results from a
 // comma - which is supposed to be punctuation - following an otherwise
-// valid CallExpression or MemberExpression.  So we have to
-// identify the trailing comma which is the issue and find the appropriate
-// subexpression.
+// valid CallExpression or MemberExpression: `calc(2+2), four, which is nice.`
+// The expression that begins at the extension's name is the sequence's
+// FIRST, however many commas of prose follow it, so hand that one to its own
+// handler (which deals with its own trailing full stop). Anything else is
+// declined — undefined, so it stays prose. (Slicing at the LAST comma, as this
+// used to, left a sequence whenever the prose held two commas, and built a
+// token with no `raw`, which crashed the build.)
 function handleSequenceExpression(exp, src, name) {
-	const start = exp.start;
-	const end = exp.end;
-	const sequence = src.slice(start, end);
-	// But we don't want the sequence, just the part up to the last comma.
-	const last_comma_index = sequence.lastIndexOf(',');
-	const code_to_check = sequence.substring(0, last_comma_index);
-
-	let exp2;
-	try {
-		exp2 = acorn.parseExpressionAt(code_to_check, 0, { ecmaVersion: 2022 });
+	const first = exp.expressions[0];
+	if (first.type == "CallExpression") {
+		return handleCallExpression(first, src, name);
 	}
-	catch(error) {
-		throw new AcornParseError(error);
+	if (first.type == "MemberExpression") {
+		return handleMemberExpression(first, src, name);
 	}
-
-	// If we get here we found a valid subexpression
-	let output;
-	let code_to_run;
-	if (exp2.type == "CallExpression" || exp2.type == "MemberExpression") {
-		code_to_run = code_to_check.slice(exp2.start, exp2.end);
-		try {
-			output = runInThisContext(code_to_run);
-		}
-		catch(error) {
-			const token = {
-						type: `${name}`,
-						raw: code_to_run,
-						success: false,
-						error: error
-					};
-			error.token = token;
-			throw new VMEvaluationError(error)
-		}
-	}
-
-	const token = {
-		type: `${name}`,
-		raw: code_to_run,
-		success: true,
-		text: output,
-		tokens: []
-	};
-	return token;
+	return undefined;
 }
 
 
@@ -398,24 +422,28 @@ function handleMemberExpression(exp, src, name) {
 		throw new AcornParseError(error);
 	}
 
+	// Without the sentence's full stop, `Save the Date. Bring wine.` leaves a
+	// bare name — prose, not a call or a member. Decline it, rather than build
+	// a token with no `raw`, which crashed the build.
+	if (exp2.type != "CallExpression" && exp2.type != "MemberExpression") {
+		return undefined;
+	}
+
 	// If we get here we found a valid subexpression
 	let output;
-	let code_to_run;
-	if (exp2.type == "CallExpression" || exp2.type == "MemberExpression") {
-		code_to_run = code_to_check.slice(exp2.start, exp2.end);
-		try {
-			output = runInThisContext(code_to_run);
-		}
-		catch(error) {
-			const token = {
-						type: `${name}`,
-						raw: code_to_run,
-						success: false,
-						error: error
-					};
-			error.token = token;
-			throw new VMEvaluationError(error)
-		}
+	const code_to_run = code_to_check.slice(exp2.start, exp2.end);
+	try {
+		output = runInThisContext(code_to_run);
+	}
+	catch(error) {
+		const token = {
+					type: `${name}`,
+					raw: code_to_run,
+					success: false,
+					error: error
+				};
+		error.token = token;
+		throw new VMEvaluationError(error)
 	}
 
 	let token;
@@ -461,85 +489,82 @@ function handleMemberExpression(exp, src, name) {
 //
 // In all these cases, the solution is to find the character which generates the error, extract the substring up to
 // but not including that character, and then checking to see if that is a valid JavaScript expression.
-function handlePossibleIrrelevantEndCharacter(error, src, name) {
+//
+// The candidate substring, by the parse error's message; null when none of the
+// cases applies. Shared with expressionSource, below.
+function trailingCharacterCandidate(error, src) {
 	const substring = src.slice(0, error.raisedAt).trimRight();
 	// Now handle three cases based on the message...
-	let substring_to_check = '';
 	if (error.message.startsWith("Unexpected token")) {
 		// This is typically triggered by the inline JavaScript occuring right before a final . indicating
 		// a sentence end - so try removing that.
 		const i = substring.lastIndexOf('.');
-		substring_to_check = substring.slice(0, i);
+		return substring.slice(0, i);
 	}
 	else if (error.message.startsWith("Unexpected character")) {
 		// In this case, the raisedAt index correctly indicates the end of the possible valid
 		// expression, so the string to check is just the original substring extracted
-		substring_to_check = substring;
-
+		return substring;
 	}
 	else if (error.message.startsWith("Unterminated string constant")) {
 		const match = error.message.match(/\(\d+:(\d+)\)/);
-		substring_to_check = substring.slice(0, match[1]);
+		return substring.slice(0, match[1]);
 	}
-	else {
-		// We've exhausted all the possible cases I can think of...
-		return false;
+	// We've exhausted all the possible cases I can think of...
+	return null;
+}
+
+// The source of the expression at the start of `src`, found WITHOUT running
+// it — acorn parses, nothing evaluates — with the same forgiveness for a
+// sentence's closing punctuation as handlePossibleIrrelevantEndCharacter.
+// null when there is no expression to be had. The refusal path under
+// `Run note code: false` (note-code.js) claims exactly this much.
+function expressionSource(src) {
+	try {
+		const exp = acorn.parseExpressionAt(src, 0, { ecmaVersion: 2022 });
+		return src.slice(0, exp.end);
 	}
+	catch (error) {
+		try {
+			const candidate = trailingCharacterCandidate(error, src);
+			if (candidate === null) return null;
+			const exp = acorn.parseExpressionAt(candidate, 0, { ecmaVersion: 2022 });
+			return candidate.slice(exp.start, exp.end);
+		}
+		catch {
+			return null;
+		}
+	}
+}
+
+function handlePossibleIrrelevantEndCharacter(error, src, name) {
+	const substring_to_check = trailingCharacterCandidate(error, src);
+	if (substring_to_check === null) return false;
 
 	let exp;
-	let code_to_run;
 	try {
 		exp = acorn.parseExpressionAt(substring_to_check, 0, { ecmaVersion: 2022 });
-		code_to_run = substring_to_check.slice(exp.start, exp.end);
 	}
 	catch (error) {
 		return false
 	}
 
-	// If we get here we have found a valid subexpression
-	let output = '';
-	try {
-		output = runInThisContext(code_to_run);
+	// If we get here we have found a valid subexpression: handle it exactly
+	// as the tokenizer handles a first-time parse. A bare name (`I saved the
+	// Date.` — without the full stop, just `Date`) is prose, and is declined
+	// (undefined) rather than run: it used to print the function's source into
+	// the sentence. A sequence (`calc(2+2), four.`) used to run whole, and die
+	// on the prose after the comma.
+	if (exp.type == "CallExpression") {
+		return handleCallExpression(exp, substring_to_check, name);
 	}
-	catch(error) {
-		const token = {
-					type: `${name}`,
-					raw: code_to_run,
-					success: false,
-					error: error
-				};
-		error.token = token;
-		throw new VMEvaluationError(error)
+	if (exp.type == "SequenceExpression") {
+		return handleSequenceExpression(exp, substring_to_check, name);
 	}
-
-	let token;
-	if (typeof output === "object" && output !== null) {
-		token = {
-			type: `${name}`,
-			raw: code_to_run,
-			success: true,
-			tokens: []
-		};
-		if ('block' in output) {
-			token.text = output.block;
-			token.tokenize = 'block';
-		}
-		else {
-			token.text = output.inline;
-			token.tokenize = 'inline';
-		}
+	if (exp.type == "MemberExpression") {
+		return handleMemberExpression(exp, substring_to_check, name);
 	}
-	else {
-		token = {
-			type: `${name}`,
-			raw: code_to_run,
-			success: true,
-			text: output,
-			tokens: []
-		};
-	}
-
-	return token;
+	return undefined;
 }
 
 

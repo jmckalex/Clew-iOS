@@ -89,8 +89,14 @@ export function vaultRelOf(src) {
  * Build a viewer in `target` for the PDF at `src`. Returns a handle with
  * dispose(); `onStatus` receives short human-readable states for a status
  * chip ('loading…', '', 'unsaved', 'saving…', 'saved', 'save failed').
+ *
+ * `readonly` (a web PDF — docs/dev/pdf-unification.md §4): somebody else's
+ * document, cached on the device, so nothing is ever saved into it —
+ * EmbedPDF's annotation and redaction features are switched off by its own
+ * configuration (no fork change) and the autosave is never installed.
+ * `buffer`, when the caller has already fetched the bytes, skips the fetch.
  */
-export async function createViewer({ target, src, onStatus = () => {} }) {
+export async function createViewer({ target, src, onStatus = () => {}, readonly = false, buffer: given = null, name = null }) {
 	const rel = vaultRelOf(src);
 	const handle = {
 		target, container: null, saveTimer: null,
@@ -113,7 +119,7 @@ export async function createViewer({ target, src, onStatus = () => {} }) {
 	onStatus('loading…');
 	const [{ default: EmbedPDF }, buffer] = await Promise.all([
 		loadEmbedPdf(),
-		fetch(src).then((r) => r.arrayBuffer()),
+		given ?? fetch(src).then((r) => r.arrayBuffer()),
 	]);
 	if (!target.isConnected) return handle;   // re-rendered away while loading
 
@@ -134,6 +140,7 @@ export async function createViewer({ target, src, onStatus = () => {} }) {
 		fonts: { ui: null, signature: null },  // airgapped: no Google Fonts
 		theme: { preference: document.documentElement.dataset.theme === 'light' ? 'light' : 'dark' },
 		tabBar: 'never',
+		...(readonly ? { disabledCategories: ['annotation', 'redaction'] } : {}),
 	});
 	if (!container) throw new Error('EmbedPDF.init returned nothing');
 	handle.container = container;
@@ -145,7 +152,7 @@ export async function createViewer({ target, src, onStatus = () => {} }) {
 	// a clew-preview:// path as base64 data (the lesson Clew-iOS paid for).
 	await docManager.openDocumentBuffer({
 		buffer,
-		name: rel.split('/').pop() ?? 'document.pdf',
+		name: name ?? rel.split('/').pop() ?? 'document.pdf',
 	}).toPromise();
 	onStatus('');
 
@@ -158,7 +165,7 @@ export async function createViewer({ target, src, onStatus = () => {} }) {
 	// ---- annotation autosave ----
 	const exportCap = registry.getPlugin('export')?.provides();
 	const annotationCap = registry.getPlugin('annotation')?.provides();
-	if (exportCap && annotationCap) {
+	if (exportCap && annotationCap && !readonly) {
 		let saving = false;
 		let saveAgain = false;
 		const saveNow = async () => {

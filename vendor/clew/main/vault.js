@@ -19,7 +19,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { settings } from './settings.js';
-import { direntKind, shouldRecurse, walkGuard, writeFileAtomic, WATCH_BUDGET, WATCH_CEILING, watchFilter, watchPlan } from './fs-utils.js';
+import { direntKind, shouldRecurse, walkGuard, writeFileAtomic, WATCH_BUDGET, WATCH_CEILING, watchFilter, watchPlan, scanShare, knownPaths } from './fs-utils.js';
 import { compileExcludes } from './vault-excludes.js';
 import { snapshotBeforeWrite, renameHistory } from './history.js';
 
@@ -212,9 +212,38 @@ export class VaultManager {
 
 	writeNote(rel, content) {
 		const abs = this.resolve(rel);
+		const created = !fs.existsSync(abs);
 		fs.mkdirSync(path.dirname(abs), { recursive: true });
 		this.snapshotHistory(rel);
 		writeFileAtomic(abs, content);
+		// A NEW file (an annotations note, a template's output, a save to a
+		// path that did not exist) is a structure change; an autosave of an
+		// existing note is not, and must not pay for a tree walk.
+		if (created) this.refreshTree();
+	}
+
+	/**
+	 * Clew just wrote `abs` — an export, a website, a canvas PNG — to a place
+	 * the user chose, which may or may not be inside this vault. Inside it,
+	 * the explorer is refreshed now, as Clew's own file operations do: the
+	 * watcher is not to be waited for (a 300 ms debounce at best, and in a
+	 * vault whose watch budget is spent, a message that never comes — the
+	 * owner's PDF export into ph341, 2026-09-30). Outside, nothing.
+	 */
+	refreshIfInside(abs) {
+		if (!this.root || !abs) return;
+		const inside = (root, target) => {
+			const rel = path.relative(root, target);
+			return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+		};
+		const target = path.resolve(abs);
+		let real = target;
+		try {
+			real = path.join(fs.realpathSync(path.dirname(target)), path.basename(target));
+		} catch { /* the plain path is all there is */ }
+		let realRoot = this.root;
+		try { realRoot = fs.realpathSync(this.root); } catch { /* ditto */ }
+		if (inside(this.root, target) || inside(realRoot, real)) this.refreshTree();
 	}
 
 	/**
@@ -301,6 +330,7 @@ export class VaultManager {
 			try {
 				fs.writeFileSync(tmp, Buffer.from(data));
 				execFileSync('sips', ['-s', 'format', 'jpeg', tmp, '--out', candidate], { stdio: 'ignore' });
+				this.refreshTree();
 				return path.relative(this.root, candidate);
 			} catch {
 				// Conversion failed — fall through and keep the original bytes.
@@ -310,6 +340,9 @@ export class VaultManager {
 			}
 		}
 		writeFileAtomic(candidate, Buffer.from(data));
+		// Always a new file (the name was deduplicated): the explorer shows it
+		// now rather than whenever the watcher gets round to it.
+		this.refreshTree();
 		return path.relative(this.root, candidate);
 	}
 
@@ -360,9 +393,16 @@ export class VaultManager {
 		// So after 'ready' the gate opens again, up to a ceiling that still
 		// keeps the process clear of the ~10,240 where fork() dies.
 		let settled = false;
+		// This window's SHARE of the scan budget (fs-utils.js#scanShare): what
+		// is left, less what later windows' scans are owed — first-come used
+		// to take everything, and a second window's vault went unwatched.
+		const share = scanShare(WATCH_BUDGET - watchedTotal);
+		let scanned = 0;
 		const take = () => {
+			if (!settled && scanned >= share) return false;
 			if (watchedTotal >= (settled ? WATCH_CEILING : WATCH_BUDGET)) return false;
 			watchedTotal += 1;
+			if (!settled) scanned += 1;
 			return true;
 		};
 		// WHAT the budget buys, decided before chokidar walks: notes first,
@@ -384,6 +424,9 @@ export class VaultManager {
 			take,
 			admit: plan?.admit ?? null,
 			settled: () => settled,
+			// What the scan saw: after it, only NEW paths spend the headroom
+			// (chokidar re-asks about every entry of a folder on each event).
+			known: files ? knownPaths(files) : null,
 		});
 		if (plan) {
 			state.skipped = plan.skipped;

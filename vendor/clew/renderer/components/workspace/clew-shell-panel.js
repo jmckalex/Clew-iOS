@@ -25,6 +25,8 @@
 import { ClewElement } from '../base/clew-element.js';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { Unicode11Addon } from '@xterm/addon-unicode11';
+import { gridFontFamily } from '../../lib/shell-font.js';
 import { ipc, CH } from '../../ipc.js';
 import { vaultStore } from '../../state/vault-store.js';
 import { workspaceStore } from '../../state/workspace-store.js';
@@ -64,9 +66,14 @@ class ClewShellPanel extends ClewElement {
 		// this window keeps running, but its geometry may have changed while
 		// the panel was hidden.
 		this.listen(vaultStore, 'vault-changed', () => this.#fitSoon());
-		this.listen(settingsStore, 'settings-changed', () => {
+		this.listen(settingsStore, 'settings-changed', (key) => {
 			// The theme is a setting; the grid's colours follow it.
 			if (this.#term) this.#term.options.theme = terminalTheme();
+			// A new face re-measures the cell, so the grid refits.
+			if (this.#term && key === 'shellFont') {
+				this.#term.options.fontFamily = gridFontFamily(settingsStore.get('shellFont'), cssVar('--clew-mono-font', ''));
+				this.#fitSoon();
+			}
 		});
 	}
 
@@ -101,23 +108,27 @@ class ClewShellPanel extends ClewElement {
 		const host = this.querySelector('.shell-grid');
 		if (!host) return;
 		this.#term = new Terminal({
-			// MONOSPACE, and not the editor's face. xterm draws a grid: it
-			// measures one cell from the font and then places every character
-			// in its own cell, so a proportional family (Clew's editor font is
-			// Avenir Next) leaves a visible gap around each letter — the
-			// owner's report, 2026-09-25. `monospace` is appended as a last
-			// resort in case a theme ever overrides the token with something
-			// that is not.
-			fontFamily: `${cssVar('--clew-mono-font', "'SF Mono', Menlo")}, monospace`,
+			fontFamily: gridFontFamily(settingsStore.get('shellFont'), cssVar('--clew-mono-font', '')),
 			fontSize: 12.5,
 			cursorBlink: true,
 			// The scrollback a build's output wants, without being a memory leak.
 			scrollback: 5000,
 			theme: terminalTheme(),
-			allowProposedApi: false,
+			// For `unicode.activeVersion` alone (below): xterm 5 still files
+			// its Unicode-version API under "proposed".
+			allowProposedApi: true,
 		});
 		this.#fit = new FitAddon();
 		this.#term.loadAddon(this.#fit);
+		// Character widths as the SHELL counts them. zsh (and every libc since
+		// Unicode 9) gives an emoji such as ⌚ two columns; xterm's default
+		// tables are Unicode 6, which give it one. A prompt that draws one —
+		// the owner's right prompt opens with ⌚ — then puts zsh's idea of the
+		// cursor a column ahead of the grid's, and its move back from the right
+		// prompt lands on the space after "$", so what is typed butts against
+		// it: "$echo". Unicode 11 widths agree with the shell's.
+		this.#term.loadAddon(new Unicode11Addon());
+		this.#term.unicode.activeVersion = '11';
 		this.#term.open(host);
 		// The dev hook (renderer/main.js) is how the smoke harness reaches the
 		// stores; the terminal goes there too, because everything worth

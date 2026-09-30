@@ -22,9 +22,16 @@ const FM_RE = /^---[ \t]*\n([\s\S]*?)\n---[ \t]*(?:\n|$)/;
 const KV_RE = /^([A-Za-z0-9_][\w ./-]*?)\s*:\s?(.*)$/;
 const LIST_ITEM_RE = /^\s*-\s+(.*)$/;
 
+// A double-quoted YAML string's escapes, in one pass — `\n` is a newline
+// (a Meta Bind textArea's value, 2026-09-30), `\\` a backslash.
+const DQ_ESCAPES = { n: '\n', r: '\r', t: '\t', '"': '"', '\\': '\\' };
+
 function parseScalar(raw) {
 	const text = raw.trim();
-	if (/^".*"$/.test(text) || /^'.*'$/.test(text)) {
+	if (/^".*"$/.test(text)) {
+		return text.slice(1, -1).replace(/\\([nrt"\\])/g, (_, c) => DQ_ESCAPES[c]);
+	}
+	if (/^'.*'$/.test(text)) {
 		return text.slice(1, -1).replace(/\\"/g, '"').replace(/\\\\/g, '\\');
 	}
 	if (text === 'true') return true;
@@ -90,9 +97,14 @@ function scalarToYaml(value) {
 		|| /[:#\[\]{}"'`|>&*!%@,]/.test(text)
 		|| text === 'true' || text === 'false'
 		|| /^-?\d+(\.\d+)?$/.test(text)
-		|| text.startsWith('- ');
+		|| text.startsWith('- ')
+		// A newline written bare would end the value mid-string and leave a
+		// line the parser cannot read, which marks the whole block unclean —
+		// read-only to every later edit (a textArea widget did exactly that).
+		|| /[\n\r\t]/.test(text);
 	if (!needsQuoting) return text;
-	return `"${text.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+	return `"${text.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+		.replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t')}"`;
 }
 
 /** Serialize entries back to a frontmatter block (with trailing newline),

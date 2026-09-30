@@ -72,7 +72,7 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { configManager } from './config-manager.js';
 import { registerBlockEnvironment } from './begin-end-core.js';
 import { requirePackage } from './preamble.js';
@@ -353,7 +353,7 @@ function imageLatex(ctx) {
 let ffmpegChecked = null;
 function hasFFmpeg() {
 	if (ffmpegChecked === null) {
-		try { execSync('ffmpeg -version', { stdio: 'ignore' }); ffmpegChecked = true; }
+		try { execFileSync('ffmpeg', ['-version'], { stdio: 'ignore' }); ffmpegChecked = true; }
 		catch { ffmpegChecked = false; }
 	}
 	return ffmpegChecked;
@@ -366,8 +366,11 @@ function videoAspect(file) {
 	if (aspectCache.has(file)) return aspectCache.get(file);
 	let aspect = null;
 	try {
-		const out = execSync(
-			`ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 "${file}"`,
+		// Argument arrays, no shell, here and in extractPoster: `file` is the
+		// document's own @video(path) — in a shell string, `$(…)` in it ran.
+		const out = execFileSync(
+			'ffprobe',
+			['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0', file],
 			{ encoding: 'utf8' }
 		).trim();
 		const [w, h] = out.split(',').map(Number);
@@ -397,7 +400,7 @@ function extractPoster(file) {
 	}
 	try {
 		fs.mkdirSync(path.dirname(out), { recursive: true });
-		execSync(`ffmpeg -y -loglevel error -i "${file}" -frames:v 1 "${out}"`, { stdio: 'ignore' });
+		execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-i', file, '-frames:v', '1', out], { stdio: 'ignore' });
 		if (fs.existsSync(out)) return rel;
 	} catch (error) {
 		try { fs.unlinkSync(out); } catch { /* nothing to clean up */ }

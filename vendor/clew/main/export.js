@@ -16,6 +16,16 @@
 // normal jmarkdown config cascade applies (global ~/.jmarkdown + any vault
 // .jmarkdown/) — deliberately NOT Clew's preview config: exports use the
 // engine's own templates (CDN assets, biblify, the user's customizations).
+//
+// Except for a vault this device does not trust (vault-trust.js; frame-
+// bridge.md §4.4, the owner's Q9): its exports run from a Clew-owned folder
+// in userData whose one config key turns the engine's `Run note code` off.
+// The cascade then sees the user's global ~/.jmarkdown and that key — never
+// a .jmarkdown/config.json the vault carries, which can load engine
+// extensions, i.e. run code. The engine resolves a note's relative paths
+// (images, Bibliography, includes) from the note's own folder, not the
+// working directory, so the export is otherwise the same (measured: HTML and
+// LaTeX byte-identical from either folder).
 import { dialog } from 'electron';
 import { execFile } from 'node:child_process';
 import { fork } from 'node:child_process';
@@ -27,6 +37,14 @@ import { printNoteToPdf } from './print-pdf.js';
 import { settings } from './settings.js';
 
 const WORKER_PATH = paths.engineWorker;
+
+/** Where a restricted vault's export runs from (see the header). */
+function restrictedExportDir() {
+	const dir = paths.restrictedExport;
+	fs.mkdirSync(path.join(dir, '.jmarkdown'), { recursive: true });
+	fs.writeFileSync(path.join(dir, '.jmarkdown', 'config.json'), JSON.stringify({ 'Run note code': false }, null, '\t') + '\n');
+	return dir;
+}
 
 function runWorker({ file, options, cwd }) {
 	return new Promise((resolve, reject) => {
@@ -89,8 +107,9 @@ function compilePdf(texFile) {
  *
  * Prompts for a destination; returns { output } or { canceled: true }.
  */
-export async function exportNote({ win, vaults, sessionId, callerToken = null, relPath, format, outFile }) {
+export async function exportNote({ win, vaults, sessionId, callerToken = null, relPath, format, outFile, trusted = false }) {
 	const abs = vaults.resolve(relPath);
+	const cwd = trusted ? path.dirname(abs) : restrictedExportDir();
 	// Exports honor the vault's standard-syntax choice, like previews do.
 	const normalSyntax = vaults.loadState('vault-settings.json')?.normalSyntax === true;
 	const base = path.basename(abs).replace(/\.(md|jmd)$/i, '');
@@ -118,14 +137,14 @@ export async function exportNote({ win, vaults, sessionId, callerToken = null, r
 	}
 
 	if (format === 'html') {
-		await runWorker({ file: abs, options: { to: 'html', output: filePath, normalSyntax }, cwd: path.dirname(abs) });
+		await runWorker({ file: abs, options: { to: 'html', output: filePath, normalSyntax }, cwd });
 		return { output: filePath };
 	}
 
 	// LaTeX (and PDF via LaTeX): build the .tex next to the requested output
 	// so relative graphics resolve, then compile if PDF was asked for.
 	const texFile = format === 'latex' ? filePath : filePath.replace(/\.pdf$/i, '.tex');
-	await runWorker({ file: abs, options: { to: 'latex', output: texFile, normalSyntax }, cwd: path.dirname(abs) });
+	await runWorker({ file: abs, options: { to: 'latex', output: texFile, normalSyntax }, cwd });
 	if (format === 'latex') return { output: texFile };
 	const pdf = await compilePdf(texFile);
 	if (pdf !== filePath) fs.copyFileSync(pdf, filePath);

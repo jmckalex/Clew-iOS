@@ -20,6 +20,7 @@ import { fileURLToPath } from 'node:url';
 import { registerIpc } from './ipc.js';
 import { appMenu } from './menu.js';
 import { settings } from './settings.js';
+import { trust } from './trust.js';
 import { CH } from '../shared/channels.js';
 import { registerPreviewScheme, installPreviewProtocol } from './protocol.js';
 import { VaultSession, focusedSession, sessionForVault } from './session.js';
@@ -217,6 +218,8 @@ export async function createVaultDialog(fromSession = null) {
 	});
 	if (result.canceled || !result.filePath) return null;
 	fs.mkdirSync(result.filePath, { recursive: true });
+	// Made here, by its owner, empty: nothing in it came from anyone else.
+	trust.trust(result.filePath, 'created');
 	return openVaultAnywhere(result.filePath, { preferSession: fromSession }).vaults.info;
 }
 
@@ -230,13 +233,19 @@ export async function createVaultDialog(fromSession = null) {
  */
 export function openDemoVault(fromSession = null) {
 	let target = paths.demoVault;
+	let fresh = false;
 	if (app.isPackaged) {
 		target = path.join(app.getPath('documents'), 'Clew Demo Vault');
 		if (!fs.existsSync(target)) {
 			fs.cpSync(paths.demoVault, target, { recursive: true });
+			fresh = true;
 		}
 	}
 	if (!fs.existsSync(target)) return null;
+	// Clew's own vault (§4.8) is trusted by construction: a copy made just
+	// now from the bundle, or one this device has never decided about. A
+	// decision already recorded — a revoke — stands.
+	if (fresh || !trust.entries()[fs.realpathSync(target)]) trust.trust(target, 'demo');
 	return openVaultAnywhere(target, { preferSession: fromSession }).vaults.info;
 }
 
@@ -300,6 +309,17 @@ app.whenReady().then(async () => {
 	appMenu.init({ rootDir });
 	if (process.env.CLEW_DEV) watchRendererDist();
 
+	// The interim vault-trust guard (vault-trust.js): the first launch that
+	// has it records every vault this device already knew as trusted — it
+	// has run their code already — so nothing changes for their owner. Only
+	// a vault first opened AFTER this asks. Before any window: the windows
+	// being restored below are exactly those vaults.
+	trust.migrate([
+		...(settings.get('openVaults') ?? []),
+		...(settings.get('recentVaults') ?? []),
+		settings.get('lastVault'),
+	]);
+
 	// Smoke runs open EXACTLY the given vault — never the user's restored
 	// set. The rest of the isolation lives in settings.js#save: under
 	// CLEW_SMOKE nothing is ever persisted, so vault opens and setting
@@ -356,11 +376,37 @@ app.on('window-all-closed', () => {
 //   CLEW_SMOKE_SCRIPT=/path/scenario.js run this in the first window first
 // Every window is captured: the first to CLEW_SMOKE's path, the rest with
 // -2, -3, … suffixes in creation order.
+// Boot is WAITED FOR, not timed: the first window, then its page. A fixed
+// 3 s after `ready` served an idle machine and failed on a loaded one
+// (2026-09-30, load ~15: `smoke failed: … reading 'webContents'` — there was
+// no window yet). The old 3 s stays the MINIMUM, so a scenario's timing on a
+// fast machine is what it always was; SMOKE_BOOT_LIMIT_MS bounds the wait,
+// with an error that says which step never came.
+const SMOKE_BOOT_LIMIT_MS = 120000;
+async function smokeBootedWindow(readyAt) {
+	const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+	const late = () => Date.now() - readyAt > SMOKE_BOOT_LIMIT_MS;
+	while (!windowOrder[0]) {
+		if (late()) throw new Error(`no window ${SMOKE_BOOT_LIMIT_MS / 1000} s after app ready — the app did not boot`);
+		await sleep(100);
+	}
+	const win = windowOrder[0];
+	const windowMs = Date.now() - readyAt;
+	while (win.webContents.isLoading()) {
+		if (late()) throw new Error(`the window's page was still loading ${SMOKE_BOOT_LIMIT_MS / 1000} s after app ready`);
+		await sleep(100);
+	}
+	console.log(`smoke-boot: window after ${windowMs} ms, page loaded after ${Date.now() - readyAt} ms`);
+	await sleep(Math.max(0, 3000 - (Date.now() - readyAt)));
+	return win;
+}
+
 if (process.env.CLEW_SMOKE) {
 	app.whenReady().then(() => {
-		setTimeout(async () => {
+		const readyAt = Date.now();
+		(async () => {
 			try {
-				const primary = windowOrder[0];
+				const primary = await smokeBootedWindow(readyAt);
 				// The input queue's key events never reach the native menu. CDP
 				// key events carry no characters, and Electron hands one the page
 				// leaves unhandled to the menu, where an empty key with ⌘ matches
@@ -461,6 +507,28 @@ if (process.env.CLEW_SMOKE) {
 							await sleep(ev.delay ?? 30);
 							continue;
 						}
+						if (ev.frameClick) {
+							// {frameClick:{match, selector}}: a click at the centre of
+							// an element INSIDE a preview frame — cross-origin, so a
+							// scenario on the app page cannot measure it — resolved
+							// at dispatch time from the frame (webFrameMain) and the
+							// iframe's own box in the app page. `match` is a substring
+							// of the frame's URL (the note), as CLEW_SMOKE_FRAME_MATCH.
+							const { match, selector } = ev.frameClick;
+							const frame = primary.webContents.mainFrame.framesInSubtree.find((f) =>
+								f.url.startsWith('clew-preview:') && f.url.includes(match) && f.parent === primary.webContents.mainFrame);
+							const inner = frame && await frame.executeJavaScript(`(() => {
+								const r = document.querySelector(${JSON.stringify(selector)})?.getBoundingClientRect();
+								return r ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null; })()`);
+							const outer = inner && await primary.webContents.executeJavaScript(`(() => {
+								const f = [...document.querySelectorAll('iframe')].find((el) => el.offsetParent && (el.src || '').includes(${JSON.stringify(match)}));
+								const r = f?.getBoundingClientRect(); return r ? { x: r.left, y: r.top } : null; })()`);
+							if (!inner || !outer) {
+								console.log(`smoke: frameClick found no ${selector} in a frame matching ${match}`);
+								continue;
+							}
+							ev.click = { x: Math.round(outer.x + inner.x), y: Math.round(outer.y + inner.y) };
+						}
 						if (ev.click || ev.tripleClick) {
 							const { x, y } = ev.click ?? ev.tripleClick;
 							// `modifiers` on a click event (same CDP bitmask) makes it
@@ -500,6 +568,12 @@ if (process.env.CLEW_SMOKE) {
 								pressed.push([bit, mod]);
 							}
 							const params = keyParams(ev.combo.key, held);
+							// `text` makes the key TYPE as a real one does: a real
+							// Enter's keyDown carries "\r", which is what puts a
+							// newline in a textarea; without it (the default, which
+							// every older scenario was written against) CDP's key
+							// inserts nothing.
+							if (ev.combo.text) Object.assign(params, { text: ev.combo.text, unmodifiedText: ev.combo.text });
 							await dbg.sendCommand('Input.dispatchKeyEvent', { type: 'keyDown', ...params });
 							await dbg.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', ...params });
 							for (const [bit, mod] of pressed.reverse()) {
@@ -593,6 +667,6 @@ if (process.env.CLEW_SMOKE) {
 					'window.__clew?.editorPool?.flushAll?.()');
 			} catch { /* window already gone */ }
 			app.exit(0);
-		}, 3000);
+		})();
 	});
 }

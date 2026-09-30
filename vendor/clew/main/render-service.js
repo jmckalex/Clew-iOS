@@ -29,6 +29,7 @@ import { engineExtensionEntries } from './plugins.js';
 import { writeFileAtomic } from './fs-utils.js';
 import { isDependentFragment } from '../shared/fragment-deps.js';
 import { citationHeader } from './citation-header.js';
+import { refusedNames } from '../shared/refused-names.js';
 
 const WORKER_PATH = paths.engineWorker;
 
@@ -81,6 +82,13 @@ export class RenderService {
 	#generation = 0;
 	/** Per-vault rendering options (.clew/vault-settings.json). */
 	#vaultOptions = {};
+	/** May this vault's notes make the engine run code (the engine's `Run
+	 *  note code`)? The DEVICE's answer (vault-trust.js), set by the session
+	 *  before openVault — deliberately not one of #vaultOptions, which are
+	 *  read from a file the vault carries. Closed until someone says. */
+	#noteCode = false;
+	/** What the engine refused while #noteCode is off: path → names. */
+	#refused = new Map();
 	/** vault-relative note paths with an open preview (rendered eagerly on change) */
 	#subscribed = new Map(); // path -> subscriber count
 	/** Injected by the session (which owns both services): the notes that
@@ -92,6 +100,7 @@ export class RenderService {
 	#rebuildTimers = new Map();
 	/** fragment cache: key → html string (canvas cards, live-edit blocks; bounded) */
 	#fragments = new Map();
+	#blockSources = new Map();   // block key → the note it was rendered for
 	#fragmentInflight = new Map();
 	/** Bumped on every file change: a DEPENDENT fragment's key carries it, so
 	 *  a cached render of `![[Note]]` is never served after Note changed. */
@@ -124,6 +133,39 @@ export class RenderService {
 	}
 
 	/**
+	 * Trust changed (the banner, Settings) or a vault is about to open:
+	 * whether the engine may run its notes' code. An open vault is
+	 * reconfigured, which re-renders every open preview under the new answer.
+	 */
+	setNoteCode(allowed) {
+		allowed = allowed === true;
+		if (allowed === this.#noteCode) return;
+		this.#noteCode = allowed;
+		this.#refused.clear();
+		if (this.vaultRoot) this.reconfigure({});
+	}
+
+	/** Every construct refused so far, by name — for a window that reloads. */
+	refusedNames() {
+		return [...new Set([...this.#refused.values()].flat())];
+	}
+
+	// A restricted vault's render: note what the engine refused, by the
+	// names on its `data-jmd-refused` markers (jmarkdown note-code.js), and
+	// tell the window — whose banner offers trust only once there is
+	// something to trust.
+	#noteRefusals(key, html, path = key) {
+		if (this.#noteCode) return;
+		const names = refusedNames(html);
+		if (names.length === 0) {
+			this.#refused.delete(key);
+			return;
+		}
+		this.#refused.set(key, names);
+		this.send(CH.EV_NOTE_CODE_REFUSED, { path, names });
+	}
+
+	/**
 	 * Vault-level render options changed (e.g. the jmarkdown-project toggle):
 	 * rewrite the engine config, discard the standby worker (it imported the
 	 * old config), forget cached renders, and re-render open previews.
@@ -151,6 +193,7 @@ export class RenderService {
 		this.#notes.clear();
 		this.#fragments.clear();
 		this.#fragmentInflight.clear();
+		this.#refused.clear();
 		for (const timer of this.#rebuildTimers.values()) clearTimeout(timer);
 		this.#rebuildTimers.clear();
 		this.#generation++;
@@ -173,6 +216,14 @@ export class RenderService {
 			// rendering notes that carry no metadata header of their own.
 			'Pandoc citations': this.#vaultOptions.pandocCitations === true,
 			'Header style': 'fenced',
+			// Whether a note may make the engine run code: script blocks,
+			// Math.…(…) and calc(…) in prose, math.…(, Mathematica, and the
+			// Load …/Extension … header keys. Off, each is refused by name in
+			// place (jmarkdown note-code.js). The device's decision, never the
+			// vault's (main/vault-trust.js) — the interim guard, which covers
+			// these engine paths only; vault scripts, plugins, dataviewJs and
+			// the Note API come with the full trust design.
+			'Run note code': this.#noteCode,
 			'Template': path.join(engineAssets, 'clew-template.html'),
 			'Extensions': [
 				`wikiembed, wikilink from ${path.join(engineAssets, 'wikilinks.js')}`,
@@ -411,6 +462,9 @@ export class RenderService {
 			try {
 				entry.hasQueries = /^```(query|tasks|kanban)/m.test(fs.readFileSync(abs, 'utf8'));
 			} catch { entry.hasQueries = false; }
+			if (!this.#noteCode) {
+				try { this.#noteRefusals(relPath, fs.readFileSync(entry.htmlFile, 'utf8')); } catch { /* unreadable: nothing to say */ }
+			}
 			this.send(CH.EV_RENDER_DONE, { path: relPath });
 			return entry.htmlFile;
 		}
@@ -461,7 +515,17 @@ export class RenderService {
 		const opts = { ...options, ...(header ? { dependent: true } : {}), document: true };
 		const key = this.#fragmentKey(full, opts);
 		await this.#cachedBuild(full, opts);
+		// Its note, for what the document itself cannot say: a block is served
+		// from __clew_block__/, not the note's folder, so a relative path in it
+		// (a note's own <iframe src="paper.pdf">) resolves against the note.
+		if (options.sourcePath) this.#blockSources.set(key, options.sourcePath);
+		if (this.#blockSources.size > 1000) this.#blockSources.delete(this.#blockSources.keys().next().value);
 		return key;
+	}
+
+	/** The note a block document was rendered for, or null. */
+	blockSourcePath(key) {
+		return this.#blockSources.get(key) ?? null;
 	}
 
 	/** The source note's citation header, or '' (no note, no header, unreadable). */
@@ -536,6 +600,9 @@ export class RenderService {
 		if (result.type !== 'done') throw new Error(result.message);
 
 		const html = fs.readFileSync(htmlFile, 'utf8');
+		// Keyed by the fragment, not its note: a clean block must not erase
+		// what the note itself had refused.
+		this.#noteRefusals(`fragment:${key}`, html, sourcePath ?? `fragment:${key}`);
 		fs.rmSync(mdFile, { force: true });
 		fs.rmSync(htmlFile, { force: true });
 		fs.rmSync(sourceFile, { force: true });

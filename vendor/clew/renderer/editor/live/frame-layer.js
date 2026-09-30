@@ -87,6 +87,9 @@ class FrameLayer {
 		this.offVault = vaultSettingsStore.on('vault-settings-changed', (key) => {
 			if (ENGINE_VAULT_KEYS.has(key)) this.#restaleAll(RESTALE_MS);
 		});
+		// Trust (main/vault-trust.js) is the device's, not a vault setting,
+		// but it reconfigures the engine all the same: `Run note code`.
+		this.offTrust = ipc.on(CH.EV_VAULT_TRUST_CHANGED, () => this.#restaleAll(RESTALE_MS));
 		this.restaleTimer = null;
 		this.allTimer = null;
 		this.#sync();
@@ -107,6 +110,7 @@ class FrameLayer {
 		this.offKv?.();
 		this.offTheme?.();
 		this.offVault?.();
+		this.offTrust?.();
 		clearTimeout(this.restaleTimer);
 		clearTimeout(this.allTimer);
 		clearTimeout(this.citeTimer);

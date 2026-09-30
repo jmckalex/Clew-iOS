@@ -26,6 +26,9 @@ export class KvStore {
 	root = null;
 	/** @type {(channel: string, payload: any) => void} */
 	send = () => {};
+	/** Set by the session: clewdata.json has just been CREATED (it sits in
+	 *  the vault root, in the explorer), so the tree is refreshed at once. */
+	onCreated = () => {};
 	#data = {};
 	#lastWritten = null;
 	#saveTimer = null;
@@ -86,7 +89,10 @@ export class KvStore {
 		if (text === this.#lastWritten) return;
 		this.#lastWritten = text;
 		try {
-			writeFileAtomic(path.join(this.root, KV_FILE), text);
+			const file = path.join(this.root, KV_FILE);
+			const created = !fs.existsSync(file);
+			writeFileAtomic(file, text);
+			if (created) this.onCreated();
 		} catch (err) {
 			console.error('kv store save failed:', err);
 		}

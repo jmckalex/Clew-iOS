@@ -123,7 +123,11 @@ function portalNode(node, nstyle) {
 		} else if (kind === 'image') {
 			el.innerHTML = `<img src="${vaultFileUrl(node.file)}" alt="">`;
 		} else if (kind === 'pdf') {
-			el.innerHTML = `<iframe src="${vaultFileUrl(node.file)}"></iframe>`;
+			// A first-page picture, not a live viewer (a miniature cannot be
+			// read anyway): main renders and caches it
+			// (docs/dev/pdf-unification.md §2). Until then, and if it cannot,
+			// a page-shaped plate with the PDF's name.
+			fillPdfThumb(el, node.file);
 		} else if (kind === 'video') {
 			el.innerHTML = `<video src="${vaultFileUrl(node.file)}"></video>`;
 		} else {
@@ -132,6 +136,24 @@ function portalNode(node, nstyle) {
 		}
 	}
 	return el;
+}
+
+/** A PDF node: its name on a page-shaped plate, then its first page. */
+function fillPdfThumb(el, file) {
+	el.classList.add('is-pdf');
+	const plate = document.createElement('div');
+	plate.className = 'portal-pdf-plate';
+	plate.textContent = file.split('/').pop();
+	el.replaceChildren(plate);
+	ipc.invoke(CH.PDF_THUMBNAIL, { path: file }).then((res) => {
+		if (!el.isConnected) return;
+		if (!res?.ok) { plate.classList.add('is-failed'); plate.dataset.reason = res?.reason ?? ''; return; }
+		const img = document.createElement('img');
+		img.className = 'portal-pdf-thumb';
+		img.alt = '';
+		img.onload = () => el.replaceChildren(img);
+		img.src = `${vaultFileUrl(res.path)}?v=${res.stamp}`;
+	}).catch(() => { plate.classList.add('is-failed'); });
 }
 
 // Cards upgrade to real engine renders, same as everywhere else.

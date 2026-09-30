@@ -90,3 +90,32 @@ button {
 	transition: opacity 300ms;
 }
 .clew-notice.is-leaving { opacity: 0; }
+/* The interim vault-trust banner (trust-banner.js): a notice that stays, and
+   takes clicks in a column that otherwise lets them through. */
+.clew-trust-banner {
+	pointer-events: auto;
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	border-color: var(--clew-accent);
+}
+.clew-trust-banner button {
+	font: inherit;
+	white-space: nowrap;
+	border-radius: 6px;
+	cursor: pointer;
+}
+.clew-trust-button {
+	background: var(--clew-accent);
+	color: var(--clew-text-on-accent, #fff);
+	border: none;
+	padding: 3px 10px;
+}
+.clew-trust-button:hover { background: var(--clew-accent-hover); }
+.clew-trust-dismiss {
+	background: none;
+	border: none;
+	color: var(--clew-text-muted);
+	padding: 0 4px;
+	font-size: 16px;
+}

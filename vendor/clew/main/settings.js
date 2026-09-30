@@ -60,6 +60,10 @@ const DEFAULTS = {
 	// GLOBAL ones; a vault's own live in its vault-settings.json and
 	// shadow these where the names meet.
 	texFragments: [],
+	// The shell panel's font (a family, or a CSS list), placed BEFORE Clew's
+	// monospace face and the Nerd/Powerline faces it falls back to for
+	// prompt symbols (clew-shell-panel.js#gridFontFamily). Empty: those alone.
+	shellFont: '',
 };
 
 class Settings {

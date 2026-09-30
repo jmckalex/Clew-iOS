@@ -161,6 +161,32 @@ export function installOfficeThumbBridge() {
 }
 
 export function installPdfSaveBridge() {
+	// A web PDF's viewer (pdf-page.js in read-only mode): Save a copy to the
+	// vault, and Open in browser. The viewer names the registered HASH; main
+	// finds the URL in this window's own registrations (main/remote-pdfs.js).
+	window.addEventListener('message', async (event) => {
+		const msg = event.data;
+		if (!fromPreviewOrigin(event)) return;
+		if (msg?.source !== 'clew-pdf' || (msg.type !== 'remote-pdf-save-copy' && msg.type !== 'remote-pdf-open')) return;
+		const reply = (result) => event.source?.postMessage(
+			{ source: 'clew-pdf-host', type: `${msg.type}-result`, id: msg.id, ...result }, event.origin);
+		const { notice } = await import('./plugins.js');
+		try {
+			if (msg.type === 'remote-pdf-save-copy') {
+				const { path } = await ipc.invoke(CH.REMOTE_PDF_SAVE_COPY, { key: msg.key });
+				const name = path.split('/').pop();
+				notice(`Saved a copy as ${path} — embed it with ![[${name}]]`, 6000);
+				reply({ ok: true, path });
+			} else {
+				await ipc.invoke(CH.REMOTE_PDF_OPEN, { key: msg.key });
+				reply({ ok: true });
+			}
+		} catch (err) {
+			const message = String(err?.message ?? err).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
+			notice(message, 6000);
+			reply({ ok: false, error: message });
+		}
+	});
 	window.addEventListener('message', async (event) => {
 		const msg = event.data;
 		if (!fromPreviewOrigin(event)) return;

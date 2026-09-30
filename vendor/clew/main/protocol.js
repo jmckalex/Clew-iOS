@@ -35,6 +35,8 @@ import { settings } from './settings.js';
 import { fontsDir, fallbackConfig } from './pdf-fonts.js';
 import { narrowCors } from './preview-cors.js';
 import { readRenderBody } from './caller-token.js';
+import { rewritePdfFrames } from './pdf-frames-rewrite.js';
+import { registerRemotePdf, remotePdfFile } from './remote-pdfs.js';
 
 const MIME = {
 	'.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript',
@@ -180,7 +182,13 @@ export function installPreviewProtocol({ distDir, nodeModulesDir, engineAssetsDi
 	 * for notes and live edit's block documents, so the two cannot drift;
 	 * a block is marked `data-clew-block` on its <html>.
 	 */
-	function wrapPreviewDocument(html, { session, sid, block = false }) {
+	function wrapPreviewDocument(html, { session, sid, block = false, noteDir = '' }) {
+		// A note's own PDF frames go to Clew's viewer (pdf-frames-rewrite.js,
+		// docs/dev/pdf-unification.md §3) — as the document is SERVED, so a
+		// site export (which never comes through here) keeps the author's.
+		// Web PDFs are REGISTERED for this session as they are met (§4): the
+		// viewer is handed their hash, never the URL to fetch.
+		html = rewritePdfFrames(html, { sid, noteDir, registerRemote: (url) => registerRemotePdf(session, url) }).html;
 		const vaultSettings = session.vaults.loadState('vault-settings.json') ?? {};
 		// Vault plugins load as ordinary vault files; global ones from
 		// the __clew_plugin_file__ namespace (they are outside every
@@ -345,7 +353,9 @@ export function installPreviewProtocol({ distDir, nodeModulesDir, engineAssetsDi
 			if (rel === '__clew_fragment__' && request.method === 'POST') {
 				const body = await readRender();
 				if (body.status) return refuse(body);
-				const html = await renderService.renderFragment(body.text);
+				const html = rewritePdfFrames(await renderService.renderFragment(body.text), {
+					sid: pathname.slice(0, slash), registerRemote: (url) => registerRemotePdf(session, url),
+				}).html;
 				return new Response(html, { headers: headers('text/html') });
 			}
 
@@ -374,8 +384,37 @@ export function installPreviewProtocol({ distDir, nodeModulesDir, engineAssetsDi
 				if (html === undefined) {
 					return new Response('Not found', { status: 404, headers: headers('text/plain') });
 				}
-				const injected = wrapPreviewDocument(html, { session, sid: pathname.slice(0, slash), block: true });
+				const blockKey = rel.slice('__clew_block__/'.length);
+				const blockNote = renderService.blockSourcePath(blockKey);
+				const injected = wrapPreviewDocument(html, {
+					session, sid: pathname.slice(0, slash), block: true,
+					noteDir: blockNote ? path.posix.dirname(blockNote).replace(/^\.$/, '') : '',
+				});
 				return new Response(injected, { headers: headers('text/html') });
+			}
+
+			// A web PDF a render registered (remote-pdfs.js; pdf-unification.md
+			// §4): GET only, served from the DEVICE cache, and ONLY for a hash
+			// this session's renders registered — 404 for anything else, so no
+			// page can name a URL for Clew to fetch. `?reload=1` refetches now.
+			// A failure with no copy to fall back on is a 502 whose JSON body
+			// names it; a copy served after a failed refetch says so in
+			// X-Clew-Remote-Error. X-Clew-Remote-Fetched dates the copy.
+			if (rel.startsWith('__clew_remote_pdf__/')) {
+				if (request.method !== 'GET') return new Response('GET only', { status: 405, headers: headers('text/plain') });
+				const key = rel.slice('__clew_remote_pdf__/'.length);
+				if (!/^[0-9a-f]{64}$/.test(key)) return new Response('Not found', { status: 404, headers: headers('text/plain') });
+				let got;
+				try {
+					got = await remotePdfFile(session, key, { reload: url.searchParams.get('reload') === '1' });
+				} catch (err) {
+					return new Response(JSON.stringify({ error: err.code ?? 'network', message: String(err.message ?? err) }),
+						{ status: 502, headers: headers('application/json') });
+				}
+				if (!got) return new Response('Not registered in this session', { status: 404, headers: headers('text/plain') });
+				const extra = { 'Content-Type': 'application/pdf', 'X-Clew-Remote-Fetched': new Date(got.meta.fetchedAt).toISOString() };
+				if (got.error) extra['X-Clew-Remote-Error'] = encodeURIComponent(`${got.error.code ?? 'network'}: ${got.error.message}`);
+				return fileResponse(got.file, extra, request.headers.get('range'));
 			}
 
 			// Rendered note: "<note path>.html" → render on demand, inject client.
@@ -394,7 +433,10 @@ export function installPreviewProtocol({ distDir, nodeModulesDir, engineAssetsDi
 						+ `<body><div id="__clew_err">${String(err.message ?? err)
 							.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</div></body></html>`;
 				}
-				const injected = wrapPreviewDocument(html, { session, sid: pathname.slice(0, slash) });
+				const injected = wrapPreviewDocument(html, {
+					session, sid: pathname.slice(0, slash),
+					noteDir: path.posix.dirname(relPath).replace(/^\.$/, ''),
+				});
 				return new Response(injected, { headers: headers('text/html') });
 			}
 

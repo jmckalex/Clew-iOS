@@ -26,6 +26,7 @@ import { installHotkeys } from './commands/registry.js';
 import { initPlugins } from './plugins.js';
 import { installPdfSaveBridge, installOfficeSaveBridge, installOfficeThumbBridge, installExcalidrawSaveBridge, installExcalidrawLibraryBridge, installExcalidrawResolveBridge } from './pdf-save.js';
 import { officeDock } from './office-dock.js';
+import { installTrustBanner, trustBannerVaultShown } from './trust-banner.js';
 import './components/chrome/clew-app.js';
 import './editor/toolbar/clew-selection-bubble.js';
 import { linkPreview } from './editor/link-preview.js';
@@ -44,6 +45,9 @@ async function showVault(vault, tree, index = null) {
 	// Before the workspace restores: the editors it opens await this (the
 	// grammar depends on the vault's normalSyntax).
 	vaultSettingsStore.load();
+	// Whether this device trusts the vault's notes to run code, and what the
+	// engine has refused so far (trust-banner.js).
+	trustBannerVaultShown();
 	setPreviewSession(vault?.sessionId);
 	// The caller token goes to the one module that uses it, and no further:
 	// nothing that stores or shows the vault holds it.
@@ -125,6 +129,7 @@ installExcalidrawSaveBridge();
 installExcalidrawLibraryBridge();
 installExcalidrawResolveBridge();
 installMenuBridge();
+installTrustBanner();
 officeDock.init();
 
 // ---- dev hook -------------------------------------------------------------

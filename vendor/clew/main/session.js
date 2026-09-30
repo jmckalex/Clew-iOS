@@ -23,6 +23,7 @@ import { RenderService } from './render-service.js';
 import { KvStore, KV_FILE } from './kv-store.js';
 import { SearchService } from './search.js';
 import { shells } from './ipc.js';
+import { trust } from './trust.js';
 
 const byWebContents = new Map(); // webContents.id -> session
 const byId = new Map(); // session id -> session
@@ -67,9 +68,20 @@ export class VaultSession {
 		// only the index knows which notes those are.
 		this.renderService.embeddersOf = (relPath) => this.indexer.embeddersOf(relPath);
 		this.kvStore.send = this.send;
+		this.kvStore.onCreated = () => this.vaults.refreshTree();
+
+		/** Does this device trust the open vault's notes to run code? The
+		 *  interim guard (vault-trust.js): the engine's note-code paths only. */
+		this.trusted = false;
+		/** Web PDFs this session's renders named: sha256(url) → url
+		 *  (remote-pdfs.js). The route serves these and nothing else. */
+		this.remotePdfs = new Map();
 
 		this.vaults.hooks = {
 			onOpen: (root) => {
+				// Before the render service writes its first engine config.
+				this.trusted = trust.isTrusted(root);
+				this.renderService.setNoteCode(this.trusted);
 				this.renderService.openVault(root);
 				this.indexer.openVault(root, this.vaults.excludes);
 				this.kvStore.open(root);

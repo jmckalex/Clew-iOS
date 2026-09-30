@@ -8,27 +8,34 @@ go, the way a typewriter's tab stops work. Write a ```` ```tabbing ````
 fence; every line is a row, and a bar plus one character is a tab command.
 
 ```tabbing
-Name:       |= Street:          |= Phone
+Alice $\qquad$ |= 12 Oak Street $\qquad$ |= |kill
+Name:       |> Street:          |> Phone
 Alice       |> 12 Oak Street    |> 555 1234
 Bob         |> 7 Elm Road       |> 555 9876
 ```
 
 ````markdown
 ```tabbing
-Name:       |= Street:          |= Phone
+Alice $\qquad$ |= 12 Oak Street $\qquad$ |= |kill
+Name:       |> Street:          |> Phone
 Alice       |> 12 Oak Street    |> 555 1234
 Bob         |> 7 Elm Road       |> 555 9876
 ```
 ````
 
-`|=` sets a stop where it stands — after the text before it, measured as
-it is drawn — and `|>` moves to the next one. The spaces in the source are
-only there to keep it readable; a run of them counts as one.
+`|=` sets a stop where it stands — right after the text before it,
+measured as it is drawn — and `|>` moves to the next one. So the first row
+here is a **ruler**: it ends in `|kill`, which sets its stops without
+showing it, and it holds each column's WIDEST entry, so every row fits
+(the `$\qquad$` adds a gutter, as `\qquad` does in LaTeX). Stops set from
+the short header words instead would make the longer entries run under the
+next column. The spaces in the source are only there to keep it readable;
+a run of them counts as one.
 
 ## A ruler row
 
-A row ending in `|kill` sets its stops and is not shown — a ruler, so the
-columns can be wider than anything in the first real row:
+A ruler is any row ending in `|kill` — it can hold placeholder text, or
+columns wider than anything in the table:
 
 ```tabbing
 Wednesday:   |= 10:00–11:00   |= Lecture hall |kill

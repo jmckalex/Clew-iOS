@@ -42,11 +42,56 @@ export const IGNORED_DIRS = new Set(['.obsidian', '.clew', '.git', 'node_modules
 //
 // So: a budget, shared by every window because the descriptors are, and
 // well under the ceiling — the rest of the app needs descriptors too.
-export const WATCH_BUDGET = 8000;
+//
+// CLEW_WATCH_BUDGET=<n> is for scenarios only: a vault whose budget is SPENT
+// — the watcher blind to anything new — without generating 10,000 files. It
+// sets both numbers, so nothing is watched past the scan either.
+const FORCED_BUDGET = Number(process.env.CLEW_WATCH_BUDGET) || 0;
+export const WATCH_BUDGET = FORCED_BUDGET || 8000;
 // What the watcher may grow to AFTER the initial scan, for the files a
 // session actually creates. The budget bounds the walk; this bounds the
 // drift, and both stay clear of the ~10,240 descriptors where fork() dies.
-export const WATCH_CEILING = 9000;
+export const WATCH_CEILING = FORCED_BUDGET || 9000;
+
+// How much of the budget a window's SCAN may take. The budget is shared by
+// every window, and first-come used to mean all-taken: a second window
+// opened after a capped one got nothing for its scan — nothing of its vault
+// watched — and its first event then spent the ceiling's whole headroom
+// (measured 2026-09-30, smoke/watch-repro.mjs). So a scan takes all but
+// SCAN_KEEP of what is left, and never more than half once that is less:
+// the first window of a fresh process can still hold 6,000 (a 5,000-note
+// vault fits), and every later window gets a share, halving as they come,
+// never nothing.
+export const SCAN_KEEP = 2000;
+export function scanShare(remaining) {
+	const left = Math.max(0, Math.floor(remaining));
+	// A forced budget (CLEW_WATCH_BUDGET) is a scenario's BLIND watcher: the
+	// scan takes it all, so nothing is left for a new file.
+	if (FORCED_BUDGET) return left;
+	return Math.max(Math.floor(left / 2), left - SCAN_KEEP);
+}
+
+/**
+ * Every path the vault walk saw: its files and every directory above them.
+ * After the scan, the watcher answers these WITHOUT charging the budget —
+ * a path the scan knew and did not buy stays unwatched, rather than being
+ * bought the first time chokidar re-reads its folder (it asks about every
+ * entry on every event) and reported as a spurious `add`. Only paths that
+ * are genuinely NEW draw on the headroom above the budget.
+ * @param {string[]} files vault-relative, '/'-separated
+ */
+export function knownPaths(files) {
+	const known = new Set();
+	for (const rel of files) {
+		known.add(rel);
+		for (let i = rel.lastIndexOf('/'); i > 0; i = rel.lastIndexOf('/', i - 1)) {
+			const dir = rel.slice(0, i);
+			if (known.has(dir)) break;
+			known.add(dir);
+		}
+	}
+	return known;
+}
 
 /**
  * WHAT to spend the budget on, in what order — the owner's policy,
@@ -194,10 +239,13 @@ export function watchPlan(files, take = () => true) {
  * @param {() => boolean} [options.settled] has the initial scan finished?
  *   After it has, the plan is spent and new paths are judged on the budget
  *   alone — a file the user creates must be watched, plan or no plan.
+ * @param {Set<string>} [options.known] every path the scan saw (knownPaths):
+ *   after it, those it did not admit are refused free of charge, so only
+ *   NEW paths spend the headroom.
  */
 export function watchFilter({
 	root, isExcluded = null, duplicates = new Set(), take = () => true,
-	admit = null, settled = () => false,
+	admit = null, settled = () => false, known = null,
 }) {
 	const excluded = isExcluded ?? ((rel) => rel.split('/').some((seg) => seg.startsWith('.') || IGNORED_DIRS.has(seg)));
 	// Everything the plan bought is already charged and already ours.
@@ -226,6 +274,9 @@ export function watchFilter({
 		// the budget here as well would let chokidar's own walk order spend
 		// what the plan reserved for notes deeper down.
 		if (admit && !settled()) return true;
+		// After the scan: what the scan already knew and did not buy is not
+		// bought now (knownPaths). No charge, and no `add` for an old file.
+		if (known?.has(rel)) return true;
 		if (!take()) {
 			state.skipped += 1;
 			state.firstSkipped ??= rel;

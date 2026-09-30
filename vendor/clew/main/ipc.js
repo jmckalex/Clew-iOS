@@ -18,6 +18,7 @@ import * as officeSlot from './office-slot.js';
 import * as zetaAssets from './zeta-assets.js';
 import * as officeConvert from './office-convert.js';
 import * as officeThumbs from './office-thumbs.js';
+import * as pdfThumbs from './pdf-thumbs.js';
 import { CH } from '../shared/channels.js';
 import { settings } from './settings.js';
 import { appMenu } from './menu.js';
@@ -32,6 +33,8 @@ import { listSnapshots, readSnapshot } from './history.js';
 import { listPlugins } from './plugins.js';
 import { ShellSessions } from './shell-core.js';
 import { paths } from './paths.js';
+import { trust } from './trust.js';
+import { registeredRemoteUrl, saveRemoteCopy } from './remote-pdfs.js';
 import { planOpen, pathFromFileUrl } from './open-file.js';
 import fs from 'node:fs';
 import nodePath from 'node:path';
@@ -196,6 +199,8 @@ export function registerIpc() {
 	handle(CH.OFFICE_CONVERT_PDF, (s, { path }) => officeConvert.convertToPdf(s.vaults, path));
 	handle(CH.OFFICE_OPEN_EXTERNAL, (s, { path }) => officeConvert.openExternally(s.vaults, path));
 	handle(CH.OFFICE_THUMBNAIL, (s, { path }) => officeThumbs.thumbnail(s, path));
+	// A PDF's first page as a picture (portals; docs/dev/pdf-unification.md §2).
+	handle(CH.PDF_THUMBNAIL, (s, { path }) => pdfThumbs.thumbnail(s, path));
 	handle(CH.WINDOW_CLOSE_RESOLVED, (s, { proceed }) => s.resolveClose?.(proceed));
 	// Save / Discard / Cancel, as a native sheet. CLEW_SMOKE_CONFIRM answers
 	// it without UI so the harness can drive every branch of a close flow.
@@ -252,6 +257,35 @@ export function registerIpc() {
 
 	// Vault-level settings; render-affecting keys reconfigure the engine.
 	handle(CH.VAULT_SETTINGS_GET, (s) => s.vaults.loadState('vault-settings.json') ?? {});
+	// Trust is the DEVICE's (vault-trust.js), never a vault setting: nothing
+	// the vault carries reaches it, and it is set only from this window's own
+	// chrome — the banner and Settings → This vault.
+	handle(CH.VAULT_TRUST_GET, (s) => ({
+		trusted: s.trusted === true,
+		refused: s.trusted ? [] : s.renderService.refusedNames(),
+	}));
+	handle(CH.VAULT_TRUST_SET, (s, { trusted }) => {
+		if (!s.vaults.root) return { trusted: false };
+		if (trusted === true) trust.trust(s.vaults.root);
+		else trust.revoke(s.vaults.root);
+		s.trusted = trusted === true;
+		// Rewrites the engine config and re-renders every open preview.
+		s.renderService.setNoteCode(s.trusted);
+		s.send(CH.EV_VAULT_TRUST_CHANGED, { trusted: s.trusted });
+		return { trusted: s.trusted };
+	});
+	// Web PDFs (remote-pdfs.js): the viewer names a HASH; the URL is looked
+	// up in this window's own registrations, never taken from the message.
+	handle(CH.REMOTE_PDF_SAVE_COPY, (s, { key }) =>
+		({ path: saveRemoteCopy(s, key, settings.get('attachmentFolder') || 'Attachments') }));
+	handle(CH.REMOTE_PDF_OPEN, (s, { key }) => {
+		const url = registeredRemoteUrl(s, key);
+		if (!url || !/^https?:\/\//i.test(url)) throw new Error('Not a web PDF open in this window');
+		// A scenario must never launch a browser: it reads this line instead.
+		if (process.env.CLEW_SMOKE) console.log(`smoke-open-external: ${url}`);
+		else shell.openExternal(url);
+		return { url };
+	});
 	handle(CH.VAULT_SETTINGS_SET, (s, { key, value }) => {
 		const current = s.vaults.loadState('vault-settings.json') ?? {};
 		current[key] = value;
@@ -323,8 +357,13 @@ export function registerIpc() {
 	// `outFile` (smoke tests) skips the save dialog, like EXPORT_SITE's outDir.
 	// sessionId: the reading-view PDF prints this session's own
 	// clew-preview:// document, and the protocol resolves it by sid.
-	handle(CH.EXPORT_NOTE, (s, { path, format, outFile }) =>
-		exportNote({ win: s.win, vaults: s.vaults, sessionId: s.id, callerToken: s.callerToken, relPath: path, format, outFile }));
+	// An export into the vault shows in the explorer at once (refreshIfInside:
+	// the watcher may never report it — a vault whose budget is spent).
+	handle(CH.EXPORT_NOTE, async (s, { path, format, outFile }) => {
+		const result = await exportNote({ win: s.win, vaults: s.vaults, sessionId: s.id, callerToken: s.callerToken, relPath: path, format, outFile, trusted: s.trusted });
+		if (result?.output) s.vaults.refreshIfInside(result.output);
+		return result;
+	});
 
 	// The whole vault as a static website. `outDir` (smoke tests) skips the
 	// dialog; otherwise the user picks a folder and the site lands in a
@@ -349,6 +388,7 @@ export function registerIpc() {
 			outDir: target,
 			vaultOptions,
 		});
+		s.vaults.refreshIfInside(target);
 		return { outDir: target, ...result };
 	});
 
@@ -366,6 +406,7 @@ export function registerIpc() {
 			target = chosen;
 		}
 		writeFileAtomic(target, Buffer.from(data, 'base64'));
+		s.vaults.refreshIfInside(target);
 		return target;
 	});
 
