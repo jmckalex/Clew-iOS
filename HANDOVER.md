@@ -26,6 +26,18 @@
   migration, trust/revoke, and trust surviving an upgrade install. At the
   sync: the shim maps VAULT_TRUST_GET/SET + events, engine-config sets
   `Run note code` from `trusted`, refusals read from `[data-jmd-refused]`.
+  Shim tasks at that sync (shapes confirmed by Clew-app): VAULT_TRUST_GET
+  → `{ trusted, refused }` — `trusted` from native `vaultTrustGet`,
+  `refused` = the names refused so far this vault open, kept by the shim's
+  render service (`#refused`, path → names, cleared on reconfigure and
+  close); VAULT_TRUST_SET takes only `{ trusted }` (current vault) → native
+  `vaultTrustSet` → emit EV_VAULT_TRUST_CHANGED `{ trusted }` and
+  reconfigure (`Run note code`); after each render read
+  `refusedNames(html)` from shared `src/shared/refused-names.js` (Clew-app
+  8d5f36b) and, while untrusted and non-empty, emit EV_NOTE_CODE_REFUSED
+  `{ path, names }`. The banner (`renderer/trust-banner.js`), the Settings
+  `#trustRow`, frame-layer's restale and preview.css's `.jmd-refused` are
+  shared and arrive with the vendor.
   **The next sync's range starts at Clew-app `cd8c311`** (sync #2 took
   84f975e..cd8c311), plus these two branches.
 - **Measured**: WebKit honours a CSP on WKURLSchemeHandler responses, the
