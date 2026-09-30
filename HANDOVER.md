@@ -20,7 +20,8 @@
   worktree):** Clew-app's tip `0c077a9` (cd8c311..0c077a9 plus 0.11.2;
   PDF phase 3 not yet landed) was vendored over `trust-native-p1`. Every
   guarded build patch still matches. Two iOS-side fixes are needed at
-  the sync:
+  the sync, both APPROVED by Clew-boss as part of the sync plan (not a
+  separate push):
   1. 06f5e70's shell panel imports `@xterm/addon-unicode11` and sets
      `term.unicode.activeVersion`. Add the package to build.js's xterm
      alias (→ `src/shim/xterm-stub.js`). In the stub, give `Terminal` a
