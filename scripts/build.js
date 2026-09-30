@@ -282,7 +282,7 @@ export async function buildAppBundle({ minify = true } = {}) {
 		// The shell panel's terminal emulator is aliased to an inert stub: a
 		// PTY cannot exist on iOS, and clew-shell-panel.js imports both
 		// packages at module scope (see src/shim/xterm-stub.js).
-		alias: { ...builtinAlias, '@xterm/xterm': xtermStub, '@xterm/addon-fit': xtermStub },
+		alias: { ...builtinAlias, '@xterm/xterm': xtermStub, '@xterm/addon-fit': xtermStub, '@xterm/addon-unicode11': xtermStub },
 		inject: bufferInject,
 		plugins: [rendererPatches],
 		minify,

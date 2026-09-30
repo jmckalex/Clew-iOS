@@ -70,7 +70,7 @@ test('tabbing: the ```tabbing fence and @begin(tabbing) both render through the 
 	// Five real fences (a sixth sits inside a ````markdown example) and one
 	// @begin(tabbing) — the Environments line names the same file.
 	assert.equal(blocks.length, 6, 'every fence and the environment');
-	assert.match(html, /<div data-source-line="95" class="clew-tabbing"/, 'the @begin(tabbing) environment');
+	assert.match(html, /<div data-source-line="102" class="clew-tabbing"/, 'the @begin(tabbing) environment');
 	assert.ok(!html.includes('@begin(tabbing)\n'), 'no environment left raw');
 });
 

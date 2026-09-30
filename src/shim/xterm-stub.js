@@ -11,6 +11,7 @@ export class Terminal {
 	options = {};
 	cols = 80;
 	rows = 24;
+	unicode = { activeVersion: '6', versions: ['6'] };
 	constructor(options = {}) { this.options = { ...options }; }
 	open() {}
 	loadAddon() {}
@@ -26,5 +27,10 @@ export class Terminal {
 export class FitAddon {
 	activate() {}
 	fit() {}
+	dispose() {}
+}
+
+export class Unicode11Addon {
+	activate() {}
 	dispose() {}
 }
