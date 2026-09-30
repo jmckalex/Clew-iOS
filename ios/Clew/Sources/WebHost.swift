@@ -9,6 +9,8 @@ final class WebHost: NSObject, ObservableObject {
 	let vaults = VaultStore()
 	private(set) var webView: WKWebView!
 	private var schemeHandler: SchemeHandler!
+	/// Pins the web view's scroll view at the top (see init).
+	private var offsetPin: NSKeyValueObservation?
 	/// The window a JavaScript alert() is shown in: its own, above everything
 	/// (see runJavaScriptAlertPanelWithMessage), alive until OK.
 	fileprivate var alertWindow: UIWindow?
@@ -65,6 +67,14 @@ final class WebHost: NSObject, ObservableObject {
 		#endif
 		webView.scrollView.isScrollEnabled = false // the app manages its own scrolling
 		webView.scrollView.contentInsetAdjustmentBehavior = .never
+		// The app page never scrolls as a whole — every scroller is an element
+		// inside it — but isScrollEnabled only stops the USER: WebKit still
+		// moves the scroll view itself to reveal a focused field above a
+		// keyboard, which slid the whole fixed layout up (toolbars under the
+		// status bar). Whatever moves it, it goes straight back.
+		offsetPin = webView.scrollView.observe(\.contentOffset, options: [.new]) { scrollView, _ in
+			if scrollView.contentOffset != .zero { scrollView.contentOffset = .zero }
+		}
 		webView.uiDelegate = self
 		webView.navigationDelegate = self
 		webView.isOpaque = false

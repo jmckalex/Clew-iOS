@@ -14,7 +14,20 @@ struct ClewApp: App {
 	var body: some Scene {
 		WindowGroup {
 			WebContainerView(host: host)
-				.ignoresSafeArea()
+				// Under the status bar and the home indicator (the page pads
+				// itself with env(safe-area-inset-*)), but NOT under the
+				// keyboard: when the on-screen keyboard — or iPadOS's minimised
+				// keyboard bar, shown instead of it while a hardware keyboard
+				// is attached — comes up, the web view shrinks above it and the
+				// app re-lays out. Ignoring every safe area (as before) left the
+				// web view under the keyboard, and WebKit scrolled the whole
+				// fixed page up to make room: the toolbars went under the status
+				// bar, out of reach.
+				.ignoresSafeArea(.container)
+				// What shows beside the minimised keyboard bar, in the space the
+				// web view gives up: the web view's own background colour, not
+				// the window's white.
+				.background(Color(red: 0.08, green: 0.09, blue: 0.11).ignoresSafeArea())
 				.statusBarHidden(false)
 		}
 		.onChange(of: scenePhase) { _, phase in
