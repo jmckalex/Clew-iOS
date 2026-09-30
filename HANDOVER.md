@@ -3,7 +3,7 @@
 **RESUME HERE (2026-09-30, evening; paused cleanly for a machine reboot):**
 - The tree is clean. Nothing is in progress, nothing is stashed, and the
   simulator is shut down.
-- `main` = `171ed22` (local; origin/main = `09ce3f2`, sync #2, live). Only
+- `main` = local HEAD (origin/main = `09ce3f2`, sync #2, live). Only
   `[ci skip]` HANDOVER commits sit ahead of origin.
 - Three branches are waiting. None is pushed, and ALL go in the NEXT sync:
   - `fix-keyboard-layout` (`2eeb902`, off main)
@@ -16,6 +16,21 @@
   arrives via Clew-boss. Never push on your own. Clew-boss may approve
   syncs and iOS work. Design questions go to the owner through Clew-boss.
   When a task finishes, report it to Clew-boss (SendMessage).
+- **Dry run (2026-09-30, after the reboot; read-only, done in a throwaway
+  worktree):** Clew-app's tip `0c077a9` (cd8c311..0c077a9 plus 0.11.2;
+  PDF phase 3 not yet landed) was vendored over `trust-native-p1`. Every
+  guarded build patch still matches. Two iOS-side fixes are needed at
+  the sync:
+  1. 06f5e70's shell panel imports `@xterm/addon-unicode11` and sets
+     `term.unicode.activeVersion`. Add the package to build.js's xterm
+     alias (→ `src/shim/xterm-stub.js`). In the stub, give `Terminal` a
+     `unicode = { activeVersion: '6', versions: ['6'] }` and export an
+     inert `Unicode11Addon { activate() {} dispose() {} }`.
+  2. e4f416d moved `@begin(tabbing)` in `seed-vault/Guide/Tabbing.md`
+     from line 95 to 102. `tests/engine-worker.test.js:73` hard-codes
+     the line.
+  With both applied: build OK and 681/681. The same check should be
+  repeated when phase 3 lands.
 - If `simctl` hangs, CoreSimulatorService is wedged. A reboot or
   `killall -9 com.apple.CoreSimulator.CoreSimulatorService` clears it.
 
