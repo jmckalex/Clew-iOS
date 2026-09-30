@@ -345,11 +345,17 @@ LANDED upstream and ported — the boot path's greeting and settings load
 (45dffd7, retired canvas-view patches 2–4), floaters on the visual viewport
 (43cc4e7), the engine reached as `#jmarkdown/*` (89a6bb0, retired the
 `onResolve` re-root and the test hook), `data-overflows` on the preview pane
-(f47080b). Next sync: the load-keyed preview watchdog (f1816ae) retires the
-`client.js` pageshow patch and the `clew-preview-view` rebuild. Still open:
-the engine registry hook (upstream: in the jmarkdown master), `pdf-core.js`
-viewer handles with the Pencil convention, canvas-embed scene PDFs,
-long-press as ⌥ (deferred). Withdrawn: the `Origin`-parity item (the list
+(f47080b). Then the sync to `cd8c311` (branch `synctab-*`, not yet pushed) took the
+load-keyed preview watchdog (f1816ae; retired the pageshow patch, the
+`clew-preview-view` rebuild and `__iosSubscribed`), the `pdf-core.js`
+viewer handles with the Pencil convention (12b1734, `pdf-handles.js` and
+`pdf-pen.js`; retired the handle patch and `src/preview/pdf-touch.js`) and
+canvas-embed scene PDFs through pdf-page.html (71180c6; retired
+`src/preview/pdf-scene-embeds.js`). Still open: the engine registry hook
+(upstream: in the jmarkdown master), long-press as ⌥ (deferred). NEW from
+that sync: WebKit sizes a kanban board from its cards, not the columns'
+190 px basis — `.kanban-col { min-width: 190px }` measured to fix it; the
+map's distance tool has no touch route (shift-click only). Withdrawn: the `Origin`-parity item (the list
 had it wrong). The References-panel item resolved differently: the iOS
 shim was simply missing `RENDER_HTML` (added in this sync).
 

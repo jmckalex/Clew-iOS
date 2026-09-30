@@ -1,4 +1,16 @@
-# Handover — 2026-09-30 (the 0.11.1 sync is pushed; its cloud build succeeded)
+# Handover — 2026-09-30 (sync #2 to Clew-app cd8c311 verified, NOT pushed; sync #1 is live)
+
+**SYNC #2 (2026-09-30, overnight) — waits on the owner's push decision:**
+the chain `synctab-p1-vendor` (f14d51f) → `synctab-p2-verify` takes the
+vendor to Clew-app `cd8c311` (the watchdog, Pencil/handles and scene PDFs
+upstream — retiring 4 patches and two iOS preview modules — kanban
+widening, map measuring, LaTeX's tabbing). Every check passed in the
+simulator; `UPSTREAM-CD8C311-PLAN.md` has the results and two findings
+(WebKit's kanban width; no touch route to the map's distance tool).
+`main` is NOT fast-forwarded: push = the owner's morning decision (for
+sync #1 it was "push if all checks pass"; not for this one). 10 guarded
+patches on that branch. When the push is decided: fast-forward `main` to
+the p2 tip, push, watch the build.
 
 **NOW (2026-09-30, overnight):** the upstream 0.11.1 sync ran p1 → p4 on
 `sync111-p1-vendor … sync111-p4-verify` — vendor at Clew-app `84f975e`
