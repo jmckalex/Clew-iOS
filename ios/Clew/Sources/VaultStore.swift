@@ -82,6 +82,35 @@ final class VaultStore {
 		return url.path
 	}
 
+	// MARK: - Vault trust (VaultTrust.swift — the interim guard)
+
+	/// The device's trust store, in Application Support. Created on first use
+	/// (WebHost touches it on the main thread at launch, so the I/O queue and
+	/// main never race to create it); a device's first launch with it
+	/// migrates every vault the device already knows as trusted.
+	lazy var trust: VaultTrustStore = {
+		let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+		let store = VaultTrustStore(file: support.appendingPathComponent("vault-trust.json"), documentsURL: documentsURL)
+		if !store.hasMigrated { store.migrate(knownVaults()) }
+		return store
+	}()
+
+	/// Every vault this device already knows: those it opened in Documents
+	/// (Clew leaves a `.clew/` in a vault it opens) and every external vault
+	/// it holds a bookmark for — an external vault cannot be reopened
+	/// without one, so this is the whole recents list that can still open.
+	private func knownVaults() -> [URL] {
+		var known = bookmarks.keys.map { URL(fileURLWithPath: $0, isDirectory: true) }
+		let fm = FileManager.default
+		if let names = try? fm.contentsOfDirectory(atPath: documentsURL.path) {
+			for name in names where !name.hasPrefix(".") {
+				let url = documentsURL.appendingPathComponent(name, isDirectory: true)
+				if fm.fileExists(atPath: url.appendingPathComponent(".clew").path) { known.append(url) }
+			}
+		}
+		return known
+	}
+
 	// MARK: - External-vault bookmarks
 
 	private var bookmarks: [String: Data] {
@@ -156,6 +185,9 @@ final class VaultStore {
 			let seed = Bundle.main.url(forResource: "SeedVault", withExtension: nil) {
 			try? fm.copyItem(at: seed, to: demo)
 		}
+		// Clew's own vault: trusted by construction — unless its owner has
+		// since said otherwise (a recorded entry is left alone).
+		if trust.entries()[trust.identity(demo)] == nil { trust.trust(demo, source: "demo") }
 		return demo.path
 	}
 
@@ -172,6 +204,8 @@ final class VaultStore {
 			counter += 1
 		}
 		try FileManager.default.createDirectory(at: candidate, withIntermediateDirectories: true)
+		// Made in-app, so trusted by construction.
+		trust.trust(candidate, source: "created")
 		return candidate.path
 	}
 
@@ -205,6 +239,9 @@ final class VaultStore {
 			"files": files,
 		]
 		if let global = globalPluginsSnapshot() { result["globalPlugins"] = global }
+		// Decided here, before the first engine config: a vault new to this
+		// device runs no note code until its owner trusts it.
+		result["trusted"] = trust.isTrusted(root)
 		return result
 	}
 

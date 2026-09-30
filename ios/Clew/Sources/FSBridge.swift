@@ -271,6 +271,20 @@ final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 			let folder = params["folder"] as? String ?? "Attachments"
 			performIO(reply) { try RemotePdfStore.shared.saveCopy(hash, folder: folder, into: self.vaults) }
 
+		// ---- vault trust (VaultTrust.swift; the interim guard) -----------
+		// The CURRENT vault's standing, for Settings → This vault and the
+		// "Trust this vault" banner. Only the app page reaches these.
+		case "vaultTrustGet":
+			guard let path = vaults.currentVaultPath else { return reply(["open": false, "trusted": false], nil) }
+			let root = URL(fileURLWithPath: path, isDirectory: true)
+			reply(["open": true, "trusted": vaults.trust.isTrusted(root), "identity": vaults.trust.identity(root)], nil)
+
+		case "vaultTrustSet":
+			guard let trusted = params["trusted"] as? Bool, let path = vaults.currentVaultPath else { throw ClewError.badPayload }
+			let root = URL(fileURLWithPath: path, isDirectory: true)
+			if trusted { vaults.trust.trust(root) } else { vaults.trust.revoke(root) }
+			reply(["open": true, "trusted": vaults.trust.isTrusted(root), "identity": vaults.trust.identity(root)], nil)
+
 		case "pdfLeakCount":
 			// PDFs that reached a frame directly and were cancelled
 			// (WebHost's navigation-response check) — the sweep asserts zero.

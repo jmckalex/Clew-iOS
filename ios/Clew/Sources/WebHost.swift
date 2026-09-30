@@ -18,6 +18,9 @@ final class WebHost: NSObject, ObservableObject {
 
 		let config = WKWebViewConfiguration()
 		schemeHandler = SchemeHandler(vaults: vaults)
+		// Create the trust store here, on main, before any I/O-queue open
+		// can race to (and migrate the device's known vaults on first use).
+		_ = vaults.trust
 		config.setURLSchemeHandler(schemeHandler, forURLScheme: "clew-app")
 		config.setURLSchemeHandler(schemeHandler, forURLScheme: "clew-preview")
 
