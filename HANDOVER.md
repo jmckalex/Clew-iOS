@@ -1,37 +1,25 @@
-# Handover — 2026-09-30 (sync #3 executed through p4, waiting for the owner's push decision)
+# Handover — 2026-09-30 (0.12.0: sync #3 + its follow-up, released to TestFlight)
 
-**RESUME HERE (2026-09-30, night): sync #3 is DONE through p4 and NOT
-PUSHED.** The record is `UPSTREAM-18C5E45-PLAN.md` (pin, range, results,
-findings, and the owner's iPad checklist).
-- The chain: `sync3-p1-vendor` → `sync3-p2-build` → `sync3-p3-contract`
-  → `sync3-p4-verify` (the tip; it carries this HANDOVER).
-- It covers Clew-app `cd8c311..18c5e45` (vendored from `git archive
-  18c5e45`, byte-verified), plus `fix-keyboard-layout`, `pdf-native-p1`,
-  `trust-native-p1` and the dry-run fixes. Those three branches are
-  merged and need nothing more.
-- `main` = the last `[ci skip]` HANDOVER commit before the sync. Keep it
-  that way until the push decision, so it can fast-forward to the chain's
-  tip. origin/main = `09ce3f2`.
-- **To push, on the owner's decision relayed by Clew-boss:**
-  `git switch main && git merge --ff-only sync3-p4-verify && git push`,
-  then watch the Xcode Cloud run. The tip's message must NOT carry the
-  skip marker, or the build is skipped. The chain's commits all carry it,
-  so push the tip with an empty commit that doesn't, as 7a34dd3 did.
-- Pushes are TestFlight releases and need the OWNER's decision, which
-  arrives via Clew-boss. Never push on your own. Clew-boss may approve
-  syncs and iOS work. Design questions go to the owner through Clew-boss.
-  When a task finishes, report it to Clew-boss (SendMessage).
-- p4 found and fixed a BOOT break: the vendored `fs-utils.js` reads
-  `process.env` at load. The fix is a `define` in `buildAppBundle`, plus a
-  build tripwire for any unguarded `process` in the app bundle.
-- Upstream candidates are in the record's Findings: the four-column
-  kanban at 826 px (measured fix: `box-sizing: border-box`), the
-  fs-utils `process` guard, and the iPad wording for `too-large` and
-  `insecure-url`.
+**RESUME HERE (2026-09-30, late night): the 0.12.0 release.** Two
+records cover it: `UPSTREAM-18C5E45-PLAN.md` (sync #3) and
+`UPSTREAM-0.12.0-PLAN.md` (the follow-up to Clew-app 9268aa3, 0.12.0).
+- Chain: `sync3-p1…p4` → `sync012-p1-vendor` → `sync012-p2-build` →
+  `sync012-p3-version` → `sync012-p4-verify`. Then `main` is
+  fast-forwarded to it, with an empty release commit WITHOUT the skip
+  marker on top, so Xcode Cloud builds.
+- Pushed overnight on the owner's authorisation, relayed by Clew-boss
+  ("Please proceed with everything reasonable through completion": push
+  only if p4 was fully green, which it was). The Xcode Cloud result is in
+  memory and in Clew-boss's ledger.
+- The iPad's version is 0.12.0 and follows each Clew-app release from now
+  on (the owner's decision). Build numbers stay Xcode Cloud's.
+- Push rule (the owner, 2026-09-30): push whenever Clew-boss says to.
+  Never on my own initiative. Report finished tasks to Clew-boss.
+- Next: the owner's iPad checklist (both records); the code review
+  that was deferred (a later sync); and optionally a SchemeHandler twin
+  of desktop's document redirect (29fa2ae).
 - If `simctl` hangs, CoreSimulatorService is wedged. A reboot or
   `killall -9 com.apple.CoreSimulator.CoreSimulatorService` clears it.
-- History below this block (the three branches' notes, sync #2) is what
-  led up to the sync. The dry runs' two fixes are in the record's table.
 
 **LATEST (2026-09-30, afternoon):**
 - **Sync #2 is LIVE**: origin/main = `09ce3f2` (vendor at Clew-app
