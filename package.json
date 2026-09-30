@@ -14,7 +14,8 @@
 		"test": "node --test",
 		"sync-upstream": "node scripts/sync-upstream.js",
 		"sync-mptikz": "node scripts/stage-mptikz.js",
-		"dev": "node scripts/dev-server.js"
+		"dev": "node scripts/dev-server.js",
+		"test:swift": "sh scripts/test-swift.sh"
 	},
 	"devDependencies": {
 		"esbuild": "^0.28.2"
