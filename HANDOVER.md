@@ -38,6 +38,15 @@
   provider-relative path for Files vaults); "already known" = the union of
   `settings.recentVaults`, the `vaultBookmarks` bookmarks and the vaults
   in Documents. Exact shapes come from Clew-app.
+- **Next sync's range so far** (Clew-app, local): `b9f21c6` (PDF phase 2 —
+  the shared rewrite of a note's own `<iframe|embed|object>` vault PDF to
+  pdf-page.html, #page and sizes kept: what `pdf-native-p1`'s leak check
+  depends on) and `88543bc` (vendored jmarkdown `edcc28a`: the `Run note
+  code` config key, default true; off → every note-code path refuses BY
+  NAME as `[data-jmd-refused="NAME"]`, and a note's header cannot turn it
+  back on; detect refusals for the banner the same way). Clew-boss calls
+  the sync once PDF phase 3 (web PDFs + the shim's registration) lands, so
+  `pdf-native-p1` merges with its shared half.
 
 **NOW (2026-09-30, overnight):** the upstream 0.11.1 sync ran p1 → p4 on
 `sync111-p1-vendor … sync111-p4-verify` — vendor at Clew-app `84f975e`
