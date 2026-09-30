@@ -176,7 +176,9 @@ function statusFor(host) {
 
 function mount(embed) {
 	ensureStyles();
-	const src = embed.getAttribute('src');
+	// data-src: the preview's placeholder loads nothing (wikilinks.js); src:
+	// an engine from before that.
+	const src = embed.dataset.src ?? embed.getAttribute('src');
 	const host = document.createElement('div');
 	host.className = 'clew-pdf-inline';
 	// The viewer is expensive to build and holds document state (including

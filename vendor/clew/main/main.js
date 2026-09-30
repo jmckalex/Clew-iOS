@@ -72,11 +72,15 @@ export function createWindow(vaultPath = null) {
 			contextIsolation: true,
 			nodeIntegration: false,
 			backgroundThrottling: !smokeHidden,
-			// Chromium's built-in PDF viewer. Clew's own PDF surfaces are all
-			// EmbedPDF now, canvas scenes included; what still reaches the
-			// plugin is a raw PDF iframe — a portal's miniature, and any
-			// `<iframe src="x.pdf">` a note writes itself — so it stays.
-			plugins: true,
+			// No `plugins` (docs/dev/pdf-unification.md §6): every PDF surface
+			// is EmbedPDF — tabs, embeds, canvas nodes and scenes, portals (a
+			// first-page picture), a note's own frames, vault or web. Dropping
+			// the flag does NOT retire Chromium's own viewer (Electron 43,
+			// measured 2026-09-30), so a frame that navigates to a vault PDF
+			// anyway is sent to EmbedPDF by protocol.js, and a web PDF Clew
+			// cannot recognise still opens in Chromium's viewer. No
+			// will-download guard either: EmbedPDF's own Download is a blob
+			// `<a download="x.pdf">`, and a guard cancelled it (measured).
 			webviewTag: true, // canvas web-page nodes
 		},
 	});

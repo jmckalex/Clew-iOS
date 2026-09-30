@@ -45,8 +45,11 @@ export const IGNORED_DIRS = new Set(['.obsidian', '.clew', '.git', 'node_modules
 //
 // CLEW_WATCH_BUDGET=<n> is for scenarios only: a vault whose budget is SPENT
 // — the watcher blind to anything new — without generating 10,000 files. It
-// sets both numbers, so nothing is watched past the scan either.
-const FORCED_BUDGET = Number(process.env.CLEW_WATCH_BUDGET) || 0;
+// sets both numbers, so nothing is watched past the scan either. Read
+// through `globalThis`: Clew-iOS shares this module, and its app page has no
+// `process` at all. A bare read at load threw there, and a first install
+// booted to nothing (iOS sync #3, 2026-09-30).
+const FORCED_BUDGET = Number(globalThis.process?.env?.CLEW_WATCH_BUDGET) || 0;
 export const WATCH_BUDGET = FORCED_BUDGET || 8000;
 // What the watcher may grow to AFTER the initial scan, for the files a
 // session actually creates. The budget bounds the walk; this bounds the

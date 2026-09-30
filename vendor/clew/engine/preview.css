@@ -785,8 +785,7 @@ td.clew-q-cell:hover { background: rgba(168, 130, 255, 0.08); }
 .clew-kanban {
 	display: flex;
 	/* 10, not 12: four 190 px columns then fit an 826 px iPad portrait pane
-	   (4 × 190 + 3 × 10 = 790 of 794 — iOS's columns are border-box); on
-	   desktop the difference does not show. */
+	   (4 × 190 + 3 × 10 = 790 of 794, the columns being border-box). */
 	gap: 10px;
 	align-items: flex-start;
 	overflow-x: auto;
@@ -814,6 +813,11 @@ td.clew-q-cell:hover { background: rgba(168, 130, 255, 0.08); }
 	border-radius: 5px;
 }
 .kanban-col {
+	/* 190 px is the WHOLE column, border and padding included. As content-box
+	   each came to 208, and four no longer fitted the iPad pane the gap was
+	   narrowed for: 4 × 208 + 30 = 862 > 794, a scroll WebKit still showed
+	   (iOS sync #3, measured). */
+	box-sizing: border-box;
 	flex: 1 0 190px;
 	/* The basis alone does not size the board in WebKit: its max-content
 	   comes from the CARDS, so a board of short cards stayed at the text

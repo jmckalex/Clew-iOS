@@ -11,6 +11,7 @@
 // postMessage its saves to the app page exactly as the note-embed viewer
 // does. Same pdf-core.js, same autosave, same annotations.
 import { createViewer } from './pdf-core.js';
+import { FAILURES } from './remote-failures.js';
 
 const params = new URLSearchParams(location.search);
 const src = params.get('src');
@@ -23,6 +24,10 @@ const onStatus = (text) => {
 };
 
 let viewer = null;
+
+/** The page to open at: `?page=N`, or a `#page=N` a redirect carried over
+ *  (a frame navigating straight to a vault PDF — protocol.js sends it here). */
+const startPage = () => Number(params.get('page')) || Number(/(?:^#|&)page=(\d+)/.exec(location.hash)?.[1]) || 0;
 
 /** Scroll to `page` once the viewer has laid its pages out: a scroll asked
  *  for too early lands nowhere (measured — it worked only when something
@@ -47,20 +52,6 @@ const remoteKey = /\/__clew_remote_pdf__\/([0-9a-f]{64})$/.exec(src ?? '')?.[1] 
 const origin = params.get('origin') ?? '';
 const strip = document.getElementById('remote-strip');
 
-const FAILURES = {
-	'web-page': 'The site answered with a web page, not a PDF — it may need you to sign in.',
-	'not-pdf': 'What the site sent is not a PDF.',
-	'too-large': 'The PDF is larger than Clew fetches (100 MB).',
-	'refused-address': 'Clew does not fetch from local or private network addresses.',
-	'bad-url': 'That address cannot be fetched.',
-	'timeout': 'The download took too long.',
-	'headers-timeout': 'The site did not answer in time.',
-	'connect-timeout': 'Could not connect to the site in time.',
-	'too-many-redirects': 'The site redirected too many times.',
-	'http-status': 'The site refused the request.',
-	'dns': 'Offline, or the site\'s name could not be found — and it was not fetched before.',
-	'network': 'Offline, or the site could not be reached — and it was not fetched before.',
-};
 
 const hostOf = (url) => { try { return new URL(url).host; } catch { return url; } };
 const fileNameOf = (url) => {
@@ -148,7 +139,7 @@ async function openRemote({ reload = false } = {}) {
 	root.replaceChildren();
 	viewer = await createViewer({ target: root, src, onStatus, readonly: true, buffer, name: fileNameOf(origin) });
 	window.__clewPdfHandle = viewer;
-	const page = Number(params.get('page'));
+	const page = startPage();
 	if (page > 1) showPage(page);
 }
 
@@ -177,7 +168,7 @@ if (!src) {
 		viewer = handle;
 		window.__clewPdfHandle = handle;   // scenarios
 		// `[[paper.pdf#page=12]]` (§5.15): open there.
-		const page = Number(params.get('page'));
+		const page = startPage();
 		if (page > 1) showPage(page);
 	}).catch((err) => {
 		console.warn('[clew pdf] page viewer failed:', err);

@@ -23,7 +23,7 @@
 // Because a rendered note's URL sits in its real (sid-prefixed) directory,
 // relative references in the document resolve through this handler
 // untouched — and stay inside the right vault.
-import { protocol } from 'electron';
+import { app, protocol } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
@@ -35,7 +35,7 @@ import { settings } from './settings.js';
 import { fontsDir, fallbackConfig } from './pdf-fonts.js';
 import { narrowCors } from './preview-cors.js';
 import { readRenderBody } from './caller-token.js';
-import { rewritePdfFrames } from './pdf-frames-rewrite.js';
+import { rewritePdfFrames, viewerUrl } from './pdf-frames-rewrite.js';
 import { registerRemotePdf, remotePdfFile } from './remote-pdfs.js';
 
 const MIME = {
@@ -438,6 +438,26 @@ export function installPreviewProtocol({ distDir, nodeModulesDir, engineAssetsDi
 					noteDir: path.posix.dirname(relPath).replace(/^\.$/, ''),
 				});
 				return new Response(injected, { headers: headers('text/html') });
+			}
+
+			// A vault PDF asked for as a DOCUMENT — a frame navigating to it,
+			// whatever put the frame there (a note's own script, a link) — goes
+			// to EmbedPDF's viewer page instead (pdf-unification.md §6). Dropping
+			// `plugins: true` does NOT turn Chromium's own viewer off (Electron
+			// 43, measured 2026-09-30: a raw PDF iframe still rendered, nothing
+			// downloaded), so this, not a download guard, is what keeps EmbedPDF
+			// the one viewer of a vault PDF. A navigation is told from the
+			// viewer's own fetch by its Accept (`text/html,…` against `*/*`;
+			// Sec-Fetch-Dest is not sent on this scheme). The redirect keeps a
+			// `#page=N`, which pdf-page.js reads. Every Clew surface reaches the
+			// viewer before this, so in dev and smoke a catch is logged as
+			// `smoke-pdf-leak:` and the sweep asserts there are none.
+			if (/\.pdf$/i.test(rel) && /^text\/html\b/i.test(request.headers.get('accept') ?? '')) {
+				const file = vaults.resolve(rel);
+				if (fs.existsSync(file)) {
+					if (process.env.CLEW_SMOKE || !app.isPackaged) console.log(`smoke-pdf-leak: ${request.url}`);
+					return new Response(null, { status: 302, headers: { Location: viewerUrl(pathname.slice(0, slash), rel) } });
+				}
 			}
 
 			// Anything else: the real file from the vault (relative images etc.).

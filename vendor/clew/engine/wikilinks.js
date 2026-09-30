@@ -379,9 +379,19 @@ export const wikiembed = {
 				case 'image':
 					return `<img class="internal-media" src="${src}" alt="${alt}"${dims}>\n`;
 				case 'pdf':
+					// In the preview the <embed> is only a PLACEHOLDER that
+					// pdf-embed.js replaces with EmbedPDF, so it carries its
+					// address as data-src: a real src started a load of its own
+					// before the upgrade, on first render and on every morph that
+					// re-inserted it (Chromium's viewer booted for nothing, then
+					// protocol.js's catch — the phase 4 sweep, 2026-09-30). A
+					// static site has no pdf-embed.js, so there it stays a real
+					// embed.
 					return `<div class="internal-embed pdf-embed-box">`
 						+ `<div class="embed-title"><a class="internal-link" href="#" data-href="${escapeAttr(token.full)}">${alt}</a></div>`
-						+ `<embed class="pdf-embed" src="${src}" type="application/pdf"></div>\n`;
+						+ (SITE_EXPORT
+							? `<embed class="pdf-embed" src="${src}" type="application/pdf"></div>\n`
+							: `<embed class="pdf-embed" data-src="${src}"></div>\n`);
 				case 'audio':
 					return `<audio class="internal-media" controls src="${src}"></audio>\n`;
 				case 'video':
