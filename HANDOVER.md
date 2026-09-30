@@ -22,6 +22,22 @@
   header (`Load javascript` → runInThisContext; `Load extensions` /
   `Load environments` → dynamic import) runs vault code at RENDER time —
   Node on desktop. To be gated engine-side in restricted vaults (§4).
+- **NEXT SYNC also carries the note-code guard (owner-approved; ordered
+  under the standing rule):** Clew-app adds ONE engine switch in the
+  jmarkdown master ("Run note code"-style, default = today) that every
+  note-code path honours, refusing BY NAME when off (the Load
+  javascript/extensions/directives/environments keys and `Extension …`
+  keys, function and script blocks, inline function expressions, mathjs,
+  Mathematica). The INTERIM guard: a vault this device already knows stays
+  trusted silently; a first-time vault gets the switch OFF in the generated
+  config, with a "Trust this vault" banner once something is refused;
+  trust on the device, keyed by frame-bridge §4.3's identity, revocable.
+  iOS parity at the sync: `src/shim/engine-config.js` sets the switch; the
+  trust store is a native JSON in Application Support over the bridge (no
+  absolute paths: container-relative for Documents vaults, the bookmark's
+  provider-relative path for Files vaults); "already known" = the union of
+  `settings.recentVaults`, the `vaultBookmarks` bookmarks and the vaults
+  in Documents. Exact shapes come from Clew-app.
 
 **NOW (2026-09-30, overnight):** the upstream 0.11.1 sync ran p1 → p4 on
 `sync111-p1-vendor … sync111-p4-verify` — vendor at Clew-app `84f975e`
