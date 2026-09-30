@@ -38,6 +38,13 @@
   `{ path, names }`. The banner (`renderer/trust-banner.js`), the Settings
   `#trustRow`, frame-layer's restale and preview.css's `.jmd-refused` are
   shared and arrive with the vendor.
+  Also at that sync — Clew-app 5077207's rule (a NEW file Clew writes
+  shows in the explorer at once, not when a watcher/rescan notices): on
+  iOS `saveAttachment` already emits tree-changed, but the shim's
+  NOTE_WRITE only sends EV_FILE_CHANGED — when the path did not exist
+  before (`vfs.has` first), call `structureChanged()` too; the same for the
+  kv store's first `clewdata.json`, and the shim's `saveRemotePdfCopy`
+  (a native write) must patch the mirror and refresh the tree.
   **The next sync's range starts at Clew-app `cd8c311`** (sync #2 took
   84f975e..cd8c311), plus these two branches.
 - **Measured**: WebKit honours a CSP on WKURLSchemeHandler responses, the
