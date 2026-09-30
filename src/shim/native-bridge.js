@@ -26,6 +26,14 @@
 //   shareBase64({name, base64})     -> null
 //   rescan({vault})                  -> { changed: {rel: {text?, size, mtimeMs}},
 //                                        removed: [rel] }
+//   pdfThumbnail({rel})              -> { ok, path, stamp } | { ok: false, reason } (Quick Look)
+//   registerRemotePdfs({urls})       -> { registered: {url: hash}, refused: {url: reason} }
+//   saveRemotePdfCopy({hash, folder})-> {rel, size} (never overwrites)
+//   openRemotePdf({hash})            -> {url} (this session's registration only)
+//   pdfLeakCount()                   -> number (raw PDFs cancelled in frames)
+//   vaultTrustGet()                  -> { open, trusted, identity }
+//   vaultTrustSet({trusted})         -> { open, trusted, identity }
+//   vaultOpen also answers `trusted` (this device's trust in the vault).
 
 export async function bridgeCall(method, params = {}) {
 	const impl = globalThis.__clewBridgeImpl;

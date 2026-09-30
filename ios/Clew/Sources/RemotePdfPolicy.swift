@@ -163,7 +163,10 @@ enum RemotePdfError: Error, Equatable {
 	case notPDF(String)
 	case network(String)
 
-	/// A short machine name for the viewer (it words the message).
+	/// A short machine name for the viewer, which words the message: the
+	/// vocabulary of the shared pdf-page.js FAILURES table (Clew-app
+	/// main/remote-fetch.js). `insecure-url` is the iPad's alone (§8, https
+	/// only); the viewer shows its generic head line and this detail.
 	var code: String {
 		switch self {
 		case .insecureURL: return "insecure-url"
@@ -171,10 +174,12 @@ enum RemotePdfError: Error, Equatable {
 		case .dns: return "dns"
 		case .refusedAddress: return "refused-address"
 		case .tooManyRedirects: return "too-many-redirects"
-		case .connectTimeout, .headersTimeout, .totalTimeout: return "timeout"
+		case .connectTimeout: return "connect-timeout"
+		case .headersTimeout: return "headers-timeout"
+		case .totalTimeout: return "timeout"
 		case .tooLarge: return "too-large"
-		case .httpStatus(let status): return "http-\(status)"
-		case .htmlAnswer: return "html-answer"
+		case .httpStatus: return "http-status"
+		case .htmlAnswer: return "web-page"
 		case .notPDF: return "not-pdf"
 		case .network: return "network"
 		}

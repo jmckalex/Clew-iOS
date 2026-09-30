@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
@@ -48,6 +49,10 @@ const writeAtomic = (abs, data) => {
 // The session the fake native side minted last (sid + caller token).
 let fakeOpens = 0;
 let fakeSession = null;
+// This device's trust in the vault, as VaultTrust.swift answers vaultOpen.
+let fakeTrusted = true;
+// Web PDFs the fake native side registered this session: hash → url.
+const fakeRemote = new Map();
 const fakeBridge = {
 	calls: [],
 	async call(method, params) {
@@ -57,8 +62,10 @@ const fakeBridge = {
 			case 'vaultOpen':
 				// A new session per opening, as VaultStore.swift#newSession.
 				fakeSession = { sessionId: `s${(++fakeOpens).toString(16).padStart(32, '0')}`, callerToken: 'ab'.repeat(32) };
+				fakeRemote.clear();
 				return {
 					...fakeSession,
+					trusted: fakeTrusted,
 					name: path.basename(params.path), path: params.path, files: listFiles(params.path),
 					...(globalDir && fs.existsSync(globalDir)
 						? { globalPlugins: { path: globalDir, files: listFiles(globalDir) } } : {}),
@@ -101,6 +108,36 @@ const fakeBridge = {
 				return null;
 			case 'officeThumbnail':
 				return { ok: false, reason: 'no Quick Look under Node' };
+			case 'pdfThumbnail':
+				return { ok: true, path: `.clew/cache/pdf-thumbs/${params.rel}.png`, stamp: 1 };
+			// RemotePdfStore.register: every http(s) URL, keyed sha256(url);
+			// anything else refused by name.
+			case 'registerRemotePdfs': {
+				const registered = {};
+				const refused = {};
+				for (const url of params.urls) {
+					if (!/^https?:\/\//i.test(url)) { refused[url] = 'bad-url'; continue; }
+					const hash = createHash('sha256').update(url).digest('hex');
+					fakeRemote.set(hash, url);
+					registered[url] = hash;
+				}
+				return { registered, refused };
+			}
+			case 'openRemotePdf': {
+				const url = fakeRemote.get(params.hash);
+				if (!url) throw new Error('Not a web PDF open in this window');
+				return { url };
+			}
+			case 'saveRemotePdfCopy': {
+				if (!fakeRemote.has(params.hash)) throw new Error('bad payload');
+				const rel = `${params.folder}/web.pdf`;
+				fs.mkdirSync(path.join(vaultDir, params.folder), { recursive: true });
+				fs.writeFileSync(path.join(vaultDir, rel), MINIMAL_PDF);
+				return { rel, size: MINIMAL_PDF.length };
+			}
+			case 'vaultTrustSet':
+				fakeTrusted = params.trusted === true;
+				return { open: true, trusted: fakeTrusted, identity: 'documents:test' };
 			case 'demoVaultPath':
 				return { path: vaultDir };
 			case 'createVault': {
@@ -130,6 +167,10 @@ const fakeBridge = {
 
 // A worker that answers ready + fake html (real rendering is M1-tested).
 // Build messages are recorded so tests can assert on their payloads.
+// `fakeHtml` is what every build answers; a test that needs other markup
+// sets it and puts it back.
+const FAKE_HTML = '<html>fake</html>';
+let fakeHtml = FAKE_HTML;
 const workerBuilds = [];
 const workerInits = [];
 const fakeWorkerFactory = () => {
@@ -141,7 +182,7 @@ const fakeWorkerFactory = () => {
 			if (msg.type === 'init') workerInits.push(msg);
 			queueMicrotask(() => {
 				if (msg.type === 'init') worker.onmessage?.({ data: { type: 'ready' } });
-				if (msg.type === 'build') worker.onmessage?.({ data: { type: 'done', output: msg.options.output, html: '<html>fake</html>' } });
+				if (msg.type === 'build') worker.onmessage?.({ data: { type: 'done', output: msg.options.output, html: fakeHtml } });
 			});
 		},
 		terminate() {},
@@ -767,7 +808,7 @@ test('renderBlock builds a FULL document from a temp note + .source sidecar in t
 	const builds = workerBuilds.length;
 	const hash = await native.renderBlock('# A block\n\nwith $x$', 'Guide/Editing Notes.md');
 	assert.match(hash, /^[0-9a-f]+$/, 'a hex key, safe in a URL');
-	assert.equal(native.blockDocument(hash), '<html>fake</html>', 'served by key while cached');
+	assert.equal(await native.blockDocument(hash), '<html>fake</html>', 'served by key while cached');
 	assert.equal(workerBuilds.length, builds + 1);
 	const build = workerBuilds.at(-1);
 	assert.equal(build.options.fragment, false, 'a block is a whole document (template, MathJax config)');
@@ -799,7 +840,7 @@ test('a dependent block\'s key moves with every file change; an independent one\
 	await settle();
 	assert.notEqual(await native.renderBlock('![[Welcome]]', 'Inbox.md'), dependent, 'an embed re-renders after any change');
 	assert.equal(await native.renderBlock('just *text*', 'Inbox.md'), plain, 'plain text is content-addressed');
-	assert.equal(native.blockDocument(dependent), '<html>fake</html>', 'the old document stays served until evicted');
+	assert.equal(await native.blockDocument(dependent), '<html>fake</html>', 'the old document stays served until evicted');
 });
 
 test('a block renders under its note\'s citation keys (upstream 707ed87): header prepended, dependent on the note', async () => {
@@ -831,9 +872,9 @@ test('a reconfigure retires every block: new keys, old documents gone', async ()
 	await settle();
 	const after = await native.renderBlock('reconfigure me', 'Inbox.md');
 	assert.notEqual(after, before, 'the configuration generation is in the key');
-	assert.equal(native.blockDocument(before), null, 'evicted — the handler answers 404 and the frame POSTs again');
-	assert.equal(native.blockDocument(after), '<html>fake</html>');
-	assert.equal(native.blockDocument('deadbeef'), null);
+	assert.equal(await native.blockDocument(before), null, 'evicted — the handler answers 404 and the frame POSTs again');
+	assert.equal(await native.blockDocument(after), '<html>fake</html>');
+	assert.equal(await native.blockDocument('deadbeef'), null);
 	await clew.invoke(CH.VAULT_SETTINGS_SET, { key: 'normalSyntax', value: false });
 	await settle();
 });
@@ -842,4 +883,109 @@ test('a block whose source note escapes the vault is refused', async () => {
 	await assert.rejects(native.renderBlock('x', '../outside.md'), /escapes vault/);
 	// No source note at all is fine (an anonymous block).
 	assert.match(await native.renderBlock('anonymous', null), /^[0-9a-f]+$/);
+});
+
+// ---- sync #3: the trust guard, web PDFs, new files in the tree -----------
+
+const configOf = (init) => JSON.parse(Object.entries(init.files).find(([k]) => k.endsWith('/.jmarkdown/config.json'))[1]);
+
+test('trust: `Run note code` follows the device\'s trust; SET goes native, re-renders, and says so', async () => {
+	// Opened trusted (the fake answers vaultOpen with trusted: true).
+	assert.equal(configOf(workerInits.at(-1))['Run note code'], true, 'a trusted vault runs note code');
+	assert.deepEqual(await clew.invoke('clew:vault-trust-get'), { trusted: true, refused: [] });
+	const changes = [];
+	const off = clew.on('clew:ev-vault-trust-changed', (p) => changes.push(p));
+	const inits = workerInits.length;
+	assert.deepEqual(await clew.invoke('clew:vault-trust-set', { trusted: false }), { trusted: false });
+	await settle();
+	assert.deepEqual(fakeBridge.calls.findLast(([m]) => m === 'vaultTrustSet'), ['vaultTrustSet', { trusted: false }]);
+	assert.deepEqual(changes, [{ trusted: false }]);
+	assert.ok(workerInits.length > inits, 'reconfigured: a fresh standby');
+	assert.equal(configOf(workerInits.at(-1))['Run note code'], false, 'revoked: the engine refuses note code');
+	// A render that meets refused code reports it by name, and GET lists it.
+	const refusedEvents = [];
+	const offRefused = clew.on('clew:ev-note-code-refused', (p) => refusedEvents.push(p));
+	fakeHtml = '<p><span class="jmd-refused" data-jmd-refused="script">…</span><span data-jmd-refused="Math.&quot;x&quot;"></span></p>';
+	try {
+		await native.renderNote('Guide/Tabbing.md');
+		await settle();
+	} finally {
+		fakeHtml = FAKE_HTML;
+	}
+	assert.deepEqual(refusedEvents, [{ path: 'Guide/Tabbing.md', names: ['script', 'Math."x"'] }]);
+	assert.deepEqual(await clew.invoke('clew:vault-trust-get'), { trusted: false, refused: ['script', 'Math."x"'] });
+	// Trust again: refusals forgotten, note code back on.
+	assert.deepEqual(await clew.invoke('clew:vault-trust-set', { trusted: true }), { trusted: true });
+	await settle();
+	assert.equal(configOf(workerInits.at(-1))['Run note code'], true);
+	assert.deepEqual(await clew.invoke('clew:vault-trust-get'), { trusted: true, refused: [] });
+	off();
+	offRefused();
+});
+
+test('PDF frames: a note\'s own vault and web PDFs are served as Clew\'s viewer; web ones registered natively first', async () => {
+	const sid = native.sessionId;
+	fakeHtml = '<body><iframe src="Paper.pdf#page=2" width="600"></iframe>'
+		+ '<embed src="https://example.org/papers/a.pdf" type="application/pdf">'
+		+ '<object data="ftp://example.org/b.pdf"></object></body>';
+	// A note in Attachments/, so the frame's relative target resolves there.
+	await clew.invoke(CH.NOTE_WRITE, { path: 'Attachments/Note.md', content: '# x\n' });
+	const registrations = fakeBridge.calls.filter(([m]) => m === 'registerRemotePdfs').length;
+	let html;
+	try {
+		html = await native.renderNote('Attachments/Note.md');
+	} finally {
+		fakeHtml = FAKE_HTML;
+	}
+	// The vault PDF, relative to the note's folder, at its page, sizes kept.
+	const viewer = `/__clew_assets__/clewpdf/pdf-page.html?src=${encodeURIComponent(`/${sid}/Attachments/Paper.pdf`)}&amp;page=2`;
+	assert.ok(html.includes(`<iframe width="600" src="${viewer}" allow="fullscreen" data-clew-pdf="Attachments/Paper.pdf"></iframe>`), html);
+	// The web PDF: registered with native BEFORE the HTML was answered, and
+	// the viewer handed the hash, read-only — never a URL to fetch.
+	const calls = fakeBridge.calls.filter(([m]) => m === 'registerRemotePdfs');
+	assert.equal(calls.length, registrations + 1);
+	assert.deepEqual(calls.at(-1)[1], { urls: ['https://example.org/papers/a.pdf'] });
+	const hash = createHash('sha256').update('https://example.org/papers/a.pdf').digest('hex');
+	assert.ok(html.includes(encodeURIComponent(`/${sid}/__clew_remote_pdf__/${hash}`)), 'the route by hash');
+	assert.ok(html.includes('readonly=1') && html.includes(`data-clew-remote-pdf="${hash}"`));
+	// Another scheme is not a web PDF: left exactly as written.
+	assert.ok(html.includes('<object data="ftp://example.org/b.pdf"></object>'));
+});
+
+test('web PDFs: Open and Save a copy name the HASH; native finds the URL; the copy shows in the tree at once', async () => {
+	const hash = createHash('sha256').update('https://example.org/papers/a.pdf').digest('hex');
+	assert.deepEqual(await clew.invoke('clew:remote-pdf-open', { key: hash }), { url: 'https://example.org/papers/a.pdf' });
+	await assert.rejects(clew.invoke('clew:remote-pdf-open', { key: 'f'.repeat(64) }), /Not a web PDF/);
+	let trees = 0;
+	const off = clew.on('clew:ev-tree-changed', () => { trees++; });
+	const saved = await clew.invoke('clew:remote-pdf-save-copy', { key: hash });
+	await settle();
+	off();
+	assert.deepEqual(saved, { path: 'Attachments/web.pdf' });
+	assert.deepEqual(fakeBridge.calls.findLast(([m]) => m === 'saveRemotePdfCopy')[1], { hash, folder: 'Attachments' });
+	assert.ok(trees >= 1, 'the explorer learns of the copy now');
+	assert.ok((await clew.invoke(CH.VAULT_TREE)).find((e) => e.name === 'Attachments').children.some((c) => c.name === 'web.pdf'));
+});
+
+test('PDF thumbnails: upstream pdf-thumbs.js\'s refusals, then Quick Look through the bridge', async () => {
+	assert.deepEqual(await clew.invoke('clew:pdf-thumbnail', { path: 'Welcome.md' }), { ok: false, reason: 'not a PDF: Welcome.md' });
+	assert.deepEqual(await clew.invoke('clew:pdf-thumbnail', { path: 'Missing.pdf' }), { ok: false, reason: 'missing PDF' });
+	assert.equal((await clew.invoke('clew:pdf-thumbnail', { path: '../x.pdf' })).ok, false);
+	assert.deepEqual(await clew.invoke('clew:pdf-thumbnail', { path: 'Attachments/Paper.pdf' }),
+		{ ok: true, path: '.clew/cache/pdf-thumbs/Attachments/Paper.pdf.png', stamp: 1 });
+});
+
+test('new files Clew writes show in the tree at once (Clew-app 5077207): a note write that creates, and clewdata.json', async () => {
+	let trees = 0;
+	const off = clew.on('clew:ev-tree-changed', () => { trees++; });
+	await clew.invoke(CH.NOTE_WRITE, { path: 'Brand New.md', content: 'hello\n' });
+	await settle();
+	assert.equal(trees, 1, 'a write that creates the note refreshes the tree');
+	await clew.invoke(CH.NOTE_WRITE, { path: 'Brand New.md', content: 'hello again\n' });
+	await settle();
+	assert.equal(trees, 1, 'an ordinary save does not');
+	services.kvStore.onCreated();
+	await settle();
+	assert.equal(trees, 2, 'the kv store\'s first clewdata.json refreshes it too');
+	off();
 });

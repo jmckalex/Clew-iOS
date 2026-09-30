@@ -210,33 +210,43 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 		guard !vaultRel.isEmpty else { return fail(task, "empty path") }
 
 		// A web PDF this session's render registered (RemotePdfStore; Clew-app
-		// docs/dev/pdf-unification.md §4): GET only, only a registered hash —
-		// no URL is ever named here, so nothing can ask Clew to fetch one. The
-		// cached copy at once, or the download's outcome when it lands; a
-		// failure is answered by name ("<code>: <detail>", 502), never by
-		// sending the frame to the URL.
+		// docs/dev/pdf-unification.md §4, §8) — desktop protocol.js's route,
+		// contract for contract: GET only; only a 64-hex hash this session
+		// registered (404 otherwise), so no page can name a URL for Clew to
+		// fetch; `?reload=1` refetches now; a failure with no copy is a 502
+		// whose JSON body names it ({error, message} — the viewer's FAILURES
+		// words it); X-Clew-Remote-Fetched dates the copy, and a copy served
+		// after a failed refetch says why in X-Clew-Remote-Error.
 		if vaultRel.hasPrefix("__clew_remote_pdf__/") {
-			guard task.request.httpMethod == "GET" else { return fail(task, "Method not allowed", status: 405) }
+			guard task.request.httpMethod == "GET" else { return fail(task, "GET only", status: 405) }
 			let hash = String(vaultRel.dropFirst("__clew_remote_pdf__/".count))
+			guard hash.range(of: #"^[0-9a-f]{64}$"#, options: .regularExpression) != nil else {
+				return fail(task, "Not found", status: 404)
+			}
 			let range = task.request.value(forHTTPHeaderField: "Range")
-			let known = RemotePdfStore.shared.serve(hash) { [weak self] served in
+			let reload = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+				.queryItems?.contains { $0.name == "reload" && $0.value == "1" } ?? false
+			let answer: (RemotePdfStore.Served) -> Void = { [weak self] served in
 				DispatchQueue.main.async {
 					guard let self, !self.isStopped(task) else { return }
 					switch served {
 					case .file(let file, let meta):
-						// The viewer (same origin) reads these; the app page is a
-						// cross-origin reader, so CORS must expose them to it.
+						let stamp = ISO8601DateFormatter()
+						stamp.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
 						var extra = ["Content-Type": "application/pdf",
-							"X-Clew-Fetched-At": ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: meta.fetchedAt)),
-							"Access-Control-Expose-Headers": "X-Clew-Fetched-At, X-Clew-Stale"]
-						if let stale = meta.staleReason { extra["X-Clew-Stale"] = stale }
+							"X-Clew-Remote-Fetched": stamp.string(from: Date(timeIntervalSince1970: meta.fetchedAt)),
+							"Access-Control-Expose-Headers": "X-Clew-Remote-Fetched, X-Clew-Remote-Error"]
+						if let stale = meta.staleReason { extra["X-Clew-Remote-Error"] = Self.encodeURIComponent(stale) }
 						self.respondFile(task, fileURL: file, rangeHeader: range, extra: extra)
 					case .failure(let error):
-						self.fail(task, "\(error.code): \(error.detail)", status: 502)
+						let body = (try? JSONSerialization.data(withJSONObject: ["error": error.code, "message": error.detail])) ?? Data()
+						self.respond(task, status: 502, data: body, headers: self.baseHeaders(mime: "application/json"))
 					}
 				}
 			}
-			if !known { fail(task, "Not found", status: 404) }
+			let known = reload ? RemotePdfStore.shared.refresh(hash, completion: answer)
+				: RemotePdfStore.shared.serve(hash, completion: answer)
+			if !known { fail(task, "Not registered in this session", status: 404) }
 			return
 		}
 
@@ -601,6 +611,15 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 			return message
 		}
 		return ns.localizedDescription
+	}
+
+	/// JavaScript's encodeURIComponent: everything but A–Z a–z 0–9 and
+	/// `-_.!~*'()` percent-encoded as UTF-8 (the viewer decodes the header
+	/// with decodeURIComponent, as desktop's route encodes it).
+	static func encodeURIComponent(_ text: String) -> String {
+		var allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")
+		allowed.insert(charactersIn: "-_.!~*'()")
+		return text.addingPercentEncoding(withAllowedCharacters: allowed) ?? ""
 	}
 
 	private static func escapeHtml(_ text: String) -> String {

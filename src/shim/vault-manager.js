@@ -49,6 +49,10 @@ export class VaultManager {
 	sessionId = null;
 	/** The session's caller token (Clew-app session.js); never in `info`. */
 	callerToken = null;
+	/** This device's trust in the open vault (VaultTrust.swift, vaultOpen's
+	 *  reply): whether the engine may run its notes' code. False with no
+	 *  vault, and for a vault the device has not trusted. */
+	trusted = false;
 	/** @type {(channel: string, payload: any) => void} */
 	send = () => {};
 	hooks = {};
@@ -89,13 +93,14 @@ export class VaultManager {
 
 	async open(vaultPath) {
 		this.close();
-		const { name, path: realPath, files, globalPlugins, sessionId, callerToken } = await bridgeCall('vaultOpen', { path: vaultPath });
+		const { name, path: realPath, files, globalPlugins, sessionId, callerToken, trusted } = await bridgeCall('vaultOpen', { path: vaultPath });
 		this.realPath = realPath;
 		this.name = name;
 		// Minted natively per opening: preview URLs carry the sid, and the
 		// render POSTs the token (SchemeHandler.swift checks both).
 		this.sessionId = sessionId ?? null;
 		this.callerToken = callerToken ?? null;
+		this.trusted = trusted === true;
 		this.hooks.onSession?.(this.sessionId);
 		vfs.mkdir(VAULT_ROOT);
 		for (const [rel, entry] of Object.entries(files)) {
@@ -180,6 +185,7 @@ export class VaultManager {
 		this.globalPluginsPath = null;
 		this.sessionId = null;
 		this.callerToken = null;
+		this.trusted = false;
 		this.excludes = compileExcludes({});
 	}
 

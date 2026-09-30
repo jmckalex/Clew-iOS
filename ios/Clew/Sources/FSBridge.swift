@@ -254,17 +254,17 @@ final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 			guard let urls = params["urls"] as? [String] else { throw ClewError.badPayload }
 			reply(RemotePdfStore.shared.register(Array(urls.prefix(200))), nil)
 
-		case "refreshRemotePdf":
+		case "openRemotePdf":
+			// Open in browser (the viewer's strip and its failure box, via the
+			// app page's pdf-save.js): the viewer names the HASH; the URL is
+			// this session's own registration, never taken from a message
+			// (Clew-app ipc.js REMOTE_PDF_OPEN).
 			guard let hash = params["hash"] as? String else { throw ClewError.badPayload }
-			let known = RemotePdfStore.shared.refresh(hash) { served in
-				DispatchQueue.main.async {
-					switch served {
-					case .file(_, let meta): reply(["ok": meta.staleReason == nil, "stale": meta.staleReason.map { $0 as Any } ?? NSNull()], nil)
-					case .failure(let error): reply(["ok": false, "error": error.code, "detail": error.detail], nil)
-					}
-				}
+			guard let url = RemotePdfStore.shared.url(for: hash), ["http", "https"].contains(url.scheme?.lowercased() ?? "") else {
+				throw ClewError.message("Not a web PDF open in this window")
 			}
-			if !known { reply(["ok": false, "error": "not-registered"], nil) }
+			UIApplication.shared.open(url)
+			reply(["url": url.absoluteString], nil)
 
 		case "saveRemotePdfCopy":
 			guard let hash = params["hash"] as? String else { throw ClewError.badPayload }

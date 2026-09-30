@@ -79,15 +79,22 @@ final class RemotePdfStore {
 	/// Registers the URLs a render found; answers `registered` {url: hash}
 	/// and `refused` {url: reason}. Prefetches what is not cached and
 	/// revalidates what is older than a day, in the background.
+	///
+	/// Every http(s) URL is registered, as desktop's registerRemotePdf does:
+	/// the policy (https only, the address guard) is the FETCH's, applied
+	/// before any connection, so a refused one still opens the viewer, which
+	/// names the refusal and offers Open in browser (§8: "insecure address —
+	/// open in browser"). Refused here: only what is not a web URL at all.
+	/// The hash is of the URL exactly as the render met it — the shared
+	/// rewrite looks it up by that string.
 	func register(_ urls: [String]) -> [String: [String: String]] {
 		var registered: [String: String] = [:]
 		var refused: [String: String] = [:]
 		for text in urls {
-			guard let url = URL(string: text) else { refused[text] = "bad-url"; continue }
-			do { try RemotePdfPolicy.checkURL(url) } catch let error as RemotePdfError {
-				refused[text] = "\(error.code): \(error.detail)"; continue
-			} catch { refused[text] = "bad-url"; continue }
-			let hash = Self.hash(url.absoluteString)
+			guard let url = URL(string: text), ["http", "https"].contains(url.scheme?.lowercased() ?? "") else {
+				refused[text] = "bad-url"; continue
+			}
+			let hash = Self.hash(text)
 			state.sync { session[hash] = url }
 			registered[text] = hash
 			let meta = readMeta(hash)
@@ -102,6 +109,10 @@ final class RemotePdfStore {
 	}
 
 	func isRegistered(_ hash: String) -> Bool { state.sync { session[hash] != nil } }
+
+	/// The URL this session registered under `hash` (Open in browser): the
+	/// viewer names only the hash, never a URL.
+	func url(for hash: String) -> URL? { state.sync { session[hash] } }
 
 	// MARK: - Serving
 
@@ -172,7 +183,7 @@ final class RemotePdfStore {
 			let failure = error as? RemotePdfError ?? .network(error.localizedDescription)
 			// Offline WITH a copy: the copy, marked by why it is stale.
 			if var meta = readMeta(hash), FileManager.default.fileExists(atPath: pdfURL(hash).path) {
-				meta.staleReason = failure.code
+				meta.staleReason = "\(failure.code): \(failure.detail)"
 				writeMeta(meta, hash)
 				return .file(pdfURL(hash), meta: meta)
 			}

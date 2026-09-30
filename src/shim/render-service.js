@@ -13,6 +13,7 @@ import { engineConfig, engineEnv, isTextPath, ENGINE_CSL_FILES } from './engine-
 import { engineExtensionEntries } from '../../vendor/clew/main/plugins.js';
 import { isDependentFragment } from '../../vendor/clew/shared/fragment-deps.js';
 import { citationHeader } from '../../vendor/clew/main/citation-header.js';
+import { refusedNames } from '../../vendor/clew/shared/refused-names.js';
 import { settings } from './settings.js';
 
 const REBUILD_DEBOUNCE_MS = 300;
@@ -70,6 +71,16 @@ export class RenderService {
 	 *  plugin) gets a NEW hash — a caller comparing hashes sees the change. */
 	#configGeneration = 0;
 	#rebuildTimers = new Map();
+	/** Whether the engine may run a note's code — the device's trust in the
+	 *  vault (VaultTrust.swift), set before each open and by the banner /
+	 *  Settings. Off until said otherwise, as desktop's render service. */
+	#noteCode = false;
+	/** What the engine refused while #noteCode is off: path → names. */
+	#refused = new Map();
+	/** A block document's key → its note (the PDF-frame rewrite resolves the
+	 *  note's relative targets against its folder, as desktop's protocol.js
+	 *  does through blockSourcePath). Pruned with #fragments. */
+	#blockSources = new Map();
 
 	constructor({ workerFactory, assetLoader } = {}) {
 		this.workerFactory = workerFactory
@@ -101,6 +112,40 @@ export class RenderService {
 		return this.#openPromise;
 	}
 
+	/**
+	 * Trust changed (the banner, Settings) or a vault is about to open:
+	 * whether the engine may run its notes' code. An open vault is
+	 * reconfigured, which re-renders every open preview under the new
+	 * answer. Desktop's render-service.js#setNoteCode.
+	 */
+	setNoteCode(allowed) {
+		allowed = allowed === true;
+		if (allowed === this.#noteCode) return;
+		this.#noteCode = allowed;
+		this.#refused.clear();
+		if (this.#open) this.reconfigure({});
+	}
+
+	/** Every construct refused so far, by name — for a window that reloads. */
+	refusedNames() {
+		return [...new Set([...this.#refused.values()].flat())];
+	}
+
+	// A restricted vault's render: note what the engine refused, by the
+	// names on its `data-jmd-refused` markers (shared/refused-names.js), and
+	// tell the window — whose banner offers trust only once there is
+	// something to trust.
+	#noteRefusals(key, html, path = key) {
+		if (this.#noteCode) return;
+		const names = refusedNames(html);
+		if (names.length === 0) {
+			this.#refused.delete(key);
+			return;
+		}
+		this.#refused.set(key, names);
+		this.send('clew:ev-note-code-refused', { path, names });
+	}
+
 	reconfigure(options) {
 		Object.assign(this.#vaultOptions, options);
 		if (!this.#open) return;
@@ -124,6 +169,8 @@ export class RenderService {
 		this.#notes.clear();
 		this.#fragments.clear();
 		this.#fragmentInflight.clear();
+		this.#refused.clear();
+		this.#blockSources.clear();
 		for (const timer of this.#rebuildTimers.values()) clearTimeout(timer);
 		this.#rebuildTimers.clear();
 		this.#generation++;
@@ -145,7 +192,7 @@ export class RenderService {
 	// no disk to dynamic-import from.
 	#engineConfig(engineExtensions) {
 		return JSON.stringify(
-			engineConfig({ vaultRoot: VAULT_ROOT, vaultOptions: this.#vaultOptions, engineExtensions }),
+			engineConfig({ vaultRoot: VAULT_ROOT, vaultOptions: this.#vaultOptions, engineExtensions, noteCode: this.#noteCode }),
 			null, 2);
 	}
 
@@ -293,6 +340,7 @@ export class RenderService {
 				entry.hasQueries = /^```(query|tasks|kanban)/m.test(
 					typeof text === 'string' ? text : new TextDecoder().decode(text));
 			} catch { entry.hasQueries = false; }
+			this.#noteRefusals(rel, entry.html);
 			this.send('clew:ev-render-done', { path: rel });
 			return entry.html;
 		}
@@ -364,6 +412,11 @@ export class RenderService {
 		return this.#fragments.get(key);
 	}
 
+	/** The note a block document was rendered for, or null. */
+	blockSourcePath(key) {
+		return this.#blockSources.get(key) ?? null;
+	}
+
 	#fragmentKey(text, { sourcePath = null, dependent = isDependentFragment(text), document = false }) {
 		return sha1ish(`${document ? 'doc' : 'frag'}\0${this.#configGeneration}\0${sourcePath ?? ''}\0${dependent ? this.#fragmentEpoch : ''}\0${text}`);
 	}
@@ -399,11 +452,18 @@ export class RenderService {
 			normalSyntax: this.#vaultOptions.normalSyntax === true,
 		}, extra);
 		if (result.type !== 'done') throw new Error(result.message);
+		// Keyed by the fragment, not its note: a clean block must not erase
+		// what the note itself had refused.
+		this.#noteRefusals(`fragment:${key}`, result.html, sourcePath ?? `fragment:${key}`);
 		// Bounded cache: drop the oldest half when it grows past 500 entries.
 		if (this.#fragments.size > 500) {
-			for (const k of [...this.#fragments.keys()].slice(0, 250)) this.#fragments.delete(k);
+			for (const k of [...this.#fragments.keys()].slice(0, 250)) {
+				this.#fragments.delete(k);
+				this.#blockSources.delete(k);
+			}
 		}
 		this.#fragments.set(key, result.html);
+		if (document && sourcePath) this.#blockSources.set(key, sourcePath);
 		return result.html;
 	}
 

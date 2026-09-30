@@ -72,10 +72,14 @@ function biblifyConfig(vaultRoot, vaultOptions) {
  * #engineExtensionEntries (the app over the aliased vfs-backed fs, the Node
  * harness over the real one) so manifest reading has one implementation;
  * they are parameters here because this module stays dependency-free.
+ * `noteCode` is whether a note may make the engine run code — the
+ * device's trust in the vault (VaultTrust.swift), never the vault's own
+ * setting. Off unless the caller says so, as desktop's render service
+ * starts.
  * @param {{vaultRoot?: string, vaultOptions?: Record<string, any>,
- *          engineExtensions?: string[]}} opts
+ *          engineExtensions?: string[], noteCode?: boolean}} opts
  */
-export function engineConfig({ vaultRoot = '/vault', vaultOptions = {}, engineExtensions = [] } = {}) {
+export function engineConfig({ vaultRoot = '/vault', vaultOptions = {}, engineExtensions = [], noteCode = false } = {}) {
 	return {
 		// "jmarkdown project" vaults (the book manuscript case) re-enable the
 		// engine's own-line [[file.md]] inclusion in previews.
@@ -85,6 +89,12 @@ export function engineConfig({ vaultRoot = '/vault', vaultOptions = {}, engineEx
 		// not a registered directive becomes a citation key.
 		'Pandoc citations': vaultOptions.pandocCitations === true,
 		'Header style': 'fenced',
+		// Whether a note may make the engine run code: script blocks,
+		// Math.…(…) and calc(…) in prose, math.…(, Mathematica, and the
+		// Load …/Extension … header keys. Off, each is refused by name in
+		// place (jmarkdown note-code.js) — the interim guard, desktop's
+		// render-service.js#writeEngineConfig word for word.
+		'Run note code': noteCode === true,
 		'Template': '/engine/clew-template.html',
 		'Extensions': [
 			'wikiembed, wikilink from /engine-assets/wikilinks.js',

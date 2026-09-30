@@ -13,6 +13,7 @@ import { listPlugins } from '../../vendor/clew/main/plugins.js';
 import { planOpen, pathFromFileUrl } from '../../vendor/clew/main/open-file.js';
 import { direntKind, shouldRecurse, walkGuard } from '../../vendor/clew/main/fs-utils.js';
 import { listSnapshots, readSnapshot } from '../../vendor/clew/main/history.js';
+import { rewritePdfFrames } from '../../vendor/clew/main/pdf-frames-rewrite.js';
 import fs from 'node:fs';
 import nodePath from 'node:path';
 import { vfs } from '../worker/shims/vfs.js';
@@ -87,6 +88,10 @@ export function createClewShim({ workerFactory, assetLoader } = {}) {
 		// every preview URL the render service writes carries it.
 		onSession: (sid) => { renderService.sessionId = sid; },
 		onOpen: (root) => {
+			// The device's trust first: the first standby's engine config
+			// carries `Run note code` (desktop session.js does the same
+			// before the render service opens the vault).
+			renderService.setNoteCode(vaults.trusted);
 			renderService.openVault(root);
 			// The vault's exclusion lists (vault-excludes.js): what is
 			// `unindexed` is walked past, exactly as upstream's session.js.
@@ -116,6 +121,34 @@ export function createClewShim({ workerFactory, assetLoader } = {}) {
 	const structureChanged = () => {
 		send(CH.EV_TREE_CHANGED, { tree: vaults.tree() });
 		vaults.hooks.onStructureChanged?.();
+	};
+	// clewdata.json sits in the vault root, in the explorer: its first write
+	// shows it at once (Clew-app 5077207's rule — a new file Clew writes is
+	// in the tree now, not when a rescan notices).
+	kvStore.onCreated = () => structureChanged();
+
+	// A note's own PDF frames — <iframe|embed|object> naming a PDF — go to
+	// Clew's viewer as the document is SERVED (vendor main/pdf-frames-
+	// rewrite.js, as desktop's protocol.js#wrapPreviewDocument runs it; a
+	// site export never comes through here). Web PDFs are registered with
+	// NATIVE before the HTML leaves (docs/dev/pdf-unification.md §8): a
+	// first pass lists them, the bridge answers {url: hash}, and a second
+	// pass writes the viewer URLs from those hashes — the viewer is handed a
+	// hash, never a URL, and the route serves only what native registered.
+	// The bridge answers the app page alone, so no preview can register.
+	const servePdfFrames = async (html, noteRel = null) => {
+		const sid = vaults.sessionId;
+		if (typeof html !== 'string' || !sid) return html;
+		const noteDir = noteRel && noteRel.includes('/') ? noteRel.slice(0, noteRel.lastIndexOf('/')) : '';
+		const first = rewritePdfFrames(html, { sid, noteDir });
+		if (first.remote.length === 0) return first.html;
+		let registered = {};
+		try {
+			({ registered = {} } = (await bridgeCall('registerRemotePdfs', { urls: [...new Set(first.remote)] })) ?? {});
+		} catch (err) {
+			console.error('[clew-ios] web PDF registration failed:', err);
+		}
+		return rewritePdfFrames(html, { sid, noteDir, registerRemote: (url) => registered[url] ?? null }).html;
 	};
 
 	let openInflight = null;
@@ -190,8 +223,12 @@ export function createClewShim({ workerFactory, assetLoader } = {}) {
 
 		[CH.NOTE_READ]: ({ path }) => vaults.readNote(path),
 		[CH.NOTE_WRITE]: ({ path, content }) => {
+			// A write that CREATES the note (a template, a daily note, a
+			// plugin's note) is in the explorer at once (Clew-app 5077207).
+			const created = !vfs.has(vaults.resolve(path));
 			vaults.writeNote(path, content);
 			fileChanged(path);
+			if (created) structureChanged();
 		},
 		[CH.NOTE_CREATE]: ({ path }) => {
 			const rel = vaults.createNote(path);
@@ -386,6 +423,52 @@ export function createClewShim({ workerFactory, assetLoader } = {}) {
 			const rel = officeRel(path);
 			bridgeCall('quickLook', { rel }).catch((err) => console.warn('[clew-ios] Quick Look failed:', err));
 		},
+		// A PDF's first page for canvas portals (pdf-unification §2, §8):
+		// Quick Look, natively, at the mirrored .clew/cache/pdf-thumbs/<rel>.png
+		// — never an offscreen EmbedPDF. Upstream pdf-thumbs.js's refusals.
+		[CH.PDF_THUMBNAIL]: async ({ path }) => {
+			const rel = typeof path === 'string' ? path : '';
+			if (!/\.pdf$/i.test(rel)) return { ok: false, reason: `not a PDF: ${rel}` };
+			let abs;
+			try { abs = vaults.resolve(rel); } catch (err) { return { ok: false, reason: String(err.message) }; }
+			if (!vfs.has(abs)) return { ok: false, reason: 'missing PDF' };
+			return bridgeCall('pdfThumbnail', { rel });
+		},
+		// A web PDF's viewer (pdf-page.js, read-only) through the app page's
+		// pdf-save.js: the viewer names the registered HASH, and native finds
+		// the URL in this session's own registrations (Clew-app ipc.js).
+		// Save a copy writes the cached bytes into the attachment folder,
+		// never overwriting — a native binary write, so the mirror learns of
+		// the new file here and the explorer shows it at once.
+		[CH.REMOTE_PDF_SAVE_COPY]: async ({ key }) => {
+			if (!vaults.isOpen) throw new Error('No vault open');
+			const { rel } = await bridgeCall('saveRemotePdfCopy', {
+				hash: String(key ?? ''),
+				folder: settings.get('attachmentFolder') || 'Attachments',
+			});
+			vfs.patch(`${VAULT_ROOT}/${rel}`, '', Date.now());
+			structureChanged();
+			return { path: rel };
+		},
+		[CH.REMOTE_PDF_OPEN]: ({ key }) => bridgeCall('openRemotePdf', { hash: String(key ?? '') }),
+
+		// This device's trust in the open vault (VaultTrust.swift; Clew-app
+		// ipc.js, the interim guard): never a vault setting, and set only
+		// from the app's own chrome — the banner and Settings → This vault.
+		// SET rewrites the engine config and re-renders every open preview.
+		[CH.VAULT_TRUST_GET]: () => ({
+			trusted: vaults.isOpen && vaults.trusted === true,
+			refused: vaults.trusted ? [] : renderService.refusedNames(),
+		}),
+		[CH.VAULT_TRUST_SET]: async ({ trusted }) => {
+			if (!vaults.isOpen) return { trusted: false };
+			const answer = await bridgeCall('vaultTrustSet', { trusted: trusted === true });
+			vaults.trusted = answer?.trusted === true;
+			renderService.setNoteCode(vaults.trusted);
+			send(CH.EV_VAULT_TRUST_CHANGED, { trusted: vaults.trusted });
+			return { trusted: vaults.trusted };
+		},
+
 		[CH.OFFICE_THUMBNAIL]: async ({ path }) => {
 			const rel = officeRel(path);
 			if (!vfs.has(vaults.resolve(rel))) return { ok: false, reason: 'missing document' };
@@ -581,8 +664,8 @@ export function createClewShim({ workerFactory, assetLoader } = {}) {
 
 	// Surface the Swift side needs (scheme handler + lifecycle callbacks).
 	const native = {
-		renderNote: (rel) => renderService.ensureRendered(rel),
-		renderFragment: (text) => renderService.renderFragment(text),
+		renderNote: async (rel) => servePdfFrames(await renderService.ensureRendered(rel), rel),
+		renderFragment: async (text) => servePdfFrames(await renderService.renderFragment(text)),
 		// Live edit's block frames (SchemeHandler.swift `__clew_block__`):
 		// POST {text, sourcePath} → the document's key; GET by key → the
 		// HTML, or null once evicted (a 404, and the frame layer POSTs
@@ -592,7 +675,10 @@ export function createClewShim({ workerFactory, assetLoader } = {}) {
 			if (sourcePath != null) vaults.resolve(sourcePath);
 			return renderService.renderBlock(text, { sourcePath: sourcePath ?? null });
 		},
-		blockDocument: (key) => renderService.blockDocument(key) ?? null,
+		blockDocument: async (key) => {
+			const html = renderService.blockDocument(key);
+			return html === undefined ? null : servePdfFrames(html, renderService.blockSourcePath(key));
+		},
 		externalDiff: (diff) => vaults.applyExternalDiff(diff),
 		flush: () => vaults.flush(),
 		get sessionId() { return vaults.sessionId; },
