@@ -306,19 +306,19 @@ do {
 	expectError("a bad chunk size is refused", { if case .network = $0 { return true }; return false }) { _ = try decoder.feed(Data("zz\r\n".utf8)) }
 }
 
-// The viewer words a failure from its code (the shared pdf-page.js
-// FAILURES table, Clew-app 03c06f3): every code native sends must be one of
-// those, except the iPad's own https-only refusal (§8).
+// The viewer words a failure from its code (the shared
+// preview-client/remote-failures.js, Clew-app db50f57): every code native
+// sends must be one it names — the iPad's https-only refusal included.
 do {
 	let viewerCodes: Set<String> = ["web-page", "not-pdf", "too-large", "refused-address", "bad-url", "timeout",
-		"headers-timeout", "connect-timeout", "too-many-redirects", "http-status", "dns", "network"]
+		"headers-timeout", "connect-timeout", "too-many-redirects", "http-status", "dns", "network", "insecure-url"]
 	let every: [RemotePdfError] = [.insecureURL("x"), .badURL("x"), .dns("x"), .refusedAddress("x"), .tooManyRedirects,
 		.connectTimeout, .headersTimeout, .totalTimeout, .tooLarge(50_000_000), .httpStatus(403), .htmlAnswer,
 		.notPDF("x"), .network("x")]
-	for error in every where error != .insecureURL("x") {
+	for error in every {
 		check(viewerCodes.contains(error.code), "the viewer names \(error.code)")
 	}
-	check(RemotePdfError.insecureURL("x").code == "insecure-url", "https only keeps its own name (§8)")
+	check(RemotePdfError.tooLarge(50_000_000).detail.contains("50 MB"), "too-large says the iPad's cap (the head line no longer does)")
 }
 
 print("RemotePdfPolicy: \(passed) passed, \(failed) failed")

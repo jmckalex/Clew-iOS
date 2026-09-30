@@ -164,9 +164,9 @@ enum RemotePdfError: Error, Equatable {
 	case network(String)
 
 	/// A short machine name for the viewer, which words the message: the
-	/// vocabulary of the shared pdf-page.js FAILURES table (Clew-app
-	/// main/remote-fetch.js). `insecure-url` is the iPad's alone (§8, https
-	/// only); the viewer shows its generic head line and this detail.
+	/// vocabulary of the shared preview-client/remote-failures.js (Clew-app
+	/// db50f57), which also words `insecure-url` — the iPad's alone (§8,
+	/// https only).
 	var code: String {
 		switch self {
 		case .insecureURL: return "insecure-url"
@@ -192,7 +192,9 @@ enum RemotePdfError: Error, Equatable {
 		case .connectTimeout: return "no connection within \(Int(RemotePdfPolicy.connectTimeout)) s"
 		case .headersTimeout: return "no answer within \(Int(RemotePdfPolicy.headersTimeout)) s"
 		case .totalTimeout: return "not finished within \(Int(RemotePdfPolicy.totalTimeout)) s"
-		case .tooLarge(let cap): return "larger than \(cap / 1_000_000) MB"
+		// The viewer's head line states no size (Clew-app db50f57): the
+		// iPad's cap (§8) is said here.
+		case .tooLarge(let cap): return "larger than the \(cap / 1_000_000) MB a web PDF may be"
 		case .httpStatus(let status): return "the site answered \(status)"
 		case .htmlAnswer: return "the site answered with a web page, not a PDF — it may need you to sign in"
 		}

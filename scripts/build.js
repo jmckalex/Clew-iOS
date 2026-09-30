@@ -271,8 +271,10 @@ const xtermStub = path.join(root, 'src', 'shim', 'xterm-stub.js');
 // The app page has no `process` (see bufferInject), so a vendored module
 // that reads it at load time throws before the shim installs — the app
 // boots to nothing. A reference is fine only behind `typeof process`
-// (Lezer's LOG check is the one today); any other fails the BUILD, naming
-// the code, rather than the boot on a device.
+// (Lezer's LOG check is the one today; fs-utils.js reads
+// `globalThis.process?.env`, which is not a bare reference, since Clew-app
+// 5306e93 retired our define); any other fails the BUILD, naming the code,
+// rather than the boot on a device.
 function assertNoBareProcess(file) {
 	const text = fs.readFileSync(file, 'utf8');
 	const bare = [];
@@ -283,7 +285,7 @@ function assertNoBareProcess(file) {
 	}
 	if (bare.length) {
 		throw new Error(`[build] the app bundle reads \`process\` unguarded (${bare.length}×) — it has no process, so it would fail at boot:\n  `
-			+ bare.join('\n  ') + '\n  Give it a `define` in buildAppBundle (scripts/build.js).');
+			+ bare.join('\n  ') + '\n  Guard it upstream (globalThis.process?.…), or give it a `define` in buildAppBundle (scripts/build.js).');
 	}
 }
 
@@ -303,10 +305,6 @@ export async function buildAppBundle({ minify = true } = {}) {
 		// packages at module scope (see src/shim/xterm-stub.js).
 		alias: { ...builtinAlias, '@xterm/xterm': xtermStub, '@xterm/addon-fit': xtermStub, '@xterm/addon-unicode11': xtermStub },
 		inject: bufferInject,
-		// fs-utils.js reads CLEW_WATCH_BUDGET (a desktop scenario's forced
-		// watcher budget, Clew-app b9e5416) at load. iOS has no watcher and
-		// no environment: `Number(undefined) || 0` is desktop's default.
-		define: { 'process.env.CLEW_WATCH_BUDGET': 'undefined' },
 		plugins: [rendererPatches],
 		minify,
 		sourcemap: false,
