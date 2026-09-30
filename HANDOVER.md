@@ -1,16 +1,27 @@
-# Handover — 2026-09-30 (sync #2 to Clew-app cd8c311 verified, NOT pushed; sync #1 is live)
+# Handover — 2026-09-30 (sync #2 live; the PDF Swift half on a branch)
 
-**SYNC #2 (2026-09-30, overnight) — waits on the owner's push decision:**
-the chain `synctab-p1-vendor` (f14d51f) → `synctab-p2-verify` takes the
-vendor to Clew-app `cd8c311` (the watchdog, Pencil/handles and scene PDFs
-upstream — retiring 4 patches and two iOS preview modules — kanban
-widening, map measuring, LaTeX's tabbing). Every check passed in the
-simulator; `UPSTREAM-CD8C311-PLAN.md` has the results and two findings
-(WebKit's kanban width; no touch route to the map's distance tool).
-`main` is NOT fast-forwarded: push = the owner's morning decision (for
-sync #1 it was "push if all checks pass"; not for this one). 10 guarded
-patches on that branch. When the push is decided: fast-forward `main` to
-the p2 tip, push, watch the build.
+**LATEST (2026-09-30, afternoon):**
+- **Sync #2 is LIVE**: origin/main = `09ce3f2` (vendor at Clew-app
+  `cd8c311`), pushed on the owner's decision via Clew-boss; its Xcode
+  Cloud build SUCCEEDED (https://github.com/jmckalex/Clew-iOS/runs/109954480606).
+  Record: `UPSTREAM-CD8C311-PLAN.md`.
+- **PDF unification, Swift half — branch `pdf-native-p1` (65d2708), NOT
+  pushed, must merge WITH the next sync** (Clew-app
+  `docs/dev/pdf-unification.md`, owner-approved): native fetcher
+  (Network.framework, pinned + SNI to the original host, the address guard,
+  https only, 50 MB), device cache in Library/Caches, the
+  `__clew_remote_pdf__/<hash>` route, bridge methods, Quick Look PDF thumbs,
+  the navigation-response PDF leak check (makes a note's own `<iframe
+  src=x.pdf>` go blank until the shared rewrite lands — hence "with the
+  sync"), and subframes no longer load clew-app:// (frame-bridge §2.7).
+  `npm run test:swift` — 140 defensive tests (fakes only, never a network).
+- **Measured**: WebKit honours a CSP on WKURLSchemeHandler responses, the
+  <meta> tag AND the response header (`script-src 'none'` blocked inline
+  and external scripts) — frame-bridge §4.4 is enforceable on iOS.
+- **Security finding sent to Clew-boss/Clew-app**: a note's metadata
+  header (`Load javascript` → runInThisContext; `Load extensions` /
+  `Load environments` → dynamic import) runs vault code at RENDER time —
+  Node on desktop. To be gated engine-side in restricted vaults (§4).
 
 **NOW (2026-09-30, overnight):** the upstream 0.11.1 sync ran p1 → p4 on
 `sync111-p1-vendor … sync111-p4-verify` — vendor at Clew-app `84f975e`
