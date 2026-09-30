@@ -1,56 +1,37 @@
-# Handover — 2026-09-30 (sync #2 live; PDF, trust and keyboard fixes on branches for the next sync)
+# Handover — 2026-09-30 (sync #3 executed through p4, waiting for the owner's push decision)
 
-**RESUME HERE (2026-09-30, evening; paused cleanly for a machine reboot):**
-- The tree is clean. Nothing is in progress, nothing is stashed, and the
-  simulator is shut down.
-- `main` = local HEAD (origin/main = `09ce3f2`, sync #2, live). Only
-  `[ci skip]` HANDOVER commits sit ahead of origin.
-- Three branches are waiting. None is pushed, and ALL go in the NEXT sync:
-  - `fix-keyboard-layout` (`2eeb902`, off main)
-  - `pdf-native-p1` (`65d2708`)
-  - `trust-native-p1` (`0582d76`, chained after pdf-native-p1)
-- The next sync's range is Clew-app `cd8c311`..(PDF phase 3). Clew-boss
-  calls it after Clew-app's phase 3 lands. The tasks at that sync are in
-  the bullets below.
+**RESUME HERE (2026-09-30, night): sync #3 is DONE through p4 and NOT
+PUSHED.** The record is `UPSTREAM-18C5E45-PLAN.md` (pin, range, results,
+findings, and the owner's iPad checklist).
+- The chain: `sync3-p1-vendor` → `sync3-p2-build` → `sync3-p3-contract`
+  → `sync3-p4-verify` (the tip; it carries this HANDOVER).
+- It covers Clew-app `cd8c311..18c5e45` (vendored from `git archive
+  18c5e45`, byte-verified), plus `fix-keyboard-layout`, `pdf-native-p1`,
+  `trust-native-p1` and the dry-run fixes. Those three branches are
+  merged and need nothing more.
+- `main` = the last `[ci skip]` HANDOVER commit before the sync. Keep it
+  that way until the push decision, so it can fast-forward to the chain's
+  tip. origin/main = `09ce3f2`.
+- **To push, on the owner's decision relayed by Clew-boss:**
+  `git switch main && git merge --ff-only sync3-p4-verify && git push`,
+  then watch the Xcode Cloud run. The tip's message must NOT carry the
+  skip marker, or the build is skipped. The chain's commits all carry it,
+  so push the tip with an empty commit that doesn't, as 7a34dd3 did.
 - Pushes are TestFlight releases and need the OWNER's decision, which
   arrives via Clew-boss. Never push on your own. Clew-boss may approve
   syncs and iOS work. Design questions go to the owner through Clew-boss.
   When a task finishes, report it to Clew-boss (SendMessage).
-- **Dry run (2026-09-30, after the reboot; read-only, done in a throwaway
-  worktree):** Clew-app's tip `0c077a9` (cd8c311..0c077a9 plus 0.11.2;
-  PDF phase 3 not yet landed) was vendored over `trust-native-p1`. Every
-  guarded build patch still matches. Two iOS-side fixes are needed at
-  the sync, both APPROVED by Clew-boss as part of the sync plan (not a
-  separate push):
-  1. 06f5e70's shell panel imports `@xterm/addon-unicode11` and sets
-     `term.unicode.activeVersion`. Add the package to build.js's xterm
-     alias (→ `src/shim/xterm-stub.js`). In the stub, give `Terminal` a
-     `unicode = { activeVersion: '6', versions: ['6'] }` and export an
-     inert `Unicode11Addon { activate() {} dispose() {} }`.
-  2. e4f416d moved `@begin(tabbing)` in `seed-vault/Guide/Tabbing.md`
-     from line 95 to 102. `tests/engine-worker.test.js:73` hard-codes
-     the line.
-  With both applied: build OK and 681/681. Repeated at `5fa98b8`, which adds
-  ac6e9cc, the Meta Bind `locked` widget (engine + preview-client
-  meta-bind.js, preview.css, demo Guide/Widgets.md): the same two fixes,
-  build OK, 681/681, and no patch touches those files. Repeated at
-  `e80e583` (Meta Bind Enter-commits; client.js carries an open lock
-  across a re-render; shared/frontmatter.js writes a value with a
-  newline or tab double-quoted with escapes, and query-fences#clean
-  decodes it): same result, build OK, 681/681. Still to come before the
-  pin: PDF phase 3. Repeat the dry run at the pin.
-  **p4, with the iPad's SOFTWARE keyboard:**
-  - Return in a Meta Bind text or number field commits once. This checks
-    that the return key sends Enter.
-  - A textArea keeps its newline and writes `"one\ntwo"` into the
-    frontmatter.
-  - After that, later writes still land. A bare newline used to block
-    them silently.
-  **p4 on the owner's iPad also gets:** tap the Meta Bind padlock with a
-  finger. It is 44 px under `pointer: coarse`; `inert` holds while it is
-  locked, and it relocks on commit, blur, or re-render.
+- p4 found and fixed a BOOT break: the vendored `fs-utils.js` reads
+  `process.env` at load. The fix is a `define` in `buildAppBundle`, plus a
+  build tripwire for any unguarded `process` in the app bundle.
+- Upstream candidates are in the record's Findings: the four-column
+  kanban at 826 px (measured fix: `box-sizing: border-box`), the
+  fs-utils `process` guard, and the iPad wording for `too-large` and
+  `insecure-url`.
 - If `simctl` hangs, CoreSimulatorService is wedged. A reboot or
   `killall -9 com.apple.CoreSimulator.CoreSimulatorService` clears it.
+- History below this block (the three branches' notes, sync #2) is what
+  led up to the sync. The dry runs' two fixes are in the record's table.
 
 **LATEST (2026-09-30, afternoon):**
 - **Sync #2 is LIVE**: origin/main = `09ce3f2` (vendor at Clew-app

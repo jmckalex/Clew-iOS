@@ -268,11 +268,30 @@ const rendererPatches = {
 const bufferInject = [path.join(shims, 'buffer-inject.js')];
 const xtermStub = path.join(root, 'src', 'shim', 'xterm-stub.js');
 
+// The app page has no `process` (see bufferInject), so a vendored module
+// that reads it at load time throws before the shim installs — the app
+// boots to nothing. A reference is fine only behind `typeof process`
+// (Lezer's LOG check is the one today); any other fails the BUILD, naming
+// the code, rather than the boot on a device.
+function assertNoBareProcess(file) {
+	const text = fs.readFileSync(file, 'utf8');
+	const bare = [];
+	for (const m of text.matchAll(/(?<![\w$.])process(?=\s*[.[])/g)) {
+		if (!text.slice(Math.max(0, m.index - 80), m.index).includes('typeof process')) {
+			bare.push(text.slice(Math.max(0, m.index - 60), m.index + 60));
+		}
+	}
+	if (bare.length) {
+		throw new Error(`[build] the app bundle reads \`process\` unguarded (${bare.length}×) — it has no process, so it would fail at boot:\n  `
+			+ bare.join('\n  ') + '\n  Give it a `define` in buildAppBundle (scripts/build.js).');
+	}
+}
+
 export async function buildAppBundle({ minify = true } = {}) {
 	// The renderer runs unmodified; the entry evaluates the shim first. The
 	// vendored main-process services (indexer, search, kv-store, …) resolve
 	// node:fs/node:path onto the same vfs the shim's VaultManager fills.
-	return build({
+	const result = await build({
 		entryPoints: [path.join(root, 'src', 'shim', 'entry.js')],
 		bundle: true,
 		platform: 'browser',
@@ -284,12 +303,18 @@ export async function buildAppBundle({ minify = true } = {}) {
 		// packages at module scope (see src/shim/xterm-stub.js).
 		alias: { ...builtinAlias, '@xterm/xterm': xtermStub, '@xterm/addon-fit': xtermStub, '@xterm/addon-unicode11': xtermStub },
 		inject: bufferInject,
+		// fs-utils.js reads CLEW_WATCH_BUDGET (a desktop scenario's forced
+		// watcher budget, Clew-app b9e5416) at load. iOS has no watcher and
+		// no environment: `Number(undefined) || 0` is desktop's default.
+		define: { 'process.env.CLEW_WATCH_BUDGET': 'undefined' },
 		plugins: [rendererPatches],
 		minify,
 		sourcemap: false,
 		logLevel: 'warning',
 		metafile: true,
 	});
+	assertNoBareProcess(path.join(webroot, 'bundle.js'));
+	return result;
 }
 
 // The one iOS-only addition to the preview-side bundles, from src/preview/,
