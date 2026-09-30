@@ -30,8 +30,15 @@
   2. e4f416d moved `@begin(tabbing)` in `seed-vault/Guide/Tabbing.md`
      from line 95 to 102. `tests/engine-worker.test.js:73` hard-codes
      the line.
-  With both applied: build OK and 681/681. The same check should be
-  repeated when phase 3 lands.
+  With both applied: build OK and 681/681. Repeated at `5fa98b8`, which adds
+  ac6e9cc, the Meta Bind `locked` widget (engine + preview-client
+  meta-bind.js, preview.css, demo Guide/Widgets.md): the same two fixes,
+  build OK, 681/681, and no patch touches those files. Still to come
+  before the pin: Meta Bind Enter-commits (shared preview-client), then
+  PDF phase 3. Repeat the dry run at the pin.
+  **p4 on the owner's iPad also gets:** tap the Meta Bind padlock with a
+  finger. It is 44 px under `pointer: coarse`; `inert` holds while it is
+  locked, and it relocks on commit, blur, or re-render.
 - If `simctl` hangs, CoreSimulatorService is wedged. A reboot or
   `killall -9 com.apple.CoreSimulator.CoreSimulatorService` clears it.
 
