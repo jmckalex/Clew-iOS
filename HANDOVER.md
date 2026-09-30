@@ -33,9 +33,19 @@
   With both applied: build OK and 681/681. Repeated at `5fa98b8`, which adds
   ac6e9cc, the Meta Bind `locked` widget (engine + preview-client
   meta-bind.js, preview.css, demo Guide/Widgets.md): the same two fixes,
-  build OK, 681/681, and no patch touches those files. Still to come
-  before the pin: Meta Bind Enter-commits (shared preview-client), then
-  PDF phase 3. Repeat the dry run at the pin.
+  build OK, 681/681, and no patch touches those files. Repeated at
+  `e80e583` (Meta Bind Enter-commits; client.js carries an open lock
+  across a re-render; shared/frontmatter.js writes a value with a
+  newline or tab double-quoted with escapes, and query-fences#clean
+  decodes it): same result, build OK, 681/681. Still to come before the
+  pin: PDF phase 3. Repeat the dry run at the pin.
+  **p4, with the iPad's SOFTWARE keyboard:**
+  - Return in a Meta Bind text or number field commits once. This checks
+    that the return key sends Enter.
+  - A textArea keeps its newline and writes `"one\ntwo"` into the
+    frontmatter.
+  - After that, later writes still land. A bare newline used to block
+    them silently.
   **p4 on the owner's iPad also gets:** tap the Meta Bind padlock with a
   finger. It is 44 px under `pointer: coarse`; `inert` holds while it is
   locked, and it relocks on commit, blur, or re-render.
