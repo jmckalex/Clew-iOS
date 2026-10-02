@@ -14,6 +14,7 @@ import { planOpen, pathFromFileUrl } from '../../vendor/clew/main/open-file.js';
 import { direntKind, shouldRecurse, walkGuard } from '../../vendor/clew/main/fs-utils.js';
 import { listSnapshots, readSnapshot } from '../../vendor/clew/main/history.js';
 import { rewritePdfFrames } from '../../vendor/clew/main/pdf-frames-rewrite.js';
+import { ConflictCenter } from './conflicts.js';
 // The ENGINE's callout modules (jmarkdown a7de8c6), the pure ones only:
 // callouts.js would pull config-manager (fs) into the app page, and
 // desktop's main/callout-types.js reads its icon table from disk.
@@ -145,6 +146,8 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 		// every preview URL the render service writes carries it.
 		onSession: (sid) => { renderService.sessionId = sid; },
 		onOpen: (root) => {
+			conflicts.reset();
+			setTimeout(announceConflicts, 0); // once the open has finished
 			// The device's trust first: the first standby's engine config
 			// carries `Run note code` (desktop session.js does the same
 			// before the render service opens the vault).
@@ -164,8 +167,13 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 			renderService.onFileChanged(rel);
 			indexer.onFileChanged(rel);
 			if (rel === KV_FILE) kvStore.externalChange();
+			conflicts.scan([], [rel]); // a git merge's markers arriving
 		},
-		onStructureChanged: () => indexer.onStructureChanged(),
+		onStructureChanged: () => {
+			indexer.onStructureChanged();
+			// A Dropbox copy, or a note with git markers, arriving new.
+			conflicts.scan(mirrorPaths());
+		},
 	};
 
 	// A renderer-originated save must ripple exactly like a watcher 'change'
@@ -178,6 +186,25 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 	const structureChanged = () => {
 		send(CH.EV_TREE_CHANGED, { tree: vaults.tree() });
 		vaults.hooks.onStructureChanged?.();
+	};
+
+	// ---- edit-conflict safety (conflicts.js) --------------------------------
+	// A refused save, iCloud's conflict versions, Dropbox's conflicted copies
+	// and git markers: both versions kept in .clew/history, then the user
+	// chooses (the app page's sheet, conflict-sheet.js).
+	const conflicts = new ConflictCenter({ vaults, fileChanged, structureChanged });
+	vaults.hooks.isHeld = (rel) => conflicts.isHeld(rel);
+	vaults.hooks.onWriteConflict = (rel, versions) => conflicts.onWriteConflict(rel, versions);
+	vaults.hooks.onHeldDiskChange = (rel, theirs) => conflicts.onHeldDiskChange(rel, theirs);
+	vaults.hooks.onCloudConflicts = (rels) => conflicts.onCloudConflicts(rels);
+	/** Every vault file path in the mirror (the conflict scans). */
+	const mirrorPaths = () => [...vfs.files.keys()]
+		.filter((abs) => abs.startsWith(`${VAULT_ROOT}/`) && !abs.startsWith(`${VAULT_ROOT}/.clew/`))
+		.map((abs) => abs.slice(VAULT_ROOT.length + 1));
+	/** After a vault is up: what it arrived with. */
+	const announceConflicts = () => {
+		conflicts.onCloudConflicts(vaults.openCloudConflicts ?? []);
+		conflicts.scan(mirrorPaths());
 	};
 	// clewdata.json sits in the vault root, in the explorer: its first write
 	// shows it at once (Clew-app 5077207's rule — a new file Clew writes is
@@ -763,7 +790,7 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 		get sessionId() { return vaults.sessionId; },
 	};
 
-	return { clew, native, send, services: { vaults, indexer, renderService, kvStore, searchService, settings } };
+	return { clew, native, send, conflicts, services: { vaults, indexer, renderService, kvStore, searchService, settings } };
 }
 
 export { CH, VAULT_ROOT, toBase64 };

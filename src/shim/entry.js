@@ -4,3 +4,4 @@
 import './install-shim.js';
 import '../../vendor/clew/renderer/main.js';
 import './ios-ui.js';
+import './conflict-sheet.js';

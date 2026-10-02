@@ -93,7 +93,7 @@ export class VaultManager {
 
 	async open(vaultPath) {
 		this.close();
-		const { name, path: realPath, files, globalPlugins, sessionId, callerToken, trusted } = await bridgeCall('vaultOpen', { path: vaultPath });
+		const { name, path: realPath, files, globalPlugins, sessionId, callerToken, trusted, cloudConflicts } = await bridgeCall('vaultOpen', { path: vaultPath });
 		this.realPath = realPath;
 		this.name = name;
 		// Minted natively per opening: preview URLs carry the sid, and the
@@ -101,6 +101,8 @@ export class VaultManager {
 		this.sessionId = sessionId ?? null;
 		this.callerToken = callerToken ?? null;
 		this.trusted = trusted === true;
+		// Opened with iCloud conflicts outstanding: said once the vault is up.
+		this.openCloudConflicts = Array.isArray(cloudConflicts) ? cloudConflicts : [];
 		this.hooks.onSession?.(this.sessionId);
 		vfs.mkdir(VAULT_ROOT);
 		for (const [rel, entry] of Object.entries(files)) {
@@ -128,7 +130,7 @@ export class VaultManager {
 		vfs.onWrite = (abs, data) => {
 			const rel = this.#relOf(abs);
 			if (rel === null || typeof data !== 'string' || isAtomicTemp(rel)) return;
-			this.#enqueue(() => bridgeCall('write', { vault: this.realPath, rel, text: data }));
+			this.#writeText(rel, data);
 		};
 		vfs.onMkdir = (abs) => {
 			const rel = this.#relOf(abs);
@@ -150,8 +152,7 @@ export class VaultManager {
 					console.error(`[clew-ios] atomic write of a non-text file is not supported: ${newRel}`);
 					return;
 				}
-				const text = entry.data;
-				this.#enqueue(() => bridgeCall('write', { vault: this.realPath, rel: newRel, text }));
+				this.#writeText(newRel, entry.data);
 				return;
 			}
 			this.#enqueue(() => bridgeCall('rename', { vault: this.realPath, rel, newRel }));
@@ -211,6 +212,20 @@ export class VaultManager {
 		return abs.slice(VAULT_ROOT.length + 1);
 	}
 
+	/** A text file's mirror content to the device. A note in conflict
+	 *  (conflicts.js) is held: its saves stay in the mirror until the user
+	 *  chooses which version to keep. */
+	#writeText(rel, text) {
+		if (this.hooks.isHeld?.(rel)) return;
+		this.#enqueue(async () => {
+			const answer = await bridgeCall('write', { vault: this.realPath, rel, text });
+			// Native refused: the file changed elsewhere since it was last
+			// seen, and differs. Nothing was written; both versions go to
+			// conflicts.js, which keeps them and asks.
+			if (answer?.conflict) this.hooks.onWriteConflict?.(rel, { mine: text, theirs: answer.disk ?? '' });
+		});
+	}
+
 	#enqueue(job) {
 		this.#pendingWrites++;
 		this.#flushQueue = this.#flushQueue
@@ -221,6 +236,14 @@ export class VaultManager {
 
 	/** Resolves when every queued native write has landed. */
 	flush() { return this.#flushQueue; }
+
+	/** The user's "keep mine" after a conflict: written over whatever is on
+	 *  disk, through the same queue. */
+	writeForce(rel, text) {
+		this.resolve(rel);
+		this.#enqueue(() => bridgeCall('write', { vault: this.realPath, rel, text, force: true }));
+		return this.flush();
+	}
 
 	// ---- tree -------------------------------------------------------------
 
@@ -366,10 +389,18 @@ export class VaultManager {
 
 	/** Apply a native rescan diff; fires the same events/hooks the desktop
 	 *  watcher would. */
-	applyExternalDiff({ changed = {}, removed = [] }) {
+	applyExternalDiff({ changed = {}, removed = [], cloudConflicts = null }) {
 		if (!this.isOpen) return;
+		// iCloud's own conflict versions, still unresolved (VaultStore.swift).
+		if (Array.isArray(cloudConflicts)) this.hooks.onCloudConflicts?.(cloudConflicts);
 		let structure = false;
 		for (const [rel, entry] of Object.entries(changed)) {
+			// A note in conflict keeps showing the user's version until they
+			// choose; a newer disk version only updates "theirs".
+			if (this.hooks.isHeld?.(rel)) {
+				this.hooks.onHeldDiskChange?.(rel, entry.text ?? '');
+				continue;
+			}
 			const abs = `${VAULT_ROOT}/${rel}`;
 			const existed = vfs.has(abs);
 			vfs.patch(abs, entry.text ?? '', entry.mtimeMs);
