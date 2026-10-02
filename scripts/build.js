@@ -75,6 +75,22 @@ const enginePatches = {
 				+ '};\n';
 			return { contents: helper + source, loader: 'js' };
 		});
+		// admonitions.js finds the engine's callout table at runtime — a
+		// top-level `await import(<file: URL beside process.argv[1]>)`, the
+		// vendored mirror as the fallback (Clew-app 2f0ad5c). In a WebKit
+		// module worker that file: import NEVER SETTLES (no reject, so no
+		// fallback), the worker's module graph never finishes evaluating, and
+		// nothing renders at all — measured on the simulator; Node rejects at
+		// once, so the tests could not see it. In this bundle the engine and
+		// admonitions share one callout-table.js instance anyway: import it
+		// directly.
+		builder.onLoad({ filter: /vendor\/clew\/engine\/admonitions\.js$/ }, (args) => ({
+			contents: patched('admonitions.js', fs.readFileSync(args.path, 'utf8'),
+				"const { resolveType } = await import(pathToFileURL(path.join(path.dirname(process.argv[1] ?? ''), 'callout-table.js')).href)\n"
+				+ "\t.catch(() => import('#jmarkdown/callout-table.js'));\n",
+				"const { resolveType } = await import('#jmarkdown/callout-table.js');\n"),
+			loader: 'js',
+		}));
 		// algebra.js's expressions.js assigns `Term = function …` without a
 		// declaration — a sloppy-mode global under real Node CJS, a
 		// ReferenceError inside the (strict) bundle. Declare it.

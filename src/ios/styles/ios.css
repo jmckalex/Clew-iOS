@@ -203,11 +203,17 @@ body.is-ios .toolbar-button {
 body.is-ios .toolbar-segmented .toolbar-button {
 	height: 34px;
 }
-/* The view-mode switch lives in each pane's tab strip (Clew-app 80b8b44),
-   a row of tabs about 33 px tall. The buttons keep the toolbar's look; each
-   is 44 px wide and gets an invisible 44 px-tall hit area centred on it, so
-   a finger finds it without the strip growing. Hidden in place for a tab
-   with no modes (upstream's .is-unavailable). */
+/* The pane's tab strip is a finger's height on iOS (44 px; desktop 34):
+   its tabs, and since Clew-app 80b8b44 the view-mode switch, are touch
+   targets. Measured: a hit area reaching past a 34 px strip is painted
+   over by the title bar above and the editor toolbar below, and lifting
+   it over them would steal the top of the toolbar's buttons. So the strip
+   grows instead; the mode buttons keep the toolbar's look, each 44 px wide
+   with a hit area the strip's full height. Hidden in place for a tab with
+   no modes (upstream's .is-unavailable). */
+body.is-ios clew-tab-bar {
+	height: 44px;
+}
 body.is-ios .tab-modes .tab-mode {
 	position: relative;
 	min-width: 44px;

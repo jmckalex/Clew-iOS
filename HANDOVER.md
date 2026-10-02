@@ -1,37 +1,39 @@
-# Handover — 2026-10-01 (0.12.0 released on iPad; nothing in progress)
+# Handover — 2026-10-02 (the overnight sync to Clew-app 03bb33a: a pre-0.12.1 TestFlight build)
 
 Current state for a fresh session, rewritten whole. Durable architecture
 lives in **README.md** and **PORT-PLAN.md**. Each sync's reasoning and
 measurements are in its record: `UPSTREAM-*-PLAN.md`. The latest records
-are `UPSTREAM-18C5E45-PLAN.md` (sync #3) and `UPSTREAM-0.12.0-PLAN.md`
-(its follow-up). The coordinator's ledger is `~/Source/Clew/SYNC-LEDGER.md`.
+are `UPSTREAM-03BB33A-PLAN.md` (the overnight sync of 2026-10-02),
+`UPSTREAM-18C5E45-PLAN.md` (sync #3) and `UPSTREAM-0.12.0-PLAN.md`. The coordinator's ledger is `~/Source/Clew/SYNC-LEDGER.md`.
 
 ## 1. Where things stand
 
-- **0.12.0 is RELEASED.** origin/main = main = `cf3a016`, an empty release
-  commit with no skip marker on top of the verified chain. Its Xcode Cloud
-  build SUCCEEDED (2026-10-01, 08:17–08:24 UTC,
-  https://github.com/jmckalex/Clew-iOS/runs/110283714942).
-- **Vendor** is at Clew-app **`9268aa3`** (Clew-app's 0.12.0), copied from
-  `git archive 9268aa3` and byte-verified.
-- **The iPad's version is 0.12.0.** From now on it follows each Clew-app
-  release: change `Info.plist` and both `MARKETING_VERSION` lines in
-  `project.pbxproj`. Build numbers stay Xcode Cloud's.
-- **Tests:** `npm test` 686, `npm run test:swift` 154 + 23. They are
-  green, but they don't prove the app boots (§4).
-- **Nothing is in progress.** The tree is clean, and no branch is waiting:
-  every sync chain is merged into main. `sync3-p1…p4` and
-  `sync012-p1…p4` are what 0.12.0 contains.
-- **What 0.12.0 carries** (since the 0.11.1 build):
-  - PDF unification: a note's own PDF frames open in the viewer; web PDFs
-    are read-only, fetched natively, with a device cache, Save a copy and
-    Open in browser; portal thumbnails come from Quick Look.
-  - The interim vault-trust guard.
-  - The Meta Bind lock and Enter-to-commit, and frontmatter escapes.
-  - Tabbing; kanban widening (four columns fit an 826 px portrait pane).
-  - Map measuring; the watchdog; Pencil; scene PDFs.
-  - The keyboard-bar fix: the toolbars stay in reach with a hardware
-    keyboard attached.
+- **The overnight sync to Clew-app `03bb33a` (2026-10-02) is DONE, and
+  every acceptance check was green.** On the owner's instruction, relayed
+  by Clew-boss ("have it run overnight. It can push to main so that a
+  TestFlight build is waiting by the morning"), main is fast-forwarded to
+  `sync5-p4-verify` and a build commit is pushed on top. Memory and
+  Clew-boss's ledger have the pushed hash and the Xcode Cloud result.
+  The record is `UPSTREAM-03BB33A-PLAN.md`.
+- **What it carries** (since 0.12.0):
+  - callouts are the engine's, with custom callout types (Settings →
+    Callouts, global and per vault);
+  - the view-mode switch in each pane's tab strip; **the iOS tab strip is
+    44 px** (desktop 34);
+  - cite pills read what reading mode shows; `\fullcite` drawn inline;
+  - reading mode follows a .bib edit;
+  - split layouts that keep their frames;
+  - the open race fixed;
+  - ⌘1–⌘9; text brightness; bare URLs link; literal directive arguments.
+- **Vendor** is at Clew-app **`03bb33a`**, copied from `git archive
+  03bb33a` and byte-verified.
+- **Version 0.12.0.** Desktop is still 0.12.0; this is a pre-0.12.1 build.
+  The iPad follows Clew-app RELEASES: `Info.plist` and both
+  `MARKETING_VERSION` lines. Build numbers stay Xcode Cloud's.
+- **Tests:** `npm test` 706, `npm run test:swift` 154 + 23. Green, but
+  they don't prove the app renders. This sync's worker hang was invisible
+  to Node (§5).
+- **Nothing is in progress.** Every sync chain is merged into main.
 
 ## 2. Waiting on the owner
 
@@ -68,26 +70,22 @@ are `UPSTREAM-18C5E45-PLAN.md` (sync #3) and `UPSTREAM-0.12.0-PLAN.md`
 
 ## 3. Next
 
-- **The next sync's range starts at Clew-app `9268aa3`.** Known so far:
-  - `5119d93`: the Window menu, and `menu-bridge.js` gains `activeName`.
-    Probably nothing on iOS; check the shim's menu-state handling
-    (`CH.MENU_STATE`).
-  - `a3bb88c`: ⌘1–⌘9, in `builtin.js`, `registry.js#recordKeys` and the
-    Settings view, which go together. **Check at the sync** whether
-    ⌘-digits from an iPad hardware keyboard reach the web view or UIKit
-    takes them; the app registers no `UIKeyCommand`s, so WebKit should
-    get them. If the simulator can't send them, it's an iPad check.
-  - `builtin.js` carries one of our guarded patches (the `shell:toggle`
-    removal). Confirm its anchor still matches.
-- **Overdue: the `clew-bibliography` Note mode.** It listens to neither
-  refresh event (candidate 5's remainder, open on BOTH sides). iOS
-  promised a simulator check "at the next sync", and syncs #2, #3 and
-  0.12.0 did not do it. Do it at the next sync.
+- **The next sync's range starts at Clew-app `03bb33a`.**
+- **iPad checks from this sync:**
+  - the 44 px tab strip;
+  - the mode switch under a finger;
+  - ⌘1–⌘9 from a hardware keyboard (synthetic keys work in the simulator);
+  - custom callouts in Settings (the picker's cells are 34 px);
+  - a split with live block frames. Closing a pane reloads frames in the
+    panes re-inserted after it: WebKit has no `moveBefore`.
+- **Upstream candidates from this sync:**
+  - admonitions.js's `file:` import hangs in WebKit workers (iOS patches
+    it);
+  - "every vault on this Mac" in Settings → Callouts on the iPad;
+  - a shareable main/callout-types.js.
 - **Optional:** a SchemeHandler twin of desktop's document redirect
-  (Clew-app 29fa2ae: a navigation to a raw PDF goes to the viewer). Key
-  it on `Accept`: `text/html,…` for a navigation, `*/*` for EmbedPDF's
-  fetch. Until then, WebHost's navigation-response leak check blanks such
-  a frame, which is safe.
+  (Clew-app 29fa2ae). Key it on `Accept`. Until then WebHost's leak check
+  blanks a raw PDF frame, which is safe.
 
 ## 4. Standing rules (also in Claude's memory)
 
@@ -152,6 +150,11 @@ are `UPSTREAM-18C5E45-PLAN.md` (sync #3) and `UPSTREAM-0.12.0-PLAN.md`
    - Sync #3's first install booted to nothing: vendored `fs-utils.js`
      read `process.env` at load, and the app page has no `process`.
      Neither the Node tests nor the dry runs could see it.
+   - The boot check must also RENDER a note and a block
+     (`__clewNative.renderNote` / `renderBlock`, with timeouts). In the
+     03bb33a sync the app booted, but the worker never answered: a
+     `file:` import that never settles in WebKit. Every open looked fine
+     until something had to render.
    - Then fixtures, probes and screenshots (§6).
    - Then uninstall and shut down.
 6. **Record**: `UPSTREAM-<pin>-PLAN.md` (pin, range table, results,
@@ -178,8 +181,12 @@ are `UPSTREAM-18C5E45-PLAN.md` (sync #3) and `UPSTREAM-0.12.0-PLAN.md`
     --predicate 'eventMessage CONTAINS "CLEWJS"'`.
   - The log TRUNCATES a value at about 1,000 characters; split the output,
     or use kv (next bullet).
-  - Smoke JS goes through simctl quoting, so it must contain NO
-    backslashes.
+  - **Better: deliver the script with `xcrun simctl spawn <sim> defaults
+    write org.jmckalex.clew.ios ClewSmokeJS -string "$(cat script.js)"`**,
+    then launch with no argument, and `defaults delete` the key
+    afterwards. A `-ClewSmokeJS` argument is parsed as a property list,
+    which eats backslashes; `-string` keeps them, so Clew-app's scenarios
+    run nearly verbatim.
 - **Inside preview documents** (cross-origin from the app page):
   - Install a temporary preview-surface plugin at
     `<vault>/.clew/plugins/<id>/` (`manifest.json` with `surfaces.preview`)
@@ -222,13 +229,22 @@ are `UPSTREAM-18C5E45-PLAN.md` (sync #3) and `UPSTREAM-0.12.0-PLAN.md`
 
 ## 7. Build facts
 
-- **Ten guarded patches** (`patched()` in `scripts/build.js`), all matching
-  at `9268aa3`:
+- **Twelve guarded patches** (`patched()` in `scripts/build.js`), all
+  matching at `03bb33a`:
   - `builtin.js` (`shell:toggle` removed);
   - `clew-canvas-view.js` (the office Live choice);
   - `clew-editor-view.js`, `clew-file-explorer.js` and `node-content.js`;
-  - `clew-file-view.js` ×2 and `clew-settings-view.js` ×2;
-  - `tab-drag.js`.
+  - `clew-file-view.js` ×2;
+  - `clew-settings-view.js` ×3 (the CJK-font and office sections, and the
+    LaTeX engine row);
+  - `tab-drag.js`;
+  - **`admonitions.js`**: the worker imports `#jmarkdown/callout-table.js`
+    directly. Its runtime `file:` import never settles in a WebKit
+    worker, and nothing rendered.
+- **The worker applies CLEW_CALLOUTS at init** (engine-worker.js). The
+  engine's table reads it at load, which is worker start here, before the
+  env exists.
+- **`fa-icons.json`** is built into the WebRoot (writeIconTable).
 - **Other build-time pieces:**
   - The engine plugin rewrites `await import(` in `metadata-header.js` to
     a registry, and declares algebra.js's `Term`. Candidate 13, an engine

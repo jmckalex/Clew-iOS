@@ -1063,3 +1063,34 @@ test('reading mode follows a .bib edit (Clew-app a1d8de0): only the notes citing
 	await clew.invoke('clew:vault-settings-set', { key: 'bibliography', value: '' });
 	await settle();
 });
+
+test('custom callouts merge exactly as desktop\'s main/callout-types.js does, field by field', async () => {
+	// Desktop's resolver over the same icon table, from a file as it reads it.
+	const { resolvedCallouts } = await import(path.join(root, 'vendor/clew/main/callout-types.js'));
+	const table = path.join(os.tmpdir(), `clew-ios-fa-icons-${process.pid}.json`);
+	fs.writeFileSync(table, JSON.stringify(FAKE_ICONS));
+	const globalList = [
+		{ name: 'idea', icon: 'star', title: 'Global idea', color: '#111111', aliases: ['eureka'] },
+		{ name: 'bad', icon: 'nope' },
+	];
+	const vaultList = [
+		{ name: 'idea', color: '#222222' },       // the vault's colour over the global icon and title
+		{ name: 'note', color: '#333333' },       // a vault entry recolouring a built-in
+		{ name: '9lives', title: 'Not a name' },  // refused: not a callout name
+	];
+	const desktop = resolvedCallouts(globalList, vaultList, table);
+	await clew.invoke('clew:settings-set', { key: 'callouts', value: globalList });
+	await clew.invoke('clew:vault-settings-set', { key: 'callouts', value: vaultList });
+	const ios = await clew.invoke('clew:callouts-resolved');
+	assert.deepEqual(ios, desktop, 'the iPad resolves exactly as the desktop');
+	// And what that merge IS, so the comparison cannot pass vacuously.
+	assert.equal(ios.custom.idea.color, '#222222');
+	assert.equal(ios.custom.idea.label, 'Global idea');
+	assert.deepEqual(ios.custom.idea.icon, FAKE_ICONS.icons['solid:star']);
+	assert.equal(ios.custom.note.color, '#333333');
+	assert.ok(ios.problems.some((p) => p.name === 'bad' && p.skipped && /icon/.test(p.reason)), 'a refused entry, skipped, with its reason');
+	assert.ok(ios.problems.some((p) => p.skipped && /not a callout name/.test(p.reason)));
+	await clew.invoke('clew:settings-set', { key: 'callouts', value: [] });
+	await clew.invoke('clew:vault-settings-set', { key: 'callouts', value: [] });
+	fs.rmSync(table, { force: true });
+});
