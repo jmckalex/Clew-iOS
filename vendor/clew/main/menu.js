@@ -25,7 +25,7 @@ import { CH } from '../shared/channels.js';
 import { FORMAT_MENU } from '../shared/format-spec.js';
 import { settings } from './settings.js';
 import { allSessions, focusedSession, sessionForVault } from './session.js';
-import { createWindow, openVaultAnywhere, openVaultDialog, createVaultDialog, openDemoVault } from './main.js';
+import { createWindow, openVaultAnywhere, openVaultDialog, createVaultDialog, openDemoVault, focusWindow } from './main.js';
 
 const isMac = process.platform === 'darwin';
 
@@ -65,6 +65,9 @@ const defaultState = () => ({
 	rightSidebar: true,
 	shellOpen: false,
 	theme: 'dark',
+	/** the active tab's name as the title bar shows it, or null — the Window
+	 *  menu tells windows on the same vault's neighbours apart by it */
+	activeName: null,
 	/** command id → CM chord or null, from the renderer's effective keymap */
 	hotkeys: {},
 });
@@ -104,7 +107,8 @@ class AppMenu {
 			focusedSession()?.id ?? null,
 			this.#currentState(),
 			settings.get('recentVaults'),
-			allSessions().map((s) => s.vaults.root),
+			// Every window's vault and active tab: the Window menu lists them.
+			allSessions().map((s) => [s.id, s.vaults.root, this.#stateBySession.get(s)?.activeName ?? null]),
 		]);
 		if (snapshot === this.#lastBuilt) return;
 		this.#lastBuilt = snapshot;
@@ -168,6 +172,38 @@ class AppMenu {
 				},
 			},
 		];
+	}
+
+	/**
+	 * Every open window, by VAULT name (the owner's ask, 2026-10-01: nothing
+	 * else showed which vaults were open). The window's own title is "Clew"
+	 * in every window (the title bar is drawn by the page), so macOS's
+	 * automatic list would only have said "Clew" three times; this menu is
+	 * deliberately NOT role 'windowMenu', and this list is the one there is,
+	 * the same on every platform. The active tab follows the vault name, as
+	 * the title bar shows it; two vaults with one folder name are told apart
+	 * by their parent folder. The focused window is checked; choosing one
+	 * brings it forward (main.js#focusWindow).
+	 */
+	#windowItems() {
+		const sessions = allSessions().filter((s) => s.win && !s.win.isDestroyed());
+		const focused = focusedSession();
+		const names = sessions.map((s) => (s.vaults.root ? path.basename(s.vaults.root) : null));
+		return sessions.map((session, i) => {
+			const root = session.vaults.root;
+			let label = root ? names[i] : 'Welcome';
+			if (root && names.filter((n) => n === names[i]).length > 1) {
+				label += ` (${path.basename(path.dirname(root))})`;
+			}
+			const active = this.#stateBySession.get(session)?.activeName;
+			if (active) label += ` — ${active}`;
+			return {
+				label,
+				type: 'checkbox',
+				checked: session === focused,
+				click: () => focusWindow(session),
+			};
+		});
 	}
 
 	// ---- the template ------------------------------------------------------
@@ -336,6 +372,14 @@ class AppMenu {
 				{ type: 'separator' },
 				c('workspace:next-tab', 'Next Tab', { chord: 'Ctrl-Tab' }),
 				c('workspace:prev-tab', 'Previous Tab', { chord: 'Ctrl-Shift-Tab' }),
+				{
+					label: 'Tab',
+					submenu: [
+						...[1, 2, 3, 4, 5, 6, 7, 8].map((n) =>
+							c(`workspace:goto-tab-${n}`, `Tab ${n}`, { chord: `Mod-${n}`, needs: 'tab' })),
+						c('workspace:goto-last-tab', 'Last Tab', { chord: 'Mod-9', needs: 'tab' }),
+					],
+				},
 			],
 		};
 
@@ -352,6 +396,8 @@ class AppMenu {
 				{ type: 'separator' },
 				c('workspace:pin-tab', 'Pin Tab', { needs: 'tab', type: 'checkbox', checked: s.pinned }),
 				...(isMac ? [{ type: 'separator' }, { role: 'front' }] : []),
+				{ type: 'separator' },
+				...this.#windowItems(),
 			],
 		};
 

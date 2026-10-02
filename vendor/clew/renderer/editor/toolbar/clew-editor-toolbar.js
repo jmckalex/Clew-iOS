@@ -18,9 +18,8 @@
 //   - State (pressed, enabled, the block label) is PATCHED from setState —
 //     no re-render per keystroke.
 //   - Width-aware (toolbar-layout.js#layoutRows): too narrow for one row,
-//     it WRAPS onto a second, at group boundaries and in natural order, the
-//     mode switch ending row 1; only past two rows do groups go into a `…`
-//     menu, lowest priority first. One row while the visual viewport is
+//     it WRAPS onto a second, at group boundaries and in natural order; only
+//     past two rows do groups go into a `…` menu, lowest priority first. One row while the visual viewport is
 //     short (--toolbar-two-row-min-height: an iPad with its keyboard up).
 //     A change of rows reports its height delta ('toolbar-resize') so the
 //     host can hold the text still.
@@ -29,7 +28,8 @@
 //     the other row), Home/End jump, Enter/Space activate, Escape returns to
 //     the editor.
 //
-// `slim`: reading mode's bar, which holds only the mode switch.
+// The view-mode switch is not here: it is in each pane's tab strip
+// (clew-tab-bar.js) since 2026-10-01.
 import { runCommand, effectiveKeymap } from '../../commands/registry.js';
 import { prettifyChord } from '../../commands/builtin.js';
 import { icon } from '../../lib/icons.js';
@@ -73,7 +73,6 @@ function iconEl(name) {
 export class ClewEditorToolbar extends HTMLElement {
 	/** @type {object} the last state from deriveState */
 	state = { mode: 'source', inline: new Set(), blockType: 'paragraph' };
-	slim = false;
 	#controls = []; // { item, el, groupId }
 	#groups = [];
 	#observer = null;
@@ -85,7 +84,7 @@ export class ClewEditorToolbar extends HTMLElement {
 
 	connectedCallback() {
 		this.setAttribute('role', 'toolbar');
-		this.setAttribute('aria-label', this.slim ? 'View mode' : 'Formatting');
+		this.setAttribute('aria-label', 'Formatting');
 		this.classList.add('editor-toolbar');
 		toolbars.add(this);
 		this.offSettings = settingsStore.on('settings-changed', (key) => {
@@ -98,6 +97,9 @@ export class ClewEditorToolbar extends HTMLElement {
 		window.visualViewport?.addEventListener('resize', this.#onViewport);
 	}
 
+	/** Moved with its pane (moveBefore): it never left the document. */
+	connectedMoveCallback() {}
+
 	disconnectedCallback() {
 		toolbars.delete(this);
 		this.offSettings?.();
@@ -107,9 +109,7 @@ export class ClewEditorToolbar extends HTMLElement {
 
 	/** Re-render from the spec (settings or plugin buttons changed). */
 	rebuild() {
-		this.#groups = this.slim
-			? orderedGroups(null).filter((g) => g.id === 'mode')
-			: orderedGroups(settingsStore.get('editorToolbarGroups'), pluginItems);
+		this.#groups = orderedGroups(settingsStore.get('editorToolbarGroups'), pluginItems);
 		this.#controls = [];
 		this.#widths = null;
 		const frag = document.createDocumentFragment();
@@ -238,7 +238,7 @@ export class ClewEditorToolbar extends HTMLElement {
 		const before = this.#rows.length || 1;
 		const { rows, visible, overflow } = layoutRows(this.#groups, this.#widths, available, {
 			state: this.state, separator: 9, overflowButton: this.#moreWidth,
-			maxRows: this.slim || !tallEnough ? 1 : 2, previousRows: before, hysteresis: 8,
+			maxRows: tallEnough ? 2 : 1, previousRows: before, hysteresis: 8,
 		});
 		const byId = new Map(groups.map((g) => [g.dataset.group, g]));
 		for (const g of groups) {

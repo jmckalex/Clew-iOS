@@ -15,7 +15,7 @@
 import { runCommand, effectiveKeymap } from '../../commands/registry.js';
 import { prettifyChord } from '../../commands/builtin.js';
 import { FORMAT_MENU } from '../../../shared/format-spec.js';
-import { CALLOUT_TYPES, calloutIcon } from '../../../engine/callouts.js';
+import { CALLOUT_TYPES, calloutIcon, calloutColor } from '#jmarkdown/callout-table.js';
 import { fenceLanguage } from '../langs/fence-languages.js';
 import { menuItem, menuSeparator, menuHeading, openPopover } from './popover.js';
 import { TABLE_ITEMS, TABLE_MENU_EXTRA } from './toolbar-spec.js';
@@ -124,6 +124,11 @@ const BUILDERS = {
 		const rows = Object.entries(CALLOUT_TYPES).map(([type, { label }]) => {
 			const icon = document.createElement('span');
 			icon.className = `popover-icon le-callout-${type} le-callout-marker`;
+			const color = calloutColor(type);
+			if (color) {
+				icon.classList.add('le-callout-custom');
+				icon.style.setProperty('--clew-callout-color', color);
+			}
 			icon.innerHTML = calloutIcon(type);
 			return menuItem(label, () => { close(); runCommand('format:callout', { type, fold: fold.value }); }, { icon });
 		});

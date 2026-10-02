@@ -12,7 +12,8 @@
 // cached by the hash of its text (render-service.js), which is only right
 // when the text is all it renders from. A transclusion (`![[Note]]`, and a
 // canvas or a .base through the same syntax), a vault query, a Meta Bind
-// widget reading a note's fields, or an `@reveal` of a vault folder all put
+// widget reading a note's fields, an `@reveal` of a vault folder, or a
+// citation (`\cite{…}` and kin read the bibliography) all put
 // something else's content in the result — so such a fragment must not be
 // served from the cache once any file has changed.
 //
@@ -26,6 +27,7 @@ const DEPENDENT = new RegExp([
 	'^[ \\t]*(?:```|~~~)[ \\t]*(?:query|tasks|kanban|dataview|dataviewjs|base|leaflet)\\b', // vault-reading fences
 	'\\b(?:INPUT|VIEW)\\[',                                           // Meta Bind
 	'@reveal\\b',                                                     // @reveal[…]
+	'\\\\[a-z]*cite[a-z]*\\*?\\s*[\\[{]',                             // \cite{, \citep[, \fullcite{…: reads the .bib
 ].join('|'), 'm');
 
 /**

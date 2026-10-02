@@ -46,6 +46,13 @@ export const CH = {
 	PLUGINS_LIST: 'clew:plugins-list',
 	PLUGINS_REVEAL_GLOBAL: 'clew:plugins-reveal-global',
 	VAULT_SETTINGS_SET: 'clew:vault-settings-set',
+	// invoke: custom callout types for the window's vault, both scopes
+	// resolved (main/callout-types.js) → { custom, problems }.
+	CALLOUTS_RESOLVED: 'clew:callouts-resolved',
+	// invoke: the Font Awesome table, for Settings only — whole for the icon
+	// picker → { version, icons: { 'solid:pencil': [w, h, d], … } }, or
+	// { names } → { version, icons: { name: { key, icon: [w, h, d] } } }.
+	CALLOUT_ICONS: 'clew:callout-icons',
 	// invoke: this device's trust in the window's vault (main/vault-trust.js):
 	// GET → { trusted, refused: [names] }; SET { trusted } → { trusted }.
 	VAULT_TRUST_GET: 'clew:vault-trust-get',
@@ -115,6 +122,9 @@ export const CH = {
 	EV_NOTE_CODE_REFUSED: 'clew:ev-note-code-refused',
 	// This window's vault was trusted or revoked: { trusted }.
 	EV_VAULT_TRUST_CHANGED: 'clew:ev-vault-trust-changed',
+	// Custom callout types changed — in Settings, or a hand edit of the
+	// vault's vault-settings.json: re-ask CALLOUTS_RESOLVED. No payload.
+	EV_CALLOUTS_CHANGED: 'clew:ev-callouts-changed',
 	// The shell panel: one real shell per window (main/shell-core.js).
 	SHELL_OPEN: 'clew:shell-open',
 	SHELL_WRITE: 'clew:shell-write',

@@ -43,8 +43,9 @@
 // Pure: no DOM, no view. Memoised per document version.
 import { syntaxTree, ensureSyntaxTree } from '@codemirror/language';
 import { scanFor } from '../jmd/scan-cache.js';
+import { LITERAL_DIRECTIVES } from '../jmd/jmarkdown-scan.js';
 import { MATH_ENVIRONMENT_NAMES } from '../jmd/math-segments.js';
-import { resolveType } from '../../../engine/callouts.js';
+import { resolveType, calloutGeneration } from '#jmarkdown/callout-table.js';
 import { IMAGE_EXT } from '../../../shared/file-types.js';
 import { headerlessTables } from '../tables.js';
 import {
@@ -56,7 +57,7 @@ import {
 const MATH_ENVS = new Set(MATH_ENVIRONMENT_NAMES);
 const isMathEnv = (name) => MATH_ENVS.has(name.replace(/\*$/, ''));
 
-/** The engine's callout opener (src/engine/callouts.js), after the `>`s. */
+/** The engine's callout opener (jmarkdown's callouts.js), after the `>`s. */
 const CALLOUT_HEAD = /^[ \t]*\[!([A-Za-z][\w-]*)\][ \t]*([+-]?)[ \t]*(.*)$/;
 /** The engine's alignment rules (syntax-enhancements.js). */
 const ALIGN_CENTER = /^>> .*<<\s*$/;
@@ -76,7 +77,9 @@ const cache = new WeakMap();
  */
 export function liveModel(state, config = {}) {
 	const tree = ensureSyntaxTree(state, state.doc.length, 50) ?? syntaxTree(state);
-	const key = `${config.normalSyntax === true}|${(config.richFences ?? []).join(',')}`;
+	// The callout table is part of the key: a type defined in Settings
+	// (the engine's callout-table.js#applyCustomCallouts) changes what `[!x]` is.
+	const key = `${config.normalSyntax === true}|${(config.richFences ?? []).join(',')}|${calloutGeneration()}`;
 	const hit = cache.get(state.doc);
 	if (hit && hit.tree === tree && hit.key === key) return hit.list;
 	const list = build(state.doc, tree, config);
@@ -179,6 +182,7 @@ function build(doc, tree, config) {
 
 	// ---- the tree ----------------------------------------------------------
 	const quoteLines = new Map(); // line.from → {marks: Range[], depth, callout}
+	const bareUrls = [];
 	tree.iterate({
 		enter(ref) {
 			const { name, from, to } = ref;
@@ -246,6 +250,17 @@ function build(doc, tree, config) {
 					add('autolink', 'A', 'inline', from, to, {
 						url: url ? text(url.from, url.to) : '', hidden: marks.map(rangeOf),
 					});
+					return false;
+				}
+				case 'URL': {
+					// A BARE URL or address (GFM's autolink extension, and
+					// jmd/ftp-autolink.js for ftp://). The engine links them
+					// too since jmarkdown 3134543. A URL inside a link, image
+					// or <autolink> is theirs.
+					const parent = node.parent?.name;
+					if (parent !== 'Link' && parent !== 'Image' && parent !== 'Autolink' && parent !== 'LinkReference') {
+						bareUrls.push({ from, to });
+					}
 					return false;
 				}
 				case 'Link':
@@ -327,7 +342,10 @@ function build(doc, tree, config) {
 		if (!ALIGN_RIGHT.test(first.text)) {
 			const afterMarks = stripQuotes(first.text, depth);
 			const m = afterMarks && CALLOUT_HEAD.exec(afterMarks.rest);
-			const type = m && resolveType(m[1]);
+			// As the engine's tokenizer reads it: a type known by name or alias,
+			// else an UNKNOWN type — drawn as a note (pencil, note's colour),
+			// titled with its name (jmarkdown a7de8c6, Obsidian's behaviour).
+			const type = m && (resolveType(m[1]) ?? m[1].toLowerCase());
 			if (type) {
 				const headFrom = first.from + afterMarks.offset + (afterMarks.rest.length - afterMarks.rest.trimStart().length);
 				const titleFrom = first.to - m[3].length;
@@ -343,6 +361,10 @@ function build(doc, tree, config) {
 				for (let n = first.number; n <= last.number; n += 1) {
 					const entry = quoteLine(doc.line(n).from);
 					entry.callout = type;
+					// Its box's top and bottom (padding, corners), on each line's
+					// own record — a line in view knows without its head in view.
+					entry.calloutFirst = n === first.number;
+					entry.calloutLast = n === last.number;
 				}
 			}
 		}
@@ -430,6 +452,7 @@ function build(doc, tree, config) {
 		const last = entry.marks[entry.marks.length - 1];
 		add('quote', 'A', 'line', from, line.to, {
 			depth: entry.marks.length, callout: entry.callout,
+			...(entry.callout ? { calloutFirst: entry.calloutFirst, calloutLast: entry.calloutLast } : {}),
 			hidden: [{ from: entry.marks[0].from, to: skipSpace(doc, last.to, line.to, 1) }],
 		});
 	}
@@ -531,6 +554,23 @@ function build(doc, tree, config) {
 			}
 			default:
 		}
+	}
+
+	// Bare URLs, where the engine sees prose: not inside a construct the
+	// scanner owns (a wikilink, maths, a citation, a {{var}}) nor in a
+	// directive's bracket the engine takes literally (`@reveal[https://…]`).
+	const owned = scan.constructs.flatMap((s) => {
+		if (s.kind === 'directiveInline' || s.kind === 'directiveAt') {
+			const name = s.name ? text(s.name.start, s.name.end) : '';
+			return LITERAL_DIRECTIVES.has(name) ? [{ from: s.start, to: s.end }] : [];
+		}
+		return ['wikilink', 'embed', 'math', 'cite', 'mustache'].includes(s.kind) ? [{ from: s.start, to: s.end }] : [];
+	});
+	for (const { from, to } of bareUrls) {
+		if (owned.some((r) => from >= r.from && to <= r.to)) continue;
+		const url = text(from, to);
+		const href = /^[a-z][a-z0-9+.-]*:/i.test(url) ? url : /^www\./i.test(url) ? `http://${url}` : `mailto:${url}`;
+		add('url', 'A', 'inline', from, to, { url: href, hidden: [] });
 	}
 
 	out.sort((a, b) => a.from - b.from || b.to - a.to);

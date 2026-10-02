@@ -45,7 +45,7 @@ function cssVar(name, fallback) {
 function terminalTheme() {
 	return {
 		background: cssVar('--clew-bg-primary', '#1e1e1e'),
-		foreground: cssVar('--clew-text-normal', '#dadada'),
+		foreground: cssVar('--clew-text-normal', '#e8e8e8'),
 		cursor: cssVar('--clew-accent', '#8b7ec8'),
 		cursorAccent: cssVar('--clew-bg-primary', '#1e1e1e'),
 		selectionBackground: cssVar('--clew-selection', 'rgba(139,126,200,0.35)'),

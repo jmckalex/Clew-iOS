@@ -125,7 +125,7 @@ const safeDecode = (s) => { try { return decodeURI(s); } catch { return s; } };
  *   previews that note's section), and — for a reference — what its label's
  *   host renders as (live/numbering.js#labelPreview)
  * @returns {null
- *   | { kind: 'block', path: string, text: string, label: string }
+ *   | { kind: 'block', path: string, text: string, label: string, cite?: string[] }
  *   | { kind: 'image', path: string, label: string }
  *   | { kind: 'unresolved', name: string, label: string }}
  *   `block`: render `text` through the block endpoint; null: no popover
@@ -143,10 +143,14 @@ export function previewSpec(link, resolve) {
 			return { kind: 'unresolved', name: link.keys[0], label: link.keys.join('; '), message: `No entry “${link.keys[0]}” in the vault’s .bib files`, hint: 'Citation completion lists the keys there are' };
 		}
 		const label = known.map((f) => f.entry.label).join('; ');
+		// `cite`: the keys the popover's button shows in the References
+		// panel's Library — never the note path, which the button would
+		// otherwise "open" (the note already open: nothing happened).
+		const cite = known.map((f) => f.key);
 		if (resolve.fullcite) {
-			return { kind: 'block', path: resolve.current, text: known.map((f) => `\\fullcite{${f.key}}`).join('\n\n'), label };
+			return { kind: 'block', path: resolve.current, text: known.map((f) => `\\fullcite{${f.key}}`).join('\n\n'), label, cite };
 		}
-		return { kind: 'unresolved', name: link.keys[0], label, message: known.map((f) => `${f.entry.label} — ${f.entry.title}`).join('\n'), hint: 'Name a bibliography in this vault’s settings to see it formatted' };
+		return { kind: 'unresolved', name: link.keys[0], label, cite, message: known.map((f) => `${f.entry.label} — ${f.entry.title}`).join('\n'), hint: 'Name a bibliography in this vault’s settings to see it formatted' };
 	}
 	if (link.kind === 'xref') {
 		const host = resolve.label?.(link.key) ?? null;

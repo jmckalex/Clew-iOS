@@ -14,13 +14,14 @@ import { ClewElement } from '../base/clew-element.js';
 import { settingsStore } from '../../state/settings-store.js';
 import { vaultStore } from '../../state/vault-store.js';
 import { vaultSettingsStore } from '../../state/vault-settings-store.js';
-import { allCommands, chordOf } from '../../commands/registry.js';
+import { allCommands, chordOf, recordKeys } from '../../commands/registry.js';
 import { debounce } from '../../lib/debounce.js';
 import { invalidateNoteApiGate } from '../../note-api.js';
 import { ipc, CH } from '../../ipc.js';
 import { createCodeEditor } from '../../editor/mini-editor.js';
 import { fragmentKey } from '../../../engine/tex-fragments.js';
 import { TOOLBAR_GROUPS } from '../../editor/toolbar/toolbar-spec.js';
+import { calloutsSection } from './settings-callouts.js';
 
 const isMac = navigator.platform.startsWith('Mac');
 
@@ -44,6 +45,8 @@ class ClewSettingsView extends ClewElement {
 	#fragmentEditors = [];
 	/** scope → { entries, refresh }, so each group can see the other's names. */
 	#fragmentScopes = new Map();
+	/** Settings → Callouts (settings-callouts.js), disposed with the DOM. */
+	#callouts = null;
 
 	subscribe() {
 		this.listen(settingsStore, 'settings-changed', () => {
@@ -78,6 +81,11 @@ class ClewSettingsView extends ClewElement {
 					[['auto', 'When the pane is wide enough'], ['on', 'Always'], ['off', 'Never']]),
 				this.#selectRow('PDF paper size (reading-view export)', 'printPaperSize',
 					[['a4', 'A4'], ['letter', 'US Letter'], ['legal', 'US Legal'], ['tabloid', 'Tabloid']]),
+				this.#selectRow('LaTeX engine (PDF via LaTeX export)', 'latexEngine',
+					[['auto', 'Automatic'], ['pdflatex', 'pdfLaTeX'], ['lualatex', 'LuaLaTeX'], ['xelatex', 'XeLaTeX']]),
+				this.#hint('Automatic reads the exported document: one that loads fontspec, unicode-math, '
+					+ 'polyglossia or Lua code (a \\setmainfont in your jmarkdown config, say) is compiled with '
+					+ 'LuaLaTeX, anything else with pdfLaTeX. Choose an engine here for what that cannot see.'),
 				this.#textRow('Shell panel font', 'shellFont', 'e.g. MesloLGS NF — blank for the default'),
 				this.#hint('A monospace family for the shell panel — your terminal\'s, say. Blank uses '
 					+ 'Clew\'s monospace font. Prompt symbols (Powerline and Nerd Font glyphs) come from '
@@ -116,6 +124,7 @@ class ClewSettingsView extends ClewElement {
 				this.#textRow('Templates folder', 'templatesFolder', 'Templates'),
 			]),
 			this.#texFragmentsSection(),
+			(this.#callouts = calloutsSection((title, rows) => this.#section(title, rows))).element,
 			this.#vaultSection(),
 			this.#hotkeysSection(),
 		);
@@ -759,12 +768,12 @@ class ClewSettingsView extends ClewElement {
 		return this.#row(label, input);
 	}
 
-	/** The toolbar's groups: shown or not, and their order (▲▼). The mode
-	 *  switch is not listed — it cannot be hidden. */
+	/** The toolbar's groups: shown or not, and their order (▲▼). (The mode
+	 *  switch is in the tab strip, not the toolbar.) */
 	#toolbarGroupsRow() {
 		const wrap = document.createElement('div');
 		wrap.className = 'settings-row settings-row-stacked toolbar-groups-setting';
-		const all = TOOLBAR_GROUPS.filter((g) => g.id !== 'mode');
+		const all = TOOLBAR_GROUPS;
 		const draw = () => {
 			const saved = settingsStore.get('editorToolbarGroups');
 			const order = Array.isArray(saved) ? saved.filter((id) => all.some((g) => g.id === id)) : all.map((g) => g.id);
@@ -947,8 +956,10 @@ class ClewSettingsView extends ClewElement {
 			});
 			this.#stopRecording(list);
 		};
-		window.addEventListener('keydown', onKey, { capture: true });
-		this.#recorderCleanup = () => window.removeEventListener('keydown', onKey, { capture: true });
+		// Through the dispatcher, which hands it every key while recording —
+		// a listener of our own would come second, after the command a bound
+		// chord runs (registry.js#recordKeys).
+		this.#recorderCleanup = recordKeys(onKey);
 		this.#renderHotkeyList(list);
 	}
 
@@ -968,6 +979,8 @@ class ClewSettingsView extends ClewElement {
 		// A fragment edited in the last 900ms has a save pending; the tab
 		// closing (or the vault changing) must not be what loses it.
 		for (const group of this.#fragmentScopes.values()) group.persist.flush();
+		this.#callouts?.dispose();
+		this.#callouts = null;
 		for (const editor of this.#fragmentEditors) editor.destroy();
 		this.#fragmentEditors = [];
 		this.#fragmentScopes.clear();

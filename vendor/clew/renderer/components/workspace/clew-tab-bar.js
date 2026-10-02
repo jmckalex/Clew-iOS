@@ -10,6 +10,13 @@
 
 // <clew-tab-bar>: the row of tabs for one group. Click activates,
 // middle-click / × closes, dragging hands off to tab-drag.js.
+//
+// It also holds the pane's VIEW-MODE switch — source, live edit, reading —
+// pinned at the right end, just left of "+", acting on this pane's ACTIVE
+// tab (the owner's choice, 2026-10-01: a whole row above the note for three
+// buttons was not worth the space). Tabs shrink and scroll under it, never
+// push it out. A tab with no modes (a file, a canvas, the graph, settings)
+// leaves it hidden in place, so nothing in the strip moves.
 import { ClewElement } from '../base/clew-element.js';
 import { workspaceStore } from '../../state/workspace-store.js';
 import { editorPool } from '../../editor/pool.js';
@@ -18,6 +25,14 @@ import { startTabDrag } from '../../workspace/tab-drag.js';
 import { showMenu } from '../chrome/menu.js';
 import { icon } from '../../lib/icons.js';
 import { officeDock } from '../../office-dock.js';
+import { runCommand, effectiveKeymap } from '../../commands/registry.js';
+import { prettifyChord } from '../../commands/builtin.js';
+import { VIEW_MODES } from '../../editor/toolbar/toolbar-spec.js';
+
+const chordFor = (id) => {
+	for (const [chord, mapped] of effectiveKeymap()) if (mapped === id) return prettifyChord(chord);
+	return '';
+};
 
 export function tabTitle(tab) {
 	if (tab.kind === 'note' && tab.path) {
@@ -67,6 +82,7 @@ class ClewTabBar extends ClewElement {
 			+ group.tabs.map((t) => `${t.id}:${t.pinned ? 1 : 0}:${tabTitle(t)}`).join('|');
 		if (signature === this.#signature && this.querySelector('.tab-strip')) {
 			this.#refreshActive();
+			this.#syncModes();
 			return;
 		}
 		this.#signature = signature;
@@ -85,7 +101,83 @@ class ClewTabBar extends ClewElement {
 			workspaceStore.openTab(this.groupId, createTab('empty'));
 		});
 
-		this.replaceChildren(strip, addButton);
+		this.#modes ??= this.#makeModes();
+		this.replaceChildren(strip, this.#modes, addButton);
+		this.#syncModes();
+	}
+
+	#modes = null;
+
+	/** The segmented switch, made once and kept across tab-list rebuilds. */
+	#makeModes() {
+		const wrap = document.createElement('div');
+		wrap.className = 'tab-modes toolbar-segmented';
+		wrap.setAttribute('role', 'group');
+		wrap.setAttribute('aria-label', 'View mode');
+		for (const option of VIEW_MODES) {
+			const b = document.createElement('button');
+			b.type = 'button';
+			b.className = 'toolbar-button tab-mode';
+			b.dataset.value = option.value;
+			b.dataset.command = option.command;
+			b.setAttribute('aria-pressed', 'false');
+			b.append(icon(option.icon));
+			// Clicking must not take focus or the selection from the note.
+			b.addEventListener('pointerdown', (e) => e.preventDefault());
+			b.addEventListener('click', () => {
+				// The commands act on the ACTIVE pane's tab: make it this one.
+				workspaceStore.setActiveGroup(this.groupId);
+				runCommand(option.command);
+			});
+			wrap.append(b);
+		}
+		wrap.addEventListener('keydown', (e) => this.#modeKeys(e));
+		return wrap;
+	}
+
+	/** Pressed state and availability from this pane's active tab. */
+	#syncModes() {
+		if (!this.#modes) return;
+		const group = this.group;
+		const tab = group?.tabs.find((t) => t.id === group.activeTabId) ?? null;
+		const has = tab?.kind === 'note';
+		const mode = tab?.view?.mode ?? 'source';
+		this.#modes.classList.toggle('is-unavailable', !has);
+		this.#modes.setAttribute('aria-hidden', String(!has));
+		for (const b of this.#modes.querySelectorAll('.tab-mode')) {
+			const option = VIEW_MODES.find((o) => o.value === b.dataset.value);
+			const pressed = has && mode === option.value;
+			b.setAttribute('aria-pressed', String(pressed));
+			b.disabled = !has;
+			b.tabIndex = pressed ? 0 : -1;
+			const chord = chordFor(option.command);
+			const title = chord ? `${option.label} (${chord})` : option.label;
+			if (b.title !== title) {
+				b.title = title;
+				b.setAttribute('aria-label', option.label);
+			}
+		}
+	}
+
+	/** Keyboard: arrows move between the three, Escape returns to the note. */
+	#modeKeys(e) {
+		const buttons = [...this.#modes.querySelectorAll('.tab-mode:not([disabled])')];
+		const at = buttons.indexOf(document.activeElement);
+		if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+			e.preventDefault();
+			const next = buttons[(at + (e.key === 'ArrowRight' ? 1 : buttons.length - 1)) % buttons.length];
+			next?.focus();
+		} else if (e.key === 'Escape') {
+			e.preventDefault();
+			this.closest('clew-tab-group')?.focusView?.();
+		}
+	}
+
+	/** Focus the pressed mode (view:focus-toolbar where there is no toolbar). */
+	focusModes() {
+		const target = this.#modes?.querySelector('.tab-mode[aria-pressed="true"]');
+		target?.focus();
+		return Boolean(target);
 	}
 
 	#makeTab(tab, isActive) {
@@ -174,6 +266,7 @@ class ClewTabBar extends ClewElement {
 		for (const el of this.querySelectorAll('.tab')) {
 			el.classList.toggle('is-active', el.dataset.tabId === group.activeTabId);
 		}
+		this.#syncModes();
 	}
 }
 

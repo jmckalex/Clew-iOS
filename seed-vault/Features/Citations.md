@@ -12,10 +12,11 @@ Compile-time citations via the engine's Biblify pipeline. A plain citation
 The signalling literature descends from \cite{lewis1969}, with the
 evolutionary turn taken by \citep{skyrms1996, maynardsmith1973}.
 
-In live edit each citation is a chip reading its author and year: click it
-to open the entry in the **Refs** panel's Library — every entry in the
-vault's `.bib` files, with the notes that cite it — and hover it to see
-the reference.
+In live edit each citation is a chip reading exactly what this page shows
+for it: click it to open the entry in the **Refs** panel's Library — every
+entry in the vault's `.bib` files, with the notes that cite it — and hover
+it to see the reference (its **Show in Library** button does what the click
+does).
 
 ## Bibliography
 

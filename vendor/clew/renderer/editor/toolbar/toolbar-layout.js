@@ -16,8 +16,9 @@
 //     left to right while they fit, the first that does not starts the next
 //     row, and no later group backfills an earlier row — buttons stay where
 //     muscle memory expects them.
-//   - The mode switch (an `Infinity` priority, `align: 'end'`) never goes
-//     and ends ROW 1, where it sits when there is one row.
+//   - A group with an `Infinity` priority never goes and ends ROW 1 (the
+//     mode switch was one until it moved to the tab strip, 2026-10-01; none
+//     is defined now, but the rule stands for one that is).
 //   - Only when `maxRows` rows cannot hold everything do groups go into the
 //     `…` menu, by the priority rule (kept highest first, while the rest
 //     still pack); the `…` button's width is reserved at the end of the last
@@ -37,7 +38,7 @@
  * @param {{ state?: object, separator?: number, overflowButton?: number,
  *   maxRows?: number, previousRows?: number, hysteresis?: number }} [options]
  * @returns {{ rows: string[][], visible: string[], overflow: string[] }}
- *   rows in visual order (row 1 ends with the mode switch); visible and
+ *   rows in visual order (row 1 ends with any fixed group); visible and
  *   overflow in spec order
  */
 export function layoutRows(groups, widths, available, {

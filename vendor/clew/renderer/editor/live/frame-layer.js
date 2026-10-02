@@ -90,6 +90,9 @@ class FrameLayer {
 		// Trust (main/vault-trust.js) is the device's, not a vault setting,
 		// but it reconfigures the engine all the same: `Run note code`.
 		this.offTrust = ipc.on(CH.EV_VAULT_TRUST_CHANGED, () => this.#restaleAll(RESTALE_MS));
+		// Custom callout types (either scope, from Settings or a hand edit of
+		// the vault's file): main sends this AFTER it has reconfigured.
+		this.offCallouts = ipc.on(CH.EV_CALLOUTS_CHANGED, () => this.#restaleAll(RESTALE_MS));
 		this.restaleTimer = null;
 		this.allTimer = null;
 		this.#sync();
@@ -111,6 +114,7 @@ class FrameLayer {
 		this.offTheme?.();
 		this.offVault?.();
 		this.offTrust?.();
+		this.offCallouts?.();
 		clearTimeout(this.restaleTimer);
 		clearTimeout(this.allTimer);
 		clearTimeout(this.citeTimer);
@@ -257,6 +261,18 @@ class FrameLayer {
 		iframe.allow = 'fullscreen';
 		iframe.dataset.frameId = record.id;
 		iframe.style.visibility = 'hidden';
+		// A restale MORPHS the new render in and leaves src naming the old
+		// one, which an engine reconfigure has dropped from main's cache — so
+		// a frame that later RELOADS (its pane re-mounted by a mode switch in
+		// another pane) fetched a stale hash and showed "Not found" (measured
+		// 2026-10-01, a callout definition edited beside an open embed). Such
+		// a load is re-pointed at the current render. The 404 page has no
+		// client to say `ready`, hence the element's own load event.
+		iframe.addEventListener('load', () => {
+			if (record.iframe !== iframe || !record.hash || iframe.src.includes(record.hash)) return;
+			record.ready = false;
+			iframe.src = blockDocumentUrl(record.hash);
+		});
 		this.layer.append(iframe);
 		// src AFTER insertion (the lesson from office embeds: a frame built
 		// with its src and then moved may never navigate).

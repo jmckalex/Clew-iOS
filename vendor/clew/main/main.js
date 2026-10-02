@@ -23,10 +23,11 @@ import { settings } from './settings.js';
 import { trust } from './trust.js';
 import { CH } from '../shared/channels.js';
 import { registerPreviewScheme, installPreviewProtocol } from './protocol.js';
-import { VaultSession, focusedSession, sessionForVault } from './session.js';
+import { VaultSession, focusedSession, sessionForVault, sessionForWindow } from './session.js';
 import { paths } from './paths.js';
 import { prepareNoteFonts } from './note-fonts.js';
 import { assetStamp, stampChanged } from './asset-stamp.js';
+import { staleSources } from './build-stamp.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.dirname(__dirname); // dist/
@@ -175,6 +176,26 @@ export function createWindow(vaultPath = null) {
 		});
 	}
 	return session;
+}
+
+/**
+ * Bring a window forward — the Window menu's list of open vaults. Under a
+ * hidden smoke run nothing is shown or focused (a hidden window cannot take
+ * focus, and showing one breaks the run's invisibility), so the switch is
+ * recorded as the focus event would record it and logged instead.
+ */
+export function focusWindow(session) {
+	const win = session?.win;
+	if (!win || win.isDestroyed()) return;
+	if (smokeHidden) {
+		session.lastFocusedAt = Date.now();
+		console.log(`smoke-window-focus: ${session.vaults.root ? path.basename(session.vaults.root) : '(no vault)'}`);
+		appMenu.rebuild();
+		return;
+	}
+	if (win.isMinimized()) win.restore();
+	win.show();
+	win.focus();
 }
 
 /**
@@ -347,7 +368,11 @@ app.whenReady().then(async () => {
 	app.on('activate', () => {
 		if (BrowserWindow.getAllWindows().length === 0) createWindow(null);
 	});
-	app.on('browser-window-focus', () => appMenu.rebuild());
+	app.on('browser-window-focus', (_event, win) => {
+		const session = sessionForWindow(win);
+		if (session) session.lastFocusedAt = Date.now();
+		appMenu.rebuild();
+	});
 });
 
 app.on('before-quit', () => {
@@ -405,6 +430,29 @@ async function smokeBootedWindow(readyAt) {
 	return win;
 }
 
+// A smoke run measures the code in dist/, so that must BE the code in src/
+// (build-stamp.js): refuse, naming every source that changed since the
+// build, when they differ — before any window. A packaged app is checked
+// only when told which checkout to compare with: smoke/boot-test.sh passes
+// CLEW_SMOKE_SOURCES=<repo>. CLEW_SMOKE_ALLOW_STALE=1 runs anyway (and says so).
+if (process.env.CLEW_SMOKE) {
+	const sources = app.isPackaged ? process.env.CLEW_SMOKE_SOURCES : app.getAppPath();
+	const stale = sources ? staleSources(sources, path.join(app.getAppPath(), 'dist', 'build-stamp.json')) : { changed: [] };
+	if (!stale || stale.changed.length) {
+		const what = app.isPackaged ? 'this packaged app' : 'dist/';
+		const listed = stale ? stale.changed.slice(0, 15).join(', ') + (stale.changed.length > 15 ? `, … ${stale.changed.length} in all` : '') : '';
+		const message = stale
+			? `smoke-stale: ${what} was built from other sources than ${sources} — changed since its build (${stale.builtAt}): ${listed}`
+			: `smoke-stale: ${what} has no build stamp (dist/build-stamp.json)`;
+		if (process.env.CLEW_SMOKE_ALLOW_STALE) {
+			console.warn(`${message} — running anyway (CLEW_SMOKE_ALLOW_STALE)`);
+		} else {
+			console.error(`${message}. Rebuild first (node scripts/build.js${app.isPackaged ? ', then package' : ''}), or set CLEW_SMOKE_ALLOW_STALE=1.`);
+			process.exit(3);
+		}
+	}
+}
+
 if (process.env.CLEW_SMOKE) {
 	app.whenReady().then(() => {
 		const readyAt = Date.now();
@@ -446,7 +494,9 @@ if (process.env.CLEW_SMOKE) {
 				// cross-origin iframe (an OOPIF), and sendInputEvent never
 				// routes there (measured 2026-09-01) while the debugger's
 				// Input domain hit-tests properly. A scenario queues
-				// window.__clewSmokeInput = [{click:{x,y}} | {move:{x,y}} | {text:'abc'} |
+				// window.__clewSmokeInput = [{click:{x,y}} | {click:{selector}} (the
+				// centre of an app-page element, found when its turn comes) |
+				// {move:{x,y}} | {move:{selector}} | {text:'abc'} |
 				// {combo:{key:'s',modifiers:2}} | {wait:ms}] — a click may carry
 				// `modifiers` too, e.g. {click:{x,y},modifiers:4}; and
 				// {wheel:{x,y,deltaY}} scrolls (modifiers CDP
@@ -506,11 +556,25 @@ if (process.env.CLEW_SMOKE) {
 							// {move:{x,y}, modifiers?}: the pointer to a point, nothing
 							// pressed — hover (link previews). `modifiers` (the CDP
 							// bitmask) makes it a ⌘-hover: e.metaKey in the page.
-							const { x, y } = ev.move;
+							// {move:{selector}}: the middle of that app-page element's
+							// FIRST line box (a wrapped inline's bounding box can be
+							// empty in its middle), found when its turn comes.
+							let point = ev.move;
+							if (ev.move.selector) {
+								point = await primary.webContents.executeJavaScript(`(() => {
+									const r = document.querySelector(${JSON.stringify(ev.move.selector)})?.getClientRects()[0];
+									return r ? { x: Math.round(r.left + Math.min(r.width / 2, 40)), y: Math.round(r.top + r.height / 2) } : null; })()`);
+								if (!point) {
+									console.log(`smoke: move found no ${ev.move.selector}`);
+									continue;
+								}
+							}
+							const { x, y } = point;
 							await dbg.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', button: 'none', x, y, modifiers: ev.modifiers ?? 0 });
 							await sleep(ev.delay ?? 30);
 							continue;
 						}
+						let at = null;
 						if (ev.frameClick) {
 							// {frameClick:{match, selector}}: a click at the centre of
 							// an element INSIDE a preview frame — cross-origin, so a
@@ -531,10 +595,26 @@ if (process.env.CLEW_SMOKE) {
 								console.log(`smoke: frameClick found no ${selector} in a frame matching ${match}`);
 								continue;
 							}
-							ev.click = { x: Math.round(outer.x + inner.x), y: Math.round(outer.y + inner.y) };
+							at = { x: Math.round(outer.x + inner.x), y: Math.round(outer.y + inner.y) };
 						}
-						if (ev.click || ev.tripleClick) {
-							const { x, y } = ev.click ?? ev.tripleClick;
+						if (ev.click?.selector) {
+							// {click:{selector}}: the centre of an element on the APP
+							// page, resolved at dispatch time — for what appears only
+							// after earlier input (a hover popover's button).
+							const found = await primary.webContents.executeJavaScript(`(() => {
+								const r = document.querySelector(${JSON.stringify(ev.click.selector)})?.getBoundingClientRect();
+								return r && r.width ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null; })()`);
+							if (!found) {
+								console.log(`smoke: click found no ${ev.click.selector}`);
+								continue;
+							}
+							at = { x: Math.round(found.x), y: Math.round(found.y) };
+						}
+						// Resolved positions go in `at`, never back into the event:
+						// a scenario may queue ONE object several times.
+						at ??= ev.click ?? ev.tripleClick;
+						if (at) {
+							const { x, y } = at;
 							// `modifiers` on a click event (same CDP bitmask) makes it
 							// a ⌘-click etc. — e.metaKey in the page (inverse search).
 							const base = { x, y, pointerType: 'mouse', modifiers: ev.modifiers ?? 0 };
@@ -599,18 +679,34 @@ if (process.env.CLEW_SMOKE) {
 				// see, so this is the only assertion a menu change can carry.
 				// It reads the REAL menu, so it also proves the template built:
 				// a malformed accelerator throws inside buildFromTemplate.
+				// A checked checkbox or radio ends in ` ✓`.
+				// CLEW_SMOKE_MENU_CLICK='Window > Alpha' then clicks that REAL item
+				// (its own click handler, as a mouse would run it) and dumps the
+				// item's top-level menu again as `smoke-menu-after:` lines.
+				const walk = (items, trail, tag = 'smoke-menu', visit = null) => {
+					for (const item of items) {
+						if (item.type === 'separator') continue;
+						const where = [...trail, item.label];
+						visit?.(item, where.join(' > '));
+						console.log(`${tag}: ` + where.join(' > ')
+							+ (item.accelerator ? ` [${item.accelerator}]` : '')
+							+ (item.enabled === false ? ' (disabled)' : '')
+							+ (item.checked ? ' ✓' : ''));
+						if (item.submenu) walk(item.submenu.items, where, tag, visit);
+					}
+				};
 				if (process.env.CLEW_SMOKE_MENU) {
-					const walk = (items, trail) => {
-						for (const item of items) {
-							if (item.type === 'separator') continue;
-							const where = [...trail, item.label];
-							console.log('smoke-menu: ' + where.join(' > ')
-								+ (item.accelerator ? ` [${item.accelerator}]` : '')
-								+ (item.enabled === false ? ' (disabled)' : ''));
-							if (item.submenu) walk(item.submenu.items, where);
-						}
-					};
-					walk(Menu.getApplicationMenu()?.items ?? [], []);
+					const wanted = process.env.CLEW_SMOKE_MENU_CLICK;
+					let target = null;
+					walk(Menu.getApplicationMenu()?.items ?? [], [], 'smoke-menu',
+						(item, where) => { if (wanted && where.startsWith(wanted)) target ??= item; });
+					if (wanted) {
+						console.log(`smoke-menu-click: ${wanted} → ${target ? target.label : 'NOT FOUND'}`);
+						target?.click();
+						await sleep(500);
+						const top = (Menu.getApplicationMenu()?.items ?? []).find((m) => m.label === wanted.split(' > ')[0]);
+						if (top) walk([top], [], 'smoke-menu-after');
+					}
 				}
 				// CLEW_SMOKE_CLOSE_WINDOW=1: drive a REAL window close after the
 				// scenario, so close-guard flows (dirty office tab + the
@@ -620,6 +716,9 @@ if (process.env.CLEW_SMOKE) {
 					primary.close();
 					await new Promise((r) => setTimeout(r, 2500));
 					console.log('smoke-windows: ' + BrowserWindow.getAllWindows().length);
+					// With CLEW_SMOKE_MENU: the Window menu once the window is gone.
+					const windowMenu = (Menu.getApplicationMenu()?.items ?? []).find((m) => m.label === 'Window');
+					if (process.env.CLEW_SMOKE_MENU && windowMenu) walk([windowMenu], [], 'smoke-menu-closed');
 				}
 				// Optionally drive the preview iframe's document (cross-origin from
 				// the app, but reachable from main via webFrameMain).

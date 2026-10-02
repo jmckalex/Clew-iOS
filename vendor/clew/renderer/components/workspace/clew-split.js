@@ -12,7 +12,7 @@
 // resizer gutters between children.
 import { ClewElement } from '../base/clew-element.js';
 import { workspaceStore } from '../../state/workspace-store.js';
-import { syncNode } from './clew-workspace.js';
+import { syncNode, place } from './clew-workspace.js';
 
 class ClewSplit extends ClewElement {
 	#node = null;
@@ -23,24 +23,31 @@ class ClewSplit extends ClewElement {
 		});
 	}
 
-	/** Called by the reconciler with the current split node. */
-	syncChildren(node, existing) {
+	#resizers = [];
+
+	/**
+	 * Called by the reconciler, once this split is in place, with the current
+	 * split node: place the children (clew-workspace.js#place — only what is
+	 * out of place moves), then sync the splits among them. The resizers are
+	 * KEPT across syncs, one per gap: made afresh each time, they never
+	 * matched the old ones, and every sync re-appended every pane.
+	 */
+	syncChildren(node, existing, after) {
 		this.#node = node;
 		this.classList.toggle('dir-row', node.dir === 'row');
 		this.classList.toggle('dir-col', node.dir === 'col');
 
+		const panes = node.children.map((child) => syncNode(child, existing));
+		this.#resizers.length = Math.max(0, panes.length - 1);
 		const desired = [];
-		node.children.forEach((child, i) => {
-			desired.push(syncNode(child, existing));
-			if (i < node.children.length - 1) {
-				desired.push(this.#makeResizer(i));
-			}
+		panes.forEach((el, i) => {
+			desired.push(el);
+			if (i < panes.length - 1) desired.push(this.#resizers[i] ??= this.#makeResizer(i));
 		});
-		// Replace children only if the sequence differs (replaceChildren moves
-		// reused elements rather than recreating them).
-		const changed = desired.length !== this.children.length
-			|| desired.some((el, i) => this.children[i] !== el);
-		if (changed) this.replaceChildren(...desired);
+		place(this, desired, after);
+		node.children.forEach((child, i) => {
+			if (child.type !== 'tabs') panes[i].syncChildren(child, existing, after);
+		});
 		this.#applySizes();
 	}
 

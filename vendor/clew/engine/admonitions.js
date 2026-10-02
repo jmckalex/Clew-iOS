@@ -20,13 +20,25 @@
 // The plugin is superseded, but the fences it wrote are permanent — an
 // older vault is full of them, and each one renders as a dead code block
 // without this. The tokenizer maps the fence onto a `calloutBlock` TOKEN,
-// so callouts.js renders it: one look for both syntaxes, and nothing to
-// drift. Options: `title:` and `collapse:` (open/closed) are honoured;
+// so the engine's callouts render it: one look for both syntaxes, and
+// nothing to drift. Options: `title:` and `collapse:` (open/closed) are honoured;
 // `icon:` and `color:` are the plugin's cosmetic overrides and the
 // callout's own type styling applies instead. An `ad-` type Clew's callout
 // table does not know renders as a note titled with the raw type, which is
 // how the plugin treated user-defined types too.
-import { resolveType } from './callouts.js';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+// The ENGINE's callout table (jmarkdown's callout-table.js), the very module
+// instance its callout extension renders with — so an alias resolves, and a
+// custom type (CLEW_CALLOUTS) is known, exactly as for `> [!type]`. Found
+// beside the worker script (process.argv[1] is the engine's watch-worker.js,
+// in dev and packaged alike — figures.js finds highlight.js the same way);
+// the package import is the fallback for a process that is not the worker
+// (the unit tests) — `#jmarkdown/…`, as every other Clew file names the
+// engine, so Clew-iOS's own vendor layout resolves it too.
+const { resolveType } = await import(pathToFileURL(path.join(path.dirname(process.argv[1] ?? ''), 'callout-table.js')).href)
+	.catch(() => import('#jmarkdown/callout-table.js'));
 
 export const admonitionFence = {
 	name: 'admonitionFence',

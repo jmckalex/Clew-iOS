@@ -30,9 +30,14 @@ function createDirectives(configs = presetDirectiveConfigs) {
                 // remainder (the "`::X` in a code span shreds the paragraph"
                 // bug). Inline directives genuinely can begin anywhere, and
                 // inline code spans are claimed before text is cut, so the
-                // unanchored match stays correct for them.
+                // unanchored match stays correct for them — but only where the
+                // marker is followed by what the inline pattern must begin
+                // with (a letter, `{` or `[`; see getDirectivePattern). The
+                // label-less `:` reported EVERY colon, so marked cut the text
+                // at `http` + `:`, and GFM's url tokenizer never saw `http://`:
+                // no bare URL was ever autolinked.
                 start: level === 'inline'
-                    ? (src) => src.match(new RegExp(`${marker}${label || ''}`))?.index
+                    ? (src) => src.match(new RegExp(`${marker}${label || ''}(?=[a-zA-Z{\\[])`))?.index
                     : (src) => {
                         const m = src.match(new RegExp(`(?:^|\\n)${marker}${label || ''}`));
                         return m ? m.index + (m[0].startsWith('\n') ? 1 : 0) : undefined;

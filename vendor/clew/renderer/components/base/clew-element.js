@@ -10,7 +10,9 @@
 
 // Base class for Clew's web components (light DOM). Subscriptions are
 // declared in subscribe() via this.listen() and are flushed automatically on
-// disconnect — safe across the reconnects that tree reconciliation causes.
+// disconnect — safe across a real reconnect. The workspace MOVES panes with
+// moveBefore (clew-workspace.js#place), which calls connectedMoveCallback
+// below instead of disconnecting.
 export class ClewElement extends HTMLElement {
 	#subs = [];
 
@@ -29,4 +31,9 @@ export class ClewElement extends HTMLElement {
 		this.#subs = [];
 		this.cleanup?.();
 	}
+
+	/** Moved by `moveBefore` (clew-workspace.js#place): still connected the
+	 *  whole time — subscriptions, state and frames stay as they are. Without
+	 *  this, a move runs disconnectedCallback and connectedCallback. */
+	connectedMoveCallback() {}
 }

@@ -139,9 +139,9 @@ export function historyForward() {
  * (Obsidian-style, in the vault root) when unresolved.
  */
 /**
- * `[[paper.pdf|external]]` — hand a vault file to the OS default app
- * instead of opening a Clew tab. Takes a vault path or a bare name (the
- * editor click has only the name). Main clamps it inside the vault and
+ * `[[paper.pdf|external]]`, and the file explorer's "Open in Default App" —
+ * hand a vault file to the OS default app instead of opening a Clew tab.
+ * Takes a vault path or a bare name (the editor click has only the name). Main clamps it inside the vault and
  * refuses executables by name; a refusal is shown, never swallowed.
  */
 export function openFileExternally(target) {

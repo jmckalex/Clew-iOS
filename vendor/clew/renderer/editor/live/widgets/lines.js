@@ -19,7 +19,7 @@
 // toggles a checkbox, `data-le-fold` folds a callout, `data-le-copy` copies
 // a fence body.
 import { WidgetType } from '@codemirror/view';
-import { calloutIcon, CALLOUT_TYPES } from '../../../../engine/callouts.js';
+import { calloutIcon, calloutGeneration, untitledCalloutTitle } from '#jmarkdown/callout-table.js';
 
 const BULLETS = ['•', '◦', '▪'];
 
@@ -66,10 +66,14 @@ export class CalloutHeadWidget extends KeyedWidget {
 	 * @param {boolean} folded - current fold state
 	 * @param {boolean} titled - the author wrote a title (else the label shows)
 	 * @param {string} id - the callout construct's id (for folding)
+	 * @param {string} written - the type as the author wrote it (`CAUTION`),
+	 *   whose untitled heading is the engine's untitledCalloutTitle
 	 */
-	constructor(type, fold, folded, titled, id) {
-		super(`${type}|${fold}|${folded}|${titled}|${id}`);
-		Object.assign(this, { type, fold, folded, titled, id });
+	constructor(type, fold, folded, titled, id, written = type) {
+		// The table's generation too: a type's icon or title edited in
+		// Settings must redraw a head whose source did not change.
+		super(`${type}|${written}|${fold}|${folded}|${titled}|${id}|${calloutGeneration()}`);
+		Object.assign(this, { type, fold, folded, titled, id, written });
 	}
 
 	toDOM() {
@@ -79,7 +83,10 @@ export class CalloutHeadWidget extends KeyedWidget {
 		if (!this.titled) {
 			const label = document.createElement('span');
 			label.className = 'le-callout-label';
-			label.textContent = CALLOUT_TYPES[this.type]?.label ?? this.type;
+			// The ENGINE's rule, imported, never mirrored: the canonical name
+			// is headed by its type's title, anything else by the name as
+			// written, capitalised (`[!CAUTION]` → Caution, `[!my-type]` → My-type).
+			label.textContent = untitledCalloutTitle(this.written);
 			el.append(label);
 		}
 		if (this.fold) {
@@ -87,7 +94,6 @@ export class CalloutHeadWidget extends KeyedWidget {
 			chevron.className = `le-callout-fold${this.folded ? ' is-folded' : ''}`;
 			chevron.dataset.leFold = this.id;
 			chevron.title = this.folded ? 'Expand' : 'Collapse';
-			chevron.textContent = '›';
 			el.append(chevron);
 		}
 		return el;

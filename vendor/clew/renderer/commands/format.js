@@ -18,7 +18,7 @@ import { indentMore, indentLess, insertBlankLine, undo, redo } from '@codemirror
 import { toggleWrapSpec } from '../editor/toggle-wrap.js';
 import { vaultSettingsStore } from '../state/vault-settings-store.js';
 import { saveAndInsert } from '../editor/attachments.js';
-import { CALLOUT_TYPES } from '../../engine/callouts.js';
+import { CALLOUT_TYPES, BUILTIN_CALLOUT_TYPES } from '#jmarkdown/callout-table.js';
 import { CELL_SAFE_COMMANDS } from '../../shared/format-spec.js';
 import {
 	activeCellView, applyStructure, leaveCell, tableTarget, activateCell, rowIndex,
@@ -33,7 +33,7 @@ import { numberDocument, typedRefText } from '../editor/live/numbering.js';
 import { openListModal } from '../components/modals/list-modal.js';
 import { workspaceStore } from '../state/workspace-store.js';
 import { EditorView } from '@codemirror/view';
-import { registerCommand, buildContext } from './registry.js';
+import { registerCommand, unregisterCommand, buildContext } from './registry.js';
 import { editorPool } from '../editor/pool.js';
 
 export const needsEditor = (ctx) =>
@@ -430,18 +430,42 @@ function jumpToLabel(view) {
 
 // ---- the commands ----------------------------------------------------------
 
+/** A command body over the active editor (the note's, or a table cell's). */
+const run = (fn, id) => (ctx, args) => {
+	const view = activeEditorView();
+	if (!view) return;
+	// Inside a table cell only inline formatting makes sense: a heading
+	// or a list in a cell is not a thing GFM can hold.
+	if (view !== activeMainView() && !CELL_SAFE_COMMANDS.has(id)) {
+		notice('Not inside a table cell — press Esc to edit the table as source');
+		return;
+	}
+	fn(view, args ?? {});
+};
+
+const calloutCommand = (type, label) => ({
+	id: `format:callout-${type}`, name: `Insert ${label.toLowerCase()} callout`,
+	fn: (v, { fold = '' } = {}) => wrapCallout(v, type, fold),
+});
+
+/**
+ * The palette's "Insert … callout" commands for the CUSTOM types
+ * (renderer/callouts.js calls this after each sync): one per type a
+ * definition adds, and a built-in's again under the title a definition
+ * gave it (the same id, so a hotkey bound to it stays bound).
+ */
+const customCalloutIds = new Set();
+export function syncCalloutCommands(types) {
+	for (const id of customCalloutIds) unregisterCommand(id);
+	customCalloutIds.clear();
+	for (const [type, { label }] of Object.entries({ ...BUILTIN_CALLOUT_TYPES, ...types })) {
+		const { id, name, fn } = calloutCommand(type, label);
+		registerCommand({ id, name, when: needsEditor, run: run(fn, id) });
+		if (!BUILTIN_CALLOUT_TYPES[type]) customCalloutIds.add(id);
+	}
+}
+
 export function registerFormatCommands() {
-	const run = (fn, id) => (ctx, args) => {
-		const view = activeEditorView();
-		if (!view) return;
-		// Inside a table cell only inline formatting makes sense: a heading
-		// or a list in a cell is not a thing GFM can hold.
-		if (view !== activeMainView() && !CELL_SAFE_COMMANDS.has(id)) {
-			notice('Not inside a table cell — press Esc to edit the table as source');
-			return;
-		}
-		fn(view, args ?? {});
-	};
 	// Commands that act on the NOTE's editor and the table as a whole.
 	const main = (fn) => () => { const view = activeMainView(); if (view) fn(view); };
 	const commands = [
@@ -559,10 +583,7 @@ export function registerFormatCommands() {
 			fn: (v, { rows = 2, cols = 2 } = {}) => insertTable(v, Math.max(1, rows), Math.max(1, cols)) },
 		{ id: 'format:callout', name: 'Insert callout…',
 			fn: (v, { type = 'note', fold = '' } = {}) => wrapCallout(v, type, fold) },
-		...Object.entries(CALLOUT_TYPES).map(([type, { label }]) => ({
-			id: `format:callout-${type}`, name: `Insert ${label.toLowerCase()} callout`,
-			fn: (v, { fold = '' } = {}) => wrapCallout(v, type, fold),
-		})),
+		...Object.entries(CALLOUT_TYPES).map(([type, { label }]) => calloutCommand(type, label)),
 		{ id: 'format:code-fence-lang', name: 'Insert code fence (language)…',
 			fn: (v, { lang = '' } = {}) => wrapContainer(v, '```' + lang, '```', 'code') },
 		{ id: 'format:math-env', name: 'Insert math environment…',

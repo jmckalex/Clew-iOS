@@ -35,6 +35,8 @@ import path from 'node:path';
 import { toolchainPath } from './render-service.js';
 import { printNoteToPdf } from './print-pdf.js';
 import { settings } from './settings.js';
+import { calloutsEnv } from './callout-types.js';
+import { chooseLatexEngine, engineName, latexmkFlag, firstLatexError } from './latex-engine.js';
 
 const WORKER_PATH = paths.engineWorker;
 
@@ -46,12 +48,15 @@ function restrictedExportDir() {
 	return dir;
 }
 
-function runWorker({ file, options, cwd }) {
+function runWorker({ file, options, cwd, callouts = '' }) {
 	return new Promise((resolve, reject) => {
 		const child = fork(WORKER_PATH, [], {
 			cwd,
 			stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
-			env: { ...process.env, PATH: toolchainPath() },
+			// The engine renders callouts itself (jmarkdown a7de8c6), HTML and
+			// LaTeX; CLEW_CALLOUTS hands it this vault's custom types, as the
+			// preview does — a `Callouts` key in the user's own config wins.
+			env: { ...process.env, PATH: toolchainPath(), CLEW_CALLOUTS: callouts },
 		});
 		let stderr = '';
 		child.stdout.on('data', () => {});
@@ -72,27 +77,48 @@ function runWorker({ file, options, cwd }) {
 	});
 }
 
-function findTexCommand() {
-	for (const candidate of ['latexmk', 'pdflatex']) {
-		for (const dir of ['/Library/TeX/texbin', '/usr/local/bin', '/opt/homebrew/bin']) {
-			if (fs.existsSync(path.join(dir, candidate))) return path.join(dir, candidate);
-		}
-	}
-	return null;
-}
+const TEX_DIRS = ['/Library/TeX/texbin', '/usr/local/bin', '/opt/homebrew/bin'];
+const findTex = (name) => TEX_DIRS.map((dir) => path.join(dir, name)).find((p) => fs.existsSync(p)) ?? null;
 
-function compilePdf(texFile) {
-	const tex = findTexCommand();
-	if (!tex) throw new Error('No TeX toolchain found (latexmk/pdflatex). Install MacTeX for PDF export.');
-	const args = tex.endsWith('latexmk')
-		? ['-pdf', '-interaction=nonstopmode', '-quiet', path.basename(texFile)]
+/**
+ * Compile the exported .tex to a PDF with the engine it needs
+ * (latex-engine.js: read off the document itself, or the `latexEngine`
+ * setting). latexmk when installed — it runs BibTeX and the reruns — else
+ * the engine once. A failure names the engine, why it was chosen, and the
+ * log's first error. The NOTE's folder is on TeX's and BibTeX's search
+ * paths: the .tex is written beside the chosen output, which need not be
+ * beside the note, and `\bibliography{refs}` or a relative graphic is the
+ * note's (the default save path is the vault root — every citation came out
+ * undefined there, 2026-10-02).
+ *
+ * @returns {Promise<{pdf: string, engine: string, reason: string}>}
+ */
+function compilePdf(texFile, noteDir) {
+	const { engine, reason } = chooseLatexEngine(fs.readFileSync(texFile, 'utf8'), settings.get('latexEngine') ?? 'auto');
+	const latexmk = findTex('latexmk');
+	const tex = latexmk ?? findTex(engine);
+	if (!tex) throw new Error(`No TeX toolchain found (latexmk or ${engine}). Install MacTeX for PDF export.`);
+	const args = latexmk
+		? [latexmkFlag(engine), '-interaction=nonstopmode', '-quiet', path.basename(texFile)]
 		: ['-interaction=nonstopmode', path.basename(texFile)];
+	const pdf = texFile.replace(/\.tex$/, '.pdf');
+	const started = Date.now();
 	return new Promise((resolve, reject) => {
-		execFile(tex, args, { cwd: path.dirname(texFile), timeout: 120000 }, (err) => {
-			const pdf = texFile.replace(/\.tex$/, '.pdf');
-			// pdflatex exits non-zero on warnings; accept if the PDF materialized.
-			if (fs.existsSync(pdf)) resolve(pdf);
-			else reject(err ?? new Error('PDF was not produced'));
+		// A trailing separator keeps TeX's own search path after the note's.
+		const searchPath = (name) => `${noteDir}${path.delimiter}${process.env[name] ?? ''}`;
+		const env = { ...process.env, PATH: toolchainPath(), BIBINPUTS: searchPath('BIBINPUTS'), TEXINPUTS: searchPath('TEXINPUTS') };
+		execFile(tex, args, { cwd: path.dirname(texFile), timeout: 180000, env }, (err) => {
+			// A non-zero exit can be warnings only: accept a PDF THIS run wrote —
+			// never one an earlier export left at the same path.
+			const fresh = fs.existsSync(pdf) && fs.statSync(pdf).mtimeMs >= started - 1000;
+			if (fresh) {
+				resolve({ pdf, engine, reason });
+				return;
+			}
+			let log = '';
+			try { log = fs.readFileSync(texFile.replace(/\.tex$/, '.log'), 'utf8'); } catch { /* none written */ }
+			const first = firstLatexError(log) || err?.message || 'no PDF was produced';
+			reject(new Error(`PDF via LaTeX failed — ${engineName(engine)} ran (${reason}). First error: ${first}`));
 		});
 	});
 }
@@ -111,7 +137,9 @@ export async function exportNote({ win, vaults, sessionId, callerToken = null, r
 	const abs = vaults.resolve(relPath);
 	const cwd = trusted ? path.dirname(abs) : restrictedExportDir();
 	// Exports honor the vault's standard-syntax choice, like previews do.
-	const normalSyntax = vaults.loadState('vault-settings.json')?.normalSyntax === true;
+	const vaultSettings = vaults.loadState('vault-settings.json') ?? {};
+	const normalSyntax = vaultSettings.normalSyntax === true;
+	const callouts = calloutsEnv(settings.get('callouts'), vaultSettings.callouts, paths.faIcons);
 	const base = path.basename(abs).replace(/\.(md|jmd)$/i, '');
 	const ext = format === 'html' ? 'html' : format === 'latex' ? 'tex' : 'pdf';
 
@@ -129,6 +157,10 @@ export async function exportNote({ win, vaults, sessionId, callerToken = null, r
 		filePath = chosen.filePath;
 	}
 
+	// A caller-named path (a scenario's outFile) may name a folder that does
+	// not exist yet; the save dialog's always does.
+	fs.mkdirSync(path.dirname(filePath), { recursive: true });
+
 	if (format === 'print-pdf') {
 		await printNoteToPdf({
 			sessionId, callerToken, relPath, outFile: filePath, paperSize: settings.get('printPaperSize'),
@@ -137,16 +169,16 @@ export async function exportNote({ win, vaults, sessionId, callerToken = null, r
 	}
 
 	if (format === 'html') {
-		await runWorker({ file: abs, options: { to: 'html', output: filePath, normalSyntax }, cwd });
+		await runWorker({ file: abs, options: { to: 'html', output: filePath, normalSyntax }, cwd, callouts });
 		return { output: filePath };
 	}
 
 	// LaTeX (and PDF via LaTeX): build the .tex next to the requested output
 	// so relative graphics resolve, then compile if PDF was asked for.
 	const texFile = format === 'latex' ? filePath : filePath.replace(/\.pdf$/i, '.tex');
-	await runWorker({ file: abs, options: { to: 'latex', output: texFile, normalSyntax }, cwd });
+	await runWorker({ file: abs, options: { to: 'latex', output: texFile, normalSyntax }, cwd, callouts });
 	if (format === 'latex') return { output: texFile };
-	const pdf = await compilePdf(texFile);
+	const { pdf, engine, reason } = await compilePdf(texFile, path.dirname(abs));
 	if (pdf !== filePath) fs.copyFileSync(pdf, filePath);
-	return { output: filePath };
+	return { output: filePath, engine, reason };
 }

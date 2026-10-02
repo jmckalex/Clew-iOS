@@ -68,7 +68,7 @@ export function planOpen(vaults, { rel = null, abs = null }) {
 	// a macOS bundle IS a directory, so the extension check runs on both.
 	const ext = path.extname(target).replace(/^\./, '').toLowerCase();
 	if (REFUSED.has(ext)) {
-		return { ok: false, reason: `Clew does not open .${ext} files — a link should not launch a program` };
+		return { ok: false, reason: `Clew does not open .${ext} files in another app — opening one could run a program` };
 	}
 	return { ok: true, target };
 }

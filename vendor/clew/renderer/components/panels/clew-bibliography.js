@@ -33,6 +33,7 @@ import { allBibEntries } from '../../editor/complete/citations.js';
 import { openNoteAtLine } from '../../commands/actions.js';
 import { activeEditorView } from '../../commands/format.js';
 import { notice } from '../../plugins.js';
+import { openEntryPdf } from '../../bib-pdf.js';
 
 const NOTE_FILE = /\.(md|jmd)$/i;
 
@@ -294,15 +295,7 @@ export class ClewBibliography extends ClewElement {
 	}
 
 	#openPdf(e) {
-		const pdf = e.pdf;
-		if (!pdf) return;
-		if (!pdf.exists) { notice(`The PDF for ${e.key} is missing: ${pdf.path}`); return; }
-		if (pdf.inVault) { workspaceStore.openFile(pdf.path, { newTab: true }); return; }
-		// Outside the vault: the OS, through the open-file guard.
-		const url = `file://${pdf.path.split('/').map(encodeURIComponent).join('/')}`;
-		ipc.invoke(CH.SHELL_OPEN_PATH, { url })
-			.then((result) => { if (result && !result.ok) notice(result.reason); })
-			.catch(() => notice(`Could not open ${pdf.path}`));
+		openEntryPdf(e);
 	}
 
 	#empty(text) {

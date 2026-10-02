@@ -28,8 +28,9 @@ import { settings } from './settings.js';
 import { engineExtensionEntries } from './plugins.js';
 import { writeFileAtomic } from './fs-utils.js';
 import { isDependentFragment } from '../shared/fragment-deps.js';
-import { citationHeader } from './citation-header.js';
+import { citationHeader, noteBibFiles } from './citation-header.js';
 import { refusedNames } from '../shared/refused-names.js';
+import { calloutsEnv } from './callout-types.js';
 
 const WORKER_PATH = paths.engineWorker;
 
@@ -145,6 +146,11 @@ export class RenderService {
 		if (this.vaultRoot) this.reconfigure({});
 	}
 
+	/** One of the vault's render options as this service holds it. */
+	vaultOption(key) {
+		return this.#vaultOptions[key];
+	}
+
 	/** Every construct refused so far, by name — for a window that reloads. */
 	refusedNames() {
 		return [...new Set([...this.#refused.values()].flat())];
@@ -246,16 +252,14 @@ export class RenderService {
 				// wikilinks.js; this registers the inline ```base fence.
 				`baseFence from ${path.join(engineAssets, 'bases.js')}`,
 				// The Admonition plugin's ```ad-* fences (pre-callout vaults),
-				// mapped onto callout tokens so callouts.js renders them.
+				// mapped onto callout tokens so the engine's callouts render them.
 				`admonitionFence from ${path.join(engineAssets, 'admonitions.js')}`,
 				// Meta Bind's INPUT[…]/VIEW[…] widgets — editable cells that
 				// live in prose, on the same field-edit write path.
 				`metaBindInline, metaBindFence from ${path.join(engineAssets, 'meta-bind.js')}`,
-				// LAST on purpose: marked offers the most recently registered
-				// block extension first, and callouts must be seen before the
-				// engine's own GFM-alert rule so that every `> [!type]` in a
-				// document — the five GFM ones included — renders identically.
-				`calloutBlock from ${path.join(engineAssets, 'callouts.js')}`,
+				// (Callouts are the ENGINE's since jmarkdown a7de8c6 — callouts.js,
+				// registered after its own GFM-alert rule; Clew hands it the custom
+				// types through CLEW_CALLOUTS.)
 				// After callouts (so it is offered first): a note whose
 				// frontmatter declares `kanban-plugin` IS a board, and this
 				// claims the whole body before any other rule can render it
@@ -360,6 +364,10 @@ export class RenderService {
 					global: settings.get('texFragments') ?? [],
 					vault: this.#vaultOptions.texFragments ?? [],
 				}),
+				// Custom callout types, both scopes RESOLVED (callout-types.js):
+				// names, titles, colours and only the icon paths they use. Empty
+				// when none are defined — and then the icon table is never read.
+				CLEW_CALLOUTS: calloutsEnv(settings.get('callouts'), this.#vaultOptions.callouts, paths.faIcons),
 				// Engine console chatter goes to the pipes; keep them from filling.
 			},
 		});
@@ -458,10 +466,14 @@ export class RenderService {
 
 		if (result.type === 'done') {
 			entry.mtimeMs = mtimeMs;
-			// Notes holding query fences re-render on ANY vault change.
+			// Notes holding query fences re-render on ANY vault change; notes
+			// citing a .bib re-render when THAT .bib changes (onFileChanged).
 			try {
-				entry.hasQueries = /^```(query|tasks|kanban)/m.test(fs.readFileSync(abs, 'utf8'));
-			} catch { entry.hasQueries = false; }
+				const text = fs.readFileSync(abs, 'utf8');
+				entry.hasQueries = /^```(query|tasks|kanban)/m.test(text);
+				entry.bibs = new Set(noteBibFiles(text, path.dirname(abs), this.#vaultBibliography(),
+					{ pandoc: this.#vaultOptions.pandocCitations === true }).map((p) => path.resolve(p)));
+			} catch { entry.hasQueries = false; entry.bibs = null; }
 			if (!this.#noteCode) {
 				try { this.#noteRefusals(relPath, fs.readFileSync(entry.htmlFile, 'utf8')); } catch { /* unreadable: nothing to say */ }
 			}
@@ -655,6 +667,23 @@ export class RenderService {
 				this.#restale(queryPath);
 			}
 		}
+		// A bibliography: the notes whose citations come from it (their
+		// header's `Bibliography`, else the vault's) — rebuilt where a preview
+		// is open, marked stale elsewhere. Reading mode kept the old entry
+		// until the note itself changed (2026-10-01).
+		if (/\.bib$/i.test(relPath) && this.vaultRoot) {
+			const bib = path.resolve(this.vaultRoot, relPath);
+			for (const [notePath, entry] of this.#notes) {
+				if (entry.bibs?.has(bib)) this.#restale(notePath);
+			}
+		}
+	}
+
+	/** The vault-wide bibliography (vault-settings `bibliography`), absolute, or ''. */
+	#vaultBibliography() {
+		const bib = String(this.#vaultOptions.bibliography ?? '').trim();
+		if (!bib || !this.vaultRoot) return '';
+		return path.isAbsolute(bib) ? bib : path.join(this.vaultRoot, bib);
 	}
 
 	/**

@@ -16,8 +16,12 @@ coloured box with an icon.
 Anything after the type becomes the title, and it may contain markdown:
 
 > [!tip] Titles can carry *emphasis* and even [[Welcome|links]]
-> Without a title, the type's own name is used — "Tip", above would have
-> read "Tip".
+> Without a title, the type as you wrote it is used, capitalised — this
+> one would have read "Tip".
+
+> [!caution]
+> Untitled, and written as an alias of `warning`: it keeps warning's look
+> but is headed "Caution", the name it was given. `[!NOTE]` reads "Note".
 
 ## Folding
 
@@ -71,12 +75,21 @@ expanded.
 > [!quote]
 > quote — someone else's words.
 
+> [!suggestion]
+> suggestion — an idea worth trying (the jmarkdown engine's own type).
+
+Types of your own — a name, a title, any Font Awesome icon and a colour,
+for one vault or for all of them — are made in Settings → Callouts.
+
 ## What happens to an unknown type
 
 > [!nonsense]
-> A type Clew does not know stays an ordinary blockquote rather than
-> being invented — which is the honest failure, and keeps the note
-> readable.
+> A type nobody defined is drawn as a note — the pencil, note's colour —
+> headed by its name, which is how Obsidian draws one; `data-callout` keeps
+> the name, so a stylesheet can still give it a look of its own.
+
+Callouts render the same in an HTML or a LaTeX export of a note (a
+coloured box with the same icon), not only on screen.
 
 Clew's callouts use the same class names Obsidian does (`callout`,
 `data-callout`), so a vault's own CSS snippets keep working, and the same

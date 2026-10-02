@@ -44,6 +44,9 @@ export function installMenuBridge() {
 			rightSidebar: !!workspaceStore.state.sidebars.right?.open,
 			shellOpen: !!workspaceStore.shell.open,
 			theme: settingsStore.get('theme') ?? 'dark',
+			// The Window menu lists every open vault with its active tab,
+			// named as the title bar names it (clew-app.js#updateTitle).
+			activeName: ctx.activeTab?.path ? ctx.activeTab.path.split('/').pop().replace(/\.(md|jmd)$/i, '') : null,
 			hotkeys,
 		}).catch(() => {});
 	}, 50);

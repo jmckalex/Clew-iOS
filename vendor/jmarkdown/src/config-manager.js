@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import os from 'os';
 import { marked } from './utils.js';
+import { addWarning } from './warnings.js';
 import { addExtension, loadExtensionsFromSpec, loadDirectivesFromSpec, loadEnvironmentsFromSpec, parseOptionals } from './metadata-header.js';
 
 // Default configuration values
@@ -96,6 +97,15 @@ export const DEFAULT_CONFIG = {
 	// Opt-in typographic educator (see src/smart-typography.js): straight
 	// quotes → curly, ---/-- → em/en dash, ... → ellipsis, in both outputs.
 	'Smart typography': false,
+	// Custom Obsidian callout types (src/callouts.js): a list of
+	// { "name", "title"?, "icon"?, "color"?, "aliases"? } — `[!name]` with
+	// that title, a Font Awesome icon by name ("lightbulb", "regular:circle",
+	// "brands:github"), a CSS colour (hex, rgb(), hsl() or a name) and extra
+	// `[!alias]` spellings. A built-in's name re-titles, re-icons or recolours
+	// it. Validated as Clew validates its own: a bad entry is skipped with a
+	// warning, never half-applied. Config only — a definition is a list of
+	// objects, which a metadata header cannot express.
+	'Callouts': [],
 	// Raw LaTeX macro definitions (\newcommand, \DeclareMathOperator, …),
 	// one per line, shared verbatim by BOTH outputs: preamble lines in LaTeX
 	// (latex-template.js), a hidden MathJax block at the top of the body in
@@ -333,6 +343,12 @@ class ConfigManager {
 				// Never from a header: the switch exists so a host can keep a
 				// document it did not write from running code, and a document
 				// that could set it would simply switch itself back on.
+				break;
+			case "Callouts":
+				// Config only (src/callouts.js): a definition is an object, which
+				// a header line cannot express, so a header's `Callouts:` would
+				// only arrive as strings, each refused as "not an entry".
+				addWarning('Callouts: custom callout types are defined in .jmarkdown/config.json, not in a document header — ignored');
 				break;
 			case "Math_macros":
 				// A multi-line metadata value arrives as one newline-joined

@@ -36,6 +36,8 @@ import { paths } from './paths.js';
 import { trust } from './trust.js';
 import { registeredRemoteUrl, saveRemoteCopy } from './remote-pdfs.js';
 import { planOpen, pathFromFileUrl } from './open-file.js';
+import { iconTable, resolvedCallouts } from './callout-types.js';
+import { iconKey } from '#jmarkdown/callout-definitions.js';
 import fs from 'node:fs';
 import nodePath from 'node:path';
 
@@ -223,7 +225,7 @@ export function registerIpc() {
 	// Hand a file to the OS default app: `[[paper.pdf|external]]` sends a
 	// vault-relative path, a file:// link an absolute one. The guards
 	// (vault clamp, executable refusal) live in open-file.js.
-	handle(CH.SHELL_OPEN_PATH, (s, { path: rel, url }) => {
+	handle(CH.SHELL_OPEN_PATH, async (s, { path: rel, url }) => {
 		let plan;
 		if (url) {
 			const abs = pathFromFileUrl(url);
@@ -233,11 +235,17 @@ export function registerIpc() {
 			plan = planOpen(s.vaults, { rel: String(rel ?? '') });
 		}
 		if (!plan.ok) return plan;
-		// openPath resolves to '' on success, or a message on failure.
-		shell.openPath(plan.target).then((message) => {
-			if (message) console.warn(`[clew] openPath failed (${plan.target}): ${message}`);
-		});
-		return { ok: true };
+		// A scenario must never launch an app: it reads this line instead.
+		if (process.env.CLEW_SMOKE) {
+			console.log(`smoke-open-path: ${plan.target}`);
+			return { ok: true };
+		}
+		// openPath resolves to '' on success, or the OS's own message (no app
+		// for the type, …) — returned, so the caller shows it as a notice
+		// rather than the open failing in silence.
+		const message = await shell.openPath(plan.target);
+		if (message) console.warn(`[clew] openPath failed (${plan.target}): ${message}`);
+		return message ? { ok: false, reason: message } : { ok: true };
 	});
 
 	handle(CH.WORKSPACE_LOAD, (s) => s.vaults.loadState('workspace.json'));
@@ -251,6 +259,33 @@ export function registerIpc() {
 		if (key === 'texFragments') {
 			for (const session of allSessions()) session.renderService.reconfigure({});
 		}
+		// The global callout types: every window's worker and every window's
+		// editor (live edit draws callouts itself, from the same table).
+		if (key === 'callouts') {
+			for (const session of allSessions()) {
+				session.renderService.reconfigure({});
+				session.send(CH.EV_CALLOUTS_CHANGED);
+			}
+		}
+	});
+	// Custom callout types for the sender's vault, resolved. The vault's
+	// list is read from disk, so a hand edit is what this answers with.
+	handle(CH.CALLOUTS_RESOLVED, (s) => {
+		const vaultList = s.vaults.root ? s.vaults.loadState('vault-settings.json')?.callouts : undefined;
+		const { custom, problems } = resolvedCallouts(settings.get('callouts'), vaultList, paths.faIcons);
+		return { custom, problems };
+	});
+	// The icon table, for Settings only (never a render): whole for the
+	// picker, or just the names a list of rows uses, for their previews.
+	handleGlobal(CH.CALLOUT_ICONS, (args) => {
+		const table = iconTable(paths.faIcons);
+		if (!Array.isArray(args?.names)) return table;
+		const icons = {};
+		for (const name of args.names.slice(0, 500)) {
+			const key = iconKey(name, table.icons);
+			if (key) icons[String(name)] = { key, icon: table.icons[key] };
+		}
+		return { version: table.version, icons };
 	});
 	handle(CH.VSTATE_LOAD, (s, { name }) => s.vaults.loadState(sanitizeStateName(name)));
 	handle(CH.VSTATE_SAVE, (s, { name, data }) => s.vaults.saveState(sanitizeStateName(name), data));
@@ -311,6 +346,12 @@ export function registerIpc() {
 		// standby has to go and the open previews re-render (engine/
 		// tex-fragments.js, engine/figures.js#applyTexFragments).
 		if (key === 'texFragments') s.renderService.reconfigure({ texFragments: value });
+		// This vault's callout types: the worker's table (CLEW_CALLOUTS is
+		// read at spawn) and this window's editor.
+		if (key === 'callouts') {
+			s.renderService.reconfigure({ callouts: value });
+			s.send(CH.EV_CALLOUTS_CHANGED);
+		}
 		// Plugin toggles change the engine config (engine surfaces) and the
 		// preview injection; re-render open previews with the new set.
 		if (key === 'plugins') s.renderService.reconfigure({ plugins: value });

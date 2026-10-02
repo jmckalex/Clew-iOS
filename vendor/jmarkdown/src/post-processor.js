@@ -92,6 +92,11 @@ function add_labels_to_headers($) {
 
 	$('div.toc').addClass('numeric');
 
+	// A numbered heading links back to the table of contents — but only when
+	// there is one ({{TOC}} expands to `<p id='toc'>…`, see createTOC). Without
+	// it the link went nowhere and just left the heading looking clickable.
+	const hasTOC = $('#toc').length > 0;
+
 	$(":header").each((i, elem) => {
 		let $elem = $(elem);
 		switch($elem.prop('tagName')) {
@@ -125,9 +130,9 @@ function add_labels_to_headers($) {
 		if ($toc.length > 0) {
 			$toc.html($elem.html());
 		}
-		let html = $elem.html();
-		html = `<a href='#toc'>${html}</a>`;
-		$elem.html(html);
+		if (hasTOC) {
+			$elem.html(`<a href='#toc'>${$elem.html()}</a>`);
+		}
 	})
 }
 

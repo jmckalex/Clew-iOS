@@ -190,6 +190,112 @@ table.game td.columnLabel p {
 	background-color: #FFEBE9;
 }
 
+/* ---- Obsidian callouts (src/callouts.js) ------------------------------------
+   Clew's reading-view styling (Clew-app src/engine/preview.css), for this
+   light page. One accent colour per type drives the border, the icon and the
+   title; the body stays the page's own text colour, so a callout reads as
+   emphasis rather than as a coloured box. The LaTeX output draws the same
+   design (src/callout-latex.js), with the same palette.
+
+   Every rule is scoped to [data-callout], which every callout carries and a
+   user's own `@begin(callout)` / `:::callout` block (a plain div.callout)
+   does not — so naming an environment `callout` does not restyle it. */
+.callout[data-callout] {
+	/* Note's colour: an unknown type, or a custom one with no colour of its
+	   own, is drawn as a note — Obsidian's default. */
+	--callout: #5b8def;
+	margin: 1.1em 0;
+	padding: 12px 16px;
+	border-left: 4px solid var(--callout);
+	border-radius: 5px;
+	background: color-mix(in srgb, var(--callout) 12%, transparent);
+}
+.callout[data-callout] .callout-title {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin: 0;
+	font-weight: 600;
+	color: var(--callout);
+}
+.callout[data-callout] .callout-icon {
+	width: 1em;
+	height: 1em;
+	flex: none;
+}
+.callout[data-callout] .callout-content { margin-top: 6px; }
+.callout[data-callout] .callout-content > :first-child { margin-top: 0; }
+.callout[data-callout] .callout-content > :last-child { margin-bottom: 0; }
+/* An empty callout is a title on its own — no gap below it. */
+.callout[data-callout] .callout-content:empty { display: none; }
+
+/* Foldables are <details>: the browser does the work. */
+details.callout[data-callout] > summary {
+	cursor: pointer;
+	list-style: none;
+}
+details.callout[data-callout] > summary::-webkit-details-marker { display: none; }
+/* A chevron that turns, so a collapsed callout says so without a script. */
+details.callout[data-callout] > summary::after {
+	content: '';
+	width: 6px;
+	height: 6px;
+	margin-left: auto;
+	border-right: 2px solid currentColor;
+	border-bottom: 2px solid currentColor;
+	transform: rotate(-45deg);
+	transition: transform 0.15s ease;
+	opacity: 0.7;
+}
+details.callout[data-callout][open] > summary::after { transform: rotate(45deg); }
+
+/* Obsidian's palette, near enough that a vault looks like itself. The same
+   values are in src/callouts.js (PALETTE) for LaTeX; tests/callouts checks
+   the two agree. */
+.callout[data-callout='note']          { --callout: #5b8def; }
+.callout[data-callout='abstract']      { --callout: #00b8a3; }
+.callout[data-callout='info']          { --callout: #3b9dd8; }
+.callout[data-callout='todo']          { --callout: #3b9dd8; }
+.callout[data-callout='tip']           { --callout: #00b8a3; }
+.callout[data-callout='success']       { --callout: #3fb950; }
+.callout[data-callout='question']      { --callout: #d9a441; }
+.callout[data-callout='warning']       { --callout: #e08c3c; }
+.callout[data-callout='failure']       { --callout: #e5534b; }
+.callout[data-callout='danger']        { --callout: #e5534b; }
+.callout[data-callout='bug']           { --callout: #e5534b; }
+.callout[data-callout='example']       { --callout: #a371f7; }
+.callout[data-callout='quote']         { --callout: #8b949e; }
+.callout[data-callout='compatibility'] { --callout: #00b8a3; }
+.callout[data-callout='suggestion']    { --callout: #db61a2; }
+
+/* A CUSTOM colour (the `Callouts` config, or a host's table) rides on the
+   element as --clew-callout-color and drives the same four things, with its
+   lightness capped where text reads on a light page: OKLCH L no more than
+   0.68. Most colours pass through untouched; pale yellow is darkened until it
+   reads. The LaTeX output applies the same cap. */
+.callout[data-callout].callout-custom { --callout: var(--clew-callout-color); }
+@supports (color: oklch(from red l c h)) {
+	.callout[data-callout].callout-custom { --callout: oklch(from var(--clew-callout-color) min(l, 0.68) c h); }
+}
+
+/* A callout also carries `markdown-alert markdown-alert-<type>`, so the
+   GitHub-alert rules above match it too; these keep the callout's own look. */
+.callout[data-callout].markdown-alert {
+	border-top: 0;
+	border-right: 0;
+	border-bottom: 0;
+	border-left: 4px solid var(--callout);
+	background: color-mix(in srgb, var(--callout) 12%, transparent);
+}
+.callout[data-callout].markdown-alert .callout-title {
+	margin: 0;
+	color: var(--callout);
+}
+
+@media print {
+	.callout[data-callout] { break-inside: avoid; }
+}
+
 .tikz-error {
 	border: 2px solid #ff6b6b;
 	background-color: #fff5f5;

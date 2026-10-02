@@ -77,6 +77,10 @@ export const paths = app.isPackaged
 		// by a vault, which is why installing there is a one-time act while
 		// enabling stays per-vault (main/plugins.js).
 		globalPlugins: path.join(app.getPath('userData'), 'plugins'),
+		// Font Awesome's icons as one table, for custom callout types
+		// (main/callout-types.js; written by scripts/build.js) — inside the
+		// asar, which main's fs reads like a folder.
+		faIcons: path.join(distDir, 'main', 'fa-icons.json'),
 		...trustPaths(),
 	}
 	: {
@@ -109,5 +113,6 @@ export const paths = app.isPackaged
 		// Same userData location in dev, so a plugin installed while
 		// developing is the same one the packaged app finds.
 		globalPlugins: path.join(app.getPath('userData'), 'plugins'),
+		faIcons: path.join(distDir, 'main', 'fa-icons.json'),
 		...trustPaths(),
 	};

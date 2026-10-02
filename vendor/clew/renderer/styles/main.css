@@ -46,7 +46,12 @@ body {
 	font-size: 14px;
 	background: var(--clew-bg-primary);
 	color: var(--clew-text-normal);
-	-webkit-font-smoothing: antialiased;
+	/* `auto`, not `antialiased`: on macOS antialiased suppresses the stem
+	   thickening that keeps light-on-dark text legible — the owner found
+	   the body text thin and dim and chose this from screenshots
+	   (2026-10-01); light text is no worse for it, and the preview
+	   document's body says the same (engine/preview.css). */
+	-webkit-font-smoothing: auto;
 }
 
 button {

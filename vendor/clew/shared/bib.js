@@ -32,6 +32,23 @@ function shortAuthors(field) {
 }
 
 /**
+ * A citation's short label, author-year — "Akerlof and Kranton 2000",
+ * "Smith et al. 2001" — from a parsed entry: what live edit's pill reads
+ * until the engine's own text for the citation is in, or where the engine
+ * has none (renderer/editor/live/cite-text.js). `authors` is already short
+ * (shortAuthors above), so it is joined, never re-parsed — re-parsing "A & B"
+ * as a name took its last word, which is how a pill came to read "Kranton
+ * 2000" for Akerlof and Kranton (2026-10-01).
+ *
+ * @param {{key?: string, authors?: string, year?: string}} entry
+ * @returns {string}
+ */
+export function shortCiteLabel(entry) {
+	const authors = String(entry?.authors ?? '').replace(/ & /g, ' and ');
+	return [authors, entry?.year].filter(Boolean).join(' ') || String(entry?.key ?? '');
+}
+
+/**
  * @returns {Array<{key, type, authors, title, year, file, url, doi}>}
  *   `file`: the raw BibTeX `file` field (Zotero/JabRef — see bibFilePath)
  */

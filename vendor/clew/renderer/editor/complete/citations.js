@@ -15,13 +15,17 @@
 import { vaultStore } from '../../state/vault-store.js';
 import { fuzzyScore } from '../../lib/fuzzy.js';
 import { ipc, CH } from '../../ipc.js';
+import { shortCiteLabel } from '../../../shared/bib.js';
 
 const CITE_PREFIX = /\\[a-zA-Z]*cite[a-zA-Z]*\*?(?:\[[^\]]*\]){0,2}\{([^{}]*)$/;
 
 let cache = null;
 let cachePromise = null;
-vaultStore.on('tree-changed', () => { cache = null; cachePromise = null; });
-vaultStore.on('vault-changed', () => { cache = null; cachePromise = null; });
+const drop = () => { cache = null; cachePromise = null; };
+vaultStore.on('tree-changed', drop);
+vaultStore.on('vault-changed', drop);
+// …and a .bib edited in place, which changes no tree.
+ipc.on(CH.EV_FILE_CHANGED, ({ path }) => { if (/\.bib$/i.test(path ?? '')) drop(); });
 
 async function bibEntries() {
 	if (cache) return cache;
@@ -31,28 +35,32 @@ async function bibEntries() {
 	return cache;
 }
 
-/**
- * A citation key's short label (`Knuth 1984`) and title, from the vault's
- * .bib files — synchronous, so live edit's chips can ask while drawing.
- * Null until the entries have loaded (the first ask starts the load; the
- * next redraw picks it up) and for a key no .bib defines.
- *
- * @param {string} key
- * @returns {{ label: string, title: string }|null}
- */
 /** Resolves once the vault's .bib entries are loaded (for a redraw). */
 export function citationsReady() {
 	return bibEntries().then(() => undefined, () => undefined);
 }
 
+/** Whether the entries are in — until then an unknown key is not yet one. */
+export function citationsLoaded() {
+	return cache !== null;
+}
+
+/**
+ * A citation key's short label (`Akerlof and Kranton 2000`, `Smith et al.
+ * 2001` — shared/bib.js#shortCiteLabel) and title, from the vault's .bib
+ * files — synchronous, so live edit's chips can ask while drawing. Null
+ * until the entries have loaded (the first ask starts the load; the next
+ * redraw picks it up) and for a key no .bib defines. A pill shows it only
+ * until the engine's own text is in (editor/live/cite-text.js).
+ *
+ * @param {string} key
+ * @returns {{ label: string, title: string, authors: string, year: string }|null}
+ */
 export function citationLabel(key) {
 	if (!cache) { bibEntries().catch(() => {}); return null; }
 	const entry = cache.find((e) => e.key === key);
 	if (!entry) return null;
-	const first = String(entry.authors ?? '').split(/\s+and\s+|;/)[0].trim();
-	const surname = first.includes(',') ? first.split(',')[0].trim() : first.split(/\s+/).pop();
-	const label = [surname, entry.year].filter(Boolean).join(' ') || key;
-	return { label, title: entry.title ?? '' };
+	return { label: shortCiteLabel(entry), title: entry.title ?? '', authors: entry.authors ?? '', year: entry.year ?? '' };
 }
 
 /** Every entry in the vault's .bib files (the References panel's Library,

@@ -1056,6 +1056,11 @@ function atDirectives(ctx, S) {
 			content: null, attrs: null, block: Boolean(m[5]),
 		};
 
+		// A directive the ENGINE takes literally (LITERAL_DIRECTIVES): its
+		// bracket is a path, a URL, a key or code, never prose — so nothing
+		// inside it is formatted or concealed here either.
+		const literal = LITERAL_DIRECTIVES.has(m[3]);
+
 		// Optional [jmarkdown text] group: paint/own the brackets, then
 		// inject the bracket-free interior into the inline grammar. Injecting
 		// the bare slice (rather than leaving the whole `[…]` to the ambient
@@ -1073,7 +1078,13 @@ function atDirectives(ctx, S) {
 				region(ctx, rb, rb + 1);
 				claim(ctx, p, p + 1);
 				claim(ctx, rb, rb + 1);
-				if (rb > p + 1) {
+				if (literal) {
+					// Claimed, and no inline grammar: `@reveal[http://a/b/c/]`
+					// read as /italic/ pairs, slashes concealed, while the cursor
+					// was on it — exactly where the author edits (the owner's
+					// report, 2026-10-01).
+					if (rb > p + 1) claim(ctx, p + 1, rb);
+				} else if (rb > p + 1) {
 					ctx.out.injections.push({
 						start: p + 1,
 						end: rb,
@@ -1119,6 +1130,24 @@ function atDirectives(ctx, S) {
 		re.lastIndex = p;
 	}
 }
+
+/**
+ * The `@name[…]` directives whose bracket the ENGINE does not read as inline
+ * markdown — the editor must not either (no /italic/, no concealing). The
+ * engine lexes a directive's bracket unless its environment's mode is
+ * `verbatim`; a `custom` handler may ignore the lexed tokens and take the
+ * raw text, and these do (their argument is a path, a URL, a key or code).
+ * tests/jmarkdown-scan.test.js holds the verbatim half to the vendored
+ * engine's registrations, so a new one cannot be missed.
+ */
+export const LITERAL_DIRECTIVES = new Set([
+	// mode 'verbatim' (vendor/jmarkdown/src: begin-end, media, sources-and-
+	// targets, equations, metapost)
+	'label', 'ref', 'cref', 'Cref', 'TeX', 'image', 'video', 'target', 'equation', 'metapost',
+	// mode 'custom', raw text: the engine's tikz, mermaid, Mathematica and
+	// strategic-form games; Clew's reveal, tabbing (and its TiKZ/metapost).
+	'TiKZ', 'mermaid', 'Mathematica', 'game', 'reveal', 'tabbing',
+]);
 
 /**
  * From an opener at `from` (where `S[from] === open`), return the offset
@@ -1312,21 +1341,30 @@ function highlights(ctx, S) {
 /**
  * `/italic/` spans, exactly as the ENGINE reads them (owner's rule,
  * 2026-09-27: the editor always follows the engine). Its tokenizer
- * (vendor/jmarkdown/src/syntax-modifications.js#italics) is a bare regex,
- * `/([^/.?!]+[.?!]?)/`, tried at every slash the inline lexer reaches — no
- * word boundaries, so `and/or/not`, `/usr/bin` and `1/2 or 3/4` italicise
- * too, and `\/` is how an author says a slash is only a slash. A slash the
- * lexer never reaches cannot open one: an escaped `\/`, a slash inside a
- * link's destination, or an autolink or HTML tag (each consumed whole by an
- * earlier token). A BARE URL is not one: the engine does not link it, and
- * `https://a.com/b/c` italicises its `b` (measured with the engine itself). The body is raw text up to the next slash of
- * any kind — escaped or not — and no further than the paragraph. Not owned:
- * a nested `*bold*` keeps its grammar face.
+ * (vendor/jmarkdown/src/syntax-modifications.js#italics) has FLANKING rules
+ * since jmarkdown 3134543 (2026-10-01): the opening `/` is not preceded by a
+ * letter, a digit or any of `:` `/` `.` `~` (nothing before it — a paragraph,
+ * cell or link text starting — is a boundary); the body is one or more
+ * characters, none of `/ . ? !` except that the last may be `. ? !`; the
+ * closing `/` is not followed by a letter, a digit or `/`. So `and/or`,
+ * `1/2/3`, `/usr/local/bin/` and `~/notes/` stay literal, while `(/word/)`
+ * and `"/quoted/"` are italic; a one-segment path with a trailing slash
+ * (`see /tmp/ here`) still italicises, in both. `\/` is still a slash only.
+ *
+ * A slash the lexer never reaches cannot open one: an escaped `\/`, a slash
+ * inside a link's destination, an autolink or HTML tag, or a BARE URL — the
+ * engine autolinks http(s)/ftp/www URLs whole (GFM's url tokenizer, reachable
+ * since that same commit). The body is raw text up to the next slash of any
+ * kind — escaped or not — and no further than the paragraph. Not owned: a
+ * nested `*bold*` keeps its grammar face.
  */
-const ITALIC = /\/([^/.?!]+[.?!]?)\//y;
+const ITALIC = /\/([^/.?!]+[.?!]?)\/(?![\p{L}\p{N}/])/uy;
+/** What may not stand just before an opening `/` (the engine's lookbehind). */
+const NO_ITALIC_AFTER = /[\p{L}\p{N}:/.~]$/u;
 const LEXED_WHOLE = [
 	/\]\([^)\n]*\)/g, // a link's destination (its text is lexed, and may hold one)
 	/<[A-Za-z/!?][^>\n]*>/g, // an HTML tag or an autolink
+	/(?:(?:ftp|https?):\/\/|www\.)[^\s<]*/g, // a bare URL (marked's GFM url rule)
 ];
 
 function italics(ctx, S) {
@@ -1341,6 +1379,8 @@ function italics(ctx, S) {
 		let backslashes = 0;
 		for (let k = open - 1; k >= 0 && S[k] === '\\'; k -= 1) backslashes += 1;
 		if (backslashes % 2 === 1) continue;
+		// Two code units back: an astral letter is a surrogate pair.
+		if (NO_ITALIC_AFTER.test(S.slice(Math.max(0, open - 2), open))) continue;
 		ITALIC.lastIndex = open;
 		const m = ITALIC.exec(S);
 		// A blank line ends the paragraph, and the engine lexes one at a time.

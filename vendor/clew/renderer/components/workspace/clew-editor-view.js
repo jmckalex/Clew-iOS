@@ -55,7 +55,12 @@ class ClewEditorView extends ClewElement {
 		// The tab may have switched/closed while the note loaded.
 		if (!this.isConnected || this.tabId !== tabId || !entry.view) return;
 
-		this.replaceChildren(entry.view.dom);
+		// A split layout RECONNECTS every pane's view on each layout change
+		// (clew-element.js); dropping the toolbar here while #toolbar still
+		// named it left live edit in a split pane with no toolbar at all
+		// (measured 2026-10-01). It goes back with the editor; #applyMode
+		// then keeps or removes it for the mode.
+		this.replaceChildren(...(this.#toolbar ? [this.#toolbar] : []), entry.view.dom);
 		this.#applyMode();
 		this.#restoreViewState(entry.view);
 		this.#syncConflictBanner();
@@ -67,6 +72,12 @@ class ClewEditorView extends ClewElement {
 		this.addEventListener('pointerup', this.#onAnyChange);
 		this.listen(editorPool, 'conflict-changed', ({ tabId: changed }) => {
 			if (changed === this.tabId) this.#syncConflictBanner();
+		});
+		// The pool put a new state in this view (the tab re-pointed while it
+		// showed): that state carries no mode of its own, so the tab's comes
+		// back — live edit is never left undrawn behind a live button.
+		this.listen(editorPool, 'state-replaced', ({ tabId: changed }) => {
+			if (changed === this.tabId && this.contains(editorPool.get(this.tabId)?.view?.dom ?? null)) this.#applyMode();
 		});
 		// Source ↔ live is a flip of THIS view (the tab group keeps it
 		// mounted for both), so the mode is followed here.
@@ -144,22 +155,39 @@ class ClewEditorView extends ClewElement {
 	#toolbar = null;
 	#toolbarRaf = 0;
 
-	/** Mount or drop the formatting bar (setting × mode), then fill it. */
+	/**
+	 * The formatting toolbar, where `editorToolbar` shows it in this mode,
+	 * and nothing otherwise: the mode switch is in the pane's tab strip
+	 * (clew-tab-bar.js), so the note starts right under the strip. The bar
+	 * coming or going moves the editor's top edge; the scroll moves with it,
+	 * so a line mid-note holds still — except at the very top, where the
+	 * text simply moves down under a new bar rather than its first lines
+	 * being hidden.
+	 */
 	#syncToolbar() {
 		const tab = workspaceStore.findTab(this.tabId)?.tab;
 		const entry = editorPool.get(this.tabId);
 		const want = Boolean(tab && entry?.view && toolbarShown(tab.view.mode));
-		if (!want) {
-			this.#toolbar?.remove();
-			this.#toolbar = null;
+		if (want === Boolean(this.#toolbar)) {
+			if (want) this.#scheduleToolbarState();
 			return;
 		}
-		if (!this.#toolbar) {
+		const before = this.#toolbar?.getBoundingClientRect().height ?? 0;
+		const scrolled = entry?.view ? entry.view.scrollDOM.scrollTop : 0;
+		if (want) {
 			this.#toolbar = document.createElement('clew-editor-toolbar');
 			this.#toolbar.tabId = this.tabId;
 			this.insertBefore(this.#toolbar, entry.view.dom);
+		} else {
+			this.#toolbar?.remove();
+			this.#toolbar = null;
 		}
-		this.#scheduleToolbarState();
+		const delta = (this.#toolbar?.getBoundingClientRect().height ?? 0) - before;
+		if (entry?.view && delta && (delta < 0 || scrolled > 0)) {
+			this.#suppressor.suppress();
+			entry.view.scrollDOM.scrollTop = scrolled + delta;
+		}
+		if (want) this.#scheduleToolbarState();
 	}
 
 	/** The toolbar reflects the cursor — once per frame at most. */

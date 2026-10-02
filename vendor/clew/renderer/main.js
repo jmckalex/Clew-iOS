@@ -27,6 +27,7 @@ import { initPlugins } from './plugins.js';
 import { installPdfSaveBridge, installOfficeSaveBridge, installOfficeThumbBridge, installExcalidrawSaveBridge, installExcalidrawLibraryBridge, installExcalidrawResolveBridge } from './pdf-save.js';
 import { officeDock } from './office-dock.js';
 import { installTrustBanner, trustBannerVaultShown } from './trust-banner.js';
+import { installCalloutSync } from './callouts.js';
 import './components/chrome/clew-app.js';
 import './editor/toolbar/clew-selection-bubble.js';
 import { linkPreview } from './editor/link-preview.js';
@@ -130,6 +131,7 @@ installExcalidrawLibraryBridge();
 installExcalidrawResolveBridge();
 installMenuBridge();
 installTrustBanner();
+installCalloutSync();
 officeDock.init();
 
 // ---- dev hook -------------------------------------------------------------

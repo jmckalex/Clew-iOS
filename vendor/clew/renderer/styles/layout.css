@@ -534,3 +534,15 @@ clew-shell-panel.is-open { display: flex; }
 }
 .shell-grid .xterm { height: 100%; }
 .shell-grid .xterm-viewport { background: transparent !important; }
+
+/* The pane's view-mode switch (clew-tab-bar.js): pinned at the strip's
+   right end, left of "+", the strip shrinking and scrolling under it. Kept
+   in place but hidden for a tab with no modes, so "+" never moves. */
+.tab-modes {
+	flex: none;
+	align-self: center;
+	margin: 0 4px 0 6px;
+}
+.tab-modes .toolbar-button { height: 24px; min-width: 26px; padding: 0 5px; }
+.tab-modes .toolbar-button .ui-icon { width: 14px; height: 14px; }
+.tab-modes.is-unavailable { visibility: hidden; }

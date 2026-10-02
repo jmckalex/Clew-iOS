@@ -35,9 +35,14 @@ class Sidenotes {
 		this.schedule();
 	}
 
+	// Every read of the live field is TOLERANT (`false`): a measure this
+	// plugin requested can run after the live compartment left the state (a
+	// mode swap, the pool putting in a fresh state) — CodeMirror keeps
+	// pending measure requests past their plugin. It then does nothing.
 	update(u) {
-		const live = u.state.field(liveStateField);
-		if (!(u.docChanged || u.viewportChanged || u.geometryChanged || live !== u.startState.field(liveStateField))) return;
+		const live = u.state.field(liveStateField, false);
+		if (!live) return;
+		if (!(u.docChanged || u.viewportChanged || u.geometryChanged || live !== u.startState.field(liveStateField, false))) return;
 		// A note with no footnotes costs a keystroke nothing here.
 		if (!this.layer.childElementCount && !live.model.some((c) => c.kind === 'footnote')) return;
 		this.schedule();
@@ -54,7 +59,8 @@ class Sidenotes {
 
 	read() {
 		const { view } = this;
-		const live = view.state.field(liveStateField);
+		const live = view.state.field(liveStateField, false);
+		if (!live) return { on: false };
 		const notes = live.model.filter((c) => c.kind === 'footnote' && !live.revealed.has(c.id) && c.body);
 		const mode = settingsStore.get('sidenotes') ?? 'auto';
 		if (!notes.length || mode === 'off') return { on: false };
@@ -83,7 +89,8 @@ class Sidenotes {
 		if (!m.on) { this.layer.replaceChildren(); this.layer.hidden = true; return; }
 		this.layer.hidden = false;
 		const { doc } = this.view.state;
-		const model = this.view.state.field(liveStateField).model;
+		const model = this.view.state.field(liveStateField, false)?.model;
+		if (!model) { this.layer.replaceChildren(); this.layer.hidden = true; return; }
 		const els = [];
 		let floor = -Infinity;
 		for (const { note, top } of m.placed.sort((a, b) => a.top - b.top)) {

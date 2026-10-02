@@ -532,11 +532,11 @@
 .canvas-text table { border-collapse: collapse; margin: 0 0 0.55em; }
 .canvas-text th, .canvas-text td { border: 1px solid var(--clew-border); padding: 2px 8px; }
 
-/* Callouts (src/engine/callouts.js — it renders GFM alerts too, so the
+/* Callouts (the engine's callouts.js — it renders GFM alerts too, so the
    wrapper carries both class families; these are the compact card cousins
-   of preview.css's rules, same palette). */
+   of preview.css's rules, same palette, note's colour the default). */
 .canvas-text .callout {
-	--callout: #6b7785;
+	--callout: #5b8def;
 	margin: 0 0 0.55em;
 	padding: 6px 10px;
 	border-left: 3px solid var(--callout);
@@ -573,6 +573,15 @@
 .canvas-text .callout[data-callout='quote']         { --callout: #8b949e; }
 .canvas-text .callout[data-callout='important']     { --callout: #a371f7; }
 .canvas-text .callout[data-callout='caution']       { --callout: #e5534b; }
+.canvas-text .callout[data-callout='compatibility'] { --callout: #00b8a3; }
+.canvas-text .callout[data-callout='suggestion']    { --callout: #db61a2; }
+/* A custom colour (Settings → Callouts), legible in each theme as preview.css
+   and live-edit.css make it. */
+.canvas-text .callout.callout-custom { --callout: var(--clew-callout-color); }
+@supports (color: oklch(from red l c h)) {
+	body[data-theme='dark'] .canvas-text .callout.callout-custom { --callout: oklch(from var(--clew-callout-color) max(l, 0.62) c h); }
+	body[data-theme='light'] .canvas-text .callout.callout-custom { --callout: oklch(from var(--clew-callout-color) min(l, 0.68) c h); }
+}
 
 /* ---- style bar (stroke / sloppiness / fill / opacity / text font) -------- */
 .canvas-stylebar {

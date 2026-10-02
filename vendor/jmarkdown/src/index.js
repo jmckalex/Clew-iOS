@@ -28,6 +28,7 @@ import { createMultilevelOptionals } from './metadata-header.js';
 import { targets, sources, inlineTarget } from './sources-and-targets.js';
 import markedAlert from 'marked-alert';
 import { renderAlertLatex } from './alerts.js';
+import { calloutBlock } from './callouts.js';
 import createMarkdownDemo from './markdown-demo.js';
 import strategicFormGame from './strategic-form-games.js';
 import createTiKZ from './tikz.js';
@@ -383,6 +384,12 @@ alertRenderer.renderer = function(token) {
 };
 marked.use(alertExtension);
 marked_copy.use(alertExtension);
+
+// Obsidian callouts (callouts.js) claim every `> [!type]` block, the GFM alert
+// types included, so they are registered AFTER marked-alert: marked offers the
+// most recently registered block extension first. Not gated by -n: callouts
+// are standard Obsidian syntax, not JMarkdown's dialect.
+registerExtension(calloutBlock);
 
 
 const markdownDemos = [

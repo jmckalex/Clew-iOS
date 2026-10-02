@@ -22,6 +22,7 @@ import '../views/clew-settings-view.js';
 import '../views/clew-file-view.js';
 import '../views/clew-canvas-view.js';
 import { retire } from '../../pdf-frames.js';
+import { editorPool } from '../../editor/pool.js';
 
 /**
  * Put `next` in the tab body. The outgoing view goes through retire(): if a
@@ -124,6 +125,14 @@ class ClewTabGroup extends ClewElement {
 
 	refreshActive() {
 		this.render();
+	}
+
+	/** Put focus back in this pane's note (the tab strip's mode switch, Escape). */
+	focusView() {
+		const view = this.querySelector(':scope > .tab-body > :not([data-clew-retiring])');
+		const editor = editorPool.get(this.group?.activeTabId)?.view;
+		if (view?.localName === 'clew-editor-view' && editor) editor.focus();
+		else view?.querySelector('iframe')?.focus();
 	}
 
 	#emptyState() {

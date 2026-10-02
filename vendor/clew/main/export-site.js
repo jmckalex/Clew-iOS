@@ -29,6 +29,7 @@ import { paths } from './paths.js';
 import { settings } from './settings.js';
 import { compileExcludes } from './vault-excludes.js';
 import { readNoteFonts } from './note-fonts.js';
+import { calloutsEnv } from './callout-types.js';
 import { toolchainPath } from './render-service.js';
 import { direntKind, shouldRecurse, walkGuard } from './fs-utils.js';
 import { enabledPlugins, previewPluginScripts } from './plugins.js';
@@ -96,6 +97,10 @@ export async function exportSite({ vaultRoot, engineDir, outDir, distDir, vaultO
 					global: settings.get('texFragments') ?? [],
 					vault: vaultOptions.texFragments ?? [],
 				}),
+				// Custom callout types, as the live render service passes them:
+				// the page carries each one's colour on the element, so the
+				// exported site needs no stylesheet of its own for them.
+				CLEW_CALLOUTS: calloutsEnv(settings.get('callouts'), vaultOptions.callouts, paths.faIcons),
 			},
 		});
 		child.stdout.on('data', () => {});

@@ -18,7 +18,7 @@
 // set's signature — so providers compare it by identity to skip rebuilds.
 // Cursor movement inside prose touches nothing and costs one range test
 // per construct.
-import { StateField } from '@codemirror/state';
+import { StateField, StateEffect } from '@codemirror/state';
 import { syntaxTree } from '@codemirror/language';
 import { liveModel } from './model.js';
 import { revealSet } from './reveal.js';
@@ -48,13 +48,18 @@ function compute(state, previous) {
 	return { model, revealed: ids, signature, config, cellKey, cell };
 }
 
+/** Rebuild the model with no document change: what a construct MEANS
+ *  changed outside the editor (a custom callout type defined or edited). */
+export const liveRebuild = StateEffect.define();
+
 export const liveStateField = StateField.define({
 	create: (state) => compute(state, null),
 	update(value, tr) {
 		const treeMoved = syntaxTree(tr.state) !== syntaxTree(tr.startState);
 		const configMoved = tr.state.facet(liveConfigFacet) !== tr.startState.facet(liveConfigFacet);
 		const cellMoved = tr.state.field(activeCellField, false) !== tr.startState.field(activeCellField, false);
-		if (!tr.docChanged && !tr.selection && !treeMoved && !configMoved && !cellMoved) return value;
+		const rebuilt = tr.effects.some((e) => e.is(liveRebuild));
+		if (!tr.docChanged && !tr.selection && !treeMoved && !configMoved && !cellMoved && !rebuilt) return value;
 		return compute(tr.state, value);
 	},
 });

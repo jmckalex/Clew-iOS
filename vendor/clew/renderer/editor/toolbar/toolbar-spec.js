@@ -109,13 +109,15 @@ export const TOOLBAR_GROUPS = [
 	{ id: 'table-tools', label: 'Table', priority: 60, when: (s) => s.inTable, items: [
 		...TABLE_ITEMS,
 	] },
-	{ id: 'mode', label: 'Mode', priority: Infinity, align: 'end', items: [
-		{ kind: 'segmented', id: 'view-mode', label: 'View mode', options: [
-			{ value: 'source', icon: 'code', label: 'Source', command: 'workspace:mode-source' },
-			{ value: 'live', icon: 'pencil', label: 'Live edit', command: 'workspace:mode-live' },
-			{ value: 'reading', icon: 'book', label: 'Reading', command: 'workspace:mode-reading' },
-		], value: (s) => s.mode },
-	] },
+];
+
+/** The three view modes of a note. Not a toolbar group since 2026-10-01:
+ *  the switch lives in each pane's tab strip (clew-tab-bar.js), the owner's
+ *  call — a whole row for three buttons was not worth the space. */
+export const VIEW_MODES = [
+	{ value: 'source', icon: 'code', label: 'Source', command: 'workspace:mode-source' },
+	{ value: 'live', icon: 'pencil', label: 'Live edit', command: 'workspace:mode-live' },
+	{ value: 'reading', icon: 'book', label: 'Reading', command: 'workspace:mode-reading' },
 ];
 
 /** Groups the selection bubble shows (plan §6.7). */
@@ -125,13 +127,12 @@ export const BUBBLE_EXTRA = [
 	{ kind: 'button', icon: 'wikilink', label: 'Wikilink — [[…]]', command: 'edit:insert-wikilink' },
 ];
 
-/** The groups in the user's order (settings `editorToolbarGroups`); the
- *  mode switch is always present and always last. */
+/** The groups in the user's order (settings `editorToolbarGroups`; an id
+ *  that names no group — `mode`, from before the switch moved — is dropped). */
 export function orderedGroups(setting, extraItems = []) {
 	const byId = new Map(TOOLBAR_GROUPS.map((g) => [g.id, g]));
-	const ids = Array.isArray(setting) ? setting.filter((id) => byId.has(id) && id !== 'mode') : TOOLBAR_GROUPS.map((g) => g.id).filter((id) => id !== 'mode');
+	const ids = Array.isArray(setting) ? setting.filter((id) => byId.has(id)) : TOOLBAR_GROUPS.map((g) => g.id);
 	const groups = ids.map((id) => byId.get(id));
-	groups.push(byId.get('mode'));
 	// Plugin buttons join their named group (default: insert).
 	if (extraItems.length === 0) return groups;
 	return groups.map((g) => {

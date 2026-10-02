@@ -84,6 +84,8 @@ export function inlineTokens(doc, from, to, model) {
 				return { type: 'link', href: c.url, children: walk(c.label.from, c.label.to) };
 			case 'autolink':
 				return { type: 'link', href: c.url, children: [{ type: 'text', text: c.url }] };
+			case 'url':
+				return { type: 'link', href: c.url, children: [{ type: 'text', text: source }] };
 			case 'wikilink': {
 				const target = c.target + (c.heading ? `#${c.heading}` : '') + (c.blockId ? `#^${c.blockId}` : '');
 				const shown = doc.sliceString(c.hidden[0].to, c.hidden[c.hidden.length - 1].from);

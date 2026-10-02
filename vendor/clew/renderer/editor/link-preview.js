@@ -30,6 +30,9 @@ import { handlePreviewMessage } from './live/frame-host.js';
 import { workspaceStore } from '../state/workspace-store.js';
 import * as actions from '../commands/actions.js';
 import { FloatingPane } from '../components/chrome/floating-pane.js';
+import { showCitation } from './live/events.js';
+import { allBibEntries } from './complete/citations.js';
+import { openEntryPdf } from '../bib-pdf.js';
 
 const DELAY_MS = 500;
 const GRACE_MS = 300;
@@ -151,7 +154,13 @@ class ClewLinkPreview extends FloatingPane {
 		this.#rect = rect;
 		this.#sourcePath = sourcePath;
 		this.name.textContent = spec.label;
-		this.open.hidden = spec.kind === 'unresolved';
+		// A citation's button shows its entry in the Library (§5.14), and says
+		// so; anything else opens what the link names.
+		this.open.hidden = spec.kind === 'unresolved' && !spec.cite;
+		this.open.textContent = spec.cite ? 'Show in Library' : 'Open';
+		this.open.title = spec.cite
+			? 'Show this entry in the References panel’s Library (⌘-click: open its PDF, if it has one)'
+			: 'Open (⌘-click: in a new tab)';
 		this.frame.hidden = spec.kind !== 'block';
 		this.image.hidden = spec.kind !== 'image';
 		this.card.hidden = spec.kind !== 'unresolved';
@@ -208,6 +217,16 @@ class ClewLinkPreview extends FloatingPane {
 		const spec = this.#spec;
 		if (!spec) return;
 		this.hide();
+		// A citation: its (first) entry in the Library, as a pill's click
+		// does — or with ⌘, the entry's PDF when it has one.
+		if (spec.cite) {
+			const key = spec.cite[0];
+			if (!newTab) { showCitation(key); return; }
+			allBibEntries().then((entries) => {
+				if (!openEntryPdf(entries.find((e) => e.key === key))) showCitation(key);
+			}, () => showCitation(key));
+			return;
+		}
 		if (spec.kind === 'unresolved') actions.openWikilink(spec.name, { newTab });
 		else {
 			const heading = spec.text?.match(/#([^|\]]+)/)?.[1];
@@ -219,6 +238,7 @@ class ClewLinkPreview extends FloatingPane {
 	describe() {
 		return {
 			visible: !this.hidden, kind: this.#spec?.kind ?? null, path: this.#spec?.path ?? null, label: this.#spec?.label ?? null,
+			button: this.open.hidden ? null : this.open.textContent,
 			ready: this.frameReady, height: Math.round(this.body.getBoundingClientRect().height),
 			src: this.frame.getAttribute('src'), card: this.card.hidden ? null : this.card.firstChild?.textContent ?? null,
 		};

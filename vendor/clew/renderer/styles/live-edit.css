@@ -54,6 +54,12 @@
 	line-height: 0;
 }
 .le-cite { color: var(--clew-link); }
+/* A key no .bib defines: the key itself, as a missing reference reads. */
+.le-cite-missing.le-chip { color: var(--clew-danger); text-decoration: underline dotted; }
+/* \fullcite's entry, inline as prose: only a faint dotted underline says it
+   is a citation (text-decoration — no box, so the line keeps its height). */
+.le-fullcite { text-decoration: underline dotted var(--clew-text-faint); text-underline-offset: 3px; }
+.le-fullcite.le-cite-missing { color: var(--clew-danger); text-decoration-color: var(--clew-danger); }
 .le-var { font-family: var(--clew-mono-font); }
 .le-label, .le-today, .le-directive-chip, .le-embed-chip { color: var(--clew-text-muted); background: var(--clew-bg-tertiary); }
 .le-block-id { background: none; color: var(--clew-text-faint); margin-left: 0.3em; }
@@ -120,17 +126,63 @@
 .le-quote-2 { border-left-width: 6px; }
 .le-quote-3, .le-quote-4 { border-left-width: 9px; }
 .le-callout {
-	--callout: #6b7785;
+	/* Note's colour, as reading view's base: an unknown type (or a custom
+	   one with no colour) is drawn as a note. */
+	--callout: #5b8def;
 	border-left: 4px solid var(--callout);
 	background: color-mix(in srgb, var(--callout) 12%, transparent);
 	color: var(--clew-text-normal);
 }
 .le-callout-head { font-weight: 600; }
-.le-callout-marker { color: var(--callout); display: inline-flex; align-items: center; gap: 0.35em; margin-right: 0.35em; vertical-align: -0.1em; }
+.le-callout-marker { color: var(--callout); display: inline-flex; align-items: center; gap: 8px; margin-right: 8px; vertical-align: -0.1em; }
 .le-callout-marker .callout-icon { width: 1em; height: 1em; }
 .le-callout-label, .le-callout-title { color: var(--callout); }
-.le-callout-fold { cursor: pointer; display: inline-block; transform: rotate(90deg); transition: transform 0.12s; padding: 0 0.3em; }
-.le-callout-fold.is-folded { transform: rotate(0deg); }
+/* The box itself follows preview.css's `.callout` (reading view) — padding
+   12px 16px inside a 4px left border, radius 5px — drawn across the lines it
+   spans: the first line takes the top, the last the bottom (a folded callout's
+   head is both). Line classes, so revealing the source never moves a line. */
+.le-quote.le-callout { padding-left: 16px !important; padding-right: 16px; }
+.le-callout-first { padding-top: 12px !important; border-top-left-radius: 5px; border-top-right-radius: 5px; position: relative; }
+.le-callout-last, .le-callout-head.le-callout-folded {
+	padding-bottom: 12px !important;
+	border-bottom-left-radius: 5px;
+	border-bottom-right-radius: 5px;
+}
+/* Reading view's 6px gap between the title row and the content. */
+.le-callout-head:not(.le-callout-last):not(.le-callout-folded) { padding-bottom: 6px !important; }
+/* The fold chevron: reading view's own (preview.css `summary::after`) — two
+   2px borders on a 6px box, turned — at the far right of the title row, its
+   centre 20px in from the box's edge and on the title's middle (12px of
+   padding, then half the 1.6em line). A wider invisible hit area. */
+.le-callout-fold {
+	position: absolute;
+	right: 12px;
+	top: calc(12px + 0.8em - 8px);
+	width: 16px;
+	height: 16px;
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+.le-callout-fold::after {
+	content: '';
+	width: 6px;
+	height: 6px;
+	border-right: 2px solid currentColor;
+	border-bottom: 2px solid currentColor;
+	opacity: 0.7;
+	transform: rotate(45deg);
+	transition: transform 0.15s ease;
+}
+.le-callout-fold.is-folded::after { transform: rotate(-45deg); }
+/* A list inside a quote keeps its hang (the quote's own padding used to win,
+   and the numbers hung over the border); inside a callout it indents as
+   reading view's list does, 2.5em from the callout's text. */
+.le-quote.le-li { padding-left: calc(20px + var(--le-hang)) !important; }
+.le-quote.le-callout.le-li { padding-left: calc(16px + 2.5em + var(--le-indent, 0) * 0.3em) !important; }
+/* A bare `>` between a callout's paragraphs is reading view's paragraph gap. */
+.le-quote.le-callout.le-quote-blank { line-height: 1em; }
 .le-callout-note          { --callout: #5b8def; }
 .le-callout-abstract      { --callout: #00b8a3; }
 .le-callout-info          { --callout: #3b9dd8; }
@@ -145,6 +197,14 @@
 .le-callout-example       { --callout: #a371f7; }
 .le-callout-quote         { --callout: #8b949e; }
 .le-callout-compatibility { --callout: #00b8a3; }
+.le-callout-suggestion    { --callout: #db61a2; }
+/* A custom colour (Settings → Callouts): preview.css's rule, word for word
+   but for the theme selector — kept legible in each theme. */
+.le-callout-custom { --callout: var(--clew-callout-color); }
+@supports (color: oklch(from red l c h)) {
+	body[data-theme='dark'] .le-callout-custom { --callout: oklch(from var(--clew-callout-color) max(l, 0.62) c h); }
+	body[data-theme='light'] .le-callout-custom { --callout: oklch(from var(--clew-callout-color) min(l, 0.68) c h); }
+}
 
 /* ---- code fences: source stays, the fence lines become chrome ---- */
 .le-fence {

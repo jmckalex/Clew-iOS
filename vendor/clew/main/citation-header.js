@@ -49,3 +49,33 @@ export function citationHeader(noteText, noteDir) {
 	});
 	return lines.length ? `---\n${lines.join('\n')}\n---\n` : '';
 }
+
+// A citation construct: the LaTeX family (`\cite{`, `\citep[`, `\fullcite{`…)
+// or an `@bibliography`; pandoc's `[@key]` / `@key` only where the vault turns
+// them on (`@` is otherwise the directive sigil). Over-inclusive on purpose:
+// a false positive costs one re-render.
+const CITES = /\\[a-z]*cite[a-z]*\*?\s*[[{]|^[ \t]*@bibliography\b/m;
+const PANDOC = /\[[^\]\n]*@[\w:./-]|(?:^|[\s(])@[\w:./-]/;
+
+/**
+ * The .bib files a note's rendered citations come from — what must re-render
+ * its reading view when one of them changes (render-service.js
+ * #onFileChanged; before 2026-10-01 nothing did, and reading mode kept the
+ * old entry until the note itself changed): its header's `Bibliography`
+ * (each comma-separated file, against the note's folder) when it names one,
+ * else the vault's bibliography when the note cites anything at all.
+ *
+ * @param {string} noteText
+ * @param {string} noteDir - absolute: the note's folder
+ * @param {string} [vaultBib] - absolute: the vault's bibliography, or ''
+ * @param {{ pandoc?: boolean }} [options] - pandoc citations on in this vault
+ * @returns {string[]} absolute paths (URLs left out)
+ */
+export function noteBibFiles(noteText, noteDir, vaultBib = '', { pandoc = false } = {}) {
+	const named = citationLines(noteText).find((line) => line.key === 'bibliography');
+	if (named) {
+		return absolutise(named.value, noteDir).split(',').map((p) => p.trim()).filter((p) => path.isAbsolute(p));
+	}
+	if (!vaultBib) return [];
+	return CITES.test(noteText) || (pandoc && PANDOC.test(noteText)) ? [vaultBib] : [];
+}

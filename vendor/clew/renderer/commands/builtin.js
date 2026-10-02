@@ -204,6 +204,20 @@ export function registerBuiltinCommands() {
 			run: () => cycleTab(1) },
 		{ id: 'workspace:prev-tab', name: 'Previous tab', hotkeys: ['Ctrl-Shift-Tab'],
 			run: () => cycleTab(-1) },
+		// ⌘1–⌘8: the Nth tab of the CURRENT pane; ⌘9: its last tab (the
+		// owner's choice 2026-10-01, Obsidian's and the browsers' convention;
+		// Mod is Ctrl away from mac). Enabled only when the tab exists, so a
+		// chord with no tab to go to falls through rather than being eaten.
+		// They win over a focused terminal, as every app chord does (capture
+		// phase, registry.js): on mac ⌘ never reaches the pty anyway.
+		...[1, 2, 3, 4, 5, 6, 7, 8].map((n) => ({
+			id: `workspace:goto-tab-${n}`, name: `Go to tab ${n}`, hotkeys: [`Mod-${n}`],
+			when: () => (workspaceStore.activeGroup()?.tabs.length ?? 0) >= n,
+			run: () => gotoTab(n - 1),
+		})),
+		{ id: 'workspace:goto-last-tab', name: 'Go to last tab', hotkeys: ['Mod-9'],
+			when: () => (workspaceStore.activeGroup()?.tabs.length ?? 0) > 0,
+			run: () => gotoTab(-1) },
 		{ id: 'workspace:split-right', name: 'Split right', hotkeys: ['Mod-\\'],
 			run: () => actions.splitActive('right') },
 		{ id: 'workspace:split-down', name: 'Split down', hotkeys: ['Mod-Shift-\\'],
@@ -240,11 +254,16 @@ export function registerBuiltinCommands() {
 					settingsStore.set('editorToolbar', 'never');
 				}
 			} },
+		// Where the note shows no formatting toolbar (reading view, or the
+		// setting hides it), the way in is the pane's mode switch in its
+		// tab strip instead.
 		{ id: 'view:focus-toolbar', name: 'Focus editor toolbar', hotkeys: ['Alt-Shift-t'], when: needsNote,
 			run: () => {
 				const tab = workspaceStore.activeTab();
 				const host = [...document.querySelectorAll('clew-editor-view:not([data-clew-retiring]), clew-preview-view:not([data-clew-retiring])')].find((v) => v.tabId === tab?.id);
-				host?.querySelector('clew-editor-toolbar')?.focusFirst();
+				const toolbar = host?.querySelector('clew-editor-toolbar');
+				if (toolbar) toolbar.focusFirst();
+				else host?.closest('clew-tab-group')?.querySelector(':scope > clew-tab-bar')?.focusModes();
 			} },
 		// The shell panel. Ctrl-` is every editor's terminal chord, and it is
 		// free here — Clew's own chords are all Mod-based.
@@ -323,6 +342,13 @@ function cycleTab(direction) {
 	const index = group.tabs.findIndex((t) => t.id === group.activeTabId);
 	const next = (index + direction + group.tabs.length) % group.tabs.length;
 	workspaceStore.activateTab(group.tabs[next].id);
+}
+
+/** The current pane's tab at `index` (-1: the last). */
+function gotoTab(index) {
+	const tabs = workspaceStore.activeGroup()?.tabs ?? [];
+	const tab = index < 0 ? tabs.at(-1) : tabs[index];
+	if (tab) workspaceStore.activateTab(tab.id);
 }
 
 function toggleSidebar(side) {

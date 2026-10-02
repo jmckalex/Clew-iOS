@@ -445,6 +445,11 @@ class ClewFileExplorer extends ClewElement {
 					actions.splitActive('right');
 					this.#openEntry(entry, { newTab: false });
 				} },
+				// The OS's own app for the type, through the guard the
+				// `|external` alias uses (main/open-file.js#planOpen: inside the
+				// vault, executables refused by name); a refusal or the OS's
+				// "no app" is a notice. The owner's ask, 2026-10-01.
+				{ label: 'Open in Default App', click: () => actions.openFileExternally(entry.path) },
 				{ separator: true },
 			);
 			// A PDF's highlights and notes, as a note beside it (§5.15).

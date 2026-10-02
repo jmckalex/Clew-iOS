@@ -140,9 +140,26 @@ export function runChord(chord) {
 	return true;
 }
 
+// A shortcut being RECORDED (Settings → Hotkeys) gets every key, and the
+// dispatcher stands aside. The recorder's own capture listener came after
+// this one, so a chord the app already binds ran its command first: with
+// ⌘1–⌘9 switching tabs, recording ⌘1 left the Settings tab and recorded
+// nothing (measured 2026-10-01, smoke/hotkey-record-scenario.js).
+let recorder = null;
+
+/** Send every keydown to `handler` until the returned function is called. */
+export function recordKeys(handler) {
+	recorder = handler;
+	return () => { if (recorder === handler) recorder = null; };
+}
+
 /** Install the global dispatcher (capture phase; CM keymaps see the rest). */
 export function installHotkeys() {
 	window.addEventListener('keydown', (event) => {
+		if (recorder) {
+			recorder(event);
+			return;
+		}
 		const chord = chordOf(event);
 		if (!chord || !chord.includes('-')) return;
 		const id = effectiveKeymap().get(chord);

@@ -76,7 +76,7 @@ export const liveEvents = Prec.high(EditorView.domEventHandlers({
 			return true;
 		}
 		if (el.dataset.leFold) {
-			const callout = view.state.field(liveStateField).model.find((c) => c.id === el.dataset.leFold);
+			const callout = view.state.field(liveStateField, false)?.model.find((c) => c.id === el.dataset.leFold);
 			if (callout) {
 				view.dispatch({ effects: setCalloutFold.of({ id: callout.id, folded: !calloutFolded(view.state, callout) }) });
 			}
@@ -84,7 +84,7 @@ export const liveEvents = Prec.high(EditorView.domEventHandlers({
 		}
 		if (el.dataset.leCopy) {
 			const pos = view.posAtDOM(el);
-			const fence = view.state.field(liveStateField).model
+			const fence = view.state.field(liveStateField, false)?.model
 				.find((c) => c.kind === 'codeFence' && pos >= c.openLine.from && pos <= c.openLine.to);
 			if (fence) navigator.clipboard.writeText(view.state.doc.sliceString(fence.body.from, fence.body.to)).catch(() => {});
 			return true;

@@ -55,7 +55,7 @@ import { isChapterClass } from './sectioning.js';
 import { escapeLatexText } from './latex-escape.js';
 import { attachmentsFor } from './bib-attachments.js';
 import { addWarning } from './warnings.js';
-import { requirePackage } from './preamble.js';
+import { requirePackage, addPreamble } from './preamble.js';
 
 // The canonical \cite-family grammar, shared with the post-pass. Anchored so it
 // can be used to re-parse a single stored command.
@@ -112,11 +112,22 @@ export const citations = {
 export function renderCiteCommand(cmd) {
 	{
 		if (global.isLatex) {
-			// Native natbib: hand the command through unchanged. natbib has no
-			// \fullcite, so translate it to \bibentry (the bibentry package).
+			// Native natbib: hand the command through unchanged — and load natbib,
+			// usage-driven like every other package (preamble.js), or a full
+			// document's \citet/\citep are undefined. natbib has no \fullcite, so
+			// translate it to \bibentry, which needs the bibentry package and
+			// prints an entry only once the .bbl is read: `\nobibliography*` reads
+			// the one @bibliography's \bibliography{…} produces, at the start of
+			// the document. (A --fragment build leaves all this to the document
+			// it goes into.)
+			requirePackage('natbib');
 			return cmd.replace(
 				/^\\fullcite(?:\[[^\]]*\])?(?:\[[^\]]*\])?\{([^}]*)\}/i,
-				(_m, keys) => keys.split(',').map(k => `\\bibentry{${k.trim()}}`).join('; ')
+				(_m, keys) => {
+					requirePackage('bibentry');
+					addPreamble('\\AtBeginDocument{\\nobibliography*}');
+					return keys.split(',').map(k => `\\bibentry{${k.trim()}}`).join('; ');
+				}
 			);
 		}
 

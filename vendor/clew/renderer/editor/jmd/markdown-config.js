@@ -16,6 +16,7 @@ import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { jmdFootnotes } from './footnote-parser.js';
 import { jmdMath } from './math-parser.js';
 import { jmdSubSup } from './subsup-parser.js';
+import { jmdFtpLinks } from './ftp-autolink.js';
 import { fenceLanguage } from '../langs/fence-languages.js';
 
 /**
@@ -36,12 +37,14 @@ export function noteMarkdown({ normalSyntax = false } = {}) {
 		// TeX is full of markdown's punctuation (footnote-parser.js,
 		// math-parser.js) — and jmdSubSup gives `_x`/`^x` the engine's
 		// meaning (subsup-parser.js). Order: math, sub/sup, footnotes.
-		// The dialect overlay paints them.
+		// The dialect overlay paints them. jmdFtpLinks adds the one bare
+		// URL scheme the engine links and GFM's Autolink does not.
 		extensions: [
 			{ remove: ['IndentedCode', 'SetextHeading'] },
 			jmdMath,
 			...(normalSyntax ? [] : [jmdSubSup]),
 			jmdFootnotes,
+			jmdFtpLinks,
 		],
 		// ```tikz / ```latex / ```tex / ```metapost bodies are parsed
 		// by their own grammars (langs/); every other fence stays text.

@@ -19,7 +19,11 @@
 	min-height: 0;
 	overflow: hidden;
 }
-.editor-host .cm-editor { flex: 1; min-width: 0; }
+/* min-height 0: a flex item will not shrink below its content without it,
+   so the editor stayed the host's full height under the toolbar, 36px too
+   tall — and a scroll into view near the end scrolled the HOST (overflow:
+   hidden still scrolls programmatically), carrying the bar off the top. */
+.editor-host .cm-editor { flex: 1; min-width: 0; min-height: 0; }
 
 .cmt-heading { color: var(--clew-heading); font-weight: 650; }
 .cmt-heading1 { font-size: 1.55em; }

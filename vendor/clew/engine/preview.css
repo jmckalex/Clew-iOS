@@ -19,7 +19,7 @@
 	   ButtonText near-black even on our dark background. */
 	color-scheme: dark;
 	--preview-bg: #1e1e1e;
-	--preview-text: #dadada;
+	--preview-text: #e8e8e8;
 	--preview-muted: #9a9a9a;
 	--preview-accent: #8b7ec8;
 	--preview-border: #3f3f3f;
@@ -73,6 +73,9 @@ body {
 	font-family: 'Avenir Next', Avenir, 'Segoe UI', Cantarell, -apple-system, BlinkMacSystemFont, sans-serif;
 	font-size: 16px;
 	line-height: 1.6;
+	/* As the app page's body (renderer/styles/main.css): stated, so live edit
+	   and reading mode draw the same weight whatever a template sets. */
+	-webkit-font-smoothing: auto;
 	max-width: 44em;
 	margin: 0 auto;
 	padding: 24px 32px 40vh;
@@ -857,20 +860,26 @@ td.clew-q-cell:hover { background: rgba(168, 130, 255, 0.08); }
 .kanban-card-title { font-size: 0.95em; font-weight: 600; }
 .kanban-card-meta { font-size: 0.78em; color: var(--preview-muted); margin-top: 3px; }
 
-/* ---- Obsidian callouts (src/engine/callouts.js) --------------------------
+/* ---- Obsidian callouts (jmarkdown's callouts.js) -------------------------
    One accent colour per type drives the border, the icon and the title; the
    body stays the page's own text colour so a callout reads as emphasis
    rather than as a coloured box. Tinting the background from the same
-   variable keeps that relationship true in both themes. */
-.callout {
-	--callout: #6b7785;
+   variable keeps that relationship true in both themes.
+   Every rule is scoped to [data-callout], as jmarkdown.css scopes it: every
+   callout carries it and a user's own `:::callout` / `@begin(callout)` block
+   (a plain div.callout) does not, so naming an environment `callout` does
+   not restyle it. */
+.callout[data-callout] {
+	/* Note's colour: an unknown type, or a custom one with no colour of its
+	   own, is drawn as a note — Obsidian's default (jmarkdown.css agrees). */
+	--callout: #5b8def;
 	margin: 1.1em 0;
 	padding: 12px 16px;
 	border-left: 4px solid var(--callout);
 	border-radius: 5px;
 	background: color-mix(in srgb, var(--callout) 12%, transparent);
 }
-.callout-title {
+.callout[data-callout] .callout-title {
 	display: flex;
 	align-items: center;
 	gap: 8px;
@@ -878,25 +887,25 @@ td.clew-q-cell:hover { background: rgba(168, 130, 255, 0.08); }
 	font-weight: 600;
 	color: var(--callout);
 }
-.callout-icon {
+.callout[data-callout] .callout-icon {
 	width: 1em;
 	height: 1em;
 	flex: none;
 }
-.callout-content { margin-top: 6px; }
-.callout-content > :first-child { margin-top: 0; }
-.callout-content > :last-child { margin-bottom: 0; }
+.callout[data-callout] .callout-content { margin-top: 6px; }
+.callout[data-callout] .callout-content > :first-child { margin-top: 0; }
+.callout[data-callout] .callout-content > :last-child { margin-bottom: 0; }
 /* An empty callout is a title on its own — no gap below it. */
-.callout-content:empty { display: none; }
+.callout[data-callout] .callout-content:empty { display: none; }
 
 /* Foldables are <details>: the browser does the work. */
-details.callout > summary {
+details.callout[data-callout] > summary {
 	cursor: pointer;
 	list-style: none;
 }
-details.callout > summary::-webkit-details-marker { display: none; }
+details.callout[data-callout] > summary::-webkit-details-marker { display: none; }
 /* A chevron that turns, so a collapsed callout says so without a plugin. */
-details.callout > summary::after {
+details.callout[data-callout] > summary::after {
 	content: '';
 	width: 6px;
 	height: 6px;
@@ -907,7 +916,7 @@ details.callout > summary::after {
 	transition: transform 0.15s ease;
 	opacity: 0.7;
 }
-details.callout[open] > summary::after { transform: rotate(45deg); }
+details.callout[data-callout][open] > summary::after { transform: rotate(45deg); }
 
 /* Obsidian's palette, near enough that a vault looks like itself. */
 .callout[data-callout='note']          { --callout: #5b8def; }
@@ -924,10 +933,32 @@ details.callout[open] > summary::after { transform: rotate(45deg); }
 .callout[data-callout='example']       { --callout: #a371f7; }
 .callout[data-callout='quote']         { --callout: #8b949e; }
 .callout[data-callout='compatibility'] { --callout: #00b8a3; }
+.callout[data-callout='suggestion']    { --callout: #db61a2; }
+
+/* A CUSTOM colour (Settings → Callouts; the engine's callouts.js puts it on the
+   element as --clew-callout-color — not Obsidian's --callout-color, which a
+   vault's CSS snippet sets as an `r, g, b` triple) drives the same four
+   things, with its lightness kept where text reads in each theme: no lighter
+   than L 0.68 on the light page, no darker than L 0.62 on the dark one
+   (OKLCH). Most colours pass through untouched — the palette above sits at
+   0.62–0.76 — while pale yellow on white or navy on charcoal are moved until
+   they read. live-edit.css has the same rule for live edit, so the two cannot
+   differ. */
+.callout[data-callout].callout-custom { --callout: var(--clew-callout-color); }
+@supports (color: oklch(from red l c h)) {
+	.callout[data-callout].callout-custom { --callout: oklch(from var(--clew-callout-color) max(l, 0.62) c h); }
+	html[data-theme='light'] .callout[data-callout].callout-custom { --callout: oklch(from var(--clew-callout-color) min(l, 0.68) c h); }
+}
 
 /* The engine's own alert styling assumes a light page and would otherwise
    fight the tint above; ours is the one that applies. */
-.callout.markdown-alert { border-top: 0; border-right: 0; border-bottom: 0; }
+.callout[data-callout].markdown-alert { border-top: 0; border-right: 0; border-bottom: 0; }
+/* …the TITLE included: a callout also carries `markdown-alert-<type>`, and the
+   GitHub-alert title colours above (note, tip, warning) outranked
+   `.callout-title`, so those titles and icons took GitHub's colour while the
+   border took ours — tip a green title on a teal box. One accent per type,
+   as this section says (2026-10-01). A plain GitHub alert keeps its own. */
+.callout[data-callout].markdown-alert .callout-title { color: var(--callout); }
 
 /* Live edit's block documents (protocol.js `__clew_block__`): one rendered
    block in a frame inside the editor, sized by its content (client.js
