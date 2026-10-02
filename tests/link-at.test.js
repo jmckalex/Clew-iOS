@@ -90,9 +90,11 @@ test('citations: the family, keys split, and what they preview', () => {
 	const l = at('As \\citep[p. 3]{knuth84, lamport94} says', 'knuth');
 	assert.deepEqual([l.kind, l.command, l.keys], ['cite', 'citep', ['knuth84', 'lamport94']]);
 	const cite = { ...resolve, cite: (k) => (k === 'knuth84' ? { label: 'Knuth 1984', title: 'TeX' } : null) };
-	assert.deepEqual(previewSpec(l, { ...cite, fullcite: true }), { kind: 'block', path: 'Here.md', text: '\\fullcite{knuth84}', label: 'Knuth 1984' });
+	assert.deepEqual(previewSpec(l, { ...cite, fullcite: true }), { kind: 'block', path: 'Here.md', text: '\\fullcite{knuth84}', label: 'Knuth 1984', cite: ['knuth84'] });
 	assert.equal(previewSpec(l, cite).message, 'Knuth 1984 — TeX', 'no bibliography named: the .bib fields on a card');
+	assert.deepEqual(previewSpec(l, cite).cite, ['knuth84'], 'and its button still shows the entry');
 	assert.match(previewSpec(at('\\cite{nobody}', 'nobody'), cite).message, /No entry “nobody”/);
+	assert.equal(previewSpec(at('\\cite{nobody}', 'nobody'), cite).cite, undefined, 'an unknown key has nothing to show');
 });
 
 test('a PDF page anchor parses as the heading part', () => {

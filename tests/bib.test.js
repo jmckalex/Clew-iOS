@@ -10,7 +10,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseBib, bibFilePath } from '../vendor/clew/shared/bib.js';
+import { parseBib, bibFilePath, shortCiteLabel } from '../vendor/clew/shared/bib.js';
 
 const SAMPLE = `
 @book{lewis1969,
@@ -66,3 +66,29 @@ test('bibFilePath: Zotero, JabRef, plain, escaped drive, several files', () => {
 	assert.equal(bibFilePath('snap:s.html:text/html;pdf:p.pdf:PDF'), 'p.pdf', 'the PDF, not the first file');
 	assert.equal(bibFilePath(''), null);
 });
+
+test('shortCiteLabel joins the short authors with "and", never re-parsing them', () => {
+	const [two, three, one] = parseBib(`
+@Article{Akerlof/Kranton:2000,
+  author = {Akerlof, George A. and Kranton, Rachel E.},
+  title = {Economics and Identity},
+  year = {2000}
+}
+
+@Article{smith2001,
+  author = {Smith, Adam and Jones, Bea and Brown, Carl},
+  year = {2001}
+}
+
+@Book{lewis1969,
+  author = {David Lewis},
+  year = {1969}
+}
+`);
+	// "Kranton 2000" until 2026-10-01: "Akerlof & Kranton" re-parsed as a name.
+	assert.equal(shortCiteLabel(two), 'Akerlof and Kranton 2000');
+	assert.equal(shortCiteLabel(three), 'Smith et al. 2001');
+	assert.equal(shortCiteLabel(one), 'Lewis 1969');
+	assert.equal(shortCiteLabel({ key: 'bare' }), 'bare');
+});
+

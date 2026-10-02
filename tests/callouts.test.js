@@ -10,7 +10,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveType, calloutBlock } from '../vendor/clew/engine/callouts.js';
+// The ENGINE's callouts since jmarkdown a7de8c6 (Clew's own copy retired).
+import { resolveType, calloutBlock, untitledCalloutTitle } from '#jmarkdown/callouts.js';
 
 test('type resolution is case-insensitive, which GFM alerts are not', () => {
 	assert.equal(resolveType('NOTE'), 'note');
@@ -30,8 +31,9 @@ test('aliases fold onto their canonical type', () => {
 	assert.equal(resolveType('faq'), 'question');
 });
 
-test('an unknown type is not a callout', () => {
-	// It must fall through to an ordinary blockquote rather than be invented.
+test('an unknown type is not in the table', () => {
+	// resolveType names KNOWN types only; the tokenizer draws an unknown one
+	// as a note (below).
 	assert.equal(resolveType('nonsense'), null);
 	assert.equal(resolveType(''), null);
 	assert.equal(resolveType(undefined), null);
@@ -75,5 +77,19 @@ test('the token consumes the whole blockquote and nothing after it', () => {
 
 test('a blockquote that is not a callout is declined', () => {
 	assert.equal(tokenize('> just a quote\n'), undefined);
-	assert.equal(tokenize('> [!nonsense]\n> body\n'), undefined);
+});
+
+test('an unknown type is a callout drawn as a note, titled as written (Obsidian\'s rule)', () => {
+	const token = tokenize('> [!Nonsense]\n> body\n');
+	assert.equal(token.calloutType, 'nonsense');
+	assert.equal(untitledCalloutTitle('Nonsense'), 'Nonsense');
+});
+
+test('an untitled callout is headed by its type as written', () => {
+	assert.equal(untitledCalloutTitle('note'), 'Note');
+	assert.equal(untitledCalloutTitle('NOTE'), 'Note');
+	assert.equal(untitledCalloutTitle('CAUTION'), 'Caution');   // an alias of warning
+	assert.equal(untitledCalloutTitle('tldr'), 'Tldr');
+	assert.equal(untitledCalloutTitle('my-type'), 'My-type');
+	assert.equal(untitledCalloutTitle('suggestion'), 'Suggestion');
 });

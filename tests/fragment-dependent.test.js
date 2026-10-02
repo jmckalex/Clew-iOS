@@ -33,6 +33,13 @@ test('Meta Bind widgets and @reveal are dependent', () => {
 	assert.equal(isDependentFragment('@reveal[Decks/intro/]'), true);
 });
 
+test('a citation is dependent: it reads the bibliography', () => {
+	for (const text of ['A \\cite{x}.', '\\citep[p. 5]{a, b}', '\\fullcite{k}', '\\citeauthor{k}', '\\cite*{k}', '\\textcite{k}']) {
+		assert.equal(isDependentFragment(text), true, text);
+	}
+	assert.equal(isDependentFragment('They excite {nothing}; recite{x}'), false);
+});
+
 test('self-contained text is not', () => {
 	for (const text of [
 		'Plain *prose* with [[a link]] and a #tag.',

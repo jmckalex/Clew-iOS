@@ -115,17 +115,14 @@ export function engineConfig({ vaultRoot = '/vault', vaultOptions = {}, engineEx
 			// wikilinks.js; this registers the inline ```base fence.
 			'baseFence from /engine-assets/bases.js',
 			// The Admonition plugin's ```ad-* fences (pre-callout vaults),
-			// mapped onto callout tokens so callouts.js renders them.
+			// mapped onto callout tokens so the engine's callouts render them.
 			'admonitionFence from /engine-assets/admonitions.js',
 			// Meta Bind's INPUT[…]/VIEW[…] widgets — editable cells that
 			// live in prose, on the same field-edit write path.
 			'metaBindInline, metaBindFence from /engine-assets/meta-bind.js',
-			// Registered late on purpose, exactly as upstream: marked offers
-			// the most recently registered block extension first, and
-			// calloutBlock must be seen before the engine's own GFM-alert rule
-			// so that every `> [!type]` — the five GFM ones included —
-			// renders identically.
-			'calloutBlock from /engine-assets/callouts.js',
+			// (Callouts are the ENGINE's since jmarkdown a7de8c6 — callouts.js,
+			// registered after its own GFM-alert rule; the shim hands it the
+			// custom types through CLEW_CALLOUTS, engineEnv.)
 			// After callouts (so it is offered first): a note whose
 			// frontmatter declares `kanban-plugin` IS a board, and this
 			// claims the whole body before any other rule can render it
