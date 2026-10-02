@@ -14,6 +14,11 @@ import { planOpen, pathFromFileUrl } from '../../vendor/clew/main/open-file.js';
 import { direntKind, shouldRecurse, walkGuard } from '../../vendor/clew/main/fs-utils.js';
 import { listSnapshots, readSnapshot } from '../../vendor/clew/main/history.js';
 import { rewritePdfFrames } from '../../vendor/clew/main/pdf-frames-rewrite.js';
+// The ENGINE's callout modules (jmarkdown a7de8c6), the pure ones only:
+// callouts.js would pull config-manager (fs) into the app page, and
+// desktop's main/callout-types.js reads its icon table from disk.
+import { resolveCallouts, iconKey } from '../../vendor/jmarkdown/src/callout-definitions.js';
+import { BUILTIN_CALLOUT_TYPES } from '../../vendor/jmarkdown/src/callout-table.js';
 import fs from 'node:fs';
 import nodePath from 'node:path';
 import { vfs } from '../worker/shims/vfs.js';
@@ -45,7 +50,7 @@ function resolveBibFile(value, bibDir, root) {
 	return { path: inVault ? rel.split(nodePath.sep).join('/') : abs, inVault, exists: Boolean(found) };
 }
 
-export function createClewShim({ workerFactory, assetLoader } = {}) {
+export function createClewShim({ workerFactory, assetLoader, iconTableLoader } = {}) {
 	// ---- event plumbing ---------------------------------------------------
 	const listeners = new Map(); // channel -> Set<fn>
 	const send = (channel, payload) => {
@@ -82,6 +87,58 @@ export function createClewShim({ workerFactory, assetLoader } = {}) {
 		.then((result) => { renderService.noteFonts = result?.faces ?? null; })
 		.catch(() => { renderService.noteFonts = null; });
 	kvStore.send = send;
+
+	// ---- custom callout types (Clew-app 096f129 → 67311b6) ----------------
+	// The global list is this device's settings `callouts`; a vault's is its
+	// .clew/vault-settings.json `callouts`. Both are resolved over the
+	// built-ins with the Font Awesome table in hand (the engine's
+	// callout-definitions.js has the rules), so the worker (CLEW_CALLOUTS)
+	// and the app page (CALLOUTS_RESOLVED) get only finished entries. The
+	// table (~1.9 MB, built into the WebRoot as fa-icons.json, as desktop's
+	// build writes it) is fetched the first time a definition exists or the
+	// Settings picker asks, and never otherwise: never on a render path.
+	const loadIcons = iconTableLoader ?? (async () => (await fetch('/fa-icons.json')).json());
+	let iconTablePromise = null;
+	const iconTable = () => {
+		iconTablePromise ??= loadIcons().catch((err) => {
+			console.warn('[clew-ios] no icon table:', err);
+			iconTablePromise = null; // a later ask may succeed
+			return { version: null, icons: {} };
+		});
+		return iconTablePromise;
+	};
+	const isEmpty = (list) => list == null || (Array.isArray(list) && list.length === 0);
+	let callouts = { key: null, custom: {}, problems: [] };
+	/** Re-resolve both lists (memoised on them); the vault's is read now,
+	 *  so a hand edit of vault-settings.json is what this answers with. */
+	const refreshCallouts = async () => {
+		const globalList = settings.get('callouts');
+		const vaultList = vaults.isOpen ? vaults.loadState('vault-settings.json')?.callouts : undefined;
+		const key = JSON.stringify([globalList ?? null, vaultList ?? null]);
+		if (key === callouts.key) return callouts;
+		if (isEmpty(globalList) && isEmpty(vaultList)) {
+			callouts = { key, custom: {}, problems: [] };
+			return callouts;
+		}
+		const table = await iconTable();
+		const { custom, problems } = resolveCallouts({
+			builtins: BUILTIN_CALLOUT_TYPES,
+			global: globalList ?? [],
+			vault: vaultList ?? [],
+			iconTable: table.icons ?? {},
+		});
+		callouts = { key, custom, problems };
+		return callouts;
+	};
+	renderService.calloutsReady = () => refreshCallouts();
+	renderService.calloutsEnv = () => (Object.keys(callouts.custom).length ? JSON.stringify(callouts.custom) : '');
+	/** A list changed: resolve again, then a fresh standby and every open
+	 *  preview, and the app page's editors (live edit draws callouts too). */
+	const calloutsChanged = async (options) => {
+		await refreshCallouts();
+		renderService.reconfigure(options);
+		send(CH.EV_CALLOUTS_CHANGED);
+	};
 
 	vaults.hooks = {
 		// A random sid per vault opening (minted natively, VaultStore.swift):
@@ -520,18 +577,20 @@ export function createClewShim({ workerFactory, assetLoader } = {}) {
 		},
 		[CH.WORKSPACE_SAVE]: (state) => vaults.saveState('workspace.json', state),
 		[CH.SETTINGS_GET]: () => settings.get(),
-		[CH.SETTINGS_SET]: ({ key, value }) => {
+		[CH.SETTINGS_SET]: async ({ key, value }) => {
 			settings.set(key, value);
 			// The global TeX fragments are read at worker spawn: a change here
 			// retires the standby and re-renders the open previews (upstream
 			// ipc.js does this for every window; there is one here).
 			if (key === 'texFragments') renderService.reconfigure({});
+			// The global callout types: the worker and the editor.
+			if (key === 'callouts') await calloutsChanged({});
 		},
 		[CH.VSTATE_LOAD]: ({ name }) => vaults.loadState(sanitizeStateName(name)),
 		[CH.VSTATE_SAVE]: ({ name, data }) => vaults.saveState(sanitizeStateName(name), data),
 
 		[CH.VAULT_SETTINGS_GET]: () => vaults.loadState('vault-settings.json') ?? {},
-		[CH.VAULT_SETTINGS_SET]: ({ key, value }) => {
+		[CH.VAULT_SETTINGS_SET]: async ({ key, value }) => {
 			const current = vaults.loadState('vault-settings.json') ?? {};
 			current[key] = value;
 			vaults.saveState('vault-settings.json', current);
@@ -556,7 +615,27 @@ export function createClewShim({ workerFactory, assetLoader } = {}) {
 			// the standby has to go and the open previews re-render.
 			if (key === 'texFragments') renderService.reconfigure({ texFragments: value });
 			if (key === 'plugins') renderService.reconfigure({ plugins: value });
+			// This vault's callout types: the worker's table (CLEW_CALLOUTS is
+			// read at spawn) and the editor.
+			if (key === 'callouts') await calloutsChanged({ callouts: value });
 			return current;
+		},
+		// Custom callout types for this vault, resolved: { custom, problems }.
+		[CH.CALLOUTS_RESOLVED]: async () => {
+			const { custom, problems } = await refreshCallouts();
+			return { custom, problems };
+		},
+		// The icon table, for Settings only (never a render): whole for the
+		// picker, or just the names a list of rows uses, for their previews.
+		[CH.CALLOUT_ICONS]: async (args) => {
+			const table = await iconTable();
+			if (!Array.isArray(args?.names)) return table;
+			const icons = {};
+			for (const name of args.names.slice(0, 500)) {
+				const found = iconKey(name, table.icons ?? {});
+				if (found) icons[String(name)] = { key: found, icon: table.icons[found] };
+			}
+			return { version: table.version, icons };
 		},
 
 		// ---- the shell panel ----------------------------------------------

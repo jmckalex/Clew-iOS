@@ -182,12 +182,17 @@ const rendererPatches = {
 		// button that never finishes. Drop both sections rather than ship a
 		// control that lies. A native URLSession font downloader is a
 		// possible later feature; the office engine is the owner's call.
+		// Likewise the "LaTeX engine (PDF via LaTeX export)" row and its hint
+		// (Clew-app 0b4b7a4): iOS has no TeX toolchain, and that export
+		// answers "not available".
 		builder.onLoad({ filter: /vendor\/clew\/renderer\/components\/views\/clew-settings-view\.js$/ }, (args) => ({
-			contents: patched('clew-settings-view.js',
+			contents: patched('clew-settings-view.js', patched('clew-settings-view.js',
 				patched('clew-settings-view.js', fs.readFileSync(args.path, 'utf8'),
 					"\t\t\tthis.#section('PDF viewer', [...this.#cjkFontRow()]),\n",
 					''),
 				"\t\t\tthis.#section('Office documents', [...this.#officeEngineRow()]),\n",
+				''),
+				'\t\t\t\tthis.#selectRow(\'LaTeX engine (PDF via LaTeX export)\', \'latexEngine\',\n\t\t\t\t\t[[\'auto\', \'Automatic\'], [\'pdflatex\', \'pdfLaTeX\'], [\'lualatex\', \'LuaLaTeX\'], [\'xelatex\', \'XeLaTeX\']]),\n\t\t\t\tthis.#hint(\'Automatic reads the exported document: one that loads fontspec, unicode-math, \'\n\t\t\t\t\t+ \'polyglossia or Lua code (a \\\\setmainfont in your jmarkdown config, say) is compiled with \'\n\t\t\t\t\t+ \'LuaLaTeX, anything else with pdfLaTeX. Choose an engine here for what that cannot see.\'),\n',
 				''),
 			loader: 'js',
 		}));
@@ -411,7 +416,33 @@ export async function buildExcalidrawPage({ minify = true } = {}) {
 	});
 }
 
+// Font Awesome Free's icons as one table — `family:name` → [width, height,
+// path] — for custom callout types (Clew-app's scripts/build.js
+// #writeIconTable, the same format): the shim resolves the names a
+// definition uses from it and hands the worker only those paths, and
+// Settings' icon picker loads it on demand. Never on a render path. Built
+// from the package's own svgs/ (CC BY 4.0), which do not ship in the app.
+function writeIconTable() {
+	const base = path.join(root, 'node_modules/@fortawesome/fontawesome-free');
+	const icons = {};
+	for (const family of ['solid', 'regular', 'brands']) {
+		const dir = path.join(base, 'svgs', family);
+		if (!fs.existsSync(dir)) continue;
+		for (const file of fs.readdirSync(dir).filter((f) => f.endsWith('.svg')).sort()) {
+			const svg = fs.readFileSync(path.join(dir, file), 'utf8');
+			const box = /viewBox="0 0 (\d+(?:\.\d+)?) (\d+(?:\.\d+)?)"/.exec(svg);
+			const paths = [...svg.matchAll(/<path[^>]*\sd="([^"]+)"/g)].map((m) => m[1]);
+			if (!box || !paths.length) continue;
+			icons[`${family}:${file.slice(0, -4)}`] = [Number(box[1]), Number(box[2]), paths.join(' ')];
+		}
+	}
+	const { version } = JSON.parse(fs.readFileSync(path.join(base, 'package.json'), 'utf8'));
+	fs.mkdirSync(webroot, { recursive: true });
+	fs.writeFileSync(path.join(webroot, 'fa-icons.json'), JSON.stringify({ version, icons }));
+}
+
 export function stageStatic() {
+	writeIconTable();
 	const copy = (from, to) => {
 		fs.rmSync(to, { recursive: true, force: true });
 		fs.mkdirSync(path.dirname(to), { recursive: true });

@@ -58,6 +58,15 @@ const DEFAULTS = {
 	// the GLOBAL ones (this device's); a vault's own live in its
 	// vault-settings.json and shadow these where the names meet.
 	texFragments: [],
+	// Custom callout types, this device's (Settings → Callouts; a vault's own
+	// are in its vault-settings.json). Resolved by the shim (ipc.js).
+	callouts: [],
+	// Desktop-only, kept so a settings object reads the same everywhere: no
+	// LaTeX toolchain (the row is dropped, scripts/build.js), no CJK font
+	// download (its section is dropped), no shell (stubbed).
+	latexEngine: 'auto',
+	pdfCjkFonts: false,
+	shellFont: '',
 };
 
 const STORE_KEY = 'clew-settings';

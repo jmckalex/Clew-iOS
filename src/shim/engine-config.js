@@ -174,6 +174,7 @@ export function engineConfig({ vaultRoot = '/vault', vaultOptions = {}, engineEx
  */
 export function engineEnv({
 	vaultRoot = '/vault', sessionId = '', vaultOptions = {}, noteFonts = null, globalTexFragments = [],
+	callouts = '',
 } = {}) {
 	return {
 		CLEW_VAULT_ROOT: vaultRoot,
@@ -190,5 +191,10 @@ export function engineEnv({
 			global: Array.isArray(globalTexFragments) ? globalTexFragments : [],
 			vault: Array.isArray(vaultOptions.texFragments) ? vaultOptions.texFragments : [],
 		}),
+		// Custom callout types, both scopes RESOLVED (the shim's calloutsEnv,
+		// as desktop's callout-types.js): names, titles, colours and only the
+		// icon paths they use; '' when none are defined. The worker applies
+		// it at init (engine-worker.js).
+		CLEW_CALLOUTS: callouts || '',
 	};
 }

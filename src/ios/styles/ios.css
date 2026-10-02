@@ -203,6 +203,24 @@ body.is-ios .toolbar-button {
 body.is-ios .toolbar-segmented .toolbar-button {
 	height: 34px;
 }
+/* The view-mode switch lives in each pane's tab strip (Clew-app 80b8b44),
+   a row of tabs about 33 px tall. The buttons keep the toolbar's look; each
+   is 44 px wide and gets an invisible 44 px-tall hit area centred on it, so
+   a finger finds it without the strip growing. Hidden in place for a tab
+   with no modes (upstream's .is-unavailable). */
+body.is-ios .tab-modes .tab-mode {
+	position: relative;
+	min-width: 44px;
+}
+body.is-ios .tab-modes .tab-mode::after {
+	content: '';
+	position: absolute;
+	left: 0;
+	right: 0;
+	top: 50%;
+	height: 44px;
+	transform: translateY(-50%);
+}
 body.is-ios clew-selection-bubble .toolbar-button {
 	min-width: 36px;
 	height: 36px;

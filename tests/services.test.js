@@ -233,6 +233,10 @@ const MINIMAL_PDF = Buffer.from(
 	+ 'trailer<</Root 1 0 R>>\n%%EOF\n', 'latin1');
 
 let clew, native, services;
+// A stand-in for the WebRoot's fa-icons.json (`family:name` → [w, h, d]),
+// and how often the shim fetched it.
+const FAKE_ICONS = { version: 'test', icons: { 'solid:star': [576, 512, 'M0 0L10 10Z'], 'regular:star': [576, 512, 'M1 1Z'] } };
+let iconLoads = 0;
 const settle = () => new Promise((resolve) => setTimeout(resolve, 10));
 // A note whose disk mtime is well in the past when the vault opens, so the
 // history tests can see the interval gate and the content-time stamp.
@@ -265,6 +269,7 @@ before(async () => {
 	({ clew, native, services } = createClewShim({
 		workerFactory: fakeWorkerFactory,
 		assetLoader: async () => '',
+		iconTableLoader: async () => { iconLoads++; return FAKE_ICONS; },
 	}));
 	globalThis.window ??= globalThis; // renderer-free environment
 });
@@ -784,11 +789,14 @@ test('TeX fragments: both scopes reach every engine worker\'s env, and editing e
 
 test('the iOS settings defaults carry every key upstream defines, with the plan\'s overrides', async () => {
 	const all = await clew.invoke('clew:settings-get');
-	for (const key of ['defaultEditMode', 'liveReveal', 'liveRenderMath', 'liveRenderFences', 'liveRenderEmbeds',
-		'liveFrameCap', 'editorToolbar', 'editorToolbarPrev', 'editorToolbarGroups', 'selectionBubble',
-		'slashCommands', 'linkPreview', 'previewPane', 'graphReferences', 'sidenotes', 'texFragments']) {
-		assert.ok(key in all, `${key} is defined`);
-	}
+	// Every key upstream's main/settings.js DEFAULTS defines, read from the
+	// vendored file itself, so a key added upstream fails here until iOS
+	// carries it (callouts and latexEngine arrived this way).
+	const upstream = fs.readFileSync(path.join(root, 'vendor/clew/main/settings.js'), 'utf8');
+	const block = upstream.slice(upstream.indexOf('const DEFAULTS = {'), upstream.indexOf('\n};', upstream.indexOf('const DEFAULTS = {')));
+	const keys = [...block.matchAll(/^\t([a-zA-Z]+):/gm)].map((m) => m[1]);
+	assert.ok(keys.length > 20, `read upstream's defaults (${keys.length} keys)`);
+	for (const key of keys) assert.ok(key in all, `${key} is defined`);
 	assert.equal(all.newTabMode, 'live');
 	assert.equal(all.defaultEditMode, 'live');
 	assert.equal(all.editorToolbar, 'always');
@@ -988,4 +996,70 @@ test('new files Clew writes show in the tree at once (Clew-app 5077207): a note 
 	await settle();
 	assert.equal(trees, 2, 'the kv store\'s first clewdata.json refreshes it too');
 	off();
+});
+
+// ---- sync to 03bb33a: custom callouts, a .bib edit -----------------------
+
+const configOf5 = (init) => JSON.parse(Object.entries(init.files).find(([k]) => k.endsWith('/.jmarkdown/config.json'))[1]);
+
+test('custom callouts: resolved from both scopes, CLEW_CALLOUTS reaches the worker, the icon table only when needed', async () => {
+	assert.deepEqual(await clew.invoke('clew:callouts-resolved'), { custom: {}, problems: [] });
+	assert.equal(iconLoads, 0, 'no definitions: the icon table is never fetched');
+	assert.equal(workerInits.at(-1).env.CLEW_CALLOUTS, '');
+	assert.ok(!configOf5(workerInits.at(-1)).Extensions.some((e) => /callouts\.js/.test(e)), 'callouts are the engine\'s');
+	const changes = [];
+	const off = clew.on('clew:ev-callouts-changed', () => changes.push(1));
+	const inits = workerInits.length;
+	await clew.invoke('clew:settings-set', { key: 'callouts', value: [{ name: 'idea', icon: 'star', color: '#123456', title: 'Idea' }] });
+	await settle();
+	assert.equal(changes.length, 1, 'the editor is told');
+	assert.ok(workerInits.length > inits, 'reconfigured: a fresh standby');
+	const env = JSON.parse(workerInits.at(-1).env.CLEW_CALLOUTS);
+	assert.equal(env.idea.label, 'Idea');
+	assert.equal(env.idea.color, '#123456');
+	assert.deepEqual(env.idea.icon, FAKE_ICONS.icons['solid:star'], 'only the icon paths it uses');
+	assert.equal(iconLoads, 1);
+	// The vault's own list merges in, and a bad entry is a problem by name.
+	await clew.invoke('clew:vault-settings-set', { key: 'callouts', value: [{ name: 'quote2', aliases: ['q2'] }, { name: 'bad', icon: 'nope' }] });
+	await settle();
+	assert.equal(changes.length, 2);
+	const resolved = await clew.invoke('clew:callouts-resolved');
+	assert.ok(resolved.custom.idea && resolved.custom.quote2, 'both scopes');
+	assert.ok(resolved.problems.some((p) => p.name === 'bad' && /icon/.test(p.reason)));
+	assert.ok(JSON.parse(workerInits.at(-1).env.CLEW_CALLOUTS).quote2);
+	// The picker's previews: only the names asked for, by their table key.
+	const icons = await clew.invoke('clew:callout-icons', { names: ['star', 'nope'] });
+	assert.deepEqual(Object.keys(icons.icons), ['star']);
+	assert.equal(icons.icons.star.key, 'solid:star');
+	assert.equal((await clew.invoke('clew:callout-icons')).version, 'test', 'whole for the picker');
+	assert.equal(iconLoads, 1, 'fetched once');
+	// Back to none.
+	await clew.invoke('clew:settings-set', { key: 'callouts', value: [] });
+	await clew.invoke('clew:vault-settings-set', { key: 'callouts', value: [] });
+	await settle();
+	assert.equal(workerInits.at(-1).env.CLEW_CALLOUTS, '');
+	off();
+});
+
+test('reading mode follows a .bib edit (Clew-app a1d8de0): only the notes citing it re-render', async () => {
+	await clew.invoke('clew:vault-settings-set', { key: 'bibliography', value: 'Sync5/refs.bib' });
+	await clew.invoke(CH.NOTE_WRITE, { path: 'Sync5/refs.bib', content: '@book{lewis1969, title={Convention}, year={1969}}\n' });
+	await clew.invoke(CH.NOTE_WRITE, { path: 'Sync5/Cites.md', content: 'As \\cite{lewis1969} argued.\n' });
+	await clew.invoke(CH.NOTE_WRITE, { path: 'Sync5/Plain.md', content: 'No citations here.\n' });
+	await clew.invoke('clew:render-subscribe', { path: 'Sync5/Cites.md' });
+	await clew.invoke('clew:render-subscribe', { path: 'Sync5/Plain.md' });
+	await native.renderNote('Sync5/Cites.md');
+	await native.renderNote('Sync5/Plain.md');
+	await new Promise((r) => setTimeout(r, 800));
+	const built = (rel) => workerBuilds.filter((b) => b.file.endsWith(rel)).length;
+	const cites = built('Sync5/Cites.md');
+	const plain = built('Sync5/Plain.md');
+	await clew.invoke(CH.NOTE_WRITE, { path: 'Sync5/refs.bib', content: '@book{lewis1969, title={Convention}, year={1970}}\n' });
+	await new Promise((r) => setTimeout(r, 1000));
+	assert.equal(built('Sync5/Cites.md'), cites + 1, 'the citing note re-rendered');
+	assert.equal(built('Sync5/Plain.md'), plain, 'a note citing nothing did not');
+	await clew.invoke('clew:render-unsubscribe', { path: 'Sync5/Cites.md' });
+	await clew.invoke('clew:render-unsubscribe', { path: 'Sync5/Plain.md' });
+	await clew.invoke('clew:vault-settings-set', { key: 'bibliography', value: '' });
+	await settle();
 });

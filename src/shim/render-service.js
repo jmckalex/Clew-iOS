@@ -12,7 +12,8 @@ import { VAULT_ROOT, GLOBAL_PLUGINS_ROOT } from './vault-manager.js';
 import { engineConfig, engineEnv, isTextPath, ENGINE_CSL_FILES } from './engine-config.js';
 import { engineExtensionEntries } from '../../vendor/clew/main/plugins.js';
 import { isDependentFragment } from '../../vendor/clew/shared/fragment-deps.js';
-import { citationHeader } from '../../vendor/clew/main/citation-header.js';
+import { citationHeader, noteBibFiles } from '../../vendor/clew/main/citation-header.js';
+import nodePath from 'node:path';
 import { refusedNames } from '../../vendor/clew/shared/refused-names.js';
 import { settings } from './settings.js';
 
@@ -59,6 +60,12 @@ export class RenderService {
 	 *  map — a font=note figure in the first note opened would otherwise
 	 *  typeset against files the engine was never told about. */
 	noteFontsReady = Promise.resolve();
+	/** Set by the session: () => Promise — resolves the custom callout types
+	 *  (which may need the icon table fetched) before a standby spawns, so
+	 *  its env carries them. Default: nothing to resolve. */
+	calloutsReady = async () => {};
+	/** Set by the session: () => string — CLEW_CALLOUTS for the next spawn. */
+	calloutsEnv = () => '';
 	#notes = new Map(); // rel -> {mtimeMs, html, hasQueries, inflight, dirty}
 	/** fragment cache: key → html string (canvas cards, live-edit blocks; bounded) */
 	#fragments = new Map();
@@ -106,6 +113,7 @@ export class RenderService {
 				this.#assets = Object.fromEntries(names.map((n, i) => [`/engine/${n}`, texts[i]]));
 			}
 			await this.noteFontsReady;
+			await this.calloutsReady();
 			this.#spawnStandby();
 		})();
 		this.#openPromise.catch((err) => console.error('[clew-ios] render service open failed:', err));
@@ -252,6 +260,7 @@ export class RenderService {
 				// reconfigures (ipc.js SETTINGS_SET), so a standby never
 				// outlives the list it was spawned with.
 				globalTexFragments: settings.get('texFragments') ?? [],
+				callouts: this.calloutsEnv(),
 			}),
 		});
 		this.#standby = { worker, ready };
@@ -336,10 +345,15 @@ export class RenderService {
 			entry.mtimeMs = mtimeMs;
 			entry.html = result.html;
 			try {
-				const text = vfs.read(abs);
-				entry.hasQueries = /^```(query|tasks|kanban)/m.test(
-					typeof text === 'string' ? text : new TextDecoder().decode(text));
-			} catch { entry.hasQueries = false; }
+				const raw = vfs.read(abs);
+				const text = typeof raw === 'string' ? raw : new TextDecoder().decode(raw);
+				// Notes holding query fences re-render on ANY vault change; notes
+				// citing a .bib re-render when THAT .bib changes (onFileChanged;
+				// desktop render-service.js, Clew-app a1d8de0).
+				entry.hasQueries = /^```(query|tasks|kanban)/m.test(text);
+				entry.bibs = new Set(noteBibFiles(text, nodePath.dirname(abs), this.#vaultBibliography(),
+					{ pandoc: this.#vaultOptions.pandocCitations === true }).map((p) => nodePath.resolve(p)));
+			} catch { entry.hasQueries = false; entry.bibs = null; }
 			this.#noteRefusals(rel, entry.html);
 			this.send('clew:ev-render-done', { path: rel });
 			return entry.html;
@@ -494,6 +508,15 @@ export class RenderService {
 		for (const embedder of this.embeddersOf(rel)) {
 			this.#restale(embedder);
 		}
+		// A bibliography: the notes whose citations come from it (their
+		// header's `Bibliography`, else the vault's) — rebuilt where a preview
+		// is open, marked stale elsewhere (Clew-app a1d8de0).
+		if (/\.bib$/i.test(rel)) {
+			const bib = nodePath.resolve(VAULT_ROOT, rel);
+			for (const [notePath, entry] of this.#notes) {
+				if (entry.bibs?.has(bib)) this.#restale(notePath);
+			}
+		}
 		// Query notes depend on the whole vault (see desktop render-service).
 		if (/\.(md|jmd)$/i.test(rel)) {
 			for (const [queryPath, entry] of this.#notes) {
@@ -510,6 +533,13 @@ export class RenderService {
 	 * ensureRendered do the work rather than serve the cache. (Desktop's
 	 * #restale, verbatim.)
 	 */
+	/** The vault-wide bibliography (vault-settings `bibliography`), absolute, or ''. */
+	#vaultBibliography() {
+		const bib = String(this.#vaultOptions.bibliography ?? '').trim();
+		if (!bib) return '';
+		return nodePath.isAbsolute(bib) ? bib : nodePath.join(VAULT_ROOT, bib);
+	}
+
 	#restale(rel) {
 		const entry = this.#notes.get(rel);
 		if (entry) entry.mtimeMs = 0;
