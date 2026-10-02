@@ -53,6 +53,9 @@ let fakeSession = null;
 let fakeTrusted = true;
 // Web PDFs the fake native side registered this session: hash → url.
 const fakeRemote = new Map();
+// The document camera's outcome ('cancel' or a scan), and a waiting quick action.
+let fakeScan = 'scan';
+let fakeQuickAction = null;
 const fakeBridge = {
 	calls: [],
 	async call(method, params) {
@@ -134,6 +137,22 @@ const fakeBridge = {
 				fs.mkdirSync(path.join(vaultDir, params.folder), { recursive: true });
 				fs.writeFileSync(path.join(vaultDir, rel), MINIMAL_PDF);
 				return { rel, size: MINIMAL_PDF.length };
+			}
+			// DocumentScanner + VaultStore.writeNewBinary: a NEW file, deduped.
+			case 'scanDocument': {
+				if (fakeScan === 'cancel') return { cancelled: true };
+				const answer = { pages: 2, text: 'Page one text\n\nPage two text' };
+				if (!params.pdf) return answer;
+				let rel = params.rel;
+				for (let n = 1; fs.existsSync(path.join(vaultDir, rel)); n++) rel = params.rel.replace(/\.pdf$/, ` ${n}.pdf`);
+				fs.mkdirSync(path.dirname(path.join(vaultDir, rel)), { recursive: true });
+				fs.writeFileSync(path.join(vaultDir, rel), MINIMAL_PDF);
+				return { ...answer, rel, size: MINIMAL_PDF.length };
+			}
+			case 'takeQuickAction': {
+				const action = fakeQuickAction;
+				fakeQuickAction = null;
+				return { action };
 			}
 			case 'vaultTrustSet':
 				fakeTrusted = params.trusted === true;
@@ -232,7 +251,7 @@ const MINIMAL_PDF = Buffer.from(
 	+ '3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 99 99]>>endobj\n'
 	+ 'trailer<</Root 1 0 R>>\n%%EOF\n', 'latin1');
 
-let clew, native, services;
+let clew, native, services, capture;
 // A stand-in for the WebRoot's fa-icons.json (`family:name` → [w, h, d]),
 // and how often the shim fetched it.
 const FAKE_ICONS = { version: 'test', icons: { 'solid:star': [576, 512, 'M0 0L10 10Z'], 'regular:star': [576, 512, 'M1 1Z'] } };
@@ -266,7 +285,7 @@ before(async () => {
 	}
 	globalThis.__clewBridgeImpl = fakeBridge;
 	const { createClewShim } = await import(path.join(root, 'dist', 'test', 'services.js'));
-	({ clew, native, services } = createClewShim({
+	({ clew, native, services, capture } = createClewShim({
 		workerFactory: fakeWorkerFactory,
 		assetLoader: async () => '',
 		iconTableLoader: async () => { iconLoads++; return FAKE_ICONS; },
@@ -1093,4 +1112,42 @@ test('custom callouts merge exactly as desktop\'s main/callout-types.js does, fi
 	await clew.invoke('clew:settings-set', { key: 'callouts', value: [] });
 	await clew.invoke('clew:vault-settings-set', { key: 'callouts', value: [] });
 	fs.rmSync(table, { force: true });
+});
+
+// ---- capture (FEATURE-IDEAS #9): the shim side of capture-ui.js ----------
+
+test('scan: a NEW PDF in the attachment folder, in the mirror and the tree at once; the text comes back', async () => {
+	let treeEvents = 0;
+	const off = clew.on('clew:ev-tree-changed', () => { treeEvents++; });
+	const first = await capture.scan({ name: 'Scan 2026-10-03 01.00.00.pdf' });
+	const second = await capture.scan({ name: 'Scan 2026-10-03 01.00.00.pdf' });
+	off?.();
+	assert.equal(first.rel, 'Attachments/Scan 2026-10-03 01.00.00.pdf');
+	assert.equal(second.rel, 'Attachments/Scan 2026-10-03 01.00.00 1.pdf', 'never overwrites');
+	assert.equal(first.pages, 2);
+	assert.match(first.text, /Page one text/);
+	const tree = JSON.stringify(await clew.invoke(CH.VAULT_TREE));
+	assert.ok(tree.includes('Scan 2026-10-03 01.00.00.pdf') && tree.includes('Scan 2026-10-03 01.00.00 1.pdf'), 'both in the tree');
+	assert.ok(treeEvents >= 2, 'the explorer is told');
+	const call = fakeBridge.calls.findLast(([m]) => m === 'scanDocument');
+	assert.deepEqual(call[1], { rel: 'Attachments/Scan 2026-10-03 01.00.00.pdf', pdf: true });
+});
+
+test('scan: text only writes nothing; a cancelled camera answers null; a name cannot leave the folder', async () => {
+	const mark = fakeBridge.calls.length;
+	const text = await capture.scan({ pdf: false });
+	assert.equal(text.rel, undefined);
+	assert.deepEqual(fakeBridge.calls.slice(mark).find(([m]) => m === 'scanDocument')[1], { pdf: false });
+	fakeScan = 'cancel';
+	assert.equal(await capture.scan({ name: 'x.pdf' }), null);
+	fakeScan = 'scan';
+	const sneaky = await capture.scan({ name: '../../escape.pdf' });
+	assert.ok(sneaky.rel.startsWith('Attachments/'), `stays in the folder: ${sneaky.rel}`);
+	assert.ok(!sneaky.rel.slice('Attachments/'.length).includes('/'));
+});
+
+test('quick actions: the waiting one is taken once', async () => {
+	fakeQuickAction = 'scan';
+	assert.equal(await capture.takeQuickAction(), 'scan');
+	assert.equal(await capture.takeQuickAction(), null);
 });

@@ -90,6 +90,18 @@ final class WebHost: NSObject, ObservableObject {
 		Timer.scheduledTimer(withTimeInterval: 20, repeats: true) { [weak self] _ in
 			self?.rescanVault()
 		}
+
+		// A Home Screen quick action chosen while the page is up: it asks
+		// for it (capture-ui.js), as it does once at every load.
+		QuickActions.shared.nudge = { [weak self] in
+			self?.webView.evaluateJavaScript("window.__clewCapture?.poll?.();", completionHandler: nil)
+		}
+		#if DEBUG
+		// The simulator can't long-press a Home Screen icon for us.
+		if let action = UserDefaults.standard.string(forKey: "ClewQuickAction") {
+			QuickActions.shared.handle(action)
+		}
+		#endif
 	}
 
 	func flushEditors() {

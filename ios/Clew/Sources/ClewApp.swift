@@ -9,6 +9,8 @@ import SwiftUI
 @main
 struct ClewApp: App {
 	@Environment(\.scenePhase) private var scenePhase
+	// Home Screen quick actions (QuickActions.swift).
+	@UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 	@StateObject private var host = WebHost()
 
 	var body: some Scene {

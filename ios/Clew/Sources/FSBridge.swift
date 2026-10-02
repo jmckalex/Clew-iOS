@@ -10,6 +10,7 @@ final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 	private let folderPicker = FolderPicker()
 	private let quickLook = QuickLookPresenter()
 	private let printer = PdfPrinter()
+	private let scanner = DocumentScanner()
 
 	init(vaults: VaultStore) {
 		self.vaults = vaults
@@ -289,6 +290,50 @@ final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 			// PDFs that reached a frame directly and were cancelled
 			// (WebHost's navigation-response check) — the sweep asserts zero.
 			reply(PdfLeaks.count, nil)
+
+		case "takeQuickAction":
+			reply(["action": QuickActions.shared.take() as Any? ?? NSNull()], nil)
+
+		case "scanDocument":
+			// Scan into a note: the document camera, then OCR and (unless
+			// `pdf` is false) one PDF written as a NEW file at `rel`, deduped.
+			// Answers {rel?, size?, pages, text} or {cancelled: true}.
+			let rel = params["rel"] as? String
+			let wantPdf = params["pdf"] as? Bool ?? true
+			if wantPdf, rel == nil { throw ClewError.badPayload }
+			let process: ([UIImage]) -> Void = { images in
+				DispatchQueue.global(qos: .userInitiated).async {
+					let pages = images.map { (image: $0, lines: ScanPDF.recognize($0)) }
+					let text = pages.map { ScanPDF.text(of: $0.lines) }.joined(separator: "\n\n")
+					var result: [String: Any] = ["pages": pages.count, "text": text]
+					guard wantPdf, let rel else { return DispatchQueue.main.async { reply(result, nil) } }
+					let data = ScanPDF.pdf(pages: pages)
+					self.performIO(reply) {
+						let written = try self.vaults.writeNewBinary(data, rel: rel)
+						result.merge(written) { _, new in new }
+						return result
+					}
+				}
+			}
+			#if DEBUG
+			if let fixture = UserDefaults.standard.string(forKey: "ClewScanFixture") {
+				return process(ScanPDF.fixturePages(fixture))
+			}
+			#endif
+			guard DocumentScanner.isSupported else {
+				throw ClewError.message("Scanning needs a camera, and this device has none Clew can use.")
+			}
+			guard var top = webView?.window?.rootViewController else {
+				return reply(nil, "no view controller to present from")
+			}
+			while let presented = top.presentedViewController { top = presented }
+			scanner.present(from: top) { outcome in
+				switch outcome {
+				case .failure(let error): reply(nil, error.localizedDescription)
+				case .success(nil): reply(["cancelled": true], nil)
+				case .success(let images?): process(images)
+				}
+			}
 
 		case "pickFolder":
 			// Anywhere Files can reach: iCloud Drive, Working Copy, other

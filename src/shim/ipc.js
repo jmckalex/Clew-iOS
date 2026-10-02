@@ -763,7 +763,26 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 		get sessionId() { return vaults.sessionId; },
 	};
 
-	return { clew, native, send, services: { vaults, indexer, renderService, kvStore, searchService, settings } };
+	// ---- capture (FEATURE-IDEAS #9; the page side is capture-ui.js) ---------
+	const capture = {
+		/** The document camera, then OCR. With `pdf`, the pages become one
+		 *  NEW PDF in the attachment folder (its text layer searchable); the
+		 *  answer is {rel?, pages, text}, or null when cancelled. */
+		async scan({ pdf = true, name } = {}) {
+			if (!vaults.isOpen) throw new Error('No vault open');
+			const folder = settings.get('attachmentFolder') || 'Attachments';
+			const answer = await bridgeCall('scanDocument', pdf
+				? { rel: `${folder}/${String(name ?? 'Scan.pdf').replace(/[/:\\]/g, '-')}`, pdf: true }
+				: { pdf: false });
+			if (!answer || answer.cancelled) return null;
+			if (answer.rel) vaults.addedNatively(answer.rel);
+			return answer;
+		},
+		/** The Home Screen quick action waiting for this page, if any. */
+		takeQuickAction: () => bridgeCall('takeQuickAction').then((r) => r?.action ?? null),
+	};
+
+	return { clew, native, send, capture, services: { vaults, indexer, renderService, kvStore, searchService, settings } };
 }
 
 export { CH, VAULT_ROOT, toBase64 };

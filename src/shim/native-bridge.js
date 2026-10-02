@@ -34,6 +34,9 @@
 //   vaultTrustGet()                  -> { open, trusted, identity }
 //   vaultTrustSet({trusted})         -> { open, trusted, identity }
 //   vaultOpen also answers `trusted` (this device's trust in the vault).
+//   scanDocument({rel?, pdf?})       -> { rel?, size?, pages, text } | { cancelled: true }
+//                                       (the document camera; OCR; a NEW PDF at rel, deduped)
+//   takeQuickAction()                -> { action: 'scan'|'new-note'|'daily'|null } (Home Screen)
 
 export async function bridgeCall(method, params = {}) {
 	const impl = globalThis.__clewBridgeImpl;
