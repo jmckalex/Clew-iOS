@@ -223,6 +223,20 @@ final class VaultStore {
 		return ["ok": true, "path": resolved]
 	}
 
+	/// A vault created for a switch that was then cancelled: removed again,
+	/// but only while it is still exactly what createVault made — an empty
+	/// folder directly in Documents. Anything else is left alone.
+	func removeEmptyVault(_ path: String) -> Bool {
+		let url = URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
+		guard url.deletingLastPathComponent().standardizedFileURL.path == documentsURL.standardizedFileURL.path else { return false }
+		let fm = FileManager.default
+		guard let names = try? fm.contentsOfDirectory(atPath: url.path),
+			names.allSatisfy({ $0 == ".DS_Store" }) else { return false }
+		guard (try? fm.removeItem(at: url)) != nil else { return false }
+		trust.forget(url)
+		return true
+	}
+
 	/// A remembered vault the user removed from the list: its bookmark goes
 	/// with it (nothing else remembers an external folder natively).
 	func forgetVault(_ path: String) {

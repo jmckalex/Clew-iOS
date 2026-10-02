@@ -193,6 +193,11 @@ final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 			guard let path = params["path"] as? String else { throw ClewError.badPayload }
 			performIO(reply) { self.vaults.setNextVault(path) }
 
+		case "removeEmptyVault":
+			// A vault created for a switch the user then cancelled.
+			guard let path = params["path"] as? String else { throw ClewError.badPayload }
+			performIO(reply) { ["removed": self.vaults.removeEmptyVault(path)] }
+
 		case "forgetVault":
 			guard let path = params["path"] as? String else { throw ClewError.badPayload }
 			performIO(reply) { self.vaults.forgetVault(path); return nil }

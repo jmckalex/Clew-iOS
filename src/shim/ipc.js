@@ -317,7 +317,20 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 		},
 		createVault: async () => {
 			const created = await bridgeCall('createVault');
-			return created?.path ? switchTo(created.path) : null;
+			if (!created?.path) return null;
+			// Made for this switch: if the switch is cancelled or refused, the
+			// folder goes again — native removes it only while it is still
+			// the empty folder it made.
+			const undo = () => bridgeCall('removeEmptyVault', { path: created.path }).catch(() => {});
+			let result;
+			try {
+				result = await switchTo(created.path);
+			} catch (err) {
+				await undo();
+				throw err;
+			}
+			if (result === null) await undo();
+			return result;
 		},
 		openDemo: async () => {
 			const demo = await bridgeCall('demoVaultPath');

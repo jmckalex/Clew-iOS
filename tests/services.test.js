@@ -155,9 +155,18 @@ const fakeBridge = {
 			case 'demoVaultPath':
 				return { path: vaultDir };
 			case 'createVault': {
-				const dir = path.join(os.tmpdir(), `clew-ios-test-created-${process.pid}`, 'My Vault');
+				// A fresh folder each time, deduped like VaultStore's.
+				const base = path.join(os.tmpdir(), `clew-ios-test-created-${process.pid}`);
+				let dir = path.join(base, 'My Vault');
+				for (let n = 2; fs.existsSync(dir); n++) dir = path.join(base, `My Vault ${n}`);
 				fs.mkdirSync(dir, { recursive: true });
 				return { path: dir };
+			}
+			// VaultStore.removeEmptyVault: only while still empty.
+			case 'removeEmptyVault': {
+				const empty = fs.existsSync(params.path) && fs.readdirSync(params.path).length === 0;
+				if (empty) fs.rmSync(params.path, { recursive: true });
+				return { removed: empty };
 			}
 			case 'remove':
 				// VaultStore.remove's refusal: only history pruning hard-deletes.
@@ -1196,4 +1205,23 @@ test('switching vaults: one row per vault, even when the container moved under a
 	assert.equal(list.filter((v) => v.resolved === twin).length, 1, 'one row');
 	assert.ok(!services.settings.get('recentVaults').includes(`${twin}#moved`), 'the list is rewritten to the current path');
 	await shimApi.vaultSwitch.forget(twin);
+});
+
+test('switching vaults: a vault created for a cancelled switch is removed again, while still empty', async () => {
+	const before = services.vaults.realPath;
+	const off = clew.on('clew:ev-close-requested', () => {
+		queueMicrotask(() => clew.invoke('clew:window-close-resolved', { proceed: false }));
+	});
+	const result = await clew.invoke(CH.VAULT_CREATE_DIALOG);
+	off();
+	assert.equal(result, null, 'cancelled');
+	const asked = fakeBridge.calls.findLast(([m]) => m === 'removeEmptyVault')?.[1]?.path;
+	assert.ok(asked, 'the folder it made is asked to go');
+	assert.ok(!fs.existsSync(asked), 'and it is gone');
+	assert.equal(services.vaults.realPath, before, 'still in the same vault');
+	// Native leaves anything that is no longer empty alone (the fake mirrors it).
+	const used = fs.mkdtempSync(path.join(os.tmpdir(), 'clew-ios-test-used-'));
+	fs.writeFileSync(path.join(used, 'Note.md'), 'x');
+	assert.deepEqual(await fakeBridge.call('removeEmptyVault', { path: used }), { removed: false });
+	assert.ok(fs.existsSync(path.join(used, 'Note.md')));
 });
