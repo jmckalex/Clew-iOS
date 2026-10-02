@@ -53,6 +53,9 @@ export class VaultManager {
 	 *  reply): whether the engine may run its notes' code. False with no
 	 *  vault, and for a vault the device has not trusted. */
 	trusted = false;
+	/** Vault paths of links leading OUT of the open vault: never followed on
+	 *  iPad (VaultPaths.swift), said once by ios-ui.js. */
+	refusedLinks = [];
 	/** @type {(channel: string, payload: any) => void} */
 	send = () => {};
 	hooks = {};
@@ -93,7 +96,7 @@ export class VaultManager {
 
 	async open(vaultPath) {
 		this.close();
-		const { name, path: realPath, files, globalPlugins, sessionId, callerToken, trusted } = await bridgeCall('vaultOpen', { path: vaultPath });
+		const { name, path: realPath, files, globalPlugins, sessionId, callerToken, trusted, refusedLinks } = await bridgeCall('vaultOpen', { path: vaultPath });
 		this.realPath = realPath;
 		this.name = name;
 		// Minted natively per opening: preview URLs carry the sid, and the
@@ -101,6 +104,8 @@ export class VaultManager {
 		this.sessionId = sessionId ?? null;
 		this.callerToken = callerToken ?? null;
 		this.trusted = trusted === true;
+		// Links leading out of the vault, which native skipped (VaultPaths.swift).
+		this.refusedLinks = Array.isArray(refusedLinks) ? refusedLinks : [];
 		this.hooks.onSession?.(this.sessionId);
 		vfs.mkdir(VAULT_ROOT);
 		for (const [rel, entry] of Object.entries(files)) {

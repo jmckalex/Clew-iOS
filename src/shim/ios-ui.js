@@ -494,3 +494,24 @@ if (compact.matches) {
 		closeSidebars();
 	}, true);
 }
+
+// Links leading out of the vault are never followed on iPad (a link out
+// either dangles, is outside the folder the iPad was given, or would reach
+// the app's own files; VaultPaths.swift). A vault carrying some says so
+// once per opening, so a missing bibliography or folder is explained.
+{
+	let toldFor = null;
+	const tell = () => {
+		const vaults = window.__clewShim?.services?.vaults;
+		const links = vaults?.refusedLinks ?? [];
+		if (!links.length || toldFor === vaults.sessionId) return;
+		toldFor = vaults.sessionId;
+		const named = links.slice(0, 3).map((l) => `“${l}”`).join(', ');
+		const more = links.length > 3 ? ` and ${links.length - 3} more` : '';
+		import('../../vendor/clew/renderer/plugins.js').then(({ notice }) => notice(
+			`${links.length === 1 ? 'A link in this vault leads' : `${links.length} links in this vault lead`} outside it, `
+			+ `and links leaving a vault aren’t followed on iPad: ${named}${more}.`, 12000));
+	};
+	window.__clew?.vaultStore?.on?.('vault-changed', () => setTimeout(tell, 1500));
+	setTimeout(tell, 3000);
+}

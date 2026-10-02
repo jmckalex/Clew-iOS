@@ -22,6 +22,13 @@ import Security
 final class VaultStore {
 	/// Absolute path of the currently open vault (set by vaultOpen).
 	private(set) var currentVaultPath: String?
+	/// The open vault's REAL root (POSIX realpath, VaultPaths): what every
+	/// vault path is clamped to, links followed.
+	private var currentVaultRealRoot: String?
+	/// Links in the open vault that lead out of it (or dangle), by vault
+	/// path → where they lead ("" when nowhere). Never followed; reported to
+	/// the app page so a missing file can be explained.
+	private(set) var refusedLinks: [String: String] = [:]
 	/// rel path -> mtimeMs at last snapshot/rescan, text files only.
 	private var knownMtimes: [String: Double] = [:]
 	/// The security-scoped URL whose access we currently hold, if any.
@@ -216,6 +223,8 @@ final class VaultStore {
 			throw ClewError.vaultUnreachable(path)
 		}
 		currentVaultPath = real
+		currentVaultRealRoot = VaultPaths.realPath(real)
+		refusedLinks = [:]
 		UserDefaults.standard.set(real, forKey: "lastVaultPath")
 		knownMtimes = [:]
 		var files: [String: Any] = [:]
@@ -224,7 +233,7 @@ final class VaultStore {
 		// spend at most this long waiting across the whole walk (whatever
 		// misses the deadline arrives via a later rescan).
 		let downloadDeadline = Date().addingTimeInterval(20)
-		walk(root, rel: "", downloadDeadline: downloadDeadline) { rel, url, mtimeMs, size in
+		walk(root, rel: "", downloadDeadline: downloadDeadline, ancestry: [currentVaultRealRoot ?? real]) { rel, url, mtimeMs, size in
 			if Self.isText(rel) {
 				let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
 				files[rel] = ["text": text, "size": size, "mtimeMs": mtimeMs]
@@ -239,6 +248,9 @@ final class VaultStore {
 			"files": files,
 		]
 		if let global = globalPluginsSnapshot() { result["globalPlugins"] = global }
+		// Links leading out of the vault, skipped by the walk: the app page
+		// says so once, so a missing file is explained.
+		if !refusedLinks.isEmpty { result["refusedLinks"] = refusedLinks.keys.sorted() }
 		// Decided here, before the first engine config: a vault new to this
 		// device runs no note code until its owner trusts it.
 		result["trusted"] = trust.isTrusted(root)
@@ -274,7 +286,10 @@ final class VaultStore {
 	/// an Obsidian vault's .obsidian never enters the snapshot. iCloud
 	/// placeholders (.name.icloud) are mapped to their real names; text
 	/// placeholders are downloaded and awaited within the shared deadline.
-	private func walk(_ dir: URL, rel: String, downloadDeadline: Date?,
+	/// `ancestry` is the real paths of the folders above `dir` on this walk:
+	/// a folder whose real path is already among them (a link back up the
+	/// tree) is not entered again, so links cannot loop.
+	private func walk(_ dir: URL, rel: String, downloadDeadline: Date?, ancestry: [String] = [],
 		visit: (String, URL, Double, Int) -> Void) {
 		let fm = FileManager.default
 		guard let entries = try? fm.contentsOfDirectory(
@@ -306,9 +321,38 @@ final class VaultStore {
 				}
 			}
 			let childRel = rel.isEmpty ? name : "\(rel)/\(name)"
-			let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .contentModificationDateKey, .fileSizeKey])
-			if values?.isDirectory == true {
-				walk(url, rel: childRel, downloadDeadline: downloadDeadline, visit: visit)
+			let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey, .contentModificationDateKey, .fileSizeKey])
+			if values?.isSymbolicLink == true {
+				// A link is followed only while it stays inside the vault
+				// (VaultPaths); one leaving it, or dangling, is skipped and
+				// recorded. A folder link is walked once, by its real path,
+				// so a link back up the tree cannot loop.
+				guard let root = currentVaultRealRoot,
+					case .inside(let real) = VaultPaths.check(url.path, root: root) else {
+					if case .escapes(let real) = currentVaultRealRoot.map({ VaultPaths.check(url.path, root: $0) }) ?? .escapes(nil) {
+						refusedLinks[childRel] = real ?? ""
+					}
+					continue
+				}
+				var isDir: ObjCBool = false
+				guard fm.fileExists(atPath: real, isDirectory: &isDir) else { continue }
+				if isDir.boolValue {
+					// Listed through its REAL folder: contentsOfDirectory(at:)
+					// does not follow a link to a folder. Paths stay the link's.
+					if !ancestry.contains(real) {
+						walk(URL(fileURLWithPath: real, isDirectory: true), rel: childRel, downloadDeadline: downloadDeadline,
+							ancestry: ancestry + [real], visit: visit)
+					}
+				} else {
+					let attrs = try? fm.attributesOfItem(atPath: real)
+					let mtimeMs = ((attrs?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0) * 1000
+					visit(childRel, url, mtimeMs, (attrs?[.size] as? NSNumber)?.intValue ?? 0)
+				}
+			} else if values?.isDirectory == true {
+				let real = VaultPaths.realPath(url.path) ?? url.path
+				if !ancestry.contains(real) {
+					walk(url, rel: childRel, downloadDeadline: downloadDeadline, ancestry: ancestry + [real], visit: visit)
+				}
 			} else {
 				let mtimeMs = (values?.contentModificationDate?.timeIntervalSince1970 ?? 0) * 1000
 				visit(childRel, url, mtimeMs, values?.fileSize ?? 0)
@@ -345,6 +389,13 @@ final class VaultStore {
 		let target = base.appendingPathComponent(rel).standardizedFileURL
 		guard target.path == base.path || target.path.hasPrefix(base.path + "/") else {
 			throw ClewError.pathEscape(rel)
+		}
+		// Lexically inside is not inside: a link can lead out. Clamp by real
+		// path (VaultPaths): a link leaving the vault, or dangling, is
+		// refused, for reads, writes, renames and serving alike.
+		guard let root = currentVaultRealRoot ?? VaultPaths.realPath(vault) else { throw ClewError.pathEscape(rel) }
+		if case .escapes = VaultPaths.check(target.path, root: root) {
+			throw ClewError.linkEscape(rel)
 		}
 		return target
 	}
@@ -503,7 +554,7 @@ final class VaultStore {
 			// Rescans stay cheap: newly appearing evicted text gets a short
 			// shared download budget, the rest lands on a later pass.
 			let deadline = Date().addingTimeInterval(5)
-			self.walk(root, rel: "", downloadDeadline: deadline) { rel, url, mtimeMs, size in
+			self.walk(root, rel: "", downloadDeadline: deadline, ancestry: [self.currentVaultRealRoot ?? vault]) { rel, url, mtimeMs, size in
 				guard Self.isText(rel) else { return }
 				seen.insert(rel)
 				next[rel] = mtimeMs
@@ -525,6 +576,7 @@ final class VaultStore {
 enum ClewError: Error, LocalizedError {
 	case noVault
 	case pathEscape(String)
+	case linkEscape(String)
 	case badPayload
 	case unknownMethod(String)
 	case vaultUnreachable(String)
@@ -539,6 +591,7 @@ enum ClewError: Error, LocalizedError {
 		switch self {
 		case .noVault: return "No vault open"
 		case .pathEscape(let rel): return "Path escapes vault: \(rel)"
+		case .linkEscape(let rel): return "“\(rel)” is a link that leads outside the vault: links leaving a vault aren’t followed on iPad"
 		case .badPayload: return "Bad payload"
 		case .unknownMethod(let name): return "Unknown bridge method: \(name)"
 		case .notFound(let rel): return "No such vault file: \(rel)"
