@@ -135,6 +135,20 @@ const fakeBridge = {
 				fs.writeFileSync(path.join(vaultDir, rel), MINIMAL_PDF);
 				return { rel, size: MINIMAL_PDF.length };
 			}
+			// The vault switcher (VaultStore.swift): reachability, the next
+			// vault, forgetting one.
+			case 'vaultStatus':
+				// `<path>#moved` stands for a Documents vault remembered under a
+				// container the app has since left: it resolves to `<path>`.
+				return params.paths.map((p) => (p.endsWith('#moved') && fs.existsSync(p.slice(0, -6))
+					? { path: p, ok: true, resolved: p.slice(0, -6), name: path.basename(p.slice(0, -6)), kind: 'documents' }
+					: fs.existsSync(p)
+					? { path: p, ok: true, resolved: p, name: path.basename(p), kind: 'external' }
+					: { path: p, ok: false, name: path.basename(p), kind: 'external', reason: 'The folder can’t be found.' }));
+			case 'setNextVault':
+				return fs.existsSync(params.path) ? { ok: true, path: params.path } : { ok: false, reason: 'The folder can’t be found.' };
+			case 'forgetVault':
+				return null;
 			case 'vaultTrustSet':
 				fakeTrusted = params.trusted === true;
 				return { open: true, trusted: fakeTrusted, identity: 'documents:test' };
@@ -232,7 +246,7 @@ const MINIMAL_PDF = Buffer.from(
 	+ '3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 99 99]>>endobj\n'
 	+ 'trailer<</Root 1 0 R>>\n%%EOF\n', 'latin1');
 
-let clew, native, services;
+let clew, native, services, shimApi;
 // A stand-in for the WebRoot's fa-icons.json (`family:name` → [w, h, d]),
 // and how often the shim fetched it.
 const FAKE_ICONS = { version: 'test', icons: { 'solid:star': [576, 512, 'M0 0L10 10Z'], 'regular:star': [576, 512, 'M1 1Z'] } };
@@ -266,11 +280,12 @@ before(async () => {
 	}
 	globalThis.__clewBridgeImpl = fakeBridge;
 	const { createClewShim } = await import(path.join(root, 'dist', 'test', 'services.js'));
-	({ clew, native, services } = createClewShim({
+	shimApi = createClewShim({
 		workerFactory: fakeWorkerFactory,
 		assetLoader: async () => '',
 		iconTableLoader: async () => { iconLoads++; return FAKE_ICONS; },
-	}));
+	});
+	({ clew, native, services } = shimApi);
 	globalThis.window ??= globalThis; // renderer-free environment
 });
 
@@ -285,6 +300,12 @@ test('caller token: VAULT_CURRENT and the vault-opened event carry it; the open 
 	assert.equal(current.callerToken, fakeSession.callerToken, 'the app page\'s own vault, token included');
 	let opened = null;
 	const off = clew.on('clew:ev-vault-opened', (payload) => { opened = payload; });
+	// Another vault (choosing the open one is a no-op since the vault
+	// switcher), then back: each open mints a session. Headless, the switch
+	// settles and opens in place.
+	const second = fs.mkdtempSync(path.join(os.tmpdir(), 'clew-ios-test-second-'));
+	fs.writeFileSync(path.join(second, 'Second.md'), '# Second\n');
+	await clew.invoke('clew:vault-open-path', { path: second });
 	const answer = await clew.invoke('clew:vault-open-path', { path: vaultDir });
 	await new Promise((r) => setTimeout(r, 10));
 	off?.();
@@ -1093,4 +1114,86 @@ test('custom callouts merge exactly as desktop\'s main/callout-types.js does, fi
 	await clew.invoke('clew:settings-set', { key: 'callouts', value: [] });
 	await clew.invoke('clew:vault-settings-set', { key: 'callouts', value: [] });
 	fs.rmSync(table, { force: true });
+});
+
+// ---- switching vaults (the iPad's one scene) ------------------------------
+
+test('switching vaults: the close handshake can cancel; a switch settles this vault, names the next and reloads', async () => {
+	const other = fs.mkdtempSync(path.join(os.tmpdir(), 'clew-ios-test-other-'));
+	fs.writeFileSync(path.join(other, 'Other.md'), '# Other\n');
+	let reloads = 0;
+	shimApi.vaultSwitch.reload = () => { reloads++; };
+	const pending = (p, ms = 3000) => Promise.race([p.then((v) => ({ settled: v })), new Promise((r) => setTimeout(() => r('pending'), ms))]);
+	const before = services.vaults.realPath;
+	// The renderer's office dock answers the close question: Cancel first.
+	let asked = 0;
+	let answer = false;
+	const off = clew.on('clew:ev-close-requested', () => {
+		asked++;
+		queueMicrotask(() => clew.invoke('clew:window-close-resolved', { proceed: 'pending' })
+			.then(() => clew.invoke('clew:window-close-resolved', { proceed: answer })));
+	});
+	const nexts = () => fakeBridge.calls.filter(([m]) => m === 'setNextVault').length;
+	const n0 = nexts();
+	assert.deepEqual(await clew.invoke('clew:vault-open-path', { path: other }), null, 'cancelled: nothing changes');
+	assert.equal(asked, 1);
+	assert.equal(nexts(), n0, 'no next vault named');
+	assert.equal(reloads, 0);
+	assert.equal(services.vaults.realPath, before, 'still in the same vault');
+	// The same vault again: nothing to do, no question.
+	assert.equal((await clew.invoke('clew:vault-open-path', { path: before })).path, before);
+	assert.equal(asked, 1);
+	// Proceed: a write made just before lands in THIS vault, then the switch.
+	answer = true;
+	await clew.invoke(CH.NOTE_WRITE, { path: 'Switch Probe.md', content: 'written before the switch\n' });
+	const result = await pending(clew.invoke('clew:vault-open-path', { path: other }));
+	assert.equal(result, 'pending', 'the page is going: the call never answers');
+	assert.equal(reloads, 1);
+	assert.deepEqual(fakeBridge.calls.findLast(([m]) => m === 'setNextVault')[1], { path: other });
+	assert.equal(fs.readFileSync(path.join(vaultDir, 'Switch Probe.md'), 'utf8'), 'written before the switch\n', 'saved into the vault being left');
+	assert.ok(!fs.existsSync(path.join(other, 'Switch Probe.md')), 'nothing written into the next one');
+	// A vault that cannot be opened is refused before anything is torn down.
+	await assert.rejects(clew.invoke('clew:vault-open-path', { path: path.join(other, 'missing') }), /can’t be found/);
+	off();
+	assert.equal(services.vaults.realPath, before, 'the shim itself never switched in place');
+	shimApi.vaultSwitch.reload = null; // headless again for the tests after
+});
+
+test('switching vaults: the remembered list says which can open and why not; removing one; never the open one', async () => {
+	const keep = fs.mkdtempSync(path.join(os.tmpdir(), 'clew-ios-test-keep-'));
+	const gone = path.join(os.tmpdir(), `clew-ios-test-gone-${process.pid}`);
+	services.settings.rememberVault(gone);
+	services.settings.rememberVault(keep);
+	services.settings.rememberVault(services.vaults.realPath); // the open one first, as at open
+	const list = await shimApi.vaultSwitch.recent();
+	const by = (p) => list.find((v) => v.path === p);
+	assert.equal(by(services.vaults.realPath).current, true);
+	assert.equal(by(keep).ok, true);
+	assert.equal(by(gone).ok, false);
+	assert.match(by(gone).reason, /can’t be found/);
+	assert.equal(await shimApi.vaultSwitch.forget(services.vaults.realPath), false, 'the open vault stays');
+	assert.equal(await shimApi.vaultSwitch.forget(gone), true);
+	assert.deepEqual(fakeBridge.calls.findLast(([m]) => m === 'forgetVault')[1], { path: gone });
+	assert.ok(!(await shimApi.vaultSwitch.recent()).some((v) => v.path === gone));
+});
+
+test('Save / Discard / Cancel: the app page\'s dialog answers; without one, Cancel', async () => {
+	const saved = shimApi.ui.confirmDiscard;
+	shimApi.ui.confirmDiscard = null;
+	assert.equal(await clew.invoke('clew:confirm-discard', { message: 'Save?' }), 'cancel');
+	shimApi.ui.confirmDiscard = async ({ message }) => (message === 'Save?' ? 'save' : 'discard');
+	assert.equal(await clew.invoke('clew:confirm-discard', { message: 'Save?' }), 'save');
+	assert.equal(await clew.invoke('clew:confirm-discard', { message: 'Other' }), 'discard');
+	shimApi.ui.confirmDiscard = saved;
+});
+
+test('switching vaults: one row per vault, even when the container moved under a remembered path', async () => {
+	const twin = fs.mkdtempSync(path.join(os.tmpdir(), 'clew-ios-test-twin-'));
+	services.settings.rememberVault(`${twin}#moved`); // the same vault, remembered in an old container
+	services.settings.rememberVault(twin);
+	services.settings.rememberVault(services.vaults.realPath);
+	const list = await shimApi.vaultSwitch.recent();
+	assert.equal(list.filter((v) => v.resolved === twin).length, 1, 'one row');
+	assert.ok(!services.settings.get('recentVaults').includes(`${twin}#moved`), 'the list is rewritten to the current path');
+	await shimApi.vaultSwitch.forget(twin);
 });

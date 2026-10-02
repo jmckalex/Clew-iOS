@@ -295,3 +295,121 @@ body.is-ios .le-frame-edge:active {
 		pointer-events: none;
 	}
 }
+
+/* ---- switching vaults (src/shim/vault-switcher.js) ---- */
+/* The vault's name at the top of the file explorer is the way in: a button
+   a finger can find, marked with a chevron. */
+body.is-ios clew-file-explorer .panel-title[data-ios-switch] {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	min-height: 44px;
+	cursor: pointer;
+	color: var(--clew-text-normal);
+}
+body.is-ios clew-file-explorer .panel-title[data-ios-switch]::after {
+	content: '▾';
+	font-size: 0.85em;
+	color: var(--clew-text-muted);
+}
+/* The sheet: fitted to the visual viewport by the script (the software
+   keyboard may be up); every target 44 pt. */
+.ios-sheet-backdrop {
+	position: fixed;
+	left: 0;
+	right: 0;
+	top: 0;
+	height: 100%;
+	z-index: 10000;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: rgba(0, 0, 0, 0.45);
+	padding: 16px;
+	box-sizing: border-box;
+}
+.ios-sheet {
+	width: min(440px, 100%);
+	overflow-y: auto;
+	-webkit-overflow-scrolling: touch;
+	background: var(--clew-bg-primary, #1e1e1e);
+	color: var(--clew-text-normal, #e8e8e8);
+	border: 1px solid var(--clew-border, #333);
+	border-radius: 14px;
+	box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+	padding: 8px 16px 16px;
+	box-sizing: border-box;
+}
+.ios-sheet-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	min-height: 48px;
+}
+.ios-sheet-title { font-weight: 600; font-size: 17px; }
+.ios-sheet-done,
+.ios-vault-button,
+.ios-vault-remove {
+	min-height: 44px;
+	min-width: 44px;
+	border-radius: 10px;
+	border: 1px solid var(--clew-border, #333);
+	background: var(--clew-bg-secondary, #262626);
+	color: var(--clew-text-normal, #e8e8e8);
+	font: inherit;
+	padding: 0 14px;
+}
+.ios-sheet-done { border: none; background: none; color: var(--clew-accent, #a882ff); font-weight: 600; }
+.ios-vault-section {
+	margin: 6px 0 4px;
+	font-size: 13px;
+	color: var(--clew-text-muted, #999);
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+}
+.ios-vault-list { display: flex; flex-direction: column; gap: 6px; }
+.ios-vault { display: flex; align-items: stretch; gap: 6px; }
+.ios-vault-open {
+	flex: 1;
+	min-height: 52px;
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	justify-content: center;
+	gap: 2px;
+	text-align: left;
+	border-radius: 10px;
+	border: 1px solid var(--clew-border, #333);
+	background: var(--clew-bg-secondary, #262626);
+	color: inherit;
+	font: inherit;
+	padding: 6px 12px;
+}
+.ios-vault-name { font-weight: 600; }
+.ios-vault-where { font-size: 13px; color: var(--clew-text-muted, #999); }
+.ios-vault.is-current .ios-vault-open { border-color: var(--clew-accent, #a882ff); }
+.ios-vault.is-current .ios-vault-open:disabled { opacity: 1; }
+.ios-vault.is-unavailable .ios-vault-name { opacity: 0.6; text-decoration: line-through; }
+.ios-vault.is-unavailable .ios-vault-where { color: var(--clew-danger, #e5534b); }
+.ios-vault-remove { padding: 0; width: 44px; color: var(--clew-text-muted, #999); }
+.ios-vault-problem {
+	margin-top: 10px;
+	padding: 10px 12px;
+	border-radius: 10px;
+	border: 1px solid var(--clew-danger, #e5534b);
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	align-items: center;
+}
+.ios-vault-problem[hidden] { display: none; } /* its display: flex would beat [hidden] */
+.ios-vault-problem p { flex-basis: 100%; margin: 0 0 4px; }
+.ios-vault-actions { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; }
+.ios-vault-actions .ios-vault-button { text-align: left; }
+.ios-vault-button.is-destructive { color: var(--clew-danger, #e5534b); }
+.ios-vault-button.is-default { background: var(--clew-accent, #a882ff); color: var(--clew-text-on-accent, #fff); border-color: transparent; }
+.ios-vault-status { min-height: 1.4em; margin: 10px 0 0; font-size: 13px; color: var(--clew-text-muted, #999); }
+.ios-sheet.is-busy { cursor: progress; }
+.ios-confirm-message { font-weight: 600; margin: 12px 0 4px; }
+.ios-confirm-detail { margin: 0 0 12px; color: var(--clew-text-muted, #999); }
+.ios-confirm-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }

@@ -34,6 +34,19 @@ are `UPSTREAM-03BB33A-PLAN.md` (the overnight sync of 2026-10-02),
   they don't prove the app renders. This sync's worker hang was invisible
   to Node (§5).
 - **Nothing is in progress.** Every sync chain is merged into main.
+- **Branch `vault-switch` (off main e4ce7cb), NOT pushed** (the owner's
+  call): the iPad's way between vaults. The owner reported there was none.
+  - The way in: the explorer's vault name, the palette's "Switch vault…"
+    or ⌘⇧O open a sheet listing the remembered vaults (removable; an
+    unreachable one says why), then Open Folder…, Create New Vault… and
+    the demo.
+  - A switch settles the open vault (the renderer's close handshake, then
+    every editor's save, the workspace, and the native write queue, all
+    into THAT vault) and reloads the page into the next.
+  - Desktop opens a fresh window instead. In-place switching would have
+    flushed unsaved edits into the NEW vault and kept A's editors under
+    B's tab ids.
+  - Simulator-verified; see its commit message.
 
 ## 2. Waiting on the owner
 

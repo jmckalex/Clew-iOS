@@ -99,6 +99,19 @@ class Settings {
 		this.#save();
 	}
 
+	/** The remembered list, rewritten (the vault switcher: one entry per
+	 *  vault, at its current path). */
+	setRecentVaults(list) {
+		this.#data.recentVaults = list.slice(0, 10);
+		this.#save();
+	}
+
+	/** A remembered vault removed from the list (the vault switcher). */
+	forgetVault(vaultPath) {
+		this.#data.recentVaults = this.#data.recentVaults.filter((p) => p !== vaultPath);
+		this.#save();
+	}
+
 	#save() {
 		try {
 			globalThis.localStorage?.setItem(STORE_KEY, JSON.stringify(this.#data));
