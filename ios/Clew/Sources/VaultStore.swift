@@ -612,7 +612,7 @@ final class VaultStore {
 
 	/// Writes `data` at `targetRel`, or at "name 1.ext", "name 2.ext", … if
 	/// that exists — never overwriting — and answers the path it used.
-	private func writeNewBinary(_ data: Data, rel targetRel: String) throws -> [String: Any] {
+	func writeNewBinary(_ data: Data, rel targetRel: String) throws -> [String: Any] {
 		let dir = try resolve((targetRel as NSString).deletingLastPathComponent)
 		try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
 		let base = ((targetRel as NSString).lastPathComponent as NSString).deletingPathExtension

@@ -345,11 +345,17 @@ export class VaultManager {
 			rel: `${dirRel}/${safe}`,
 			base64: toBase64(bytes),
 		});
-		vfs.patch(`${VAULT_ROOT}/${rel}`, '', Date.now());
 		void size;
+		this.addedNatively(rel);
+		return rel;
+	}
+
+	/** A binary file native wrote straight into the vault (an attachment,
+	 *  a scan): into the mirror as a stub, and into the tree now. */
+	addedNatively(rel) {
+		vfs.patch(`${VAULT_ROOT}/${rel}`, '', Date.now());
 		this.send('clew:ev-tree-changed', { tree: this.tree() });
 		this.hooks.onStructureChanged?.();
-		return rel;
 	}
 
 	rename(rel, newRel) {

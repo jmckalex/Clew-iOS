@@ -6,3 +6,4 @@ import '../../vendor/clew/renderer/main.js';
 import './ios-ui.js';
 import './vault-switcher.js';
 import './conflict-sheet.js';
+import './capture-ui.js';
