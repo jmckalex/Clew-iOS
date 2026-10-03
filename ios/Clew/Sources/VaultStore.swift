@@ -29,8 +29,12 @@ final class VaultStore {
 	/// path → where they lead ("" when nowhere). Never followed; reported to
 	/// the app page so a missing file can be explained.
 	private(set) var refusedLinks: [String: String] = [:]
-	/// rel path -> mtimeMs at last snapshot/rescan, text files only.
+	/// rel path -> mtimeMs at last snapshot/rescan, text files only. Read
+	/// and written on `ioQueue` (writes, rescans and opens all run there).
 	private var knownMtimes: [String: Double] = [:]
+	/// Files with unresolved iCloud conflict versions (the walk's
+	/// ubiquitousItemHasUnresolvedConflicts), reported to the shim.
+	private(set) var cloudConflicts = Set<String>()
 	/// The security-scoped URL whose access we currently hold, if any.
 	private var activeScopedURL: URL?
 
@@ -311,13 +315,15 @@ final class VaultStore {
 		refusedLinks = [:]
 		UserDefaults.standard.set(real, forKey: "lastVaultPath")
 		knownMtimes = [:]
+		cloudConflicts = []
 		var files: [String: Any] = [:]
 		let root = URL(fileURLWithPath: real, isDirectory: true)
 		// Evicted iCloud text files must land before the mirror snapshot;
 		// spend at most this long waiting across the whole walk (whatever
 		// misses the deadline arrives via a later rescan).
 		let downloadDeadline = Date().addingTimeInterval(20)
-		walk(root, rel: "", downloadDeadline: downloadDeadline, ancestry: [currentVaultRealRoot ?? real]) { rel, url, mtimeMs, size in
+		walk(root, rel: "", downloadDeadline: downloadDeadline, ancestry: [currentVaultRealRoot ?? real],
+			onConflict: { self.cloudConflicts.insert($0) }) { rel, url, mtimeMs, size in
 			if Self.isText(rel) {
 				let text = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
 				files[rel] = ["text": text, "size": size, "mtimeMs": mtimeMs]
@@ -335,6 +341,8 @@ final class VaultStore {
 		// Links leading out of the vault, skipped by the walk: the app page
 		// says so once, so a missing file is explained.
 		if !refusedLinks.isEmpty { result["refusedLinks"] = refusedLinks.keys.sorted() }
+		// iCloud's own conflicts: the shim offers each its keep/compare sheet.
+		if !cloudConflicts.isEmpty { result["cloudConflicts"] = cloudConflicts.sorted() }
 		// Decided here, before the first engine config: a vault new to this
 		// device runs no note code until its owner trusts it.
 		result["trusted"] = trust.isTrusted(root)
@@ -372,12 +380,13 @@ final class VaultStore {
 	/// placeholders are downloaded and awaited within the shared deadline.
 	/// `ancestry` is the real paths of the folders above `dir` on this walk:
 	/// a folder whose real path is already among them (a link back up the
-	/// tree) is not entered again, so links cannot loop.
+	/// tree) is not entered again, so links cannot loop. `onConflict` hears
+	/// each item iCloud holds unresolved conflict versions of.
 	private func walk(_ dir: URL, rel: String, downloadDeadline: Date?, ancestry: [String] = [],
-		visit: (String, URL, Double, Int) -> Void) {
+		onConflict: ((String) -> Void)? = nil, visit: (String, URL, Double, Int) -> Void) {
 		let fm = FileManager.default
 		guard let entries = try? fm.contentsOfDirectory(
-			at: dir, includingPropertiesForKeys: [.isDirectoryKey, .contentModificationDateKey, .fileSizeKey],
+			at: dir, includingPropertiesForKeys: [.isDirectoryKey, .contentModificationDateKey, .fileSizeKey, .ubiquitousItemHasUnresolvedConflictsKey],
 			options: []) else { return }
 		for entry in entries {
 			var url = entry
@@ -405,7 +414,8 @@ final class VaultStore {
 				}
 			}
 			let childRel = rel.isEmpty ? name : "\(rel)/\(name)"
-			let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey, .contentModificationDateKey, .fileSizeKey])
+			let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey, .contentModificationDateKey, .fileSizeKey, .ubiquitousItemHasUnresolvedConflictsKey])
+			if values?.ubiquitousItemHasUnresolvedConflicts == true { onConflict?(childRel) }
 			if values?.isSymbolicLink == true {
 				// A link is followed only while it stays inside the vault
 				// (VaultPaths); one leaving it, or dangling, is skipped and
@@ -425,7 +435,7 @@ final class VaultStore {
 					// does not follow a link to a folder. Paths stay the link's.
 					if !ancestry.contains(real) {
 						walk(URL(fileURLWithPath: real, isDirectory: true), rel: childRel, downloadDeadline: downloadDeadline,
-							ancestry: ancestry + [real], visit: visit)
+							ancestry: ancestry + [real], onConflict: onConflict, visit: visit)
 					}
 				} else {
 					let attrs = try? fm.attributesOfItem(atPath: real)
@@ -435,7 +445,7 @@ final class VaultStore {
 			} else if values?.isDirectory == true {
 				let real = VaultPaths.realPath(url.path) ?? url.path
 				if !ancestry.contains(real) {
-					walk(url, rel: childRel, downloadDeadline: downloadDeadline, ancestry: ancestry + [real], visit: visit)
+					walk(url, rel: childRel, downloadDeadline: downloadDeadline, ancestry: ancestry + [real], onConflict: onConflict, visit: visit)
 				}
 			} else {
 				let mtimeMs = (values?.contentModificationDate?.timeIntervalSince1970 ?? 0) * 1000
@@ -502,10 +512,82 @@ final class VaultStore {
 		if let error = writeError { throw error }
 	}
 
-	func write(rel: String, text: String) throws {
+	/// Write a text file — unless it changed on disk since this app last saw
+	/// it (another device's edit, delivered by iCloud or a file provider
+	/// between rescans), and differs from what is being written: then
+	/// NOTHING is written and the disk's version comes back, so neither is
+	/// lost silently (the shim keeps both and asks). `force` is the user's
+	/// answer, "keep mine". Vault state (.clew/, the kv store) is never
+	/// guarded.
+	func write(rel: String, text: String, force: Bool = false) throws -> [String: Any]? {
 		let url = try resolve(rel)
+		let fm = FileManager.default
+		if !force, Self.isGuarded(rel), fm.fileExists(atPath: url.path) {
+			let onDisk = currentMtimeMs(url)
+			let changedBehindUs = knownMtimes[rel].map { abs($0 - onDisk) > 0.5 } ?? true
+			if changedBehindUs {
+				let disk = coordinatedReadText(url) ?? ""
+				if disk != text {
+					return ["conflict": true, "disk": disk, "mtimeMs": onDisk]
+				}
+			}
+		}
 		try coordinatedWrite(to: url) { try AtomicFile.write(Data(text.utf8), to: $0) }
 		knownMtimes[rel] = currentMtimeMs(url)
+		return nil
+	}
+
+	/// A user's file, where a write over an unseen version must not happen
+	/// silently: not vault state.
+	static func isGuarded(_ rel: String) -> Bool {
+		!rel.hasPrefix(".clew/") && rel != "clewdata.json"
+	}
+
+	/// A text file's content as the file coordinator gives it (an iCloud or
+	/// provider-backed file may be mid-update).
+	private func coordinatedReadText(_ url: URL) -> String? {
+		var result: String?
+		var error: NSError?
+		NSFileCoordinator().coordinate(readingItemAt: url, options: [], error: &error) { readURL in
+			result = try? String(contentsOf: readURL, encoding: .utf8)
+		}
+		return result
+	}
+
+	// MARK: - iCloud conflict versions (NSFileVersion)
+
+	/// The unresolved conflict versions of a vault file, newest first, with
+	/// their text: what the conflict sheet compares against the current one.
+	func cloudConflictVersions(rel: String) throws -> [[String: Any]] {
+		let url = try resolve(rel)
+		let versions = (NSFileVersion.unresolvedConflictVersionsOfItem(at: url) ?? [])
+			.sorted { ($0.modificationDate ?? .distantPast) > ($1.modificationDate ?? .distantPast) }
+		return versions.enumerated().map { index, version in
+			[
+				"index": index,
+				"from": version.localizedNameOfSavingComputer ?? "another device",
+				"modifiedMs": (version.modificationDate?.timeIntervalSince1970 ?? 0) * 1000,
+				"text": (try? String(contentsOf: version.url, encoding: .utf8)) ?? "",
+			]
+		}
+	}
+
+	/// The user chose: keep the current version, or put conflict version
+	/// `index` in its place. Either way every conflict version is then marked
+	/// resolved and removed — only after the choice, and the shim has put
+	/// both texts in .clew/history before calling this.
+	func resolveCloudConflict(rel: String, keepOther index: Int?) throws {
+		let url = try resolve(rel)
+		let versions = (NSFileVersion.unresolvedConflictVersionsOfItem(at: url) ?? [])
+			.sorted { ($0.modificationDate ?? .distantPast) > ($1.modificationDate ?? .distantPast) }
+		if let index, versions.indices.contains(index) {
+			let text = try String(contentsOf: versions[index].url, encoding: .utf8)
+			try coordinatedWrite(to: url) { try AtomicFile.write(Data(text.utf8), to: $0) }
+		}
+		for version in versions { version.isResolved = true }
+		try NSFileVersion.removeOtherVersionsOfItem(at: url)
+		knownMtimes[rel] = currentMtimeMs(url)
+		cloudConflicts.remove(rel)
 	}
 
 	/// Attachment bytes; dedupes the name and converts HEIC to JPEG (the
@@ -629,16 +711,22 @@ final class VaultStore {
 	/// queue, completion on main. Returns nil when nothing changed.
 	func rescan(_ completion: @escaping ([String: Any]?) -> Void) {
 		guard let vault = currentVaultPath else { return completion(nil) }
-		let previous = knownMtimes
+		// On the IO queue throughout, the queue every write runs on: a save
+		// can't land between the snapshot and the new mtimes and be forgotten
+		// (the guarded write would then take its own save for another
+		// device's, and raise a false conflict).
 		ioQueue.async {
+			let previous = self.knownMtimes
 			var changed: [String: Any] = [:]
 			var seen = Set<String>()
 			var next: [String: Double] = [:]
+			var conflicts = Set<String>()
 			let root = URL(fileURLWithPath: vault, isDirectory: true)
 			// Rescans stay cheap: newly appearing evicted text gets a short
 			// shared download budget, the rest lands on a later pass.
 			let deadline = Date().addingTimeInterval(5)
-			self.walk(root, rel: "", downloadDeadline: deadline, ancestry: [self.currentVaultRealRoot ?? vault]) { rel, url, mtimeMs, size in
+			self.walk(root, rel: "", downloadDeadline: deadline, ancestry: [self.currentVaultRealRoot ?? vault],
+				onConflict: { conflicts.insert($0) }) { rel, url, mtimeMs, size in
 				guard Self.isText(rel) else { return }
 				seen.insert(rel)
 				next[rel] = mtimeMs
@@ -648,10 +736,12 @@ final class VaultStore {
 				}
 			}
 			let removed = previous.keys.filter { !seen.contains($0) }
+			self.knownMtimes = next
+			self.cloudConflicts = conflicts // the ones still unresolved
+			let sorted = conflicts.sorted()
 			DispatchQueue.main.async {
-				self.knownMtimes = next
-				if changed.isEmpty && removed.isEmpty { return completion(nil) }
-				completion(["changed": changed, "removed": Array(removed)])
+				if changed.isEmpty && removed.isEmpty && sorted.isEmpty { return completion(nil) }
+				completion(["changed": changed, "removed": Array(removed), "cloudConflicts": sorted])
 			}
 		}
 	}

@@ -413,3 +413,41 @@ body.is-ios clew-file-explorer .panel-title[data-ios-switch]::after {
 .ios-confirm-message { font-weight: 600; margin: 12px 0 4px; }
 .ios-confirm-detail { margin: 0 0 12px; color: var(--clew-text-muted, #999); }
 .ios-confirm-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+/* ---- conflicting versions (src/shim/conflict-sheet.js) ---- */
+.clew-conflict-backdrop {
+	position: fixed; left: 0; right: 0; top: 0; height: 100%;
+	z-index: 10001; display: flex; align-items: center; justify-content: center;
+	background: rgba(0, 0, 0, 0.45); padding: 16px; box-sizing: border-box;
+}
+.clew-conflict-sheet {
+	width: min(620px, 100%); overflow-y: auto; -webkit-overflow-scrolling: touch;
+	background: var(--clew-bg-primary, #1e1e1e); color: var(--clew-text-normal, #e8e8e8);
+	border: 1px solid var(--clew-border, #333); border-radius: 14px;
+	box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45); padding: 16px; box-sizing: border-box;
+}
+.clew-conflict-title { font-size: 18px; margin: 0 0 8px; }
+.clew-conflict-intro { margin: 0 0 14px; color: var(--clew-text-muted, #999); line-height: 1.4; }
+.clew-conflict-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.clew-conflict-button {
+	min-height: 44px; min-width: 44px; padding: 0 16px; border-radius: 10px;
+	border: 1px solid var(--clew-border, #333); background: var(--clew-bg-secondary, #262626);
+	color: var(--clew-text-normal, #e8e8e8); font: inherit;
+}
+.clew-conflict-button.is-default { background: var(--clew-accent, #a882ff); color: var(--clew-text-on-accent, #fff); border-color: transparent; }
+.clew-conflict-button.is-plain { background: none; }
+.clew-conflict-status { min-height: 1.4em; margin: 10px 0 0; font-size: 13px; color: var(--clew-text-muted, #999); }
+.clew-conflict-compare { margin-top: 14px; }
+.clew-conflict-legend { font-size: 13px; margin-bottom: 6px; }
+.clew-conflict-compare pre {
+	margin: 0; padding: 8px; max-height: 50vh; overflow: auto; border-radius: 8px;
+	background: var(--clew-bg-secondary, #262626); font-size: 13px; line-height: 1.45; white-space: pre-wrap;
+}
+.clew-conflict-compare .is-mine { color: #e5534b; }
+.clew-conflict-compare .is-theirs { color: #57ab5a; }
+.clew-conflict-compare .is-same { color: var(--clew-text-muted, #999); }
+.clew-conflict-compare .is-skip { color: var(--clew-text-muted, #999); font-style: italic; }
+/* The editor's own banner (vendor layout.css) in a narrow pane: the text
+   takes the full width and the buttons sit beneath it, at touch size. */
+body.is-ios .conflict-banner { flex-wrap: wrap; }
+body.is-ios .conflict-banner span { flex: 1 1 100%; }
+body.is-ios .conflict-banner button { min-height: 44px; }

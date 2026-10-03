@@ -53,6 +53,15 @@ let fakeSession = null;
 let fakeTrusted = true;
 // Web PDFs the fake native side registered this session: hash → url.
 const fakeRemote = new Map();
+// Files another device changed since this app last saw them — what
+// VaultStore.write's mtime guard detects on the device.
+const behindUs = new Set();
+const otherDevice = (rel, text) => {
+	fs.writeFileSync(path.join(vaultDir, rel), text);
+	behindUs.add(rel);
+};
+// iCloud's unresolved conflict versions (NSFileVersion), rel → versions.
+const fakeCloud = new Map();
 const fakeBridge = {
 	calls: [],
 	async call(method, params) {
@@ -83,8 +92,25 @@ const fakeBridge = {
 				} };
 			case 'write': {
 				const abs = path.join(params.vault, params.rel);
+				// VaultStore.write's guard: a user's file changed behind us,
+				// and different, is not written over unless forced.
+				if (!params.force && behindUs.has(params.rel) && fs.existsSync(abs)) {
+					const disk = fs.readFileSync(abs, 'utf8');
+					if (disk !== params.text) return { conflict: true, disk, mtimeMs: fs.statSync(abs).mtimeMs };
+				}
+				behindUs.delete(params.rel);
 				fs.mkdirSync(path.dirname(abs), { recursive: true });
 				writeAtomic(abs, params.text);
+				return null;
+			}
+			case 'cloudConflictVersions':
+				return fakeCloud.get(params.rel) ?? [];
+			case 'resolveCloudConflict': {
+				const versions = fakeCloud.get(params.rel) ?? [];
+				if (Number.isInteger(params.keepOther) && versions[params.keepOther]) {
+					writeAtomic(path.join(vaultDir, params.rel), versions[params.keepOther].text);
+				}
+				fakeCloud.delete(params.rel);
 				return null;
 			}
 			case 'mkdir':
@@ -255,7 +281,7 @@ const MINIMAL_PDF = Buffer.from(
 	+ '3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 99 99]>>endobj\n'
 	+ 'trailer<</Root 1 0 R>>\n%%EOF\n', 'latin1');
 
-let clew, native, services, shimApi;
+let clew, native, services, shimApi, conflicts;
 // A stand-in for the WebRoot's fa-icons.json (`family:name` → [w, h, d]),
 // and how often the shim fetched it.
 const FAKE_ICONS = { version: 'test', icons: { 'solid:star': [576, 512, 'M0 0L10 10Z'], 'regular:star': [576, 512, 'M1 1Z'] } };
@@ -294,7 +320,7 @@ before(async () => {
 		assetLoader: async () => '',
 		iconTableLoader: async () => { iconLoads++; return FAKE_ICONS; },
 	});
-	({ clew, native, services } = shimApi);
+	({ clew, native, services, conflicts } = shimApi);
 	globalThis.window ??= globalThis; // renderer-free environment
 });
 
@@ -1224,4 +1250,182 @@ test('switching vaults: a vault created for a cancelled switch is removed again,
 	fs.writeFileSync(path.join(used, 'Note.md'), 'x');
 	assert.deepEqual(await fakeBridge.call('removeEmptyVault', { path: used }), { removed: false });
 	assert.ok(fs.existsSync(path.join(used, 'Note.md')));
+});
+
+// ---- edit-conflict safety (conflicts.js, VaultStore.write's guard) --------
+
+const historyTexts = (rel) => {
+	const dir = path.join(vaultDir, '.clew', 'history', rel);
+	return fs.existsSync(dir) ? fs.readdirSync(dir).map((f) => fs.readFileSync(path.join(dir, f), 'utf8')) : [];
+};
+const conflictEvents = () => {
+	const events = [];
+	const off = conflicts.on((e) => events.push(e));
+	return { events, off };
+};
+const today = () => {
+	const d = new Date();
+	return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+test('a save over another device\'s unseen edit is refused: both kept in history, the note held, the user asked', async () => {
+	const rel = 'Conflict Both.md';
+	await clew.invoke(CH.NOTE_WRITE, { path: rel, content: 'base\n' });
+	await native.flush();
+	otherDevice(rel, 'base\nfrom the Mac\n');
+	const { events, off } = conflictEvents();
+	await clew.invoke(CH.NOTE_WRITE, { path: rel, content: 'base\nfrom the iPad\n' });
+	await native.flush();
+	await native.flush(); // the history copies the refusal queued
+	off();
+	assert.equal(fs.readFileSync(path.join(vaultDir, rel), 'utf8'), 'base\nfrom the Mac\n', 'the Mac\'s version was NOT written over');
+	assert.deepEqual(events.map((e) => [e.kind, e.rel, e.mine, e.theirs]), [['save', rel, 'base\nfrom the iPad\n', 'base\nfrom the Mac\n']]);
+	assert.ok(conflicts.isHeld(rel));
+	const kept = historyTexts(rel);
+	assert.ok(kept.includes('base\nfrom the Mac\n') && kept.includes('base\nfrom the iPad\n'), `both versions in .clew/history (${kept.length})`);
+	// Held: later saves stay in the mirror, none reaches the disk.
+	const mark = fakeBridge.calls.length;
+	await clew.invoke(CH.NOTE_WRITE, { path: rel, content: 'base\nfrom the iPad, more\n' });
+	await native.flush();
+	assert.deepEqual(fakeBridge.calls.slice(mark).filter(([m, p]) => m === 'write' && p.rel === rel), [], 'no write of a held note');
+	assert.equal(await clew.invoke(CH.NOTE_READ, { path: rel }), 'base\nfrom the iPad, more\n', 'the editor keeps the user\'s text');
+	// Keep Both: mine in the note (the latest), theirs beside it.
+	const sibling = await conflicts.resolve(rel, 'both');
+	assert.equal(sibling, `Conflict Both (conflict ${today()}).md`);
+	assert.equal(fs.readFileSync(path.join(vaultDir, rel), 'utf8'), 'base\nfrom the iPad, more\n');
+	assert.equal(fs.readFileSync(path.join(vaultDir, sibling), 'utf8'), 'base\nfrom the Mac\n');
+	assert.equal(conflicts.isHeld(rel), false);
+	const tree = JSON.stringify(await clew.invoke(CH.VAULT_TREE));
+	assert.ok(tree.includes(sibling), 'the sibling is in the tree at once');
+});
+
+test('conflict: Keep Theirs puts the other version in the note and the editor reloads; Keep Mine forces mine', async () => {
+	for (const [rel, choice, expected] of [['Conflict Theirs.md', 'theirs', 'theirs\n'], ['Conflict Mine.md', 'mine', 'mine\n']]) {
+		await clew.invoke(CH.NOTE_WRITE, { path: rel, content: 'base\n' });
+		await native.flush();
+		otherDevice(rel, 'theirs\n');
+		await clew.invoke(CH.NOTE_WRITE, { path: rel, content: 'mine\n' });
+		await native.flush();
+		assert.ok(conflicts.isHeld(rel), `${rel} held`);
+		let changed = false;
+		const offChanged = clew.on('clew:ev-file-changed', ({ path: p }) => { if (p === rel) changed = true; });
+		assert.equal(await conflicts.resolve(rel, choice), true);
+		offChanged?.();
+		assert.equal(fs.readFileSync(path.join(vaultDir, rel), 'utf8'), expected, `${choice}: on disk`);
+		assert.equal(await clew.invoke(CH.NOTE_READ, { path: rel }), expected, `${choice}: in the mirror`);
+		if (choice === 'theirs') assert.ok(changed, 'the open editor is told to reload');
+		const kept = historyTexts(rel);
+		assert.ok(kept.includes('theirs\n') && kept.includes('mine\n'), `${choice}: both kept first`);
+		assert.ok(!fs.readdirSync(vaultDir).some((f) => f.startsWith(rel.replace('.md', ' (conflict'))), 'no sibling');
+	}
+});
+
+test('conflict: a newer version arriving while held becomes "theirs"; the mirror keeps the user\'s', async () => {
+	const rel = 'Conflict Held.md';
+	await clew.invoke(CH.NOTE_WRITE, { path: rel, content: 'base\n' });
+	await native.flush();
+	otherDevice(rel, 'mac 1\n');
+	await clew.invoke(CH.NOTE_WRITE, { path: rel, content: 'ipad\n' });
+	await native.flush();
+	const { events, off } = conflictEvents();
+	fs.writeFileSync(path.join(vaultDir, rel), 'mac 2\n');
+	native.externalDiff({ changed: { [rel]: { text: 'mac 2\n', size: 6, mtimeMs: Date.now() } }, removed: [] });
+	await native.flush();
+	off();
+	assert.equal(await clew.invoke(CH.NOTE_READ, { path: rel }), 'ipad\n', 'the rescan did not patch a held note');
+	assert.deepEqual(events.map((e) => [e.kind, e.theirs, e.updated]), [['save', 'mac 2\n', true]]);
+	assert.ok(historyTexts(rel).includes('mac 2\n'), 'the newer one is kept too');
+	behindUs.delete(rel); // the rescan has now seen it
+	await conflicts.resolve(rel, 'theirs');
+	assert.equal(fs.readFileSync(path.join(vaultDir, rel), 'utf8'), 'mac 2\n');
+});
+
+test('conflict: a save equal to the other device\'s version goes through (no conflict)', async () => {
+	const rel = 'Conflict Same.md';
+	await clew.invoke(CH.NOTE_WRITE, { path: rel, content: 'one\n' });
+	await native.flush();
+	otherDevice(rel, 'same\n');
+	await clew.invoke(CH.NOTE_WRITE, { path: rel, content: 'same\n' });
+	await native.flush();
+	assert.equal(conflicts.isHeld(rel), false, 'both devices made the same edit: no conflict');
+});
+
+test('Dropbox conflicted copies: found when they arrive; Keep Theirs moves the copy\'s text in, both kept, the copy trashed', async () => {
+	const base = 'Dropbox Note.md';
+	const copy = "Dropbox Note (Jason's conflicted copy 2026-10-03).md";
+	await clew.invoke(CH.NOTE_WRITE, { path: base, content: 'ipad text\n' });
+	await native.flush();
+	const { events, off } = conflictEvents();
+	fs.writeFileSync(path.join(vaultDir, copy), 'mac text\n');
+	native.externalDiff({ changed: { [copy]: { text: 'mac text\n', size: 9, mtimeMs: Date.now() } }, removed: [] });
+	native.externalDiff({ changed: {}, removed: [] }); // a second rescan: announced once
+	off();
+	assert.deepEqual(events.filter((e) => e.kind === 'dropbox').map((e) => [e.base, e.copy, e.who]), [[base, copy, 'Jason']]);
+	await conflicts.resolveDropbox({ base, copy }, 'theirs');
+	assert.equal(fs.readFileSync(path.join(vaultDir, base), 'utf8'), 'mac text\n');
+	assert.equal(fs.existsSync(path.join(vaultDir, copy)), false, 'the copy is gone (to the Trash, natively)');
+	const kept = historyTexts(base);
+	assert.ok(kept.includes('ipad text\n') && kept.includes('mac text\n'), 'both kept first');
+});
+
+test('git conflict markers: a note that gains them is announced once', async () => {
+	const rel = 'Merged.md';
+	await clew.invoke(CH.NOTE_WRITE, { path: rel, content: 'clean\n' });
+	await native.flush();
+	const { events, off } = conflictEvents();
+	const marked = 'a\n<<<<<<< HEAD\nmine\n=======\ntheirs\n>>>>>>> origin/main\n';
+	fs.writeFileSync(path.join(vaultDir, rel), marked);
+	native.externalDiff({ changed: { [rel]: { text: marked, size: marked.length, mtimeMs: Date.now() } }, removed: [] });
+	native.externalDiff({ changed: { [rel]: { text: marked + 'x\n', size: marked.length + 2, mtimeMs: Date.now() + 1 } }, removed: [] });
+	off();
+	assert.deepEqual(events.map((e) => [e.kind, e.rel]), [['git', rel]]);
+});
+
+test('iCloud conflict versions: both kept in history BEFORE native marks them resolved; Keep Both and Keep Theirs', async () => {
+	for (const [rel, choice] of [['Cloud Both.md', 'both'], ['Cloud Theirs.md', 'theirs']]) {
+		await clew.invoke(CH.NOTE_WRITE, { path: rel, content: 'this iPad\n' });
+		await native.flush();
+		fakeCloud.set(rel, [{ index: 0, from: 'Jason’s MacBook', modifiedMs: Date.now() - 1000, text: 'the Mac\n' }]);
+		const { events, off } = conflictEvents();
+		native.externalDiff({ changed: {}, removed: [], cloudConflicts: [rel] });
+		native.externalDiff({ changed: {}, removed: [], cloudConflicts: [rel] });
+		off();
+		assert.deepEqual(events.map((e) => [e.kind, e.rel]), [['cloud', rel]], 'announced once across rescans');
+		const { current, versions } = await conflicts.cloudVersions(rel);
+		assert.equal(current, 'this iPad\n');
+		assert.equal(versions[0].text, 'the Mac\n');
+		const mark = fakeBridge.calls.length;
+		const result = await conflicts.resolveCloud(rel, choice, 0);
+		const calls = fakeBridge.calls.slice(mark);
+		const resolvedAt = calls.findIndex(([m]) => m === 'resolveCloudConflict');
+		const historyWrites = calls.slice(0, resolvedAt).filter(([m, p]) => m === 'write' && p.rel.startsWith(`.clew/history/${rel}/`));
+		assert.equal(historyWrites.length, 2, `${choice}: both versions written to history before resolving`);
+		assert.deepEqual(calls[resolvedAt][1], { rel, ...(choice === 'theirs' ? { keepOther: 0 } : {}) });
+		if (choice === 'both') {
+			assert.equal(result, `Cloud Both (conflict ${today()}).md`);
+			assert.equal(fs.readFileSync(path.join(vaultDir, result), 'utf8'), 'the Mac\n');
+			assert.equal(fs.readFileSync(path.join(vaultDir, rel), 'utf8'), 'this iPad\n');
+		} else {
+			assert.equal(fs.readFileSync(path.join(vaultDir, rel), 'utf8'), 'the Mac\n');
+			assert.equal(await clew.invoke(CH.NOTE_READ, { path: rel }), 'the Mac\n');
+		}
+	}
+});
+
+test('conflict: a link rewrite (upstream\'s atomic write) over an unseen edit is refused too', async () => {
+	const target = 'Rename Target.md';
+	const linker = 'Rename Linker.md';
+	await clew.invoke(CH.NOTE_WRITE, { path: target, content: '# Target\n' });
+	await clew.invoke(CH.NOTE_WRITE, { path: linker, content: 'see [[Rename Target]]\n' });
+	await native.flush();
+	await settle();
+	otherDevice(linker, 'see [[Rename Target]] and more from the Mac\n');
+	// The mirror still has the old text; the rename rewrites it there.
+	const { events, off } = conflictEvents();
+	await clew.invoke(CH.FS_RENAME, { path: target, newPath: 'Rename Target 2.md' });
+	await native.flush();
+	off();
+	assert.equal(fs.readFileSync(path.join(vaultDir, linker), 'utf8'), 'see [[Rename Target]] and more from the Mac\n', 'not written over');
+	assert.deepEqual(events.map((e) => [e.kind, e.rel]), [['save', linker]]);
+	await conflicts.resolve(linker, 'mine');
 });

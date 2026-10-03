@@ -73,7 +73,19 @@ final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 			guard let rel = params["rel"] as? String, let text = params["text"] as? String else {
 				throw ClewError.badPayload
 			}
-			performIO(reply) { try self.vaults.write(rel: rel, text: text); return nil }
+			// A refused write (the file changed elsewhere since last seen)
+			// answers {conflict, disk, mtimeMs}; `force` is "keep mine".
+			let force = params["force"] as? Bool ?? false
+			performIO(reply) { try self.vaults.write(rel: rel, text: text, force: force) }
+
+		case "cloudConflictVersions":
+			guard let rel = params["rel"] as? String else { throw ClewError.badPayload }
+			performIO(reply) { try self.vaults.cloudConflictVersions(rel: rel) }
+
+		case "resolveCloudConflict":
+			guard let rel = params["rel"] as? String else { throw ClewError.badPayload }
+			let other = params["keepOther"] as? Int
+			performIO(reply) { try self.vaults.resolveCloudConflict(rel: rel, keepOther: other); return nil }
 
 		case "writeBinary":
 			guard let rel = params["rel"] as? String, let base64 = params["base64"] as? String else {
