@@ -1,4 +1,4 @@
-# Handover — 2026-10-02 (the overnight sync to Clew-app 03bb33a: a pre-0.12.1 TestFlight build)
+# Handover — 2026-10-03 (the overnight features, integrated on `integration`; the last push was the 03bb33a sync)
 
 Current state for a fresh session, rewritten whole. Durable architecture
 lives in **README.md** and **PORT-PLAN.md**. Each sync's reasoning and
@@ -30,26 +30,46 @@ are `UPSTREAM-03BB33A-PLAN.md` (the overnight sync of 2026-10-02),
 - **Version 0.12.0.** Desktop is still 0.12.0; this is a pre-0.12.1 build.
   The iPad follows Clew-app RELEASES: `Info.plist` and both
   `MARKETING_VERSION` lines. Build numbers stay Xcode Cloud's.
-- **Tests:** `npm test` 706, `npm run test:swift` 154 + 23. Green, but
-  they don't prove the app renders. This sync's worker hang was invisible
-  to Node (§5).
-- **Nothing is in progress.** Every sync chain is merged into main.
-- **Branch `vault-switch` (off main e4ce7cb), NOT pushed** (the owner's
-  call): the iPad's way between vaults. The owner reported there was none.
-  - The way in: the explorer's vault name, the palette's "Switch vault…"
-    or ⌘⇧O open a sheet listing the remembered vaults (removable; an
-    unreachable one says why), then Open Folder…, Create New Vault… and
-    the demo.
-  - A switch settles the open vault (the renderer's close handshake, then
-    every editor's save, the workspace, and the native write queue, all
-    into THAT vault) and reloads the page into the next.
-  - Desktop opens a fresh window instead. In-place switching would have
-    flushed unsaved edits into the NEW vault and kept A's editors under
-    B's tab ids.
-  - Simulator-verified; see its commit message.
+- **Tests on main:** `npm test` 706, `npm run test:swift` 154 + 23. Green,
+  but they don't prove the app renders. This sync's worker hang was
+  invisible to Node (§5).
+- **Branch `integration` (off main e4ce7cb), NOT pushed: the overnight
+  work of 2026-10-03, ready for ONE push decision.** It merges four
+  branches, each also kept on its own:
+  - `fix-symlink-escape` (**security**): links leading out of a vault are
+    no longer followed, by a realpath clamp (VaultPaths.swift). Shipped
+    builds served container files through vault symlinks.
+  - `vault-switch`: the iPad's way between vaults. Open it from the
+    explorer's vault name, "Switch vault…" or ⌘⇧O. A switch settles the
+    open vault, then reloads into the next.
+  - `conflict-safety`: a save over another device's unseen edit is
+    refused. iCloud conflict versions, Dropbox conflicted copies and git
+    markers are detected. Both versions go to `.clew/history`, then
+    Keep Mine / Theirs / Both / Compare. See CONFLICT-SAFETY.md. The
+    integration pass found a false conflict on every second save
+    (URL-cached mtimes); it is fixed on that branch and merged here.
+  - `ipad-capture` (phase 1): Scan document / Scan text into a note
+    (VisionKit, plus OCR as a searchable PDF text layer), and Home Screen
+    quick actions. See CAPTURE.md.
+  - **Not in it:** `share-extension` (capture phase 2, "Save to Clew"). It
+    needs an App Group and a new bundle ID in App Store Connect first;
+    CAPTURE.md lists the steps.
+  - **Verified:** `npm test` 727; `npm run test:swift` 154 + 27 + 18 + 9;
+    the build succeeds. A simulator pass on a fresh container covered all
+    four together: the symlink 404s with the plist untouched, a refused
+    save → the sheet → Keep Both, a scan, separate saves with no false
+    conflict, and A → B → A with the last typed text landing in A.
+  - The `frame-bridge-review` branch is docs only
+    (FRAME-BRIDGE-REVIEW.md).
 
 ## 2. Waiting on the owner
 
+0. **Push `integration`** (a push to main is a TestFlight build), and say
+   whether the share extension should follow, after the App Store
+   Connect steps in CAPTURE.md. On the device, check:
+   - a real camera scan;
+   - Keep Both on a note edited on the Mac and the iPad at once;
+   - a vault switch with unsaved text.
 1. **Release 0.12.0 to testers.** The cloud build does not join a tester
    group by itself. Open
    https://appstoreconnect.apple.com/apps/6804827534/testflight/ios (sign
