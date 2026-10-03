@@ -1,13 +1,32 @@
-# Handover — 2026-10-03 (the overnight features, integrated on `integration`; the last push was the 03bb33a sync)
+# Handover — 2026-10-04 (the sync to Clew-app f3a7d5b + 686232b: trust v2, apps in notes, PDF save safety)
 
 Current state for a fresh session, rewritten whole. Durable architecture
 lives in **README.md** and **PORT-PLAN.md**. Each sync's reasoning and
 measurements are in its record: `UPSTREAM-*-PLAN.md`. The latest records
-are `UPSTREAM-03BB33A-PLAN.md` (the overnight sync of 2026-10-02),
+are `UPSTREAM-F3A7D5B-PLAN.md` (the sync of 2026-10-03/04),
+`UPSTREAM-03BB33A-PLAN.md` (the overnight sync of 2026-10-02),
 `UPSTREAM-18C5E45-PLAN.md` (sync #3) and `UPSTREAM-0.12.0-PLAN.md`. The coordinator's ledger is `~/Source/Clew/SYNC-LEDGER.md`.
 
 ## 1. Where things stand
 
+- **The sync to Clew-app `f3a7d5b` + `686232b` (2026-10-03/04) is DONE, and
+  every acceptance check was green.** The owner's word, relayed by
+  Clew-boss: "Yes, push if all green". Main is fast-forwarded to
+  `syncf3a7d5b-p4-verify`, and a build commit sits on top. The record is
+  UPSTREAM-F3A7D5B-PLAN.md.
+  - **Vault trust v2:** enablements live on the device; a CSP header goes
+    on previews.
+  - **Apps in notes:** the `clew-frame` scheme; the grants are the
+    device's.
+  - **Shared conflict UI** (2f5d80d).
+  - **PDF save safety:** SHA-1 `base`, as one binary POST with the token
+    in a header.
+  - **Quote-and-cite** with printed pages; the stamps served locally.
+  - **Vendor** is at Clew-app `686232b`.
+- **Before that:** the overnight features of 2026-10-03 (the symlink fix,
+  the vault switcher, conflict safety, scan and quick actions) were
+  integrated and PUSHED as cedb81e. `share-extension` (788d4ea) still
+  waits for the owner's App Store Connect steps (CAPTURE.md).
 - **The overnight sync to Clew-app `03bb33a` (2026-10-02) is DONE, and
   every acceptance check was green.** On the owner's instruction, relayed
   by Clew-boss ("have it run overnight. It can push to main so that a
