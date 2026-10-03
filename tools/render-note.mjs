@@ -71,7 +71,10 @@ walk(vaultAbs, '');
 // in vendor/clew/main/plugins.js), then re-rooted onto the vfs, and the
 // named files ride in the snapshot — the only .clew content that does.
 const engineExtensions = [];
-for (const entry of engineExtensionEntries(vaultAbs, vaultOptions)) {
+// The harness renders a vault its user handed it: trusted, with the vault's
+// own request as the device's enablement (desktop's effectiveAccess shape).
+const access = { trusted: true, plugins: Array.isArray(vaultOptions.plugins) ? vaultOptions.plugins : [], dataviewJs: vaultOptions.dataviewJs === true };
+for (const entry of engineExtensionEntries(vaultAbs, access)) {
 	const at = entry.indexOf(' from ');
 	const real = entry.slice(at + ' from '.length);
 	const vfsPath = '/vault/' + path.relative(vaultAbs, real).split(path.sep).join('/');
@@ -117,7 +120,7 @@ send({
 	type: 'init',
 	files,
 	cwd: '/vault/.clew/engine',
-	env: engineEnv({ vaultRoot: '/vault', sessionId: 's1', vaultOptions, globalTexFragments }),
+	env: engineEnv({ vaultRoot: '/vault', sessionId: 's1', vaultOptions, globalTexFragments, access }),
 });
 const ready = await waiter;
 if (ready.type !== 'ready') {

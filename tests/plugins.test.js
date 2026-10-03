@@ -84,8 +84,13 @@ test('enabled subset, engine entries, preview paths', () => {
 			'p.js': '',
 		},
 	});
-	const settings = { plugins: ['alpha'] };
+	const settings = { plugins: ['alpha'], trusted: true };
 	assert.deepEqual(enabledPlugins(root, settings).map((p) => p.id), ['alpha']);
+	// A vault's OWN plugins run only where this device trusts the vault —
+	// and an access object without `trusted` is untrusted (fails closed).
+	assert.deepEqual(enabledPlugins(root, { plugins: ['alpha'], trusted: false }), []);
+	assert.deepEqual(enabledPlugins(root, { plugins: ['alpha'] }), []);
+	assert.deepEqual(engineExtensionEntries(root, { plugins: ['alpha'] }), []);
 	const entries = engineExtensionEntries(root, settings);
 	assert.equal(entries.length, 1);
 	assert.ok(entries[0].startsWith('x, y from '));
@@ -136,9 +141,14 @@ test('a vault plugin shadows a global one of the same id', () => {
 	assert.equal(plugins.length, 1, 'one id is one plugin');
 	assert.equal(plugins[0].scope, 'vault', 'the more specific copy wins');
 	// The enabled id resolves to the vault copy, so its files are the ones served.
-	const [script] = previewPluginScripts(root, { plugins: ['dup'] }, globalDir);
+	const [script] = previewPluginScripts(root, { plugins: ['dup'], trusted: true }, globalDir);
 	assert.equal(script.vaultRel, '.clew/plugins/dup/p.js');
 	assert.equal(fs.readFileSync(path.join(script.dir, script.file), 'utf8'), '// vault');
+	// …but only in a trusted vault: an untrusted one cannot replace the
+	// user's plugin with its own by naming it — the global copy runs.
+	const [untrusted] = previewPluginScripts(root, { plugins: ['dup'], trusted: false }, globalDir);
+	assert.equal(untrusted.scope, 'global');
+	assert.equal(fs.readFileSync(path.join(untrusted.dir, untrusted.file), 'utf8'), '// global');
 	fs.rmSync(root, { recursive: true, force: true });
 	fs.rmSync(globalDir, { recursive: true, force: true });
 });

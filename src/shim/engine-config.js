@@ -105,9 +105,9 @@ export function engineConfig({ vaultRoot = '/vault', vaultOptions = {}, engineEx
 			// engine's own rules, which is what lets the directive win.
 			'tikzFence, metapostFence, latexFence, texFence, tikzDirective from /engine-assets/figures.js',
 			'queryFence, tasksFence, kanbanFence from /engine-assets/query-fences.js',
-			// ```tabbing — LaTeX's tabbing, laid out in the preview
-			// (engine/tabbing.js; preview-client/tabbing.js measures).
-			'tabbingFence from /engine-assets/tabbing.js',
+			// (```tabbing and @begin(tabbing) are the ENGINE's since jmarkdown
+			// 4ab3d6a; preview-client/tabbing.js lays them out with the
+			// engine's own layoutTabbing.)
 			'tableBeforeAnchor, blockAnchorLine, blockAnchor from /engine-assets/block-refs.js',
 			// Obsidian's Dataview, for vaults that arrive carrying it.
 			'dataviewFence, dataviewJsFence, dataviewInline from /engine-assets/dataview.js',
@@ -145,8 +145,9 @@ export function engineConfig({ vaultRoot = '/vault', vaultOptions = {}, engineEx
 			// @reveal[…] — a presentation in an iframe. One registry entry
 			// serves the inline, block and @begin forms (reveal-embed.js).
 			'reveal from /engine-assets/reveal-embed.js',
-			// @begin(tabbing): the same body as the ```tabbing fence.
-			'tabbing from /engine-assets/tabbing.js',
+			// @app[…] — an app in a note (app-embed.js marks the place; the
+			// shim resolves it as the document is served).
+			'app from /engine-assets/app-embed.js',
 		],
 		...biblifyConfig(vaultRoot, vaultOptions),
 		'MathJax': { 'src': '/__clew_assets__/mathjax/tex-svg.js' },
@@ -159,7 +160,9 @@ export function engineConfig({ vaultRoot = '/vault', vaultOptions = {}, engineEx
 /**
  * The env every engine worker spawns with. `CLEW_DATAVIEW_JS` is safe as
  * spawn-time env because reconfigure() discards the warm standby whenever
- * vault options change.
+ * vault options or the session's access change. `access` is the session's
+ * effective access ({trusted, plugins, dataviewJs}: desktop's
+ * vault-trust.js#effectiveAccess), never the vault's own settings.
  *
  * `globalTexFragments` is the app-level `texFragments` setting (the
  * vault's own list rides in `vaultOptions`).
@@ -174,12 +177,19 @@ export function engineConfig({ vaultRoot = '/vault', vaultOptions = {}, engineEx
  */
 export function engineEnv({
 	vaultRoot = '/vault', sessionId = '', vaultOptions = {}, noteFonts = null, globalTexFragments = [],
-	callouts = '',
+	callouts = '', access = { trusted: false, plugins: [], dataviewJs: false },
 } = {}) {
 	return {
 		CLEW_VAULT_ROOT: vaultRoot,
+		// Where the vault ends (engine/vault-bounds.js): a restricted vault's
+		// links are not followed out of it by the extensions. (Native never
+		// mirrors a link leaving the vault anyway: VaultPaths.swift.)
+		CLEW_VAULT_RESTRICTED: access?.trusted === true ? '' : '1',
 		CLEW_SESSION_ID: sessionId ?? '',
-		CLEW_DATAVIEW_JS: vaultOptions.dataviewJs === true ? '1' : '',
+		// ```dataviewjs runs only where the DEVICE enabled it, and only in a
+		// trusted vault; 'restricted' makes the block's refusal say why
+		// (engine/dataview.js) — desktop's render-service.js word for word.
+		CLEW_DATAVIEW_JS: access?.dataviewJs === true ? '1' : (access?.trusted === true ? '' : 'restricted'),
 		CLEW_NOTE_FONTS: noteFonts && Object.keys(noteFonts).length ? JSON.stringify(noteFonts) : '',
 		// Named TeX fragments for `clew-fragments=` (engine/figures.js): both
 		// scopes as they are stored, because engine/tex-fragments.js owns the

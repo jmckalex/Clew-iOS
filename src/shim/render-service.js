@@ -127,10 +127,40 @@ export class RenderService {
 	 * answer. Desktop's render-service.js#setNoteCode.
 	 */
 	setNoteCode(allowed) {
-		allowed = allowed === true;
-		if (allowed === this.#noteCode) return;
-		this.#noteCode = allowed;
-		this.#refused.clear();
+		this.setAccess({ ...this.access, trusted: allowed === true });
+	}
+
+	/** What the device lets this vault run ({trusted, plugins, dataviewJs}:
+	 *  desktop's vault-trust.js#effectiveAccess). Null until the host says:
+	 *  then the vault's own request stands in, gated by trust. */
+	#access = null;
+
+	get access() {
+		return this.#access ?? {
+			trusted: this.#noteCode,
+			plugins: Array.isArray(this.#vaultOptions.plugins) ? [...this.#vaultOptions.plugins] : [],
+			dataviewJs: this.#noteCode && this.#vaultOptions.dataviewJs === true,
+		};
+	}
+
+	/**
+	 * The session's effective access changed (trust, an enablement) or a
+	 * vault is about to open. Note code follows trust; the engine config
+	 * carries the enabled plugins' engine surfaces and the worker's
+	 * dataviewJs switch, so a change reconfigures, which re-renders every
+	 * open preview under the new answer. Desktop's render-service.js.
+	 */
+	setAccess(access) {
+		const next = {
+			trusted: access?.trusted === true,
+			plugins: Array.isArray(access?.plugins) ? [...access.plugins] : [],
+			dataviewJs: access?.dataviewJs === true,
+		};
+		if (this.#access && JSON.stringify(next) === JSON.stringify(this.#access)) return;
+		const trustChanged = next.trusted !== this.#noteCode;
+		this.#access = next;
+		this.#noteCode = next.trusted;
+		if (trustChanged) this.#refused.clear();
 		if (this.#open) this.reconfigure({});
 	}
 
@@ -223,7 +253,7 @@ export class RenderService {
 		// excludes .clew/ wholesale and never sees the global root — the
 		// worker never needs the rest of either, e.g. the charts plugin's
 		// ~200 KB chart.umd.js, which belongs to the PREVIEW surface).
-		const engineExtensions = engineExtensionEntries(VAULT_ROOT, this.#vaultOptions, GLOBAL_PLUGINS_ROOT);
+		const engineExtensions = engineExtensionEntries(VAULT_ROOT, this.access, GLOBAL_PLUGINS_ROOT);
 		for (const entry of engineExtensions) {
 			const abs = entry.slice(entry.indexOf(' from ') + ' from '.length);
 			const source = vfs.files.get(abs);
@@ -261,6 +291,7 @@ export class RenderService {
 				// outlives the list it was spawned with.
 				globalTexFragments: settings.get('texFragments') ?? [],
 				callouts: this.calloutsEnv(),
+				access: this.access,
 			}),
 		});
 		this.#standby = { worker, ready };
@@ -355,7 +386,9 @@ export class RenderService {
 					{ pandoc: this.#vaultOptions.pandocCitations === true }).map((p) => nodePath.resolve(p)));
 			} catch { entry.hasQueries = false; entry.bibs = null; }
 			this.#noteRefusals(rel, entry.html);
-			this.send('clew:ev-render-done', { path: rel });
+			// The build's warnings (the LaTeX-export lint among them), for the
+			// status bar (renderer/build-warnings.js).
+			this.send('clew:ev-render-done', { path: rel, warnings: Array.isArray(result.warnings) ? result.warnings : [] });
 			return entry.html;
 		}
 		this.send('clew:ev-render-error', { path: rel, message: result.message, stack: result.stack });

@@ -67,6 +67,10 @@ const DEFAULTS = {
 	latexEngine: 'auto',
 	pdfCjkFonts: false,
 	shellFont: '',
+	// The daily update check (Clew-app 036befe) is desktop's: the iPad's
+	// updates are the App Store's, so it is off and UPDATE_CHECK says so.
+	updateCheck: 'off',
+	skippedUpdate: null,
 };
 
 const STORE_KEY = 'clew-settings';

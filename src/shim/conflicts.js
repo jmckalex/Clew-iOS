@@ -21,7 +21,7 @@ import { vfs } from '../worker/shims/vfs.js';
 import { VAULT_ROOT } from './vault-manager.js';
 import { bridgeCall } from './native-bridge.js';
 
-import { historyStamp, conflictSiblingPath, findDropboxCopies, hasGitConflictMarkers, lineDiff } from './conflict-text.js';
+import { historyStamp, conflictSiblingPath, findDropboxCopies, hasGitConflictMarkers, lineDiff } from '../../vendor/clew/shared/conflict-text.js';
 
 export { historyStamp, conflictSiblingPath, findDropboxCopies, hasGitConflictMarkers, lineDiff };
 

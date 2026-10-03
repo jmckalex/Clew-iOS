@@ -47,7 +47,10 @@ import * as figures from '../../vendor/clew/engine/figures.js';
 // types through CLEW_CALLOUTS — see init.
 import { applyCustomCallouts } from '../../vendor/jmarkdown/src/callout-table.js';
 import * as revealEmbed from '../../vendor/clew/engine/reveal-embed.js';
-import * as tabbing from '../../vendor/clew/engine/tabbing.js';
+import * as appEmbed from '../../vendor/clew/engine/app-embed.js';
+// The build's warnings (the LaTeX-export lint among them) go back with the
+// html: EV_RENDER_DONE carries them to the status bar.
+import { getWarnings } from '../../vendor/jmarkdown/src/warnings.js';
 
 // One entry per file the generated config NAMES; each module's own imports
 // (dataview's dv-expr/dv-functions/dataview-js/vault-model, bases' share of
@@ -68,9 +71,10 @@ globalThis.__jmdExtensionRegistry = {
 	// @reveal[…]: an Environments-only entry (inline, block and @begin forms
 	// from the one definition).
 	'/engine-assets/reveal-embed.js': revealEmbed,
-	// ```tabbing (Extensions) and @begin(tabbing) (Environments) name this
-	// one file, as figures.js does.
-	'/engine-assets/tabbing.js': tabbing,
+	// (```tabbing and @begin(tabbing) are the ENGINE's since jmarkdown
+	// 4ab3d6a.) @app[…] — an app in a note: an Environments-only entry that
+	// marks the place; the shim resolves it as the document is served.
+	'/engine-assets/app-embed.js': appEmbed,
 };
 
 // Enabled vault plugins' engine surfaces: the config names them by absolute
@@ -124,7 +128,7 @@ async function build({ file, options, files, replaceVault }) {
 		const { processFile } = await enginePromise;
 		const { outFile } = await processFile(file, options);
 		const html = vfs.writes.get(outFile) ?? vfs.read(outFile);
-		self.postMessage({ type: 'done', output: outFile, html: String(html) });
+		self.postMessage({ type: 'done', output: outFile, html: String(html), warnings: getWarnings() });
 	} catch (err) {
 		self.postMessage({
 			type: 'error',

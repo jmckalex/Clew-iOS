@@ -878,6 +878,7 @@ test('the iOS settings defaults carry every key upstream defines, with the plan\
 	assert.equal(all.liveFrameCap, 8);
 	assert.equal(all.linkPreview, 'off');
 	assert.equal(all.selectionBubble, false);
+	assert.equal(all.updateCheck, 'off', 'the App Store updates the iPad');
 	// Upstream's own defaults where the plan keeps them.
 	assert.equal(all.liveReveal, 'construct');
 	assert.equal(all.previewPane, 'on');

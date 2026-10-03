@@ -291,3 +291,67 @@ test('serialize/deserialize round-trips live mode; legacy tabs have no editMode'
 	tree.openNote(legacy, 'b.md', { defaultMode: 'reading' });
 	assert.equal(tree.activeTab(tree.deserialize(tree.serialize(legacy))).view.editMode, undefined);
 });
+
+// ---- a link to a PDF never replaces the linking tab (openFileBeside) ----
+
+test('a PDF link from the only pane opens a new tab beside the note', () => {
+	const state = stateWithNotes('a.md');
+	const note = tree.activeTab(state);
+	const pdf = tree.openFileBeside(state, 'x.pdf');
+	assert.notEqual(pdf.id, note.id);
+	assert.equal(note.path, 'a.md', 'the note tab is untouched');
+	assert.equal(note.history.back.length, 0, 'and did not navigate');
+	assert.equal(tree.activeGroup(state).tabs.length, 2);
+	assert.equal(tree.activeTab(state).id, pdf.id);
+});
+
+test('a PDF open behind the note in the same pane is brought forward, not duplicated', () => {
+	const state = stateWithNotes('a.md');
+	const note = tree.activeTab(state);
+	const pdf = tree.openFile(state, 'x.pdf', { newTab: true });
+	tree.activateTab(state, note.id);
+	assert.equal(tree.openFileBeside(state, 'x.pdf').id, pdf.id);
+	assert.equal(tree.activeGroup(state).tabs.length, 2);
+	assert.equal(tree.activeTab(state).id, pdf.id);
+});
+
+test('split: the PDF open in the other pane is focused there; absent, it opens there', () => {
+	const state = stateWithNotes('a.md');
+	const left = tree.activeGroup(state);
+	const note = tree.activeTab(state);
+	const right = tree.splitGroup(state, left.id, 'right', tree.createTab('file', 'x.pdf'));
+	const pdf = right.tabs[0];
+	state.activeGroupId = left.id;
+	assert.equal(tree.openFileBeside(state, 'x.pdf').id, pdf.id);
+	assert.equal(state.activeGroupId, right.id, 'focus moved to the PDF\'s pane');
+	assert.equal(left.tabs.length, 1);
+	assert.equal(note.path, 'a.md');
+	// Another PDF, not open anywhere: a new tab in the OTHER pane.
+	state.activeGroupId = left.id;
+	const y = tree.openFileBeside(state, 'y.pdf');
+	assert.ok(right.tabs.includes(y), 'opened in the other pane');
+	assert.equal(left.tabs.length, 1, 'the note\'s pane is untouched');
+});
+
+test('several panes: a pane already showing a PDF is preferred for a new one', () => {
+	const state = stateWithNotes('a.md');
+	const left = tree.activeGroup(state);
+	const middle = tree.splitGroup(state, left.id, 'right', tree.createTab('note', 'b.md'));
+	const right = tree.splitGroup(state, middle.id, 'right', tree.createTab('file', 'other.pdf'));
+	state.activeGroupId = middle.id;
+	const x = tree.openFileBeside(state, 'x.pdf');
+	assert.ok(right.tabs.includes(x));
+});
+
+test('here (⌘-click): this pane only — its tab, or a new tab here, even when another pane has the PDF', () => {
+	const state = stateWithNotes('a.md');
+	const left = tree.activeGroup(state);
+	const right = tree.splitGroup(state, left.id, 'right', tree.createTab('file', 'x.pdf'));
+	state.activeGroupId = left.id;
+	const here = tree.openFileBeside(state, 'x.pdf', { here: true });
+	assert.ok(left.tabs.includes(here), 'a new tab in this pane');
+	assert.notEqual(here.id, right.tabs[0].id);
+	assert.equal(left.tabs[0].path, 'a.md', 'beside the note, not over it');
+	state.activeGroupId = left.id;
+	assert.equal(tree.openFileBeside(state, 'x.pdf', { here: true }).id, here.id, 'and reused after');
+});

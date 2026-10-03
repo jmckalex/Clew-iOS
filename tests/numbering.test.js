@@ -60,13 +60,28 @@ test('headings: numbered only under Headings: numeric, h1 included', () => {
 	assert.equal(commandForDepth(1, { documentClass: 'book' }), 'chapter');
 });
 
-test('a plain label has no number, nor a footnote label (as the engine behaves); a label in a theorem its number', () => {
-	const n = num('Loose @label[loose].\n\nA note[fn: see @label[fnl]] and another[fn: two].\n\n@begin(theorem)\nBody @label[inthm]\n@end(theorem)\n');
+test('a {-} heading takes no number and leaves the count alone (jmarkdown b212e82)', () => {
+	const n = num('---\nHeadings: numeric\n---\n# Doc\n\n## Preface {-} @label[pre]\n\n## Setup @label[sec]\n\n# Appendix {-}\n\n# Last\n');
+	assert.deepEqual([...n.lines.values()].map((l) => l.number), ['1', '1.1', '2'], 'Preface and Appendix are skipped');
+	assert.equal(refDisplay(n, 'sec', 'ref').text, '1.1', 'not 1.2: the {-} heading before it did not count');
+	assert.equal(refDisplay(n, 'pre', 'ref').state, 'numberless');
+	assert.equal(n.labels.get('pre').title, 'Preface');
+});
+
+test('a plain label has no number; a footnote label its note\'s (jmarkdown ffb39ea); a label in a theorem its number', () => {
+	const n = num('Loose @label[loose].\n\nA note[fn: one] and another[fn: see @label[fnl]].\n\n@begin(theorem)\nBody @label[inthm]\n@end(theorem)\n');
 	assert.equal(refDisplay(n, 'loose', 'ref').text, '??');
-	assert.equal(refDisplay(n, 'fnl', 'ref').text, '??', 'measured: the engine prints ?? for a footnote label');
-	assert.match(refDisplay(n, 'fnl', 'ref').tip, /footnote/);
+	assert.equal(refDisplay(n, 'fnl', 'ref').text, '2', 'the second note of its list');
+	assert.match(refDisplay(n, 'fnl', 'cref').text, /^footnote\s2$/);
 	assert.equal(n.labels.get('inthm').number, '1');
 	assert.equal(n.labels.get('inthm').type, 'theorem');
+});
+
+test('footnote labels count per list: groups apart, classic notes by first reference', () => {
+	const n = num('A[^x(asides): one] B[fn: two @label[d1]] C[^y(asides): three @label[g2]].\n\nRef[^b] and[^a].\n\n[^a]: classic a @label[ca]\n[^b]: classic b\n');
+	assert.equal(refDisplay(n, 'd1', 'ref').text, '1', 'the default list');
+	assert.equal(refDisplay(n, 'g2', 'ref').text, '2', 'the asides list');
+	assert.equal(refDisplay(n, 'ca', 'ref').text, '2', '[^a] is referenced second');
 });
 
 test('unknown keys, duplicates, undeclared and declared custom environments', () => {

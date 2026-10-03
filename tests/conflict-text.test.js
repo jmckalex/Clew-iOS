@@ -1,7 +1,17 @@
+// Clew — an Obsidian-style note app built on the jmarkdown engine.
+// Copyright © 2026 J. McKenzie Alexander <jmckalex@gmail.com> · https://jmckalex.org
+//
+// This file is part of Clew, free software released under the GNU General
+// Public License, version 3 or later. Clew is distributed in the hope that it
+// will be useful, but WITHOUT ANY WARRANTY. See LICENSE at the repository
+// root, or <https://www.gnu.org/licenses/>.
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // The text side of edit-conflict safety (src/shim/conflict-text.js).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { historyStamp, conflictSiblingPath, findDropboxCopies, hasGitConflictMarkers, lineDiff } from '../src/shim/conflict-text.js';
+import { historyStamp, conflictSiblingPath, findDropboxCopies, hasGitConflictMarkers, lineDiff } from '../vendor/clew/shared/conflict-text.js';
 
 test('history stamps use history.js\'s naming, so the note-history browser lists them', () => {
 	const ms = new Date(2026, 9, 3, 7, 5, 9).getTime();

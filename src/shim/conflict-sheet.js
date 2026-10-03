@@ -11,7 +11,7 @@
 // the note's own text). The palette's "Review conflicting versions…"
 // reopens anything outstanding.
 import { registerCommand } from '../../vendor/clew/renderer/commands/registry.js';
-import { lineDiff, conflictSiblingPath } from './conflict-text.js';
+import { lineDiff, conflictSiblingPath } from '../../vendor/clew/shared/conflict-text.js';
 
 const shim = () => window.__clewShim;
 const app = () => window.__clew;

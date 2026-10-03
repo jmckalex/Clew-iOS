@@ -200,18 +200,33 @@ const rendererPatches = {
 		// possible later feature; the office engine is the owner's call.
 		// Likewise the "LaTeX engine (PDF via LaTeX export)" row and its hint
 		// (Clew-app 0b4b7a4): iOS has no TeX toolchain, and that export
-		// answers "not available".
-		builder.onLoad({ filter: /vendor\/clew\/renderer\/components\/views\/clew-settings-view\.js$/ }, (args) => ({
-			contents: patched('clew-settings-view.js', patched('clew-settings-view.js',
-				patched('clew-settings-view.js', fs.readFileSync(args.path, 'utf8'),
-					"\t\t\tthis.#section('PDF viewer', [...this.#cjkFontRow()]),\n",
-					''),
-				"\t\t\tthis.#section('Office documents', [...this.#officeEngineRow()]),\n",
-				''),
-				'\t\t\t\tthis.#selectRow(\'LaTeX engine (PDF via LaTeX export)\', \'latexEngine\',\n\t\t\t\t\t[[\'auto\', \'Automatic\'], [\'pdflatex\', \'pdfLaTeX\'], [\'lualatex\', \'LuaLaTeX\'], [\'xelatex\', \'XeLaTeX\']]),\n\t\t\t\tthis.#hint(\'Automatic reads the exported document: one that loads fontspec, unicode-math, \'\n\t\t\t\t\t+ \'polyglossia or Lua code (a \\\\setmainfont in your jmarkdown config, say) is compiled with \'\n\t\t\t\t\t+ \'LuaLaTeX, anything else with pdfLaTeX. Choose an engine here for what that cannot see.\'),\n',
-				''),
-			loader: 'js',
-		}));
+		// answers "not available". And the Updates section (below).
+		builder.onLoad({ filter: /vendor\/clew\/renderer\/components\/views\/clew-settings-view\.js$/ }, (args) => {
+			let src = fs.readFileSync(args.path, 'utf8');
+			src = patched('clew-settings-view.js', src,
+				"\t\t\tthis.#section('PDF viewer', [...this.#cjkFontRow()]),\n", '');
+			src = patched('clew-settings-view.js', src,
+				"\t\t\tthis.#section('Office documents', [...this.#officeEngineRow()]),\n", '');
+			src = patched('clew-settings-view.js', src,
+				"\t\t\t\tthis.#selectRow(LATEX_ENGINE_SETTING.label, 'latexEngine',\n"
+				+ "\t\t\t\t\t[['auto', 'Automatic'], ['pdflatex', 'pdfLaTeX'], ['lualatex', 'LuaLaTeX'], ['xelatex', 'XeLaTeX']]),\n"
+				+ "\t\t\t\tthis.#hint('Automatic reads the exported document: one that loads fontspec, unicode-math, '\n"
+				+ "\t\t\t\t\t+ 'polyglossia or Lua code (a \\\\setmainfont in your jmarkdown config, say) is compiled with '\n"
+				+ "\t\t\t\t\t+ 'LuaLaTeX, anything else with pdfLaTeX. Choose an engine here for what that cannot see.'),\n",
+				'');
+			// The daily update check (Clew-app 036befe) asks clew-app.com for
+			// a newer desktop build; the iPad's updates are the App Store's
+			// (UPDATE_CHECK answers 'off'), so the section goes.
+			src = patched('clew-settings-view.js', src,
+				"\t\t\tthis.#section('Updates', [\n"
+				+ "\t\t\t\tthis.#selectRow('Check for updates once a day', 'updateCheck', [['on', 'On'], ['off', 'Off']]),\n"
+				+ "\t\t\t\tthis.#hint('Clew asks clew-app.com whether a newer version exists and, if so, says so, '\n"
+				+ "\t\t\t\t\t+ 'with a link to download it. Nothing is sent but the request itself, and nothing '\n"
+				+ "\t\t\t\t\t+ 'is installed for you. Help → Check for Updates… asks at any time.'),\n"
+				+ "\t\t\t]),\n",
+				'');
+			return { contents: src, loader: 'js' };
+		});
 		// An office document's tab: upstream offers the LibreOffice download
 		// (and, with a desktop LibreOffice, a PDF preview); iOS has neither,
 		// and the download button would spin forever on an engine that never
