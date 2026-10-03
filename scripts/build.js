@@ -375,7 +375,9 @@ export async function buildPreviewClients({ minify = true } = {}) {
 	// bundles the desktop build produces. pdf-page.js is the standalone
 	// viewer page's bundle (loaded by pdf-page.html in an iframe).
 	const results = [];
-	for (const name of ['client.js', 'api.js', 'site-client.js', 'pdf-page.js']) {
+	// clew-bridge.js is window.clew inside an app frame (frame-bridge.md §7),
+	// served by the clew-frame handler at /__clew_bridge__.js.
+	for (const name of ['client.js', 'api.js', 'site-client.js', 'pdf-page.js', 'clew-bridge.js']) {
 		results.push(await build({
 			entryPoints: [path.join(root, 'vendor', 'clew', 'preview-client', name)],
 			bundle: true,
@@ -527,6 +529,10 @@ export function stageStatic() {
 	// the owner's OCG build (layers fork) from the committed vendor mirror,
 	// not the @embedpdf/snippet npm package.
 	assets['embedpdf'] = 'vendor/embedpdf/dist';
+	// The stamp tool's library (vendor/default-stamps, MIT; upstream 88b6dd2):
+	// pdf-core.js asks for __clew_assets__/stamps/{locale}/manifest.json, so
+	// no viewer ever fetches it from jsdelivr.
+	assets['default-stamps'] = 'vendor/default-stamps';
 
 	for (const [to, from] of Object.entries(assets)) {
 		copy(path.join(root, from), path.join(webroot, 'preview-assets', to));

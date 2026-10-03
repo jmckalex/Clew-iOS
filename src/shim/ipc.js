@@ -16,8 +16,10 @@ import { codeSummary } from '../../vendor/clew/main/vault-code.js';
 import { planOpen, pathFromFileUrl } from '../../vendor/clew/main/open-file.js';
 import { direntKind, shouldRecurse, walkGuard } from '../../vendor/clew/main/fs-utils.js';
 import { listSnapshots, readSnapshot, keepVersion } from '../../vendor/clew/main/history.js';
+import { getPdfMeta, setPdfMeta } from '../../vendor/clew/main/pdf-meta.js';
 import { rewritePdfFrames } from '../../vendor/clew/main/pdf-frames-rewrite.js';
 import { ConflictCenter } from './conflicts.js';
+import { createApps } from './apps.js';
 // The ENGINE's callout modules (jmarkdown a7de8c6), the pure ones only:
 // callouts.js would pull config-manager (fs) into the app page, and
 // desktop's main/callout-types.js reads its icon table from disk.
@@ -151,6 +153,10 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 		onOpen: (root) => {
 			conflicts.reset();
 			setTimeout(announceConflicts, 0); // once the open has finished
+			// Apps in notes: none of the old vault's is servable; the device's
+			// grants into the vfs before the first embed is resolved.
+			apps.reset();
+			apps.load();
 			// The device's trust first: the first standby's engine config
 			// carries `Run note code` (desktop session.js does the same
 			// before the render service opens the vault).
@@ -189,6 +195,9 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 		send(CH.EV_TREE_CHANGED, { tree: vaults.tree() });
 		vaults.hooks.onStructureChanged?.();
 	};
+
+	// ---- apps in notes (apps.js; frame-bridge.md §7–§10) ---------------------
+	const apps = createApps({ vaults, indexer, searchService, kvStore, refreshTree: () => structureChanged() });
 
 	// ---- edit-conflict safety, the iOS-only part (conflicts.js) ------------
 	// The renderer's conflicts.js handles an editor's refused save, a change
@@ -434,6 +443,19 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 			fileChanged(path);
 			if (created) structureChanged();
 			return null;
+		},
+		// Quote-and-cite's memory of a PDF (pdf-meta.js over the mirror's
+		// .clew/pdf-citations.json): its chosen entry, its printed-page
+		// offset. The path is checked to be the vault's own PDF.
+		[CH.PDF_META_GET]: ({ path }) => {
+			if (!vaults.isOpen || !/\.pdf$/i.test(String(path))) return null;
+			vaults.resolve(path);
+			return getPdfMeta(VAULT_ROOT, path);
+		},
+		[CH.PDF_META_SET]: ({ path, patch }) => {
+			if (!vaults.isOpen || !/\.pdf$/i.test(String(path))) throw new Error('Not a PDF in this vault');
+			vaults.resolve(path);
+			return setPdfMeta(VAULT_ROOT, path, patch);
 		},
 		// A conflict's versions, kept before anything is chosen (renderer
 		// conflicts.js, pool.js#hold): history.js#keepVersion over the mirror,
@@ -779,6 +801,20 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 			return { list: answer?.list ?? [] };
 		},
 
+		// ---- apps in notes (apps.js): the bridge host asks what an embedded
+		// app may do, records the user's answer, and relays each port request.
+		[CH.APP_STATUS]: ({ key }) => apps.status(key),
+		[CH.APP_ANSWER]: ({ key, allow }) => apps.answer(key, allow),
+		[CH.APP_CALL]: ({ key, notePath, method, params }) => apps.call(key, notePath, method, params),
+		[CH.APPS_LIST]: () => apps.list(),
+		// Revoking forgets the app here: its ports close and its frames
+		// reload, so it asks again (§9).
+		[CH.APP_REVOKE]: ({ id }) => {
+			const { done, key } = apps.revoke(id);
+			if (key) send(CH.EV_APP_GRANTS_CHANGED, { key });
+			return done;
+		},
+
 		// The update check (Clew-app 036befe) asks clew-app.com for a newer
 		// desktop build; the iPad's updates are the App Store's.
 		[CH.UPDATE_CHECK]: () => ({ status: 'off', reason: 'the App Store updates Clew on iPad' }),
@@ -1014,7 +1050,7 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 
 	// Surface the Swift side needs (scheme handler + lifecycle callbacks).
 	const native = {
-		renderNote: async (rel) => servePdfFrames(await renderService.ensureRendered(rel), rel),
+		renderNote: async (rel) => apps.rewrite(await servePdfFrames(await renderService.ensureRendered(rel), rel), rel),
 		renderFragment: async (text) => servePdfFrames(await renderService.renderFragment(text)),
 		// Live edit's block frames (SchemeHandler.swift `__clew_block__`):
 		// POST {text, sourcePath} → the document's key; GET by key → the
@@ -1027,8 +1063,13 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 		},
 		blockDocument: async (key) => {
 			const html = renderService.blockDocument(key);
-			return html === undefined ? null : servePdfFrames(html, renderService.blockSourcePath(key));
+			if (html === undefined) return null;
+			const source = renderService.blockSourcePath(key);
+			return apps.rewrite(await servePdfFrames(html, source), source);
 		},
+		// What clew-frame://<key><path> serves (SchemeHandler.swift's app
+		// handler): the app's file and its CSP, or a refusal.
+		appServe: (key, path) => apps.serve(key, path),
 		// A note document's CSP header (SchemeHandler asks with each one).
 		noteCsp: () => renderService.noteCsp(),
 		externalDiff: (diff) => vaults.applyExternalDiff(diff),

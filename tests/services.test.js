@@ -55,6 +55,7 @@ let fakeTrusted = true;
 // decided, and the enablements — the seed vault's plugins as a migrated
 // vault would have them, the network on.
 let fakeDecided = true;
+let fakeAppGrants = '';
 const fakeEnable = { scripts: true, plugins: ['charts', 'header'], noteApi: true, dataviewJs: false, network: true };
 const fakeAccess = () => ({
 	trusted: fakeTrusted, decided: fakeDecided,
@@ -90,6 +91,7 @@ const fakeBridge = {
 					...fakeSession,
 					trusted: fakeTrusted,
 					access: fakeAccess(),
+					identity: 'documents:test',
 					name: path.basename(params.path), path: params.path, files: listFiles(params.path),
 					...(globalDir && fs.existsSync(globalDir)
 						? { globalPlugins: { path: globalDir, files: listFiles(globalDir) } } : {}),
@@ -210,6 +212,12 @@ const fakeBridge = {
 				fakeQuickAction = null;
 				return { action };
 			}
+			// The device's app grants (Application Support): text in, text out.
+			case 'appGrantsRead':
+				return fakeAppGrants;
+			case 'appGrantsWrite':
+				fakeAppGrants = params.text;
+				return null;
 			case 'vaultTrustGet':
 				return { open: true, trusted: fakeTrusted, decided: fakeDecided, identity: 'documents:test', access: fakeAccess() };
 			case 'vaultTrustSet':
@@ -1495,4 +1503,62 @@ test('trust v2: the code summary counts what would run; trusted vaults list; the
 	const list = await clew.invoke('clew:trusted-vaults-list');
 	assert.equal(list[0].key, 'documents:test');
 	assert.deepEqual(await clew.invoke('clew:update-check'), { status: 'off', reason: 'the App Store updates Clew on iPad' });
+});
+
+// ---- apps in notes (apps.js; frame-bridge.md §7–§10) -----------------------
+
+test('apps: an @app embed is resolved as the note is served — its key from the DEVICE\'s identity and the manifest id', async () => {
+	fakeHtml = '<body><clew-app-embed class="clew-app-embed" data-app="Apps/Flashcards" style="height: 320px"><span>App</span></clew-app-embed>'
+		+ '<clew-app-embed data-app="Apps/Nowhere"></clew-app-embed></body>';
+	let html;
+	try { html = await native.renderNote('Guide/Apps in Notes.md'); } finally { fakeHtml = FAKE_HTML; }
+	const key = createHash('sha256').update('documents:test\0flashcards', 'utf8').digest('hex').slice(0, 40);
+	assert.ok(html.includes(`data-app-key="${key}"`), 'hash(identity, id)');
+	assert.ok(html.includes(`data-app-src="clew-frame://${key}/index.html"`));
+	assert.ok(html.includes('data-app-note="Guide/Apps in Notes.md"'));
+	assert.match(html, /clew-embed-refused[^>]*>@app found nothing at &quot;Apps\/Nowhere&quot;/, 'a missing folder is refused by name');
+});
+
+test('apps: the clew-frame handler gets only the app\'s own files, with the app CSP; a restricted vault\'s app waits for its prompt', async () => {
+	const key = createHash('sha256').update('documents:test\0flashcards', 'utf8').digest('hex').slice(0, 40);
+	// Trusted (as opened): it may run at once; no network granted.
+	const page = native.appServe(key, '/index.html');
+	assert.deepEqual([page.rel, page.html], ['Apps/Flashcards/index.html', true]);
+	assert.match(page.csp, /^default-src 'self' data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob:/);
+	assert.match(page.csp, /form-action 'none'/);
+	assert.ok(!/https:/.test(page.csp), 'no network');
+	assert.equal(native.appServe(key, '/__clew_bridge__.js').bridge, true);
+	assert.deepEqual(native.appServe(key, '/../../Welcome.md'), { status: 404 }, 'nothing outside its folder');
+	assert.deepEqual(native.appServe('0'.repeat(40), '/index.html'), { status: 404 }, 'an unregistered key');
+	// Restricted: 403 until the prompt is answered (R1, choice B).
+	await clew.invoke('clew:vault-trust-set', { trusted: false });
+	await settle();
+	assert.equal(native.appServe(key, '/index.html').status, 403);
+	const st = await clew.invoke('clew:app-status', { key });
+	assert.equal(st.askRun, true);
+	assert.equal(st.restricted, true);
+	assert.deepEqual(st.ask, ['note.read', 'app.kv']);
+	assert.equal(st.describe['note.read'], 'read this note');
+	const after = await clew.invoke('clew:app-answer', { key, allow: true });
+	assert.equal(after.mayRun, true);
+	assert.deepEqual(after.granted, ['note.read', 'app.kv']);
+	assert.equal(native.appServe(key, '/index.html').rel, 'Apps/Flashcards/index.html', 'runs once allowed');
+	assert.ok(JSON.parse(fakeAppGrants).apps['documents:test'].flashcards.run, 'the grant is on the DEVICE');
+	// Its calls: granted ones answer, others are denied by name.
+	const read = await clew.invoke('clew:app-call', { key, notePath: 'Welcome.md', method: 'notes.read', params: {} });
+	assert.equal(read.ok, true, JSON.stringify(read));
+	assert.equal(read.result, await clew.invoke(CH.NOTE_READ, { path: 'Welcome.md' }), 'the note it is in');
+	const denied = await clew.invoke('clew:app-call', { key, notePath: 'Welcome.md', method: 'notes.write', params: {} });
+	assert.equal(denied.ok, false);
+	// Settings → Apps lists it; Revoke forgets it, and the frames are told.
+	const list = await clew.invoke('clew:apps-list');
+	assert.deepEqual(list.map((a) => a.id), ['flashcards']);
+	const events = [];
+	const off = clew.on('clew:ev-app-grants-changed', (p) => events.push(p));
+	assert.equal(await clew.invoke('clew:app-revoke', { id: 'flashcards' }), true);
+	off();
+	assert.deepEqual(events, [{ key }]);
+	assert.equal(native.appServe(key, '/index.html').status, 403, 'asks again');
+	await clew.invoke('clew:vault-trust-set', { trusted: true });
+	await settle();
 });

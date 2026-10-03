@@ -392,6 +392,8 @@ final class VaultStore {
 		// what a trusted one may run is this device's record (§4.2).
 		let access = refreshAccess()
 		result["access"] = access
+		// The device-side identity: what an app's origin key derives from.
+		result["identity"] = trust.identity(root)
 		result["trusted"] = access["trusted"] as? Bool == true
 		return result
 	}

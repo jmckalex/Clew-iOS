@@ -25,6 +25,8 @@ final class WebHost: NSObject, ObservableObject {
 		_ = vaults.trust
 		config.setURLSchemeHandler(schemeHandler, forURLScheme: "clew-app")
 		config.setURLSchemeHandler(schemeHandler, forURLScheme: "clew-preview")
+		// Apps in notes: each app on an origin of its own (frame-bridge.md §7).
+		config.setURLSchemeHandler(schemeHandler, forURLScheme: "clew-frame")
 
 		let bridge = FSBridge(vaults: vaults)
 		config.userContentController.addScriptMessageHandler(bridge, contentWorld: .page, name: "clew")
@@ -215,11 +217,20 @@ extension WebHost: WKUIDelegate, WKNavigationDelegate {
 			if ["http", "https", "mailto"].contains(scheme) { UIApplication.shared.open(url) }
 			return
 		}
-		// Iframes: previews and canvas web nodes may load clew-preview and
-		// (sandboxed canvas web nodes) http(s). Never the app origin: no frame
-		// may host the app page (the owner's call, frame-bridge §2.7 — the
-		// same rule as desktop's frame guard and frame-ancestors).
-		decisionHandler(["clew-preview", "http", "https", "about", "blob"].contains(scheme) ? .allow : .cancel)
+		// An app frame (clew-frame://<key>) is pinned to its own origin
+		// (frame-bridge.md §7): a frame navigating itself to https://…?<data>
+		// is an outbound channel no CSP closes. A new frame's origin is still
+		// its parent's, so its first load is the next rule's.
+		if let current = navigationAction.targetFrame?.securityOrigin, current.protocol == "clew-frame" {
+			let sameApp = scheme == "clew-frame" && url.host?.lowercased() == current.host.lowercased()
+			return decisionHandler(sameApp ? .allow : .cancel)
+		}
+		// Iframes: previews and canvas web nodes may load clew-preview, apps
+		// clew-frame, and (sandboxed canvas web nodes) http(s). Never the app
+		// origin: no frame may host the app page (the owner's call,
+		// frame-bridge §2.7 — the same rule as desktop's frame guard and
+		// frame-ancestors).
+		decisionHandler(["clew-preview", "clew-frame", "http", "https", "about", "blob"].contains(scheme) ? .allow : .cancel)
 	}
 
 	/// A PDF that answers a FRAME's navigation directly is cancelled and

@@ -17,6 +17,7 @@
 // rename) reach the device through the same write-through hooks.
 import { vfs } from '../worker/shims/vfs.js';
 import { snapshotBeforeWrite, renameHistory } from '../../vendor/clew/main/history.js';
+import { renamePdfMeta } from '../../vendor/clew/main/pdf-meta.js';
 import { bridgeCall, toBase64 } from './native-bridge.js';
 import { settings } from './settings.js';
 import { isTextPath } from './engine-config.js';
@@ -115,7 +116,10 @@ export class VaultManager {
 
 	async open(vaultPath) {
 		this.close();
-		const { name, path: realPath, files, globalPlugins, sessionId, callerToken, trusted, access, refusedLinks, cloudConflicts } = await bridgeCall('vaultOpen', { path: vaultPath });
+		const { name, path: realPath, files, globalPlugins, sessionId, callerToken, trusted, access, identity, refusedLinks, cloudConflicts } = await bridgeCall('vaultOpen', { path: vaultPath });
+		// This device's identity for the vault (VaultTrust.swift): what an
+		// app's origin key derives from (apps.js), never a path.
+		this.identity = typeof identity === 'string' ? identity : null;
 		this.realPath = realPath;
 		this.name = name;
 		// Minted natively per opening: preview URLs carry the sid, and the
@@ -224,6 +228,7 @@ export class VaultManager {
 		this.callerToken = null;
 		this.trusted = false;
 		this.access = normalizeAccess(null, false);
+		this.identity = null;
 		this.excludes = compileExcludes({});
 	}
 
@@ -431,6 +436,8 @@ export class VaultManager {
 		// renameHistory, whose fs.renameSync lands on the same hook).
 		vfs.rename(from, to);
 		renameHistory(VAULT_ROOT, rel, newRel);
+		// What quote-and-cite remembers about a PDF moves with it (pdf-meta.js).
+		try { renamePdfMeta(VAULT_ROOT, rel, newRel); } catch (err) { console.warn('[clew-ios] pdf-citations rename:', err?.message ?? err); }
 	}
 
 	async trash(rel) {

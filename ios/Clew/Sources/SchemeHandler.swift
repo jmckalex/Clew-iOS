@@ -52,6 +52,9 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 		"preview": "engine-assets",
 		// The EmbedPDF bundle + pdfium.wasm (the only PDF stack in the app).
 		"embedpdf": "preview-assets/embedpdf",
+		// Its stamp tool's default library (vendor/default-stamps, MIT):
+		// {locale}/manifest.json + stamps.pdf, never jsdelivr.
+		"stamps": "preview-assets/default-stamps",
 		// mp-tikz-wasm: the MetaPost/TeX engines and their TeX bundles, staged
 		// by scripts/stage-mptikz.js. A first figure reads ~90 of these files
 		// through kpathsea, so the whole tree is servable — read-only app
@@ -81,6 +84,8 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 			serveAppFile(task, url: url)
 		case "clew-preview":
 			servePreview(task, url: url)
+		case "clew-frame":
+			serveAppFrame(task, url: url)
 		default:
 			fail(task, "unknown scheme")
 		}
@@ -353,6 +358,82 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 			self.respondData(task, data: Data(html.utf8), mime: "text/html",
 				extra: csp.map { ["Content-Security-Policy": $0] } ?? [:])
 		}
+	}
+
+	// MARK: - clew-frame (apps in notes, frame-bridge.md §7)
+
+	/// An app's own origin, clew-frame://<key>/…: ONLY its folder's files
+	/// (the shim's apps.js#serve says which, through app-frames.js's realpath
+	/// clamp; this reads it through VaultStore's own), with the app CSP built
+	/// from its grants, the bridge client injected into its HTML. GET only;
+	/// an app not allowed to run here gets a 403 (R1: a restricted vault's
+	/// app waits for its prompt), an unregistered key a 404.
+	private func serveAppFrame(_ task: WKURLSchemeTask, url: URL) {
+		let plain: (Int, String) -> Void = { status, text in
+			self.respond(task, status: status, data: Data(text.utf8), headers: [
+				"Content-Type": "text/plain; charset=utf-8", "Cache-Control": "no-store",
+				"Content-Security-Policy": "default-src 'none'",
+			])
+		}
+		guard task.request.httpMethod == nil || task.request.httpMethod == "GET" else { return plain(405, "GET only") }
+		guard let key = url.host?.lowercased(), key.range(of: "^[0-9a-f]{1,63}$", options: .regularExpression) != nil else {
+			return plain(404, "Not found")
+		}
+		let pathname = url.path.isEmpty ? "/" : url.path
+		callNative("return window.__clewNative.appServe(key, path);", args: ["key": key, "path": pathname]) { [weak self] result in
+			guard let self, !self.isStopped(task) else { return }
+			guard case .success(let value) = result, let answer = value as? [String: Any] else { return plain(404, "Not found") }
+			if let status = answer["status"] as? Int {
+				return plain(status, answer["message"] as? String ?? (status == 403 ? "Forbidden" : "Not found"))
+			}
+			guard let csp = answer["csp"] as? String else { return plain(500, "No policy") }
+			let headers: (String) -> [String: String] = { type in [
+				"Content-Type": type,
+				"Cache-Control": "no-store",
+				"Content-Security-Policy": csp,
+				"Referrer-Policy": "no-referrer",
+				"X-DNS-Prefetch-Control": "off",
+				"X-Content-Type-Options": "nosniff",
+			] }
+			if answer["bridge"] as? Bool == true {
+				guard let webRoot = self.webRootURL,
+					let data = try? Data(contentsOf: webRoot.appendingPathComponent("preview-client/clew-bridge.js")) else {
+					return plain(500, "Bridge missing")
+				}
+				return self.respond(task, status: 200, data: data, headers: headers("text/javascript; charset=utf-8"))
+			}
+			guard let rel = answer["rel"] as? String else { return plain(404, "Not found") }
+			let isHtml = answer["html"] as? Bool == true
+			self.vaults.ioQueue.async {
+				// resolve() refuses a link leaving the vault (VaultPaths).
+				guard let file = self.vaults.materialize(rel: rel, timeout: 15),
+					let data = try? Data(contentsOf: file) else {
+					return DispatchQueue.main.async { plain(404, "Not found") }
+				}
+				let mime = Self.mimeTypes[file.pathExtension.lowercased()] ?? "application/octet-stream"
+				DispatchQueue.main.async {
+					guard !self.isStopped(task) else { return }
+					if isHtml {
+						let html = Self.injectBridge(String(decoding: data, as: UTF8.self))
+						self.respond(task, status: 200, data: Data(html.utf8), headers: headers("text/html; charset=utf-8"))
+					} else {
+						self.respond(task, status: 200, data: data, headers: headers(mime))
+					}
+				}
+			}
+		}
+	}
+
+	/// app-frames.js#injectBridge: the bridge client first thing in <head>.
+	static func injectBridge(_ html: String) -> String {
+		let tag = "<script src=\"/__clew_bridge__.js\"></script>"
+		if let r = html.range(of: "<head[^>]*>", options: [.regularExpression, .caseInsensitive]) {
+			return html.replacingCharacters(in: r, with: String(html[r]) + tag)
+		}
+		if let r = html.range(of: "<html[^>]*>", options: [.regularExpression, .caseInsensitive]) {
+			return html.replacingCharacters(in: r, with: String(html[r]) + "<head>\(tag)</head>")
+		}
+		return tag + html
 	}
 
 	// MARK: - The preview CSP (Clew-app main/preview-csp.js)

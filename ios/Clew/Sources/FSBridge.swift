@@ -356,6 +356,20 @@ final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 			vaults.trust.setEnable(root, patch: [key: params["value"] ?? NSNull()])
 			reply(["access": vaults.refreshAccess(), "enable": vaults.trust.enablements(root).dictionary], nil)
 
+		// ---- apps in notes: the device's grants (Application Support) -----
+		// The shim runs the grant logic (app-grants.js); the file is the
+		// device's, never the vault's — a vault sent on arrives with none.
+		case "appGrantsRead":
+			performIO(reply) { (try? String(contentsOf: Self.appGrantsFile, encoding: .utf8)) ?? "" }
+
+		case "appGrantsWrite":
+			guard let text = params["text"] as? String, text.utf8.count < 4_000_000 else { throw ClewError.badPayload }
+			performIO(reply) {
+				try FileManager.default.createDirectory(at: Self.appGrantsFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+				try AtomicFile.write(Data(text.utf8), to: Self.appGrantsFile)
+				return nil
+			}
+
 		case "trustedVaultsList":
 			reply(trustedVaultsList(), nil)
 
@@ -460,6 +474,11 @@ final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 }
 
 extension FSBridge {
+	static var appGrantsFile: URL {
+		FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+			.appendingPathComponent("app-grants.json")
+	}
+
 	/// Settings → Trusted vaults: every vault this device has decided on,
 	/// newest decision first, with whether it is the one open.
 	func trustedVaultsList() -> [[String: Any]] {
