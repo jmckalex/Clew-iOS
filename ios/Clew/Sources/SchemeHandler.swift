@@ -119,7 +119,8 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 	/// Same-origin, so a request header costs no preflight: the caller
 	/// token and the session id travel in X-Clew-Token / X-Clew-Session,
 	/// never in the URL (frame-bridge.md §1.2: URLs end up in places bodies
-	/// do not). The Origin must be the app page's. The query routes only:
+	/// do not). The request must be the app page's own (its Origin, or with
+	/// none, its Referer). The query routes only:
 	/// `rel`, and Clew-app 686232b's `base` (the SHA-1 the viewer loaded),
 	/// `force`, `create`. Answers JSON: {ok, hash} or {conflict, mine,
 	/// theirs} (VaultStore.writePdf).
@@ -129,8 +130,17 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 			self.respond(task, status: status, data: data, headers: ["Content-Type": "application/json", "Cache-Control": "no-store"])
 		}
 		guard task.request.httpMethod == "POST" else { return json(405, ["error": "POST only"]) }
-		guard task.request.value(forHTTPHeaderField: "Origin") == "clew-app://app" else {
-			return json(403, ["error": "Forbidden"])
+		// Measured (WebKit 18): a SAME-origin POST to a custom scheme carries
+		// no Origin header at all, only Referer; a cross-origin one always
+		// carries an Origin (`null` under no-referrer). So: an Origin must be
+		// the app page's, and without one the Referer must be. The token is
+		// the gate either way.
+		if let origin = task.request.value(forHTTPHeaderField: "Origin") {
+			guard origin == "clew-app://app" else { return json(403, ["error": "Forbidden"]) }
+		} else {
+			guard task.request.value(forHTTPHeaderField: "Referer")?.hasPrefix("clew-app://app/") == true else {
+				return json(403, ["error": "Forbidden"])
+			}
 		}
 		guard isCurrentSession(task.request.value(forHTTPHeaderField: "X-Clew-Session") ?? ""),
 			Self.tokenMatches(vaults.callerToken, task.request.value(forHTTPHeaderField: "X-Clew-Token")) else {
@@ -177,6 +187,9 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 	private func servePreview(_ task: WKURLSchemeTask, url: URL) {
 		let pathname = url.path.removingPercentEncoding ?? url.path
 		let rel = pathname.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+		#if DEBUG
+		if rel == "__clew_probe__" { return probe(task, url: url, origin: "preview") }
+		#endif
 
 		if rel.hasPrefix("__clew_assets__/") {
 			let rest = String(rel.dropFirst("__clew_assets__/".count))
@@ -442,6 +455,9 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 			return plain(404, "Not found")
 		}
 		let pathname = url.path.isEmpty ? "/" : url.path
+		#if DEBUG
+		if pathname == "/__clew_probe__" { return probe(task, url: url, origin: "app") }
+		#endif
 		callNative("return window.__clewNative.appServe(key, path);", args: ["key": key, "path": pathname]) { [weak self] result in
 			guard let self, !self.isStopped(task) else { return }
 			guard case .success(let value) = result, let answer = value as? [String: Any] else { return plain(404, "Not found") }
@@ -485,6 +501,18 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 			}
 		}
 	}
+
+	#if DEBUG
+	/// Scenario probes (DEBUG builds only): a document under test reports by
+	/// fetching its own origin's /__clew_probe__?r=<json>, which lands in the
+	/// device log as CLEWPROBE — the one channel a restricted preview (no
+	/// Note API) or an app frame has that every CSP here allows ('self').
+	private func probe(_ task: WKURLSchemeTask, url: URL, origin: String) {
+		let report = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "r" }?.value ?? ""
+		NSLog("CLEWPROBE %@ %@", origin, report)
+		respond(task, status: 204, data: Data(), headers: ["Cache-Control": "no-store"])
+	}
+	#endif
 
 	/// app-frames.js#injectBridge: the bridge client first thing in <head>.
 	static func injectBridge(_ html: String) -> String {

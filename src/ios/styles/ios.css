@@ -430,3 +430,7 @@ body.is-ios .clew-trust-details summary { min-height: 44px; display: flex; align
 body.is-ios .conflict-banner { flex-wrap: wrap; }
 body.is-ios .conflict-banner span { flex: 1 1 100%; }
 body.is-ios .conflict-banner button { min-height: 44px; }
+
+/* A rendered block's "Edit source" icon (frame-layer.js; upstream shows it
+   faintly on touch, `hover: none`): 26 px drawn, a 44 pt target. */
+body.is-ios .le-frame-reveal::after { content: ''; position: absolute; inset: -9px; }

@@ -279,6 +279,15 @@ const rendererPatches = {
 		// registry. The panel element stays in the DOM, closed (ipc.js forces
 		// `shell.open = false` on WORKSPACE_LOAD), and its xterm imports
 		// resolve to src/shim/xterm-stub.js.
+		// The trust prompt says where the decision lives: "Trust on this
+		// Mac?". iPadOS's WebKit reports itself as a Mac (navigator.platform
+		// is MacIntel, measured), so on iOS it is named for what it is.
+		builder.onLoad({ filter: /vendor\/clew\/renderer\/trust-banner\.js$/ }, (args) => ({
+			contents: patched('trust-banner.js', fs.readFileSync(args.path, 'utf8'),
+				"const DEVICE = MAC ? 'this Mac' : 'this computer';",
+				"const DEVICE = /iPhone/.test(navigator.userAgent) ? 'this iPhone' : 'this iPad';"),
+			loader: 'js',
+		}));
 		builder.onLoad({ filter: /vendor\/clew\/renderer\/commands\/builtin\.js$/ }, (args) => ({
 			contents: patched('builtin.js', fs.readFileSync(args.path, 'utf8'),
 				"\t\t{ id: 'shell:toggle', name: 'Toggle shell panel', hotkeys: ['Ctrl-`'], when: needsVault,\n"
