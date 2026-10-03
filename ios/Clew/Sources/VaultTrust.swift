@@ -148,6 +148,16 @@ final class VaultTrustStore {
 
 	func revoke(_ root: URL) { record(root, trusted: false, source: "user") }
 
+	/// A vault Clew made and removed again unused (a cancelled switch to a
+	/// new vault): its entry goes with it.
+	func forget(_ root: URL) {
+		lock.lock(); defer { lock.unlock() }
+		var store = load()
+		guard store.vaults.removeValue(forKey: identity(root)) != nil else { return }
+		data = store
+		save()
+	}
+
 	private func record(_ root: URL, trusted: Bool, source: String) {
 		lock.lock(); defer { lock.unlock() }
 		var store = load()

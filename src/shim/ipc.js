@@ -229,6 +229,119 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 		return openInflight;
 	};
 
+	// ---- switching vaults --------------------------------------------------
+	// Desktop opens another vault in ANOTHER WINDOW (main/main.js
+	// #openVaultAnywhere reuses a window only while it has no vault), so the
+	// shared renderer never switches in place: its vault UI (recents, Create,
+	// the demo) is the Welcome screen, which a window with a vault never
+	// shows. The iPad has one scene. Switching in place would leave the old
+	// vault's renderer state behind — its editors (tab ids are per-vault
+	// counters, so A's `t3` would survive as B's), its callout table, index,
+	// timers and frames — and the renderer flushes unsaved edits on
+	// EV_VAULT_OPENED, i.e. into the NEW vault. So a switch is a fresh page,
+	// as desktop's is a fresh window: settle this vault (the renderer's own
+	// close handshake — PDF annotations written, Save / Discard / Cancel for
+	// anything dirty — then every editor's save and the workspace into THIS
+	// vault), name the next one natively, reload. The boot opens it like any
+	// launch, with a new session id and caller token.
+	const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+	let closeAnswer = null;
+	/** The renderer's close question (office-dock.js#onCloseRequested): true
+	 *  to go on, false when the user cancelled. No listener, no question. */
+	const closeHandshake = () => {
+		if (!listeners.get(CH.EV_CLOSE_REQUESTED)?.size) return Promise.resolve(true);
+		return new Promise((resolve) => {
+			const timer = setTimeout(() => { closeAnswer = null; resolve(false); }, 60_000);
+			closeAnswer = (proceed) => { clearTimeout(timer); closeAnswer = null; resolve(proceed); };
+			send(CH.EV_CLOSE_REQUESTED, {});
+		});
+	};
+	/** Leave the open vault with nothing unsaved; false when cancelled. */
+	const prepareLeave = async () => {
+		if (!(await closeHandshake())) return false;
+		globalThis.__clew?.editorPool?.flushAll();
+		// The editors' saves dispatch, and the workspace's debounced save
+		// (500 ms) lands, before the native queue is drained.
+		await pause(650);
+		await vaults.flush();
+		return true;
+	};
+	const samePath = (a, b) => String(a ?? '').replace(/\/+$/, '') === String(b ?? '').replace(/\/+$/, '');
+	/** Open `path`: in place when no vault is open, else as a switch. */
+	const switchTo = async (path) => {
+		if (!vaults.isOpen) return openVault(path);
+		if (samePath(path, vaults.realPath)) return vaults.info;
+		if (!(await prepareLeave())) return null;
+		const next = await bridgeCall('setNextVault', { path });
+		if (!next?.ok) throw new Error(next?.reason ?? `That vault cannot be opened: ${path}`);
+		// Headless (the Node harness) there is no page to reload: the vault,
+		// settled all the same, opens in place.
+		if (typeof vaultSwitch.reload !== 'function') return openVault(next.path);
+		vaultSwitch.reload();
+		return new Promise(() => {}); // the page is going
+	};
+	const vaultSwitch = {
+		switchTo,
+		/** Remembered vaults with their standing ({path, ok, resolved?, name,
+		 *  kind, reason?}), most recent first, the open one marked. */
+		recent: async () => {
+			const paths = settings.get('recentVaults') ?? [];
+			const statuses = paths.length ? await bridgeCall('vaultStatus', { paths }) : [];
+			// A Documents vault is remembered by full path, and the app's
+			// container moves (a reinstall moves it; iOS promises no stable
+			// path), so two remembered paths can be ONE vault. One row each,
+			// the most recent, at its CURRENT path, and the list rewritten so.
+			const seen = new Set();
+			const list = [];
+			for (const st of statuses) {
+				const key = st.resolved ?? st.path;
+				if (seen.has(key)) continue;
+				seen.add(key);
+				const here = st.kind === 'documents' && st.resolved ? st.resolved : st.path;
+				list.push({ ...st, path: here, current: samePath(key, vaults.realPath) });
+			}
+			const rewritten = list.map((st) => st.path);
+			if (rewritten.join('\n') !== paths.join('\n')) settings.setRecentVaults(rewritten);
+			return list;
+		},
+		/** Remove a remembered vault (never the open one). */
+		forget: async (path) => {
+			if (samePath(path, vaults.realPath)) return false;
+			settings.forgetVault(path);
+			await bridgeCall('forgetVault', { path }).catch(() => {});
+			return true;
+		},
+		openFolder: async () => {
+			const picked = await bridgeCall('pickFolder');
+			return picked?.path ? switchTo(picked.path) : null;
+		},
+		createVault: async () => {
+			const created = await bridgeCall('createVault');
+			if (!created?.path) return null;
+			// Made for this switch: if the switch is cancelled or refused, the
+			// folder goes again — native removes it only while it is still
+			// the empty folder it made.
+			const undo = () => bridgeCall('removeEmptyVault', { path: created.path }).catch(() => {});
+			let result;
+			try {
+				result = await switchTo(created.path);
+			} catch (err) {
+				await undo();
+				throw err;
+			}
+			if (result === null) await undo();
+			return result;
+		},
+		openDemo: async () => {
+			const demo = await bridgeCall('demoVaultPath');
+			return demo?.path ? switchTo(demo.path) : null;
+		},
+		reload: globalThis.location?.reload ? () => globalThis.location.reload() : null,
+	};
+	// The app page's own UI (vault-switcher.js) answers Save / Discard /
+	// Cancel; without one, nothing dirty is ever dropped.
+	const ui = { confirmDiscard: null };
+
 	// Office paths are reachable from preview documents (vault-authored
 	// content) through the app page's office bridges, so as narrow as
 	// upstream's writeOffice: an office extension, no '..', inside the vault.
@@ -247,25 +360,15 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 
 	// ---- channel handlers -------------------------------------------------
 	const handlers = {
-		[CH.VAULT_OPEN_DIALOG]: async () => {
-			const picked = await bridgeCall('pickFolder');
-			if (!picked?.path) return null;
-			return openVault(picked.path);
-		},
-		[CH.VAULT_OPEN_PATH]: ({ path }) => openVault(path),
+		// Every way into a vault goes through switchTo: in place when none is
+		// open, a settled switch when one is (above).
+		[CH.VAULT_OPEN_DIALOG]: () => vaultSwitch.openFolder(),
+		[CH.VAULT_OPEN_PATH]: ({ path }) => switchTo(path),
 		// The welcome screen's other two ways in (upstream dd703e7). Create
 		// asks the name in a native sheet and makes the folder in Documents;
 		// the demo vault is the one Swift seeds on first launch anyway.
-		[CH.VAULT_CREATE_DIALOG]: async () => {
-			const created = await bridgeCall('createVault');
-			if (!created?.path) return null;
-			return openVault(created.path);
-		},
-		[CH.VAULT_OPEN_DEMO]: async () => {
-			const demo = await bridgeCall('demoVaultPath');
-			if (!demo?.path) return null;
-			return openVault(demo.path);
-		},
+		[CH.VAULT_CREATE_DIALOG]: () => vaultSwitch.createVault(),
+		[CH.VAULT_OPEN_DEMO]: () => vaultSwitch.openDemo(),
 		// The app page's own vault, token included (upstream ipc.js answers
 		// with vaults.ownInfo); the open handlers' answers never carry it.
 		[CH.VAULT_CURRENT]: async () => {
@@ -533,8 +636,13 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 		},
 		// Only reachable with a dirty office document, which cannot exist
 		// here; the safe answer is the one that never loses anything.
-		[CH.CONFIRM_DISCARD]: () => 'cancel',
-		[CH.WINDOW_CLOSE_RESOLVED]: () => {},
+		// Save / Discard / Cancel before a dirty document goes (a vault
+		// switch's close handshake): the app page's dialog, or Cancel.
+		[CH.CONFIRM_DISCARD]: async (args) => (ui.confirmDiscard ? ui.confirmDiscard(args ?? {}) : 'cancel'),
+		[CH.WINDOW_CLOSE_RESOLVED]: ({ proceed } = {}) => {
+			if (proceed === 'pending') return; // still asking or saving
+			closeAnswer?.(proceed === true);
+		},
 		[CH.SHELL_OPEN_EXTERNAL]: ({ url }) => {
 			if (/^https?:|^mailto:/i.test(url)) bridgeCall('openExternal', { url }).catch(() => {});
 		},
@@ -763,7 +871,7 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 		get sessionId() { return vaults.sessionId; },
 	};
 
-	return { clew, native, send, services: { vaults, indexer, renderService, kvStore, searchService, settings } };
+	return { clew, native, send, vaultSwitch, ui, services: { vaults, indexer, renderService, kvStore, searchService, settings } };
 }
 
 export { CH, VAULT_ROOT, toBase64 };

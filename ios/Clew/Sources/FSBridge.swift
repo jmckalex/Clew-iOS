@@ -180,6 +180,28 @@ final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 		case "demoVaultPath":
 			performIO(reply) { ["path": self.vaults.demoVaultPath()] }
 
+		// ---- switching vaults (the shim's vault switcher) -----------------
+		// A switch is a fresh page: the shim settles the open vault, names
+		// the next one, and reloads; the boot opens it like any launch.
+
+		case "vaultStatus":
+			// Remembered vaults' standing, for the switcher's list.
+			guard let paths = params["paths"] as? [String] else { throw ClewError.badPayload }
+			performIO(reply) { paths.prefix(50).map { self.vaults.vaultStatus($0) } }
+
+		case "setNextVault":
+			guard let path = params["path"] as? String else { throw ClewError.badPayload }
+			performIO(reply) { self.vaults.setNextVault(path) }
+
+		case "removeEmptyVault":
+			// A vault created for a switch the user then cancelled.
+			guard let path = params["path"] as? String else { throw ClewError.badPayload }
+			performIO(reply) { ["removed": self.vaults.removeEmptyVault(path)] }
+
+		case "forgetVault":
+			guard let path = params["path"] as? String else { throw ClewError.badPayload }
+			performIO(reply) { self.vaults.forgetVault(path); return nil }
+
 		case "noteFonts":
 			// The face → file map behind `font=note` figures, built from
 			// CoreText on first call (NoteFonts.swift) and served under

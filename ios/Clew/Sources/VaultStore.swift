@@ -168,6 +168,90 @@ final class VaultStore {
 		return fm.fileExists(atPath: url.path) ? url.path : nil
 	}
 
+	// MARK: - Switching vaults
+
+	// The iPad has one scene, so switching vaults is a fresh page, as desktop's
+	// is a fresh window: the shim settles the open vault, names the next one
+	// here (setNextVault), and reloads; the boot then opens it like any
+	// launch (bootstrapVaultPath).
+
+	/// The part of `path` inside an app container's Documents, or nil. A
+	/// Documents vault is remembered by full path, and the container's path
+	/// is not stable (a reinstall moves it), so it is followed by this part.
+	static func documentsRelative(_ path: String) -> String? {
+		guard let range = path.range(of: #"/Data/Application/[0-9A-Fa-f-]+/Documents/"#, options: .regularExpression) else { return nil }
+		let rest = String(path[range.upperBound...]).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+		return rest.isEmpty ? nil : rest
+	}
+
+	/// A remembered vault's standing, for the switcher: where it is now, or
+	/// why it cannot be opened. Never disturbs the open vault's security
+	/// scope: an external folder is checked under a scope opened and closed
+	/// here, unless it is the one already open.
+	func vaultStatus(_ path: String) -> [String: Any] {
+		let fm = FileManager.default
+		let isDirectory = { (p: String) -> Bool in
+			var isDir: ObjCBool = false
+			return fm.fileExists(atPath: p, isDirectory: &isDir) && isDir.boolValue
+		}
+		let name = (path as NSString).lastPathComponent
+		if let rel = Self.documentsRelative(path) ?? (path.hasPrefix(documentsURL.path + "/") ? String(path.dropFirst(documentsURL.path.count + 1)) : nil) {
+			let now = documentsURL.appendingPathComponent(rel, isDirectory: true).path
+			if isDirectory(now) { return ["path": path, "ok": true, "resolved": now, "name": name, "kind": "documents"] }
+			return ["path": path, "ok": false, "name": name, "kind": "documents",
+				"reason": "It is no longer in Clew’s folder on this iPad: it may have been moved, renamed or deleted."]
+		}
+		guard let data = bookmarks[path] else {
+			if isDirectory(path) { return ["path": path, "ok": true, "resolved": path, "name": name, "kind": "external"] }
+			return ["path": path, "ok": false, "name": name, "kind": "external",
+				"reason": "Clew no longer has access to this folder. Use Open Folder… to choose it again."]
+		}
+		var stale = false
+		guard let url = try? URL(resolvingBookmarkData: data, bookmarkDataIsStale: &stale) else {
+			return ["path": path, "ok": false, "name": name, "kind": "external",
+				"reason": "The folder can’t be found: it may have been deleted, or its storage provider is unavailable."]
+		}
+		let alreadyOpen = activeScopedURL?.path == url.path
+		let started = alreadyOpen ? false : url.startAccessingSecurityScopedResource()
+		defer { if started { url.stopAccessingSecurityScopedResource() } }
+		if isDirectory(url.path) {
+			return ["path": path, "ok": true, "resolved": url.path, "name": url.lastPathComponent, "kind": "external"]
+		}
+		return ["path": path, "ok": false, "name": name, "kind": "external",
+			"reason": "The folder can’t be reached: it may have been moved or deleted, or its storage provider is offline."]
+	}
+
+	/// The vault the next page load opens. Resolved now, so a vault that
+	/// cannot be opened is said here, before anything is torn down.
+	func setNextVault(_ path: String) -> [String: Any] {
+		let status = vaultStatus(path)
+		guard status["ok"] as? Bool == true, let resolved = status["resolved"] as? String else { return status }
+		UserDefaults.standard.set(resolved, forKey: "lastVaultPath")
+		return ["ok": true, "path": resolved]
+	}
+
+	/// A vault created for a switch that was then cancelled: removed again,
+	/// but only while it is still exactly what createVault made — an empty
+	/// folder directly in Documents. Anything else is left alone.
+	func removeEmptyVault(_ path: String) -> Bool {
+		let url = URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
+		guard url.deletingLastPathComponent().standardizedFileURL.path == documentsURL.standardizedFileURL.path else { return false }
+		let fm = FileManager.default
+		guard let names = try? fm.contentsOfDirectory(atPath: url.path),
+			names.allSatisfy({ $0 == ".DS_Store" }) else { return false }
+		guard (try? fm.removeItem(at: url)) != nil else { return false }
+		trust.forget(url)
+		return true
+	}
+
+	/// A remembered vault the user removed from the list: its bookmark goes
+	/// with it (nothing else remembers an external folder natively).
+	func forgetVault(_ path: String) {
+		var all = bookmarks
+		all.removeValue(forKey: path)
+		bookmarks = all
+	}
+
 	// MARK: - Bootstrap
 
 	/// The vault to auto-open at launch: the last-open one if it is still

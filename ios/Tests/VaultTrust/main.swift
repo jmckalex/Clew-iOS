@@ -106,5 +106,23 @@ do {
 	check(!store2.isTrusted(external), "a trust file planted in the vault means nothing")
 }
 
+// MARK: - Forgetting a vault Clew made and removed unused
+
+do {
+	let c = container("c-forget")
+	let store = VaultTrustStore(file: c.store, documentsURL: c.docs)
+	let made = mkvault(c.docs, "My Vault")
+	store.trust(made, source: "created")
+	check(store.isTrusted(made), "a created vault is trusted")
+	store.forget(made)
+	check(store.entries()[store.identity(made)] == nil, "forget removes its entry")
+	check(!store.isTrusted(made), "…so a folder of that name is no longer trusted")
+	store.forget(made) // nothing to forget: no harm
+	let kept = mkvault(c.docs, "Kept")
+	store.trust(kept)
+	store.forget(made)
+	check(store.isTrusted(kept), "forgetting one vault leaves the others")
+}
+
 print("VaultTrust: \(passed) passed, \(failed) failed")
 exit(failed == 0 ? 0 : 1)
