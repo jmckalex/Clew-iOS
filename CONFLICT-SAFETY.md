@@ -47,6 +47,23 @@ now run wholly on the IO queue, where every write runs. The walk reports
 iCloud conflicts through a callback, so the global-plugin walk no longer
 adds its paths to the vault's set.
 
+## A false conflict found in integration, and fixed
+
+`AtomicFile` replaces a file with a POSIX `rename`, which Foundation
+doesn't see. A URL that has read its resource values keeps answering the
+old mtime. The guard read the mtime before writing and recorded it on the
+same URL afterwards, so it recorded the pre-write time. The next save
+then looked like another device's edit: a false conflict on about every
+second save.
+
+The first round of simulator tests missed it. Continuous typing keeps
+resetting the 1 s autosave, so it saved only once. The integration pass
+found it: a save made just before a vault switch was refused.
+
+Mtimes now come from stat(2) (`AtomicFile.mtimeMs`). The Swift test
+writes three times on one URL, and the simulator test saves ten times,
+each after a pause longer than the autosave delay: 0 conflicts.
+
 ## Verified
 
 - **Node:** 719 JS tests, 13 of them new: 5 on the pure functions in

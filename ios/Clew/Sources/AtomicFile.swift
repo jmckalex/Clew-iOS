@@ -54,6 +54,17 @@ enum AtomicFile {
 		}
 	}
 
+	/// A file's modification time in ms, from stat(2) itself. NOT a URL's
+	/// resource values: a URL caches those, and the rename above happens
+	/// behind Foundation's back, so a URL that read the mtime before a write
+	/// still answers the old one after it. That is what VaultStore.write's
+	/// guard compares, and a stale answer there is a false conflict.
+	static func mtimeMs(_ file: URL) -> Double {
+		var st = stat()
+		guard stat(file.path, &st) == 0 else { return 0 }
+		return Double(st.st_mtimespec.tv_sec) * 1000 + Double(st.st_mtimespec.tv_nsec) / 1_000_000
+	}
+
 	/// The failing call's errno, read before anything else can clobber it.
 	private static func posixError(_ op: String) -> Error {
 		let code = errno

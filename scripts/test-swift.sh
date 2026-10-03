@@ -14,3 +14,4 @@ run() {
 }
 run remote-pdf-policy "$root/ios/Clew/Sources/RemotePdfPolicy.swift" "$root/ios/Tests/RemotePdfPolicy/main.swift"
 run vault-trust "$root/ios/Clew/Sources/VaultTrust.swift" "$root/ios/Tests/VaultTrust/main.swift"
+run atomic-file "$root/ios/Clew/Sources/AtomicFile.swift" "$root/ios/Tests/AtomicFile/main.swift"
