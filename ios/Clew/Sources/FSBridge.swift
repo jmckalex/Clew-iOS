@@ -74,10 +74,18 @@ final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 			guard let rel = params["rel"] as? String, let text = params["text"] as? String else {
 				throw ClewError.badPayload
 			}
-			// A refused write (the file changed elsewhere since last seen)
-			// answers {conflict, disk, mtimeMs}; `force` is "keep mine".
+			// A `guard`ed write (an editor's save) is refused when the file
+			// changed elsewhere since last seen: {conflict, disk, mtimeMs};
+			// `force` is "keep mine".
+			let guarded = params["guard"] as? Bool ?? false
 			let force = params["force"] as? Bool ?? false
-			performIO(reply) { try self.vaults.write(rel: rel, text: text, force: force) }
+			performIO(reply) { try self.vaults.write(rel: rel, text: text, guarded: guarded, force: force) }
+
+		case "markSeen":
+			guard let rel = params["rel"] as? String, let mtimeMs = params["mtimeMs"] as? Double else {
+				throw ClewError.badPayload
+			}
+			performIO(reply) { try self.vaults.markSeen(rel: rel, mtimeMs: mtimeMs); return nil }
 
 		case "cloudConflictVersions":
 			guard let rel = params["rel"] as? String else { throw ClewError.badPayload }
@@ -306,19 +314,60 @@ final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 			let folder = params["folder"] as? String ?? "Attachments"
 			performIO(reply) { try RemotePdfStore.shared.saveCopy(hash, folder: folder, into: self.vaults) }
 
-		// ---- vault trust (VaultTrust.swift; the interim guard) -----------
-		// The CURRENT vault's standing, for Settings → This vault and the
-		// "Trust this vault" banner. Only the app page reaches these.
+		// ---- vault trust (VaultTrust.swift, frame-bridge.md §4) -----------
+		// The CURRENT vault's standing and what it may run, for the trust
+		// prompt, Settings → This vault and Settings → Trusted vaults. Only
+		// the app page reaches these.
 		case "vaultTrustGet":
 			guard let path = vaults.currentVaultPath else { return reply(["open": false, "trusted": false], nil) }
 			let root = URL(fileURLWithPath: path, isDirectory: true)
-			reply(["open": true, "trusted": vaults.trust.isTrusted(root), "identity": vaults.trust.identity(root)], nil)
+			let access = vaults.refreshAccess()
+			var answer: [String: Any] = [
+				"open": true, "trusted": access["trusted"] as? Bool == true,
+				"decided": access["decided"] as? Bool == true, "identity": vaults.trust.identity(root), "access": access,
+			]
+			// Once, for a store from before the full design: what changed.
+			if vaults.trust.takeNotice() { answer["notice"] = ["restricted": [String]()] }
+			reply(answer, nil)
 
 		case "vaultTrustSet":
 			guard let trusted = params["trusted"] as? Bool, let path = vaults.currentVaultPath else { throw ClewError.badPayload }
 			let root = URL(fileURLWithPath: path, isDirectory: true)
-			if trusted { vaults.trust.trust(root) } else { vaults.trust.revoke(root) }
-			reply(["open": true, "trusted": vaults.trust.isTrusted(root), "identity": vaults.trust.identity(root)], nil)
+			if trusted {
+				let enable = (params["enable"] as? [String: Any]).map { VaultTrustStore.Enable.normalize($0, scripts: true) }
+				vaults.trust.trust(root, source: "user", enable: enable)
+			} else {
+				vaults.trust.revoke(root)
+			}
+			let access = vaults.refreshAccess()
+			reply(["open": true, "trusted": access["trusted"] as? Bool == true, "decided": true,
+				"identity": vaults.trust.identity(root), "access": access], nil)
+
+		case "vaultAccessGet":
+			guard let path = vaults.currentVaultPath else { return reply(NSNull(), nil) }
+			let root = URL(fileURLWithPath: path, isDirectory: true)
+			reply(["access": vaults.refreshAccess(), "enable": vaults.trust.enablements(root).dictionary,
+				"requests": VaultStore.readRequests(root).map { $0 as Any } ?? NSNull()], nil)
+
+		case "vaultAccessSet":
+			guard let key = params["key"] as? String, VaultTrustStore.enableKeys.contains(key),
+				let path = vaults.currentVaultPath else { throw ClewError.badPayload }
+			let root = URL(fileURLWithPath: path, isDirectory: true)
+			vaults.trust.setEnable(root, patch: [key: params["value"] ?? NSNull()])
+			reply(["access": vaults.refreshAccess(), "enable": vaults.trust.enablements(root).dictionary], nil)
+
+		case "trustedVaultsList":
+			reply(trustedVaultsList(), nil)
+
+		case "trustedVaultsSet":
+			guard let key = params["key"] as? String, let action = params["action"] as? String else { throw ClewError.badPayload }
+			if action == "forget" {
+				vaults.trust.forgetKey(key)
+			} else if let root = vaults.trust.rootURL(forKey: key) {
+				if action == "trust" { vaults.trust.trust(root) } else if action == "revoke" { vaults.trust.revoke(root) }
+			}
+			vaults.refreshAccess()
+			reply(["list": trustedVaultsList()], nil)
 
 		case "pdfLeakCount":
 			// PDFs that reached a frame directly and were cancelled
@@ -407,6 +456,29 @@ final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 			NSLog("CLEWJS share sheet presented=%d (%@)", root.presentedViewController != nil ? 1 : 0, sanitized)
 		}
 		#endif
+	}
+}
+
+extension FSBridge {
+	/// Settings → Trusted vaults: every vault this device has decided on,
+	/// newest decision first, with whether it is the one open.
+	func trustedVaultsList() -> [[String: Any]] {
+		let open = vaults.currentVaultPath.map { vaults.trust.identity(URL(fileURLWithPath: $0, isDirectory: true)) }
+		return vaults.trust.entries()
+			.map { key, entry -> [String: Any] in
+				let root = vaults.trust.rootURL(forKey: key)
+				return [
+					"key": key,
+					"name": root?.lastPathComponent ?? key,
+					"trusted": entry.trusted,
+					"decided": entry.decided != false,
+					"source": entry.source,
+					"at": entry.at,
+					"exists": root.map { FileManager.default.fileExists(atPath: $0.path) } ?? false,
+					"open": key == open,
+				]
+			}
+			.sorted { ($0["at"] as? String ?? "") > ($1["at"] as? String ?? "") }
 	}
 }
 

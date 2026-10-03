@@ -9,10 +9,13 @@ import { Indexer } from '../../vendor/clew/main/indexer.js';
 import { SearchService } from '../../vendor/clew/main/search.js';
 import { KvStore, KV_FILE } from '../../vendor/clew/main/kv-store.js';
 import { propagateRename } from '../../vendor/clew/main/rename-links.js';
-import { listPlugins } from '../../vendor/clew/main/plugins.js';
+import { listPlugins, enabledPlugins } from '../../vendor/clew/main/plugins.js';
+import { ENABLE_KEYS } from '../../vendor/clew/main/vault-trust.js';
+import { requestsOf } from '../../vendor/clew/main/vault-requests.js';
+import { codeSummary } from '../../vendor/clew/main/vault-code.js';
 import { planOpen, pathFromFileUrl } from '../../vendor/clew/main/open-file.js';
 import { direntKind, shouldRecurse, walkGuard } from '../../vendor/clew/main/fs-utils.js';
-import { listSnapshots, readSnapshot } from '../../vendor/clew/main/history.js';
+import { listSnapshots, readSnapshot, keepVersion } from '../../vendor/clew/main/history.js';
 import { rewritePdfFrames } from '../../vendor/clew/main/pdf-frames-rewrite.js';
 import { ConflictCenter } from './conflicts.js';
 // The ENGINE's callout modules (jmarkdown a7de8c6), the pure ones only:
@@ -23,7 +26,7 @@ import { BUILTIN_CALLOUT_TYPES } from '../../vendor/jmarkdown/src/callout-table.
 import fs from 'node:fs';
 import nodePath from 'node:path';
 import { vfs } from '../worker/shims/vfs.js';
-import { VaultManager, VAULT_ROOT, GLOBAL_PLUGINS_ROOT } from './vault-manager.js';
+import { VaultManager, VAULT_ROOT, GLOBAL_PLUGINS_ROOT, normalizeAccess } from './vault-manager.js';
 import { RenderService } from './render-service.js';
 import { settings } from './settings.js';
 import { bridgeCall, toBase64 } from './native-bridge.js';
@@ -151,7 +154,9 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 			// The device's trust first: the first standby's engine config
 			// carries `Run note code` (desktop session.js does the same
 			// before the render service opens the vault).
-			renderService.setNoteCode(vaults.trusted);
+			// What this device lets the vault run (VaultTrust.swift): note
+			// code, plugins, dataviewJs, the network — before the first config.
+			renderService.setAccess(vaults.access);
 			renderService.openVault(root);
 			// The vault's exclusion lists (vault-excludes.js): what is
 			// `unindexed` is walked past, exactly as upstream's session.js.
@@ -167,12 +172,9 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 			renderService.onFileChanged(rel);
 			indexer.onFileChanged(rel);
 			if (rel === KV_FILE) kvStore.externalChange();
-			conflicts.scan([], [rel]); // a git merge's markers arriving
 		},
 		onStructureChanged: () => {
 			indexer.onStructureChanged();
-			// A Dropbox copy, or a note with git markers, arriving new.
-			conflicts.scan(mirrorPaths());
 		},
 	};
 
@@ -188,24 +190,15 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 		vaults.hooks.onStructureChanged?.();
 	};
 
-	// ---- edit-conflict safety (conflicts.js) --------------------------------
-	// A refused save, iCloud's conflict versions, Dropbox's conflicted copies
-	// and git markers: both versions kept in .clew/history, then the user
-	// chooses (the app page's sheet, conflict-sheet.js).
+	// ---- edit-conflict safety, the iOS-only part (conflicts.js) ------------
+	// The renderer's conflicts.js handles an editor's refused save, a change
+	// under unsaved edits, Dropbox copies and git markers (NOTE_WRITE
+	// {guard}, HISTORY_KEEP). iCloud's own conflict versions are this one's:
+	// kept in history, then offered through the same sheet (conflict-sheet.js).
 	const conflicts = new ConflictCenter({ vaults, fileChanged, structureChanged });
-	vaults.hooks.isHeld = (rel) => conflicts.isHeld(rel);
-	vaults.hooks.onWriteConflict = (rel, versions) => conflicts.onWriteConflict(rel, versions);
-	vaults.hooks.onHeldDiskChange = (rel, theirs) => conflicts.onHeldDiskChange(rel, theirs);
 	vaults.hooks.onCloudConflicts = (rels) => conflicts.onCloudConflicts(rels);
-	/** Every vault file path in the mirror (the conflict scans). */
-	const mirrorPaths = () => [...vfs.files.keys()]
-		.filter((abs) => abs.startsWith(`${VAULT_ROOT}/`) && !abs.startsWith(`${VAULT_ROOT}/.clew/`))
-		.map((abs) => abs.slice(VAULT_ROOT.length + 1));
-	/** After a vault is up: what it arrived with. */
-	const announceConflicts = () => {
-		conflicts.onCloudConflicts(vaults.openCloudConflicts ?? []);
-		conflicts.scan(mirrorPaths());
-	};
+	/** After a vault is up: the iCloud conflicts it arrived with. */
+	const announceConflicts = () => conflicts.onCloudConflicts(vaults.openCloudConflicts ?? []);
 	// clewdata.json sits in the vault root, in the explorer: its first write
 	// shows it at once (Clew-app 5077207's rule — a new file Clew writes is
 	// in the tree now, not when a rescan notices).
@@ -292,6 +285,17 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 		await pause(650);
 		await vaults.flush();
 		return true;
+	};
+	/** The session's access, as native answered it (VaultTrust.swift). */
+	const adoptAccess = (raw, trusted) => {
+		vaults.access = normalizeAccess(raw, trusted);
+		vaults.trusted = vaults.access.trusted;
+		renderService.setAccess(vaults.access);
+		return vaults.access;
+	};
+	const refreshAccess = async () => {
+		const state = await bridgeCall('vaultTrustGet');
+		return adoptAccess(state?.access, state?.trusted);
 	};
 	const samePath = (a, b) => String(a ?? '').replace(/\/+$/, '') === String(b ?? '').replace(/\/+$/, '');
 	/** Open `path`: in place when no vault is open, else as a switch. */
@@ -408,15 +412,33 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 		[CH.VAULT_RECENT]: () => settings.get('recentVaults'),
 		[CH.VAULT_TREE]: () => vaults.tree(),
 
-		[CH.NOTE_READ]: ({ path }) => vaults.readNote(path),
-		[CH.NOTE_WRITE]: ({ path, content }) => {
+		[CH.NOTE_READ]: ({ path }) => {
+			const text = vaults.readNote(path);
+			// Keep theirs reads the refused-over version afresh: seen now.
+			vaults.markSeenOnRead(path);
+			return text;
+		},
+		[CH.NOTE_WRITE]: async ({ path, content, guard = false, force = false }) => {
 			// A write that CREATES the note (a template, a daily note, a
 			// plugin's note) is in the explorer at once (Clew-app 5077207).
 			const created = !vfs.has(vaults.resolve(path));
-			vaults.writeNote(path, content);
+			if (guard || force) {
+				// An editor's save (pool.js, guarded) or the user's "keep
+				// mine" (forced): the device answers before the mirror moves
+				// (vault-manager.js#writeNoteGuarded, desktop's write-guard.js).
+				const refused = await vaults.writeNoteGuarded(path, content, { guard, force });
+				if (refused) return refused;
+			} else {
+				vaults.writeNote(path, content);
+			}
 			fileChanged(path);
 			if (created) structureChanged();
+			return null;
 		},
+		// A conflict's versions, kept before anything is chosen (renderer
+		// conflicts.js, pool.js#hold): history.js#keepVersion over the mirror,
+		// whatever the interval or the history setting.
+		[CH.HISTORY_KEEP]: ({ path, text }) => keepVersion(VAULT_ROOT, vaults.resolve(path).slice(VAULT_ROOT.length + 1), text),
 		[CH.NOTE_CREATE]: ({ path }) => {
 			const rel = vaults.createNote(path);
 			structureChanged();
@@ -639,22 +661,128 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 		},
 		[CH.REMOTE_PDF_OPEN]: ({ key }) => bridgeCall('openRemotePdf', { hash: String(key ?? '') }),
 
-		// This device's trust in the open vault (VaultTrust.swift; Clew-app
-		// ipc.js, the interim guard): never a vault setting, and set only
-		// from the app's own chrome — the banner and Settings → This vault.
-		// SET rewrites the engine config and re-renders every open preview.
-		[CH.VAULT_TRUST_GET]: () => ({
-			trusted: vaults.isOpen && vaults.trusted === true,
-			refused: vaults.trusted ? [] : renderService.refusedNames(),
-		}),
-		[CH.VAULT_TRUST_SET]: async ({ trusted }) => {
+		// ---- vault trust (VaultTrust.swift; frame-bridge.md §4) ------------
+		// This device's decision about the open vault and what it may run,
+		// never a vault setting (the vault's vault-settings.json is only its
+		// request), set only from the app's own chrome: the prompt, the
+		// status-bar indicator, Settings → This vault and Trusted vaults.
+		[CH.VAULT_TRUST_GET]: async () => {
+			if (!vaults.isOpen) return { trusted: false, decided: true, refused: [], notice: null, prompt: false };
+			const state = await bridgeCall('vaultTrustGet');
+			adoptAccess(state?.access, state?.trusted);
+			return {
+				trusted: vaults.trusted,
+				decided: vaults.access.decided,
+				refused: vaults.trusted ? [] : renderService.refusedNames(),
+				notice: state?.notice ?? null,
+				prompt: true,
+			};
+		},
+		// Trusting or restricting reloads the page (§4.6): code that already
+		// runs — vault scripts in previews, plugins in the app page — can
+		// only be stopped, or started under a new CSP, by a fresh page.
+		// Settled first, as a vault switch is (prepareLeave): a Cancel
+		// changes nothing. `enable` (the prompt's yes) is what the vault
+		// asked for; a vault never decided about and trusted from Settings
+		// gets its request too. Keep restricted, for a vault already
+		// restricted, only records the answer: nothing that runs changes.
+		[CH.VAULT_TRUST_SET]: async ({ trusted, enable = null }) => {
 			if (!vaults.isOpen) return { trusted: false };
-			const answer = await bridgeCall('vaultTrustSet', { trusted: trusted === true });
-			vaults.trusted = answer?.trusted === true;
-			renderService.setNoteCode(vaults.trusted);
+			if (trusted !== true && !vaults.trusted) {
+				await bridgeCall('vaultTrustSet', { trusted: false });
+				await refreshAccess();
+				return { trusted: false };
+			}
+			if (!(await prepareLeave())) return { trusted: vaults.trusted, cancelled: true };
+			let grant = enable;
+			if (trusted === true && !grant && !vaults.access.decided) {
+				grant = requestsOf(vaults.loadState('vault-settings.json') ?? {}).enable;
+			}
+			await bridgeCall('vaultTrustSet', { trusted: trusted === true, ...(grant ? { enable: grant } : {}) });
+			if (typeof vaultSwitch.reload === 'function') {
+				vaultSwitch.reload();
+				return { trusted: trusted === true, reloading: true };
+			}
+			// Headless (the Node harness): no page to reload — in place.
+			await refreshAccess();
 			send(CH.EV_VAULT_TRUST_CHANGED, { trusted: vaults.trusted });
 			return { trusted: vaults.trusted };
 		},
+		// What this vault may run here, with the device's enablement record
+		// and the vault's own request beside it (Settings → This vault; the
+		// note API reads `noteApi` here).
+		[CH.VAULT_ACCESS_GET]: async () => {
+			if (!vaults.isOpen) return null;
+			const answer = await bridgeCall('vaultAccessGet');
+			adoptAccess(answer?.access, answer?.access?.trusted);
+			return {
+				...vaults.access,
+				enable: answer?.enable ?? null,
+				requests: answer?.requests ?? null,
+				refused: vaults.trusted ? [] : renderService.refusedNames(),
+			};
+		},
+		// One enablement (§4.6), on the device; also written into the vault's
+		// own settings as its REQUEST (never read back as a grant), so a
+		// vault keeps asking for what its author uses. Vault scripts and the
+		// network change what a loaded preview runs, so they reload the page
+		// like trust; the rest apply live.
+		[CH.VAULT_ACCESS_SET]: async ({ key, value }) => {
+			if (!vaults.isOpen || !ENABLE_KEYS.includes(key)) return null;
+			const reload = (key === 'scripts' || key === 'network') && vaults.trusted;
+			if (reload && !(await prepareLeave())) return { cancelled: true };
+			await bridgeCall('vaultAccessSet', { key, value });
+			if (key !== 'scripts') {
+				const current = vaults.loadState('vault-settings.json') ?? {};
+				const differs = key === 'plugins'
+					? JSON.stringify(current.plugins ?? []) !== JSON.stringify(value)
+					: (current[key] === true) !== (value === true);
+				if (differs) {
+					current[key] = key === 'plugins' ? value : value === true;
+					vaults.saveState('vault-settings.json', current);
+				}
+			}
+			if (reload && typeof vaultSwitch.reload === 'function') {
+				vaultSwitch.reload();
+				return { ...vaults.access, reloading: true };
+			}
+			const access = await refreshAccess();
+			send(CH.EV_VAULT_ACCESS_CHANGED, access);
+			return { ...access, reloading: false };
+		},
+		// What the vault contains that would run (§4.5): the prompt's counts
+		// and Details, from the mirror's tree and the index.
+		[CH.VAULT_CODE_SUMMARY]: () => {
+			if (!vaults.isOpen) return null;
+			return codeSummary({
+				root: VAULT_ROOT,
+				notePaths: [...(indexer.notes?.keys?.() ?? [])],
+				requests: requestsOf(vaults.loadState('vault-settings.json') ?? {}),
+				globalDir: GLOBAL_PLUGINS_ROOT,
+			});
+		},
+		// Settings → Trusted vaults: every vault this device has decided on.
+		[CH.TRUSTED_VAULTS_LIST]: () => bridgeCall('trustedVaultsList'),
+		// Revoke, trust or forget one of them; the open vault reloads.
+		[CH.TRUSTED_VAULTS_SET]: async ({ key, action }) => {
+			const state = vaults.isOpen ? await bridgeCall('vaultTrustGet') : null;
+			const isOpen = Boolean(state?.identity) && state.identity === key;
+			if (isOpen && !(await prepareLeave())) return { cancelled: true, list: await bridgeCall('trustedVaultsList') };
+			const answer = await bridgeCall('trustedVaultsSet', { key, action });
+			if (isOpen) {
+				if (typeof vaultSwitch.reload === 'function') vaultSwitch.reload();
+				else {
+					await refreshAccess();
+					send(CH.EV_VAULT_TRUST_CHANGED, { trusted: vaults.trusted });
+				}
+			}
+			return { list: answer?.list ?? [] };
+		},
+
+		// The update check (Clew-app 036befe) asks clew-app.com for a newer
+		// desktop build; the iPad's updates are the App Store's.
+		[CH.UPDATE_CHECK]: () => ({ status: 'off', reason: 'the App Store updates Clew on iPad' }),
+		[CH.UPDATE_SKIP]: () => true,
 
 		[CH.OFFICE_THUMBNAIL]: async ({ path }) => {
 			const rel = officeRel(path);
@@ -729,11 +857,12 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 			const current = vaults.loadState('vault-settings.json') ?? {};
 			current[key] = value;
 			vaults.saveState('vault-settings.json', current);
-			// The same list as upstream's ipc.js (dataviewJs joined it in
-			// 055d46b): these reach the worker only at spawn, so they need a
-			// fresh standby.
-			if (key === 'jmarkdownProject' || key === 'normalSyntax'
-				|| key === 'pandocCitations' || key === 'dataviewJs') {
+			// (`plugins`, `noteApi`, `dataviewJs` and `network` written here
+			// are the vault's REQUEST only — frame-bridge.md §4.2. What runs is
+			// the device's enablement, changed through VAULT_ACCESS_SET.)
+			// These reach the worker only at spawn, so they need a fresh
+			// standby, as upstream's ipc.js.
+			if (key === 'jmarkdownProject' || key === 'normalSyntax' || key === 'pandocCitations') {
 				renderService.reconfigure({ [key]: value === true });
 			}
 			// Bibliography settings rewrite the engine config the same way.
@@ -749,7 +878,6 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 			// This vault's TeX fragments: the worker reads them at spawn, so
 			// the standby has to go and the open previews re-render.
 			if (key === 'texFragments') renderService.reconfigure({ texFragments: value });
-			if (key === 'plugins') renderService.reconfigure({ plugins: value });
 			// This vault's callout types: the worker's table (CLEW_CALLOUTS is
 			// read at spawn) and the editor.
 			if (key === 'callouts') await calloutsChanged({ callouts: value });
@@ -791,13 +919,21 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 		// GLOBAL_PLUGINS_ROOT at vault open; a vault plugin shadows a global
 		// one of the same id, and enabling stays per vault. globalDir is the
 		// device path, which the settings row shows as its tooltip.
+		// `enabled` is what the DEVICE enabled for this vault and trust
+		// allows (a vault plugin only in a trusted vault — enabledPlugins),
+		// `requested` the vault's own ask; the list includes a restricted
+		// vault's own plugins, so Settings can show them as held back.
 		[CH.PLUGINS_LIST]: () => {
 			const globalDir = vaults.globalPluginsPath;
-			if (!vaults.isOpen) return { plugins: [], enabled: [], globalDir };
+			if (!vaults.isOpen) return { plugins: [], enabled: [], requested: [], trusted: false, globalDir };
 			const vaultSettings = vaults.loadState('vault-settings.json') ?? {};
 			return {
-				plugins: listPlugins(VAULT_ROOT, GLOBAL_PLUGINS_ROOT),
-				enabled: Array.isArray(vaultSettings.plugins) ? vaultSettings.plugins : [],
+				plugins: listPlugins(VAULT_ROOT, GLOBAL_PLUGINS_ROOT, { vault: true }),
+				enabled: enabledPlugins(VAULT_ROOT, vaults.access, GLOBAL_PLUGINS_ROOT).map((p) => p.id),
+				switchedOn: [...vaults.access.plugins],
+				requested: Array.isArray(vaultSettings.plugins) ? vaultSettings.plugins : [],
+				trusted: vaults.trusted === true,
+				access: vaults.access,
 				globalDir,
 			};
 		},
@@ -893,6 +1029,8 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 			const html = renderService.blockDocument(key);
 			return html === undefined ? null : servePdfFrames(html, renderService.blockSourcePath(key));
 		},
+		// A note document's CSP header (SchemeHandler asks with each one).
+		noteCsp: () => renderService.noteCsp(),
 		externalDiff: (diff) => vaults.applyExternalDiff(diff),
 		flush: () => vaults.flush(),
 		get sessionId() { return vaults.sessionId; },

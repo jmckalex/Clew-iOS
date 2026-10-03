@@ -124,5 +124,64 @@ do {
 	check(store.isTrusted(kept), "forgetting one vault leaves the others")
 }
 
+// MARK: - Version 2: enablements on the device, the vault only asks
+
+do {
+	let c = container("v2")
+	let known = mkvault(c.docs, "Known")
+	let fresh = mkvault(c.docs, "Fresh")
+	let store = VaultTrustStore(file: c.store, documentsURL: c.docs)
+	store.migrate([known])
+	// A legacy entry (migrated) copies what its settings enabled, once, with
+	// the network on for a trusted vault, and counts as decided.
+	let request: [String: Any] = ["plugins": ["charts", "Bad Id"], "noteApi": true, "dataviewJs": false]
+	let a = store.accessFor(known, requests: request)
+	check(a["trusted"] as? Bool == true && a["decided"] as? Bool == true, "a migrated vault: trusted and decided")
+	check(a["scripts"] as? Bool == true && a["noteApi"] as? Bool == true && a["network"] as? Bool == true, "legacy: scripts, its noteApi request, the network")
+	check(a["plugins"] as? [String] == ["charts"], "only well-formed plugin ids")
+	// Copied once: a changed request is no grant.
+	let b = store.accessFor(known, requests: ["noteApi": false, "dataviewJs": true])
+	check(b["noteApi"] as? Bool == true && b["dataviewJs"] as? Bool == false, "a later request changes nothing")
+	// A vault never seen: restricted and undecided, whatever it asks.
+	let f = store.accessFor(fresh, requests: ["noteApi": true, "plugins": ["charts"]])
+	check(f["trusted"] as? Bool == false && f["decided"] as? Bool == false, "a new vault: restricted, undecided")
+	check(f["noteApi"] as? Bool == false && f["scripts"] as? Bool == false, "nothing of its own runs")
+	// setEnable on an undecided vault: a global plugin for it, still undecided.
+	store.setEnable(fresh, patch: ["plugins": ["header"]])
+	let g = store.accessFor(fresh, requests: nil)
+	check(g["decided"] as? Bool == false && g["plugins"] as? [String] == ["header"], "a switched-on plugin is no answer to the prompt")
+	// The prompt's yes: trusted with the vault's request.
+	store.trust(fresh, enable: .normalize(["noteApi": true, "plugins": ["header", "charts"]], scripts: true))
+	let h = store.accessFor(fresh, requests: nil)
+	check(h["trusted"] as? Bool == true && h["decided"] as? Bool == true && h["noteApi"] as? Bool == true, "trusted with its request")
+	check(h["network"] as? Bool == false, "the network only when asked and granted")
+	// Revoke keeps the enablements for a later trust; effective access drops them.
+	store.revoke(fresh)
+	let r = store.accessFor(fresh, requests: nil)
+	check(r["trusted"] as? Bool == false && r["noteApi"] as? Bool == false && r["decided"] as? Bool == true, "revoked: restricted, decided")
+	check(store.enablements(fresh).noteApi == true, "…its enablements kept")
+	store.trust(fresh)
+	check(store.accessFor(fresh, requests: nil)["noteApi"] as? Bool == true, "trusted again: they apply again")
+	// Unknown keys are ignored by setEnable.
+	let e = store.setEnable(fresh, patch: ["network": true, "evil": true])
+	check(e.network && store.accessFor(fresh, requests: nil)["network"] as? Bool == true, "the network switched on")
+	// forgetKey: the next open is a first open.
+	store.forgetKey(store.identity(fresh))
+	check(store.accessFor(fresh, requests: nil)["decided"] as? Bool == false, "forgotten: undecided again")
+}
+
+do {
+	// The one-time notice: true once for a version-1 store, never for a fresh one.
+	let c = container("notice")
+	try? FileManager.default.createDirectory(at: c.store.deletingLastPathComponent(), withIntermediateDirectories: true)
+	try! #"{"version":1,"migratedAt":"2026-01-01T00:00:00Z","vaults":{}}"#.data(using: .utf8)!.write(to: c.store)
+	let old = VaultTrustStore(file: c.store, documentsURL: c.docs)
+	check(old.takeNotice() == true, "a version-1 store: the notice, once")
+	check(old.takeNotice() == false, "…and only once")
+	let c2 = container("notice-fresh")
+	let fresh = VaultTrustStore(file: c2.store, documentsURL: c2.docs)
+	check(fresh.takeNotice() == false, "a fresh store never shows it")
+}
+
 print("VaultTrust: \(passed) passed, \(failed) failed")
 exit(failed == 0 ? 0 : 1)

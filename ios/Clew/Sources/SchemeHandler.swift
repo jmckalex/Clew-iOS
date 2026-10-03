@@ -300,8 +300,18 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 		vaults.ioQueue.async { [weak self] in
 			guard let self else { return }
 			if let file = self.vaults.materialize(rel: vaultRel, timeout: 15) {
+				// Vault HTML (a header-html banner, a vault iframe, a @reveal
+				// deck): in a restricted vault it draws and runs nothing, and
+				// no vault document reaches the network unless a trusted vault
+				// has it (§4.4, §4.9) — a response HEADER, which the document
+				// cannot remove.
+				var extra: [String: String] = [:]
+				if Self.isScriptableDocument(vaultRel),
+					let csp = Self.previewCsp(kind: "vault", trusted: self.vaults.accessTrusted, network: self.vaults.accessNetwork) {
+					extra["Content-Security-Policy"] = csp
+				}
 				DispatchQueue.main.async {
-					self.respondFile(task, fileURL: file, rangeHeader: rangeHeader)
+					self.respondFile(task, fileURL: file, rangeHeader: rangeHeader, extra: extra)
 				}
 			} else {
 				// A link leading out of the vault says so (VaultPaths): a
@@ -317,12 +327,20 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 	// MARK: - Rendering through the JS engine worker
 
 	private func renderNote(_ task: WKURLSchemeTask, noteRel: String, sid: String) {
-		callNative("return await window.__clewNative.renderNote(rel);", args: ["rel": noteRel]) { [weak self] result in
+		// The note and its Content-Security-Policy (the shim's
+		// preview-csp.js: in a restricted vault only Clew's own scripts and
+		// the template's, by hash; no network unless a trusted vault has it).
+		let script = "const html = await window.__clewNative.renderNote(rel); "
+			+ "const csp = await window.__clewNative.noteCsp(); return [html, csp ?? ''];"
+		callNative(script, args: ["rel": noteRel]) { [weak self] result in
 			guard let self, !self.isStopped(task) else { return }
 			var html: String
+			var csp = Self.fallbackNoteCsp(trusted: self.vaults.accessTrusted, network: self.vaults.accessNetwork)
 			switch result {
 			case .success(let value):
-				html = (value as? String) ?? ""
+				let pair = value as? [Any]
+				html = (pair?.first as? String) ?? ""
+				if let given = pair?.last as? String { csp = given.isEmpty ? nil : given }
 			case .failure(let error):
 				// Same shape as desktop: an error document that still loads
 				// the client so the pane recovers on rebuild.
@@ -332,8 +350,46 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 					+ "<body><div id=\"__clew_err\">\(message)</div></body></html>"
 			}
 			html = self.injectClientScripts(into: html, sid: sid)
-			self.respondData(task, data: Data(html.utf8), mime: "text/html")
+			self.respondData(task, data: Data(html.utf8), mime: "text/html",
+				extra: csp.map { ["Content-Security-Policy": $0] } ?? [:])
 		}
+	}
+
+	// MARK: - The preview CSP (Clew-app main/preview-csp.js)
+
+	/// Clew's own script URLs, as CSP sources.
+	static let clewScriptSources = [
+		"clew-preview://vault/__clew_preview__/",
+		"clew-preview://vault/__clew_assets__/",
+		"clew-preview://vault/__clew_plugin_file__/",
+	]
+	private static let networkDirectives = ["connect-src 'self' blob: data:", "form-action 'none'", "worker-src 'self' blob:"]
+
+	/// preview-csp.js#previewCsp: `note` documents (rendered notes, block
+	/// documents) or other `vault` HTML. nil = no CSP (a trusted vault with
+	/// the network: exactly what it had before).
+	static func previewCsp(kind: String, trusted: Bool, network: Bool, hashes: [String] = []) -> String? {
+		var directives: [String] = []
+		if !trusted {
+			directives.append(kind == "note"
+				? (["script-src"] + clewScriptSources + hashes + ["'wasm-unsafe-eval'"]).joined(separator: " ")
+				: "script-src 'none'")
+		}
+		if !(trusted && network) { directives += networkDirectives }
+		return directives.isEmpty ? nil : directives.joined(separator: "; ")
+	}
+
+	/// A note's CSP when the shim could not say (an error): never looser
+	/// than the rule — without the template's hashes, maths waits for a
+	/// re-render rather than running a note's inline script.
+	static func fallbackNoteCsp(trusted: Bool, network: Bool) -> String? {
+		previewCsp(kind: "note", trusted: trusted, network: network)
+	}
+
+	/// preview-csp.js#isScriptableDocument: vault files served as documents
+	/// that can carry script.
+	static func isScriptableDocument(_ file: String) -> Bool {
+		file.range(of: #"\.(html?|xhtml|svg|xml)$"#, options: [.regularExpression, .caseInsensitive]) != nil
 	}
 
 	// MARK: - The caller token
@@ -423,13 +479,18 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 		guard hash.range(of: #"^[0-9a-f]{1,40}$"#, options: .regularExpression) != nil else {
 			return fail(task, "Not found", status: 404)
 		}
-		callNative("return await window.__clewNative.blockDocument(hash);", args: ["hash": hash]) { [weak self] result in
+		let script = "const html = await window.__clewNative.blockDocument(hash); "
+			+ "if (html == null) return null; const csp = await window.__clewNative.noteCsp(); return [html, csp ?? ''];"
+		callNative(script, args: ["hash": hash]) { [weak self] result in
 			guard let self, !self.isStopped(task) else { return }
 			switch result {
 			case .success(let value):
-				guard let html = value as? String else { return self.fail(task, "Not found", status: 404) }
+				guard let pair = value as? [Any], let html = pair.first as? String else { return self.fail(task, "Not found", status: 404) }
+				let given = pair.last as? String
+				let csp = given.map { $0.isEmpty ? nil : $0 } ?? Self.fallbackNoteCsp(trusted: self.vaults.accessTrusted, network: self.vaults.accessNetwork)
 				let injected = self.injectClientScripts(into: html, sid: sid, block: true)
-				self.respondData(task, data: Data(injected.utf8), mime: "text/html")
+				self.respondData(task, data: Data(injected.utf8), mime: "text/html",
+					extra: csp.map { ["Content-Security-Policy": $0] } ?? [:])
 			case .failure(let error):
 				self.fail(task, error.localizedDescription, status: 500)
 			}
@@ -453,18 +514,20 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 	/// including its two roots: the vault's .clew/plugins/<id>/ first, then
 	/// the global Documents/Plugins/<id>/ (a vault plugin SHADOWS a global
 	/// one of the same id). Installing is global; enabling is per vault.
+	/// The plugins that may run (desktop's plugins.js#enabledPlugins): those
+	/// this DEVICE enabled for the vault (VaultTrust.swift, never the vault's
+	/// own settings), a vault plugin only in a trusted vault — where it
+	/// shadows a global one of the same id — and a global one, the user's
+	/// own code, wherever the user switched it on.
 	private func enabledPlugins() -> [(id: String, scope: String, dir: URL, surfaces: [String: String])] {
 		guard let vault = vaults.currentVaultPath else { return [] }
 		let base = URL(fileURLWithPath: vault)
-		guard let settingsData = try? Data(contentsOf: base.appendingPathComponent(".clew/vault-settings.json")),
-			let settings = try? JSONSerialization.jsonObject(with: settingsData) as? [String: Any],
-			let enabled = settings["plugins"] as? [String] else { return [] }
-		return enabled.compactMap { id in
+		let trusted = vaults.accessTrusted
+		return vaults.accessPlugins.compactMap { id in
 			guard id.range(of: #"^[a-z0-9][a-z0-9-]{0,63}$"#, options: .regularExpression) != nil else { return nil }
-			let roots: [(scope: String, dir: URL)] = [
-				("vault", base.appendingPathComponent(".clew/plugins/\(id)", isDirectory: true)),
-				("global", vaults.globalPluginsURL.appendingPathComponent(id, isDirectory: true)),
-			]
+			var roots: [(scope: String, dir: URL)] = []
+			if trusted { roots.append(("vault", base.appendingPathComponent(".clew/plugins/\(id)", isDirectory: true))) }
+			roots.append(("global", vaults.globalPluginsURL.appendingPathComponent(id, isDirectory: true)))
 			for root in roots {
 				guard let surfaces = Self.manifestSurfaces(at: root.dir), !surfaces.isEmpty else { continue }
 				return (id: id, scope: root.scope, dir: root.dir, surfaces: surfaces)
@@ -515,7 +578,9 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 			out.replaceSubrange(headRange, with: out[headRange] + "<script src=\"/__clew_preview__/api.js\"></script>")
 		}
 		var tags = "<script src=\"/__clew_preview__/client.js\"></script>"
-		if let vault = vaults.currentVaultPath {
+		// Vault scripts only where this device trusts the vault AND enabled
+		// them (frame-bridge.md §4.4: nothing of the vault's is served else).
+		if vaults.accessScripts, let vault = vaults.currentVaultPath {
 			let scriptsDir = URL(fileURLWithPath: vault).appendingPathComponent(".clew/scripts")
 			if let names = try? FileManager.default.contentsOfDirectory(atPath: scriptsDir.path) {
 				for name in names.filter({ $0.hasSuffix(".js") }).sorted() {

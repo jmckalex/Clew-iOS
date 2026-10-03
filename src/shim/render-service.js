@@ -11,6 +11,7 @@ import { vfs } from '../worker/shims/vfs.js';
 import { VAULT_ROOT, GLOBAL_PLUGINS_ROOT } from './vault-manager.js';
 import { engineConfig, engineEnv, isTextPath, ENGINE_CSL_FILES } from './engine-config.js';
 import { engineExtensionEntries } from '../../vendor/clew/main/plugins.js';
+import { inlineScriptHashes, previewCsp } from '../../vendor/clew/main/preview-csp.js';
 import { isDependentFragment } from '../../vendor/clew/shared/fragment-deps.js';
 import { citationHeader, noteBibFiles } from '../../vendor/clew/main/citation-header.js';
 import nodePath from 'node:path';
@@ -140,6 +141,7 @@ export class RenderService {
 			trusted: this.#noteCode,
 			plugins: Array.isArray(this.#vaultOptions.plugins) ? [...this.#vaultOptions.plugins] : [],
 			dataviewJs: this.#noteCode && this.#vaultOptions.dataviewJs === true,
+			network: this.#noteCode,
 		};
 	}
 
@@ -155,6 +157,7 @@ export class RenderService {
 			trusted: access?.trusted === true,
 			plugins: Array.isArray(access?.plugins) ? [...access.plugins] : [],
 			dataviewJs: access?.dataviewJs === true,
+			network: access?.network === true,
 		};
 		if (this.#access && JSON.stringify(next) === JSON.stringify(this.#access)) return;
 		const trustChanged = next.trusted !== this.#noteCode;
@@ -452,6 +455,38 @@ export class RenderService {
 		} catch {
 			return '';
 		}
+	}
+
+	#templateHashes = null; // { generation, promise }
+
+	/**
+	 * The CSP hash sources of the inline scripts Clew's own template emits
+	 * for a note with NO code (the MathJax configuration) — what a
+	 * restricted vault's documents may run inline (preview-csp.js). Read off
+	 * a real render of an empty document, once per configuration, so it is
+	 * whatever the engine and this config produce, never a copy that could
+	 * drift. Desktop's render-service.js word for word.
+	 */
+	templateScriptHashes() {
+		if (this.#templateHashes?.generation === this.#configGeneration) return this.#templateHashes.promise;
+		const generation = this.#configGeneration;
+		const promise = this.#cachedBuild('', { document: true, dependent: false })
+			.then((html) => inlineScriptHashes(html))
+			.catch(() => {
+				if (this.#templateHashes?.promise === promise) this.#templateHashes = null;
+				return [];
+			});
+		this.#templateHashes = { generation, promise };
+		return promise;
+	}
+
+	/** A note document's Content-Security-Policy header (SchemeHandler
+	 *  serves rendered notes and block documents with it), or null: a
+	 *  trusted vault with the network has none. */
+	async noteCsp() {
+		const { trusted, network } = this.access;
+		const hashes = trusted ? [] : await this.templateScriptHashes();
+		return previewCsp({ kind: 'note', trusted, network: network === true, hashes });
 	}
 
 	/** A built block document by key, or undefined once evicted. */

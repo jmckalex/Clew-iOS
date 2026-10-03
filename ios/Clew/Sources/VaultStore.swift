@@ -93,7 +93,51 @@ final class VaultStore {
 		return url.path
 	}
 
-	// MARK: - Vault trust (VaultTrust.swift — the interim guard)
+	// MARK: - Vault trust (VaultTrust.swift, frame-bridge.md §4)
+
+	private let accessLock = NSLock()
+	private var currentAccess: [String: Any] = VaultTrustStore.effectiveAccess(trusted: false, enable: nil, decided: false)
+
+	/// What the open vault may run on this device (desktop's session.access):
+	/// SchemeHandler reads it to inject vault scripts and plugins, and for
+	/// the preview CSP; the shim gets it with vaultOpen.
+	var access: [String: Any] {
+		accessLock.lock(); defer { accessLock.unlock() }
+		return currentAccess
+	}
+	var accessTrusted: Bool { access["trusted"] as? Bool == true }
+	var accessScripts: Bool { access["scripts"] as? Bool == true }
+	var accessNetwork: Bool { access["network"] as? Bool == true }
+	var accessPlugins: [String] { access["plugins"] as? [String] ?? [] }
+
+	/// Re-read the open vault's access from the store (after a decision or
+	/// an enablement changed).
+	@discardableResult
+	func refreshAccess() -> [String: Any] {
+		var next = VaultTrustStore.effectiveAccess(trusted: false, enable: nil, decided: false)
+		if let path = currentVaultPath {
+			let root = URL(fileURLWithPath: path, isDirectory: true)
+			next = trust.accessFor(root, requests: Self.readRequests(root))
+		}
+		accessLock.lock(); currentAccess = next; accessLock.unlock()
+		return next
+	}
+
+	/// What the vault at `root` ASKS to run (desktop's vault-requests.js):
+	/// its vault-settings.json keys `plugins`, `noteApi`, `dataviewJs`,
+	/// `network`. A missing file is an empty request; an unreadable one nil.
+	static func readRequests(_ root: URL) -> [String: Any]? {
+		let file = root.appendingPathComponent(".clew/vault-settings.json")
+		guard FileManager.default.fileExists(atPath: file.path) else { return [:] }
+		guard let data = try? Data(contentsOf: file) else { return nil }
+		guard let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return [:] }
+		return [
+			"plugins": (object["plugins"] as? [Any] ?? []).compactMap { $0 as? String },
+			"noteApi": object["noteApi"] as? Bool == true,
+			"dataviewJs": object["dataviewJs"] as? Bool == true,
+			"network": object["network"] as? Bool == true,
+		]
+	}
 
 	/// The device's trust store, in Application Support. Created on first use
 	/// (WebHost touches it on the main thread at launch, so the I/O queue and
@@ -344,8 +388,11 @@ final class VaultStore {
 		// iCloud's own conflicts: the shim offers each its keep/compare sheet.
 		if !cloudConflicts.isEmpty { result["cloudConflicts"] = cloudConflicts.sorted() }
 		// Decided here, before the first engine config: a vault new to this
-		// device runs no note code until its owner trusts it.
-		result["trusted"] = trust.isTrusted(root)
+		// device runs none of its own code until its owner trusts it, and
+		// what a trusted one may run is this device's record (§4.2).
+		let access = refreshAccess()
+		result["access"] = access
+		result["trusted"] = access["trusted"] as? Bool == true
 		return result
 	}
 
@@ -512,17 +559,19 @@ final class VaultStore {
 		if let error = writeError { throw error }
 	}
 
-	/// Write a text file — unless it changed on disk since this app last saw
-	/// it (another device's edit, delivered by iCloud or a file provider
-	/// between rescans), and differs from what is being written: then
+	/// Write a text file. A GUARDED write (an editor's save — desktop's
+	/// write-guard.js, opt-in as there, because only the editor can answer
+	/// a refusal) is refused when the file changed on disk since this app
+	/// last saw it (another device's edit, delivered by iCloud or a file
+	/// provider between rescans) and differs from what is being written:
 	/// NOTHING is written and the disk's version comes back, so neither is
-	/// lost silently (the shim keeps both and asks). `force` is the user's
-	/// answer, "keep mine". Vault state (.clew/, the kv store) is never
-	/// guarded.
-	func write(rel: String, text: String, force: Bool = false) throws -> [String: Any]? {
+	/// lost silently (the renderer holds the note and asks). `force` is the
+	/// user's answer, "keep mine". Vault state (.clew/, the kv store) is
+	/// never guarded.
+	func write(rel: String, text: String, guarded: Bool = false, force: Bool = false) throws -> [String: Any]? {
 		let url = try resolve(rel)
 		let fm = FileManager.default
-		if !force, Self.isGuarded(rel), fm.fileExists(atPath: url.path) {
+		if guarded, !force, Self.isGuarded(rel), fm.fileExists(atPath: url.path) {
 			let onDisk = currentMtimeMs(url)
 			let changedBehindUs = knownMtimes[rel].map { abs($0 - onDisk) > 0.5 } ?? true
 			if changedBehindUs {
@@ -535,6 +584,15 @@ final class VaultStore {
 		try coordinatedWrite(to: url) { try AtomicFile.write(Data(text.utf8), to: $0) }
 		knownMtimes[rel] = currentMtimeMs(url)
 		return nil
+	}
+
+	/// The renderer adopted the disk's version that a guarded write was
+	/// refused over (Keep theirs reads it afresh): this app has now seen it,
+	/// so the next save is not refused for it. Only while that version is
+	/// still the one on disk.
+	func markSeen(rel: String, mtimeMs: Double) throws {
+		let url = try resolve(rel)
+		if abs(currentMtimeMs(url) - mtimeMs) <= 0.5 { knownMtimes[rel] = mtimeMs }
 	}
 
 	/// A user's file, where a write over an unseen version must not happen

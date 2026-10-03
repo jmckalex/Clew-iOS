@@ -15,7 +15,12 @@ export function readFileSync(p, options) {
 }
 
 export function writeFileSync(p, data) {
-	vfs.write(p, typeof data === 'string' ? data : new Uint8Array(data.buffer ?? data));
+	// A Buffer or typed array is a VIEW: its own bytes, not the whole
+	// ArrayBuffer under it (Node pools small Buffers in one 8 KB slab).
+	const bytes = typeof data === 'string' ? data
+		: ArrayBuffer.isView(data) ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength).slice()
+		: new Uint8Array(data);
+	vfs.write(p, bytes);
 }
 
 export function appendFileSync(p, data) {

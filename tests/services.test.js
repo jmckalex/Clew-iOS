@@ -51,6 +51,17 @@ let fakeOpens = 0;
 let fakeSession = null;
 // This device's trust in the vault, as VaultTrust.swift answers vaultOpen.
 let fakeTrusted = true;
+// The rest of this device's record for the vault (VaultTrust.swift v2):
+// decided, and the enablements — the seed vault's plugins as a migrated
+// vault would have them, the network on.
+let fakeDecided = true;
+const fakeEnable = { scripts: true, plugins: ['charts', 'header'], noteApi: true, dataviewJs: false, network: true };
+const fakeAccess = () => ({
+	trusted: fakeTrusted, decided: fakeDecided,
+	scripts: fakeTrusted && fakeEnable.scripts, plugins: [...fakeEnable.plugins],
+	noteApi: fakeTrusted && fakeEnable.noteApi, dataviewJs: fakeTrusted && fakeEnable.dataviewJs,
+	network: fakeTrusted && fakeEnable.network,
+});
 // Web PDFs the fake native side registered this session: hash → url.
 const fakeRemote = new Map();
 // Files another device changed since this app last saw them — what
@@ -78,6 +89,7 @@ const fakeBridge = {
 				return {
 					...fakeSession,
 					trusted: fakeTrusted,
+					access: fakeAccess(),
 					name: path.basename(params.path), path: params.path, files: listFiles(params.path),
 					...(globalDir && fs.existsSync(globalDir)
 						? { globalPlugins: { path: globalDir, files: listFiles(globalDir) } } : {}),
@@ -95,9 +107,10 @@ const fakeBridge = {
 				} };
 			case 'write': {
 				const abs = path.join(params.vault, params.rel);
-				// VaultStore.write's guard: a user's file changed behind us,
-				// and different, is not written over unless forced.
-				if (!params.force && behindUs.has(params.rel) && fs.existsSync(abs)) {
+				// VaultStore.write's guard, opt-in (an editor's save): a user's
+				// file changed behind us, and different, is not written over
+				// unless forced.
+				if (params.guard && !params.force && behindUs.has(params.rel) && fs.existsSync(abs)) {
 					const disk = fs.readFileSync(abs, 'utf8');
 					if (disk !== params.text) return { conflict: true, disk, mtimeMs: fs.statSync(abs).mtimeMs };
 				}
@@ -106,6 +119,9 @@ const fakeBridge = {
 				writeAtomic(abs, params.text);
 				return null;
 			}
+			case 'markSeen':
+				behindUs.delete(params.rel);
+				return null;
 			case 'cloudConflictVersions':
 				return fakeCloud.get(params.rel) ?? [];
 			case 'resolveCloudConflict': {
@@ -194,9 +210,24 @@ const fakeBridge = {
 				fakeQuickAction = null;
 				return { action };
 			}
+			case 'vaultTrustGet':
+				return { open: true, trusted: fakeTrusted, decided: fakeDecided, identity: 'documents:test', access: fakeAccess() };
 			case 'vaultTrustSet':
 				fakeTrusted = params.trusted === true;
-				return { open: true, trusted: fakeTrusted, identity: 'documents:test' };
+				fakeDecided = true;
+				if (params.enable) Object.assign(fakeEnable, params.enable);
+				return { open: true, trusted: fakeTrusted, decided: true, identity: 'documents:test', access: fakeAccess() };
+			case 'vaultAccessGet':
+				return { access: fakeAccess(), enable: { ...fakeEnable }, requests: { plugins: [], noteApi: false, dataviewJs: false, network: false } };
+			case 'vaultAccessSet':
+				fakeEnable[params.key] = params.value;
+				return { access: fakeAccess(), enable: { ...fakeEnable } };
+			case 'trustedVaultsList':
+				return [{ key: 'documents:test', name: 'test', trusted: fakeTrusted, decided: fakeDecided, source: 'migrated', at: '2026-10-03T00:00:00Z', exists: true, open: true }];
+			case 'trustedVaultsSet':
+				if (params.action === 'revoke') fakeTrusted = false;
+				if (params.action === 'trust') fakeTrusted = true;
+				return { list: [] };
 			case 'demoVaultPath':
 				return { path: vaultDir };
 			case 'createVault': {
@@ -288,6 +319,7 @@ const CH = {
 	OFFICE_OPEN_EXTERNAL: 'clew:office-open-external',
 	OFFICE_THUMBNAIL: 'clew:office-thumbnail',
 	CONFIRM_DISCARD: 'clew:confirm-discard',
+	HISTORY_KEEP: 'clew:history-keep',
 	VAULT_CREATE_DIALOG: 'clew:vault-create-dialog',
 	VAULT_OPEN_DEMO: 'clew:vault-open-demo',
 };
@@ -976,7 +1008,7 @@ const configOf = (init) => JSON.parse(Object.entries(init.files).find(([k]) => k
 test('trust: `Run note code` follows the device\'s trust; SET goes native, re-renders, and says so', async () => {
 	// Opened trusted (the fake answers vaultOpen with trusted: true).
 	assert.equal(configOf(workerInits.at(-1))['Run note code'], true, 'a trusted vault runs note code');
-	assert.deepEqual(await clew.invoke('clew:vault-trust-get'), { trusted: true, refused: [] });
+	assert.deepEqual(await clew.invoke('clew:vault-trust-get'), { trusted: true, decided: true, refused: [], notice: null, prompt: true });
 	const changes = [];
 	const off = clew.on('clew:ev-vault-trust-changed', (p) => changes.push(p));
 	const inits = workerInits.length;
@@ -997,12 +1029,12 @@ test('trust: `Run note code` follows the device\'s trust; SET goes native, re-re
 		fakeHtml = FAKE_HTML;
 	}
 	assert.deepEqual(refusedEvents, [{ path: 'Guide/Tabbing.md', names: ['script', 'Math."x"'] }]);
-	assert.deepEqual(await clew.invoke('clew:vault-trust-get'), { trusted: false, refused: ['script', 'Math."x"'] });
+	assert.deepEqual(await clew.invoke('clew:vault-trust-get'), { trusted: false, decided: true, refused: ['script', 'Math."x"'], notice: null, prompt: true });
 	// Trust again: refusals forgotten, note code back on.
 	assert.deepEqual(await clew.invoke('clew:vault-trust-set', { trusted: true }), { trusted: true });
 	await settle();
 	assert.equal(configOf(workerInits.at(-1))['Run note code'], true);
-	assert.deepEqual(await clew.invoke('clew:vault-trust-get'), { trusted: true, refused: [] });
+	assert.deepEqual(await clew.invoke('clew:vault-trust-get'), { trusted: true, decided: true, refused: [], notice: null, prompt: true });
 	off();
 	offRefused();
 });
@@ -1288,117 +1320,56 @@ const today = () => {
 	return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
-test('a save over another device\'s unseen edit is refused: both kept in history, the note held, the user asked', async () => {
-	const rel = 'Conflict Both.md';
+test('an editor\'s guarded save over another device\'s unseen edit is refused: {conflict, disk}, nothing written, the mirror holds the disk\'s', async () => {
+	const rel = 'Conflict Save.md';
 	await clew.invoke(CH.NOTE_WRITE, { path: rel, content: 'base\n' });
 	await native.flush();
 	otherDevice(rel, 'base\nfrom the Mac\n');
-	const { events, off } = conflictEvents();
-	await clew.invoke(CH.NOTE_WRITE, { path: rel, content: 'base\nfrom the iPad\n' });
-	await native.flush();
-	await native.flush(); // the history copies the refusal queued
-	off();
+	const answer = await clew.invoke(CH.NOTE_WRITE, { path: rel, content: 'base\nfrom the iPad\n', guard: true });
+	assert.deepEqual(answer, { conflict: true, disk: 'base\nfrom the Mac\n' });
 	assert.equal(fs.readFileSync(path.join(vaultDir, rel), 'utf8'), 'base\nfrom the Mac\n', 'the Mac\'s version was NOT written over');
-	assert.deepEqual(events.map((e) => [e.kind, e.rel, e.mine, e.theirs]), [['save', rel, 'base\nfrom the iPad\n', 'base\nfrom the Mac\n']]);
-	assert.ok(conflicts.isHeld(rel));
+	assert.equal(await clew.invoke(CH.NOTE_READ, { path: rel }), 'base\nfrom the Mac\n', 'the mirror mirrors the disk');
+	// HISTORY_KEEP: what pool.js#hold does with both versions.
+	await clew.invoke(CH.HISTORY_KEEP, { path: rel, text: 'base\nfrom the Mac\n' });
+	await clew.invoke(CH.HISTORY_KEEP, { path: rel, text: 'base\nfrom the iPad\n' });
+	await native.flush();
 	const kept = historyTexts(rel);
 	assert.ok(kept.includes('base\nfrom the Mac\n') && kept.includes('base\nfrom the iPad\n'), `both versions in .clew/history (${kept.length})`);
-	// Held: later saves stay in the mirror, none reaches the disk.
-	const mark = fakeBridge.calls.length;
-	await clew.invoke(CH.NOTE_WRITE, { path: rel, content: 'base\nfrom the iPad, more\n' });
-	await native.flush();
-	assert.deepEqual(fakeBridge.calls.slice(mark).filter(([m, p]) => m === 'write' && p.rel === rel), [], 'no write of a held note');
-	assert.equal(await clew.invoke(CH.NOTE_READ, { path: rel }), 'base\nfrom the iPad, more\n', 'the editor keeps the user\'s text');
-	// Keep Both: mine in the note (the latest), theirs beside it.
-	const sibling = await conflicts.resolve(rel, 'both');
-	assert.equal(sibling, `Conflict Both (conflict ${today()}).md`);
-	assert.equal(fs.readFileSync(path.join(vaultDir, rel), 'utf8'), 'base\nfrom the iPad, more\n');
-	assert.equal(fs.readFileSync(path.join(vaultDir, sibling), 'utf8'), 'base\nfrom the Mac\n');
-	assert.equal(conflicts.isHeld(rel), false);
-	const tree = JSON.stringify(await clew.invoke(CH.VAULT_TREE));
-	assert.ok(tree.includes(sibling), 'the sibling is in the tree at once');
+	// Keep mine: forced.
+	assert.equal(await clew.invoke(CH.NOTE_WRITE, { path: rel, content: 'base\nfrom the iPad\n', force: true }), null);
+	assert.equal(fs.readFileSync(path.join(vaultDir, rel), 'utf8'), 'base\nfrom the iPad\n');
 });
 
-test('conflict: Keep Theirs puts the other version in the note and the editor reloads; Keep Mine forces mine', async () => {
-	for (const [rel, choice, expected] of [['Conflict Theirs.md', 'theirs', 'theirs\n'], ['Conflict Mine.md', 'mine', 'mine\n']]) {
-		await clew.invoke(CH.NOTE_WRITE, { path: rel, content: 'base\n' });
-		await native.flush();
-		otherDevice(rel, 'theirs\n');
-		await clew.invoke(CH.NOTE_WRITE, { path: rel, content: 'mine\n' });
-		await native.flush();
-		assert.ok(conflicts.isHeld(rel), `${rel} held`);
-		let changed = false;
-		const offChanged = clew.on('clew:ev-file-changed', ({ path: p }) => { if (p === rel) changed = true; });
-		assert.equal(await conflicts.resolve(rel, choice), true);
-		offChanged?.();
-		assert.equal(fs.readFileSync(path.join(vaultDir, rel), 'utf8'), expected, `${choice}: on disk`);
-		assert.equal(await clew.invoke(CH.NOTE_READ, { path: rel }), expected, `${choice}: in the mirror`);
-		if (choice === 'theirs') assert.ok(changed, 'the open editor is told to reload');
-		const kept = historyTexts(rel);
-		assert.ok(kept.includes('theirs\n') && kept.includes('mine\n'), `${choice}: both kept first`);
-		assert.ok(!fs.readdirSync(vaultDir).some((f) => f.startsWith(rel.replace('.md', ' (conflict'))), 'no sibling');
-	}
-});
-
-test('conflict: a newer version arriving while held becomes "theirs"; the mirror keeps the user\'s', async () => {
-	const rel = 'Conflict Held.md';
+test('Keep theirs: reading the refused-over version marks it seen, so the next guarded save is not refused for it', async () => {
+	const rel = 'Conflict Theirs.md';
 	await clew.invoke(CH.NOTE_WRITE, { path: rel, content: 'base\n' });
 	await native.flush();
-	otherDevice(rel, 'mac 1\n');
-	await clew.invoke(CH.NOTE_WRITE, { path: rel, content: 'ipad\n' });
+	otherDevice(rel, 'theirs\n');
+	assert.equal((await clew.invoke(CH.NOTE_WRITE, { path: rel, content: 'mine\n', guard: true }))?.conflict, true);
+	assert.equal(await clew.invoke(CH.NOTE_READ, { path: rel }), 'theirs\n', 'what pool.resolveConflict(\'theirs\') reads');
 	await native.flush();
-	const { events, off } = conflictEvents();
-	fs.writeFileSync(path.join(vaultDir, rel), 'mac 2\n');
-	native.externalDiff({ changed: { [rel]: { text: 'mac 2\n', size: 6, mtimeMs: Date.now() } }, removed: [] });
-	await native.flush();
-	off();
-	assert.equal(await clew.invoke(CH.NOTE_READ, { path: rel }), 'ipad\n', 'the rescan did not patch a held note');
-	assert.deepEqual(events.map((e) => [e.kind, e.theirs, e.updated]), [['save', 'mac 2\n', true]]);
-	assert.ok(historyTexts(rel).includes('mac 2\n'), 'the newer one is kept too');
-	behindUs.delete(rel); // the rescan has now seen it
-	await conflicts.resolve(rel, 'theirs');
-	assert.equal(fs.readFileSync(path.join(vaultDir, rel), 'utf8'), 'mac 2\n');
+	assert.ok(fakeBridge.calls.some(([m, p]) => m === 'markSeen' && p.rel === rel), 'seen natively');
+	assert.equal(await clew.invoke(CH.NOTE_WRITE, { path: rel, content: 'theirs\nand more\n', guard: true }), null, 'not refused again');
+	assert.equal(fs.readFileSync(path.join(vaultDir, rel), 'utf8'), 'theirs\nand more\n');
 });
 
-test('conflict: a save equal to the other device\'s version goes through (no conflict)', async () => {
+test('only an editor\'s save is guarded: other writes (templates, link rewrites) go through, as on the desktop', async () => {
+	const rel = 'Conflict Unguarded.md';
+	await clew.invoke(CH.NOTE_WRITE, { path: rel, content: 'base\n' });
+	await native.flush();
+	otherDevice(rel, 'from the Mac\n');
+	assert.equal(await clew.invoke(CH.NOTE_WRITE, { path: rel, content: 'a template wrote this\n' }), null);
+	await native.flush();
+	assert.equal(fs.readFileSync(path.join(vaultDir, rel), 'utf8'), 'a template wrote this\n');
+	behindUs.delete(rel);
+});
+
+test('a guarded save equal to the other device\'s version goes through (no conflict)', async () => {
 	const rel = 'Conflict Same.md';
 	await clew.invoke(CH.NOTE_WRITE, { path: rel, content: 'one\n' });
 	await native.flush();
 	otherDevice(rel, 'same\n');
-	await clew.invoke(CH.NOTE_WRITE, { path: rel, content: 'same\n' });
-	await native.flush();
-	assert.equal(conflicts.isHeld(rel), false, 'both devices made the same edit: no conflict');
-});
-
-test('Dropbox conflicted copies: found when they arrive; Keep Theirs moves the copy\'s text in, both kept, the copy trashed', async () => {
-	const base = 'Dropbox Note.md';
-	const copy = "Dropbox Note (Jason's conflicted copy 2026-10-03).md";
-	await clew.invoke(CH.NOTE_WRITE, { path: base, content: 'ipad text\n' });
-	await native.flush();
-	const { events, off } = conflictEvents();
-	fs.writeFileSync(path.join(vaultDir, copy), 'mac text\n');
-	native.externalDiff({ changed: { [copy]: { text: 'mac text\n', size: 9, mtimeMs: Date.now() } }, removed: [] });
-	native.externalDiff({ changed: {}, removed: [] }); // a second rescan: announced once
-	off();
-	assert.deepEqual(events.filter((e) => e.kind === 'dropbox').map((e) => [e.base, e.copy, e.who]), [[base, copy, 'Jason']]);
-	await conflicts.resolveDropbox({ base, copy }, 'theirs');
-	assert.equal(fs.readFileSync(path.join(vaultDir, base), 'utf8'), 'mac text\n');
-	assert.equal(fs.existsSync(path.join(vaultDir, copy)), false, 'the copy is gone (to the Trash, natively)');
-	const kept = historyTexts(base);
-	assert.ok(kept.includes('ipad text\n') && kept.includes('mac text\n'), 'both kept first');
-});
-
-test('git conflict markers: a note that gains them is announced once', async () => {
-	const rel = 'Merged.md';
-	await clew.invoke(CH.NOTE_WRITE, { path: rel, content: 'clean\n' });
-	await native.flush();
-	const { events, off } = conflictEvents();
-	const marked = 'a\n<<<<<<< HEAD\nmine\n=======\ntheirs\n>>>>>>> origin/main\n';
-	fs.writeFileSync(path.join(vaultDir, rel), marked);
-	native.externalDiff({ changed: { [rel]: { text: marked, size: marked.length, mtimeMs: Date.now() } }, removed: [] });
-	native.externalDiff({ changed: { [rel]: { text: marked + 'x\n', size: marked.length + 2, mtimeMs: Date.now() + 1 } }, removed: [] });
-	off();
-	assert.deepEqual(events.map((e) => [e.kind, e.rel]), [['git', rel]]);
+	assert.equal(await clew.invoke(CH.NOTE_WRITE, { path: rel, content: 'same\n', guard: true }), null);
 });
 
 test('iCloud conflict versions: both kept in history BEFORE native marks them resolved; Keep Both and Keep Theirs', async () => {
@@ -1430,24 +1401,6 @@ test('iCloud conflict versions: both kept in history BEFORE native marks them re
 			assert.equal(await clew.invoke(CH.NOTE_READ, { path: rel }), 'the Mac\n');
 		}
 	}
-});
-
-test('conflict: a link rewrite (upstream\'s atomic write) over an unseen edit is refused too', async () => {
-	const target = 'Rename Target.md';
-	const linker = 'Rename Linker.md';
-	await clew.invoke(CH.NOTE_WRITE, { path: target, content: '# Target\n' });
-	await clew.invoke(CH.NOTE_WRITE, { path: linker, content: 'see [[Rename Target]]\n' });
-	await native.flush();
-	await settle();
-	otherDevice(linker, 'see [[Rename Target]] and more from the Mac\n');
-	// The mirror still has the old text; the rename rewrites it there.
-	const { events, off } = conflictEvents();
-	await clew.invoke(CH.FS_RENAME, { path: target, newPath: 'Rename Target 2.md' });
-	await native.flush();
-	off();
-	assert.equal(fs.readFileSync(path.join(vaultDir, linker), 'utf8'), 'see [[Rename Target]] and more from the Mac\n', 'not written over');
-	assert.deepEqual(events.map((e) => [e.kind, e.rel]), [['save', linker]]);
-	await conflicts.resolve(linker, 'mine');
 });
 
 // ---- capture (FEATURE-IDEAS #9): the shim side of capture-ui.js ----------
@@ -1486,4 +1439,60 @@ test('quick actions: the waiting one is taken once', async () => {
 	fakeQuickAction = 'scan';
 	assert.equal(await capture.takeQuickAction(), 'scan');
 	assert.equal(await capture.takeQuickAction(), null);
+});
+
+// ---- vault trust v2 (frame-bridge.md §4; VaultTrust.swift) ----------------
+
+test('trust v2: what runs is the DEVICE\'s record — a restricted vault runs no vault plugin, no dataviewjs, and its notes get the CSP', async () => {
+	// Restrict (headless: in place).
+	await clew.invoke('clew:vault-trust-set', { trusted: false });
+	await settle();
+	const list = await clew.invoke('clew:plugins-list');
+	assert.equal(list.trusted, false);
+	assert.ok(list.requested.includes('charts'), 'the vault still ASKS for charts');
+	assert.ok(!list.enabled.includes('charts'), 'a vault plugin does not run in a restricted vault');
+	const init = workerInits.at(-1);
+	assert.equal(init.env.CLEW_VAULT_RESTRICTED, '1', 'links are not followed out of a restricted vault');
+	assert.equal(init.env.CLEW_DATAVIEW_JS, 'restricted', 'dataviewjs refused, by name');
+	assert.ok(!(configOf(init).Extensions ?? []).some((e) => e.includes('/.clew/plugins/')), 'no vault engine surface in the config');
+	// The note CSP: Clew's own script URLs and the template's hashes only, no network.
+	fakeHtml = '<html><head><script>window.MathJax = { tex: {} };</script></head><body></body></html>';
+	let csp;
+	try { csp = await native.noteCsp(); } finally { fakeHtml = FAKE_HTML; }
+	assert.match(csp, /^script-src clew-preview:\/\/vault\/__clew_preview__\/ clew-preview:\/\/vault\/__clew_assets__\/ clew-preview:\/\/vault\/__clew_plugin_file__\/ 'sha256-[A-Za-z0-9+/=]+' 'wasm-unsafe-eval'/);
+	assert.ok(!csp.includes("'unsafe-inline'"), 'a note\'s own inline script does not run');
+	assert.match(csp, /connect-src 'self' blob: data:; form-action 'none'; worker-src 'self' blob:/);
+	// Trusted again, with the network (as the migrated record has): no CSP at all.
+	await clew.invoke('clew:vault-trust-set', { trusted: true });
+	await settle();
+	assert.equal(await native.noteCsp(), null, 'a trusted vault with the network: exactly what it had before');
+	assert.ok((await clew.invoke('clew:plugins-list')).enabled.includes('charts'));
+});
+
+test('trust v2: VAULT_ACCESS_SET goes to the device and writes the vault\'s REQUEST; GET has the record and the request side by side', async () => {
+	const events = [];
+	const off = clew.on('clew:ev-vault-access-changed', (p) => events.push(p));
+	const answer = await clew.invoke('clew:vault-access-set', { key: 'dataviewJs', value: true });
+	off();
+	assert.equal(answer.dataviewJs, true);
+	assert.deepEqual(fakeBridge.calls.findLast(([m]) => m === 'vaultAccessSet')[1], { key: 'dataviewJs', value: true });
+	assert.equal(events.length, 1, 'the renderer is told');
+	assert.equal(workerInits.at(-1).env.CLEW_DATAVIEW_JS, '1', 'the worker gets it');
+	const saved = JSON.parse(fs.readFileSync(path.join(vaultDir, '.clew', 'vault-settings.json'), 'utf8'));
+	assert.equal(saved.dataviewJs, true, 'the vault keeps asking for it');
+	const got = await clew.invoke('clew:vault-access-get');
+	assert.equal(got.noteApi, true, 'the note API gate reads the device\'s noteApi');
+	assert.ok(got.enable && got.requests, 'record and request');
+	assert.equal(await clew.invoke('clew:vault-access-set', { key: 'evil', value: true }), null, 'only the five keys');
+	await clew.invoke('clew:vault-access-set', { key: 'dataviewJs', value: false });
+});
+
+test('trust v2: the code summary counts what would run; trusted vaults list; the update check is the App Store\'s', async () => {
+	const summary = await clew.invoke('clew:vault-code-summary');
+	assert.deepEqual(summary.plugins.map((p) => p.id).sort(), ['charts', 'header', 'word-count']);
+	assert.equal(summary.requests.noteApi, true);
+	assert.equal(summary.empty, false);
+	const list = await clew.invoke('clew:trusted-vaults-list');
+	assert.equal(list[0].key, 'documents:test');
+	assert.deepEqual(await clew.invoke('clew:update-check'), { status: 'off', reason: 'the App Store updates Clew on iPad' });
 });

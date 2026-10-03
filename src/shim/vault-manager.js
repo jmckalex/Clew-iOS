@@ -40,6 +40,22 @@ export const GLOBAL_PLUGINS_ROOT = '/global-plugins';
 // both without dragging the bridge in. Re-exported here for existing callers.
 export { isTextPath };
 
+/** An access record from native, every key present and well-typed; a
+ *  missing one is the restricted answer. */
+export function normalizeAccess(raw, trusted = false) {
+	const a = raw && typeof raw === 'object' ? raw : {};
+	const t = a.trusted === undefined ? trusted === true : a.trusted === true;
+	return {
+		trusted: t,
+		decided: a.decided === true,
+		scripts: t && a.scripts === true,
+		plugins: Array.isArray(a.plugins) ? a.plugins.filter((id) => typeof id === 'string') : [],
+		noteApi: t && a.noteApi === true,
+		dataviewJs: t && a.dataviewJs === true,
+		network: t && a.network === true,
+	};
+}
+
 export class VaultManager {
 	/** Real on-device path of the open vault (bridge-side), or null. */
 	realPath = null;
@@ -53,6 +69,9 @@ export class VaultManager {
 	 *  reply): whether the engine may run its notes' code. False with no
 	 *  vault, and for a vault the device has not trusted. */
 	trusted = false;
+	/** The session's access (desktop's session.access): {trusted, decided,
+	 *  scripts, plugins, noteApi, dataviewJs, network}. */
+	access = normalizeAccess(null, false);
 	/** Vault paths of links leading OUT of the open vault: never followed on
 	 *  iPad (VaultPaths.swift), said once by ios-ui.js. */
 	refusedLinks = [];
@@ -96,7 +115,7 @@ export class VaultManager {
 
 	async open(vaultPath) {
 		this.close();
-		const { name, path: realPath, files, globalPlugins, sessionId, callerToken, trusted, refusedLinks, cloudConflicts } = await bridgeCall('vaultOpen', { path: vaultPath });
+		const { name, path: realPath, files, globalPlugins, sessionId, callerToken, trusted, access, refusedLinks, cloudConflicts } = await bridgeCall('vaultOpen', { path: vaultPath });
 		this.realPath = realPath;
 		this.name = name;
 		// Minted natively per opening: preview URLs carry the sid, and the
@@ -104,6 +123,9 @@ export class VaultManager {
 		this.sessionId = sessionId ?? null;
 		this.callerToken = callerToken ?? null;
 		this.trusted = trusted === true;
+		// What this device lets the vault run (VaultTrust.swift): never the
+		// vault's own settings, which are only its request.
+		this.access = normalizeAccess(access, this.trusted);
 		// Links leading out of the vault, which native skipped (VaultPaths.swift).
 		this.refusedLinks = Array.isArray(refusedLinks) ? refusedLinks : [];
 		// Opened with iCloud conflicts outstanding: said once the vault is up.
@@ -134,7 +156,16 @@ export class VaultManager {
 		// the mirror (the walks that skip it are the point of the name).
 		vfs.onWrite = (abs, data) => {
 			const rel = this.#relOf(abs);
-			if (rel === null || typeof data !== 'string' || isAtomicTemp(rel)) return;
+			if (rel === null || isAtomicTemp(rel)) return;
+			if (typeof data !== 'string') {
+				// Bytes written to a TEXT file (history.js#keepVersion writes a
+				// Buffer) are text: the mirror keeps text as strings, and the
+				// device gets them. Binaries have their own bridge calls.
+				if (!isTextPath(rel)) return;
+				data = new TextDecoder().decode(data);
+				const entry = vfs.files.get(abs);
+				if (entry) entry.data = data;
+			}
 			this.#writeText(rel, data);
 		};
 		vfs.onMkdir = (abs) => {
@@ -192,6 +223,7 @@ export class VaultManager {
 		this.sessionId = null;
 		this.callerToken = null;
 		this.trusted = false;
+		this.access = normalizeAccess(null, false);
 		this.excludes = compileExcludes({});
 	}
 
@@ -217,26 +249,57 @@ export class VaultManager {
 		return abs.slice(VAULT_ROOT.length + 1);
 	}
 
-	/** A text file's mirror content to the device. A note in conflict
-	 *  (conflicts.js) is held: its saves stay in the mirror until the user
-	 *  chooses which version to keep. */
+	/** A text file's mirror content to the device (unguarded, as desktop's
+	 *  writes are unless an editor asks: writeNoteGuarded). */
 	#writeText(rel, text) {
-		if (this.hooks.isHeld?.(rel)) return;
-		this.#enqueue(async () => {
-			const answer = await bridgeCall('write', { vault: this.realPath, rel, text });
-			// Native refused: the file changed elsewhere since it was last
-			// seen, and differs. Nothing was written; both versions go to
-			// conflicts.js, which keeps them and asks.
-			if (answer?.conflict) this.hooks.onWriteConflict?.(rel, { mine: text, theirs: answer.disk ?? '' });
-		});
+		this.#enqueue(() => bridgeCall('write', { vault: this.realPath, rel, text }));
 	}
 
+	/** Queue a native job after every write before it; resolves with ITS
+	 *  result (or rejects with its error) while the queue carries on. */
 	#enqueue(job) {
 		this.#pendingWrites++;
-		this.#flushQueue = this.#flushQueue
-			.then(job)
+		const run = this.#flushQueue.then(job);
+		this.#flushQueue = run
 			.catch((err) => console.error('[clew-ios] vault write failed:', err))
 			.finally(() => { this.#pendingWrites--; });
+		return run;
+	}
+
+	/** The disk versions a guarded save was refused over, rel → mtimeMs:
+	 *  in the mirror now, and "seen" natively once the renderer reads one
+	 *  (markSeenOnRead) — Keep theirs reads it afresh. */
+	#refusedOver = new Map();
+
+	/**
+	 * An editor's save (NOTE_WRITE {guard}): desktop's write-guard.js, with
+	 * the guard natively (VaultStore.write). The device first — refused over
+	 * a version this app has not seen, nothing is written and the answer is
+	 * {conflict, disk}; the mirror then holds the disk's version (it mirrors
+	 * the disk), and the editor holds its own. `force` is "keep mine".
+	 */
+	async writeNoteGuarded(rel, content, { guard = false, force = false } = {}) {
+		const abs = this.resolve(rel);
+		this.snapshotHistory(rel);
+		const answer = await this.#enqueue(() => bridgeCall('write', { vault: this.realPath, rel, text: content, guard, force }));
+		if (answer?.conflict) {
+			const disk = String(answer.disk ?? '');
+			vfs.patch(abs, disk, answer.mtimeMs ?? Date.now());
+			this.#refusedOver.set(rel, answer.mtimeMs);
+			return { conflict: true, disk };
+		}
+		this.#refusedOver.delete(rel);
+		vfs.patch(abs, content, Date.now());
+		return null;
+	}
+
+	/** The renderer read `rel`: if it is a version a guarded save was refused
+	 *  over, this app has now seen it (VaultStore.markSeen). */
+	markSeenOnRead(rel) {
+		if (!this.#refusedOver.has(rel)) return;
+		const mtimeMs = this.#refusedOver.get(rel);
+		this.#refusedOver.delete(rel);
+		if (typeof mtimeMs === 'number') this.#enqueue(() => bridgeCall('markSeen', { vault: this.realPath, rel, mtimeMs }));
 	}
 
 	/** Resolves when every queued native write has landed. */
@@ -406,12 +469,8 @@ export class VaultManager {
 		if (Array.isArray(cloudConflicts)) this.hooks.onCloudConflicts?.(cloudConflicts);
 		let structure = false;
 		for (const [rel, entry] of Object.entries(changed)) {
-			// A note in conflict keeps showing the user's version until they
-			// choose; a newer disk version only updates "theirs".
-			if (this.hooks.isHeld?.(rel)) {
-				this.hooks.onHeldDiskChange?.(rel, entry.text ?? '');
-				continue;
-			}
+			// A rescan has seen it natively: no refused-over version waits.
+			this.#refusedOver.delete(rel);
 			const abs = `${VAULT_ROOT}/${rel}`;
 			const existed = vfs.has(abs);
 			vfs.patch(abs, entry.text ?? '', entry.mtimeMs);
