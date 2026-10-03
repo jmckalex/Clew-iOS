@@ -32,6 +32,10 @@ final class VaultStore {
 	/// rel path -> mtimeMs at last snapshot/rescan, text files only. Read
 	/// and written on `ioQueue` (writes, rescans and opens all run there).
 	private var knownMtimes: [String: Double] = [:]
+	/// The same for the vault's PDFs (the walk, the rescan, a save): what a
+	/// guarded PDF save compares, so an annotation saved over a version this
+	/// app has not seen is refused, as a text save is. `ioQueue` only.
+	private var knownPdfMtimes: [String: Double] = [:]
 	/// Files with unresolved iCloud conflict versions (the walk's
 	/// ubiquitousItemHasUnresolvedConflicts), reported to the shim.
 	private(set) var cloudConflicts = Set<String>()
@@ -363,6 +367,7 @@ final class VaultStore {
 		refusedLinks = [:]
 		UserDefaults.standard.set(real, forKey: "lastVaultPath")
 		knownMtimes = [:]
+		knownPdfMtimes = [:]
 		cloudConflicts = []
 		var files: [String: Any] = [:]
 		let root = URL(fileURLWithPath: real, isDirectory: true)
@@ -378,6 +383,7 @@ final class VaultStore {
 				self.knownMtimes[rel] = mtimeMs
 			} else {
 				files[rel] = ["size": size, "mtimeMs": mtimeMs]
+				if Self.isPdf(rel) { self.knownPdfMtimes[rel] = mtimeMs }
 			}
 		}
 		var result: [String: Any] = [
@@ -699,9 +705,30 @@ final class VaultStore {
 	/// path must fail loudly, not scatter deduped "name 1" copies.
 	func updateBinary(rel: String, base64: String) throws {
 		guard let data = Data(base64Encoded: base64) else { throw ClewError.badPayload }
+		_ = try updateBinaryData(rel: rel, data: data)
+	}
+
+	static func isPdf(_ rel: String) -> Bool { (rel as NSString).pathExtension.lowercased() == "pdf" }
+
+	/// Overwrite an existing vault file in place (a PDF annotation save: the
+	/// binary POST, SchemeHandler `__clew_pdf_save__`). A `guarded` save of a
+	/// PDF is refused — nothing written, {conflict, mtimeMs} — when the file
+	/// changed on disk since this app last saw it (another device's
+	/// annotations, landed between rescans), as an editor's text save is;
+	/// `force` is "keep mine". Never creates: a wrong path fails loudly.
+	func updateBinaryData(rel: String, data: Data, guarded: Bool = false, force: Bool = false) throws -> [String: Any] {
 		let file = try resolve(rel)
 		guard FileManager.default.fileExists(atPath: file.path) else { throw ClewError.notFound(rel) }
+		if guarded, !force, Self.isPdf(rel) {
+			let onDisk = currentMtimeMs(file)
+			if let known = knownPdfMtimes[rel], abs(known - onDisk) > 0.5 {
+				return ["conflict": true, "mtimeMs": onDisk]
+			}
+		}
 		try coordinatedWrite(to: file) { try AtomicFile.write(data, to: $0) }
+		let mtimeMs = currentMtimeMs(file)
+		if Self.isPdf(rel) { knownPdfMtimes[rel] = mtimeMs }
+		return ["ok": true, "mtimeMs": mtimeMs, "size": data.count]
 	}
 
 	func mkdir(rel: String) throws {
@@ -783,12 +810,14 @@ final class VaultStore {
 			var seen = Set<String>()
 			var next: [String: Double] = [:]
 			var conflicts = Set<String>()
+			var nextPdf: [String: Double] = [:]
 			let root = URL(fileURLWithPath: vault, isDirectory: true)
 			// Rescans stay cheap: newly appearing evicted text gets a short
 			// shared download budget, the rest lands on a later pass.
 			let deadline = Date().addingTimeInterval(5)
 			self.walk(root, rel: "", downloadDeadline: deadline, ancestry: [self.currentVaultRealRoot ?? vault],
 				onConflict: { conflicts.insert($0) }) { rel, url, mtimeMs, size in
+				if Self.isPdf(rel) { nextPdf[rel] = mtimeMs }
 				guard Self.isText(rel) else { return }
 				seen.insert(rel)
 				next[rel] = mtimeMs
@@ -799,6 +828,7 @@ final class VaultStore {
 			}
 			let removed = previous.keys.filter { !seen.contains($0) }
 			self.knownMtimes = next
+			self.knownPdfMtimes = nextPdf
 			self.cloudConflicts = conflicts // the ones still unresolved
 			let sorted = conflicts.sorted()
 			DispatchQueue.main.async {

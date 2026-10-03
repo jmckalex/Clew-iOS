@@ -196,6 +196,29 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 		vaults.hooks.onStructureChanged?.();
 	};
 
+	/**
+	 * A PDF's bytes to the device. On the device: ONE binary POST to the app
+	 * page's own origin (SchemeHandler.swift `__clew_pdf_save__`), never
+	 * base64 through the message bridge — a 50 MB PDF moves in ~67 ms
+	 * against ~480 ms. `guard` makes it a guarded save (refused over a
+	 * version this app has not seen: {conflict, mtimeMs}), `force` "keep
+	 * mine". Under Node (no clew-app origin) the bridge carries it.
+	 */
+	const savePdfBytes = async (rel, data, { guard = false, force = false } = {}) => {
+		if (globalThis.location?.protocol === 'clew-app:' && typeof fetch === 'function') {
+			const query = new URLSearchParams({
+				rel, sid: vaults.sessionId ?? '', token: vaults.callerToken ?? '',
+				...(guard ? { guard: '1' } : {}), ...(force ? { force: '1' } : {}),
+			});
+			const res = await fetch(`clew-app://app/__clew_pdf_save__?${query}`, { method: 'POST', body: data });
+			const answer = await res.json().catch(() => null);
+			if (!res.ok) throw new Error(answer?.error ?? `The PDF was not saved (${res.status})`);
+			return answer;
+		}
+		await bridgeCall('updateBinary', { rel, base64: toBase64(data) });
+		return { ok: true };
+	};
+
 	// ---- apps in notes (apps.js; frame-bridge.md §7–§10) ---------------------
 	const apps = createApps({ vaults, indexer, searchService, kvStore, refreshTree: () => structureChanged() });
 
@@ -584,7 +607,7 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 				: bytes instanceof ArrayBuffer ? new Uint8Array(bytes)
 				: null;
 			if (!data?.length) throw new Error('Empty PDF payload');
-			await bridgeCall('updateBinary', { rel, base64: toBase64(data) });
+			await savePdfBytes(rel, data);
 			// Binaries live in the mirror as size-only stubs; move the mtime so
 			// anything re-reading the file (a viewer remount, a rescan diff)
 			// knows these bytes are new.

@@ -104,10 +104,68 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 	private func serveAppFile(_ task: WKURLSchemeTask, url: URL) {
 		guard let webRoot = webRootURL else { return fail(task, "WebRoot missing from bundle") }
 		var rel = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+		if rel == "__clew_pdf_save__" { return savePdf(task, url: url) }
 		if rel.isEmpty { rel = "index.html" }
 		let file = webRoot.appendingPathComponent(rel).standardizedFileURL
 		guard file.path.hasPrefix(webRoot.standardizedFileURL.path) else { return fail(task, "forbidden") }
 		respondFile(task, fileURL: file, rangeHeader: nil)
+	}
+
+	// MARK: - A PDF save: the bytes as one binary POST
+
+	/// The app page's PDF save (the shim's PDF_WRITE): the file's bytes as
+	/// the body of ONE POST to the page's own origin, never base64 through
+	/// the message bridge (a 50 MB PDF: ~67 ms against ~480 ms measured).
+	/// Same-origin, so no CORS; the session id and caller token in the query
+	/// (a preview document can send a request here but knows neither), and
+	/// an Origin, when one is sent, must be the app page's. `guard=1` makes
+	/// it a guarded save (VaultStore.updateBinaryData); `force=1` is "keep
+	/// mine". Answers JSON: {ok, mtimeMs, size} or {conflict, mtimeMs}.
+	private func savePdf(_ task: WKURLSchemeTask, url: URL) {
+		let json: (Int, [String: Any]) -> Void = { status, body in
+			let data = (try? JSONSerialization.data(withJSONObject: body)) ?? Data("{}".utf8)
+			self.respond(task, status: status, data: data, headers: ["Content-Type": "application/json", "Cache-Control": "no-store"])
+		}
+		guard task.request.httpMethod == "POST" else { return json(405, ["error": "POST only"]) }
+		if let origin = task.request.value(forHTTPHeaderField: "Origin"), origin != "clew-app://app" {
+			return json(403, ["error": "Forbidden"])
+		}
+		let query = Dictionary((URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? [])
+			.map { ($0.name, $0.value ?? "") }, uniquingKeysWith: { first, _ in first })
+		guard isCurrentSession(query["sid"] ?? ""), Self.tokenMatches(vaults.callerToken, query["token"]) else {
+			return json(403, ["error": "Forbidden"])
+		}
+		let rel = query["rel"] ?? ""
+		guard VaultStore.isPdf(rel), !rel.split(separator: "/", omittingEmptySubsequences: false).contains(where: { $0 == ".." || $0.isEmpty }) else {
+			return json(400, ["error": "Not a PDF in this vault: \(rel)"])
+		}
+		let guarded = query["guard"] == "1"
+		let force = query["force"] == "1"
+		let body = task.request.httpBody ?? Self.readStream(task.request.httpBodyStream)
+		guard let body, !body.isEmpty else { return json(400, ["error": "Empty PDF payload"]) }
+		vaults.ioQueue.async {
+			do {
+				let answer = try self.vaults.updateBinaryData(rel: rel, data: body, guarded: guarded, force: force)
+				DispatchQueue.main.async { guard !self.isStopped(task) else { return }; json(200, answer) }
+			} catch {
+				DispatchQueue.main.async { guard !self.isStopped(task) else { return }; json(500, ["error": error.localizedDescription]) }
+			}
+		}
+	}
+
+	/// A request body WebKit hands over as a stream rather than Data.
+	private static func readStream(_ stream: InputStream?) -> Data? {
+		guard let stream else { return nil }
+		stream.open()
+		defer { stream.close() }
+		var data = Data()
+		var buffer = [UInt8](repeating: 0, count: 1 << 16)
+		while stream.hasBytesAvailable {
+			let n = stream.read(&buffer, maxLength: buffer.count)
+			if n <= 0 { break }
+			data.append(buffer, count: n)
+		}
+		return data
 	}
 
 	// MARK: - clew-preview (rendered notes, vault files, iframe assets)
