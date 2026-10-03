@@ -198,6 +198,12 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 			guard file.path.hasPrefix(plugin.dir.standardizedFileURL.path + "/") else {
 				return fail(task, "path escapes plugin", status: 403)
 			}
+			// …and by REAL path: a link inside the plugin folder leading out
+			// of it is not followed (VaultPaths).
+			guard let pluginRoot = VaultPaths.realPath(plugin.dir.path),
+				case .inside = VaultPaths.check(file.path, root: pluginRoot) else {
+				return fail(task, "Not found", status: 404)
+			}
 			return respondFile(task, fileURL: file, rangeHeader: nil)
 		}
 
@@ -298,7 +304,12 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 					self.respondFile(task, fileURL: file, rangeHeader: rangeHeader)
 				}
 			} else {
-				DispatchQueue.main.async { self.fail(task, "Not found", status: 404) }
+				// A link leading out of the vault says so (VaultPaths): a
+				// missing image or attachment is then explained.
+				let message = self.vaults.refusedLinks[vaultRel] != nil
+					? "This is a link that leads outside the vault; links leaving a vault aren’t followed on iPad."
+					: "Not found"
+				DispatchQueue.main.async { self.fail(task, message, status: 404) }
 			}
 		}
 	}
