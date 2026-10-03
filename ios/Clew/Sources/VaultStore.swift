@@ -326,7 +326,11 @@ final class VaultStore {
 		}
 		// Clew's own vault: trusted by construction — unless its owner has
 		// since said otherwise (a recorded entry is left alone).
-		if trust.entries()[trust.identity(demo)] == nil { trust.trust(demo, source: "demo") }
+		// What it asks for is what Clew wrote into it: its plugins and the
+		// Note API run (desktop main.js passes the demo's request the same way).
+		if trust.entries()[trust.identity(demo)] == nil {
+			trust.trust(demo, source: "demo", enable: Self.readRequests(demo).map { VaultTrustStore.Enable.normalize($0, scripts: true) })
+		}
 		return demo.path
 	}
 
