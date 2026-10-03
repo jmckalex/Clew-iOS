@@ -115,37 +115,41 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 
 	/// The app page's PDF save (the shim's PDF_WRITE): the file's bytes as
 	/// the body of ONE POST to the page's own origin, never base64 through
-	/// the message bridge (a 50 MB PDF: ~67 ms against ~480 ms measured).
-	/// Same-origin, so no CORS; the session id and caller token in the query
-	/// (a preview document can send a request here but knows neither), and
-	/// an Origin, when one is sent, must be the app page's. `guard=1` makes
-	/// it a guarded save (VaultStore.updateBinaryData); `force=1` is "keep
-	/// mine". Answers JSON: {ok, mtimeMs, size} or {conflict, mtimeMs}.
+	/// the message bridge (a 30 MB PDF: 42 ms against 165 ms measured).
+	/// Same-origin, so a request header costs no preflight: the caller
+	/// token and the session id travel in X-Clew-Token / X-Clew-Session,
+	/// never in the URL (frame-bridge.md §1.2: URLs end up in places bodies
+	/// do not). The Origin must be the app page's. The query routes only:
+	/// `rel`, and Clew-app 686232b's `base` (the SHA-1 the viewer loaded),
+	/// `force`, `create`. Answers JSON: {ok, hash} or {conflict, mine,
+	/// theirs} (VaultStore.writePdf).
 	private func savePdf(_ task: WKURLSchemeTask, url: URL) {
 		let json: (Int, [String: Any]) -> Void = { status, body in
 			let data = (try? JSONSerialization.data(withJSONObject: body)) ?? Data("{}".utf8)
 			self.respond(task, status: status, data: data, headers: ["Content-Type": "application/json", "Cache-Control": "no-store"])
 		}
 		guard task.request.httpMethod == "POST" else { return json(405, ["error": "POST only"]) }
-		if let origin = task.request.value(forHTTPHeaderField: "Origin"), origin != "clew-app://app" {
+		guard task.request.value(forHTTPHeaderField: "Origin") == "clew-app://app" else {
+			return json(403, ["error": "Forbidden"])
+		}
+		guard isCurrentSession(task.request.value(forHTTPHeaderField: "X-Clew-Session") ?? ""),
+			Self.tokenMatches(vaults.callerToken, task.request.value(forHTTPHeaderField: "X-Clew-Token")) else {
 			return json(403, ["error": "Forbidden"])
 		}
 		let query = Dictionary((URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? [])
 			.map { ($0.name, $0.value ?? "") }, uniquingKeysWith: { first, _ in first })
-		guard isCurrentSession(query["sid"] ?? ""), Self.tokenMatches(vaults.callerToken, query["token"]) else {
-			return json(403, ["error": "Forbidden"])
-		}
 		let rel = query["rel"] ?? ""
 		guard VaultStore.isPdf(rel), !rel.split(separator: "/", omittingEmptySubsequences: false).contains(where: { $0 == ".." || $0.isEmpty }) else {
 			return json(400, ["error": "Not a PDF in this vault: \(rel)"])
 		}
-		let guarded = query["guard"] == "1"
+		let base = query["base"].flatMap { $0.range(of: "^[0-9a-f]{40}$", options: .regularExpression) != nil ? $0 : nil }
 		let force = query["force"] == "1"
+		let create = query["create"] == "1"
 		let body = task.request.httpBody ?? Self.readStream(task.request.httpBodyStream)
 		guard let body, !body.isEmpty else { return json(400, ["error": "Empty PDF payload"]) }
 		vaults.ioQueue.async {
 			do {
-				let answer = try self.vaults.updateBinaryData(rel: rel, data: body, guarded: guarded, force: force)
+				let answer = try self.vaults.writePdf(rel: rel, data: body, base: base, force: force, create: create)
 				DispatchQueue.main.async { guard !self.isStopped(task) else { return }; json(200, answer) }
 			} catch {
 				DispatchQueue.main.async { guard !self.isStopped(task) else { return }; json(500, ["error": error.localizedDescription]) }

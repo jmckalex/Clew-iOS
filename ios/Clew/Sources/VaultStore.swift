@@ -18,6 +18,7 @@
 // and materialized on demand when the scheme handler serves binaries.
 import Foundation
 import Security
+import CryptoKit
 
 final class VaultStore {
 	/// Absolute path of the currently open vault (set by vaultOpen).
@@ -32,10 +33,11 @@ final class VaultStore {
 	/// rel path -> mtimeMs at last snapshot/rescan, text files only. Read
 	/// and written on `ioQueue` (writes, rescans and opens all run there).
 	private var knownMtimes: [String: Double] = [:]
-	/// The same for the vault's PDFs (the walk, the rescan, a save): what a
-	/// guarded PDF save compares, so an annotation saved over a version this
-	/// app has not seen is refused, as a text save is. `ioQueue` only.
-	private var knownPdfMtimes: [String: Double] = [:]
+	/// What each PDF's bytes hash to, by mtime and size (Clew-app
+	/// main/pdf-guard.js): a guarded PDF save compares the disk's version
+	/// with the one its viewer loaded, and an ordinary autosave reads
+	/// nothing back. Refreshed by a FRESH stat after every write. `ioQueue`.
+	private var pdfHashes: [String: (mtimeMs: Double, size: Int, hash: String)] = [:]
 	/// Files with unresolved iCloud conflict versions (the walk's
 	/// ubiquitousItemHasUnresolvedConflicts), reported to the shim.
 	private(set) var cloudConflicts = Set<String>()
@@ -367,7 +369,7 @@ final class VaultStore {
 		refusedLinks = [:]
 		UserDefaults.standard.set(real, forKey: "lastVaultPath")
 		knownMtimes = [:]
-		knownPdfMtimes = [:]
+		pdfHashes = [:]
 		cloudConflicts = []
 		var files: [String: Any] = [:]
 		let root = URL(fileURLWithPath: real, isDirectory: true)
@@ -383,7 +385,6 @@ final class VaultStore {
 				self.knownMtimes[rel] = mtimeMs
 			} else {
 				files[rel] = ["size": size, "mtimeMs": mtimeMs]
-				if Self.isPdf(rel) { self.knownPdfMtimes[rel] = mtimeMs }
 			}
 		}
 		var result: [String: Any] = [
@@ -710,25 +711,121 @@ final class VaultStore {
 
 	static func isPdf(_ rel: String) -> Bool { (rel as NSString).pathExtension.lowercased() == "pdf" }
 
-	/// Overwrite an existing vault file in place (a PDF annotation save: the
-	/// binary POST, SchemeHandler `__clew_pdf_save__`). A `guarded` save of a
-	/// PDF is refused — nothing written, {conflict, mtimeMs} — when the file
-	/// changed on disk since this app last saw it (another device's
-	/// annotations, landed between rescans), as an editor's text save is;
-	/// `force` is "keep mine". Never creates: a wrong path fails loudly.
-	func updateBinaryData(rel: String, data: Data, guarded: Bool = false, force: Bool = false) throws -> [String: Any] {
+	/// Overwrite an existing vault file in place (an unguarded binary save).
+	/// Never creates: a wrong path fails loudly.
+	func updateBinaryData(rel: String, data: Data) throws -> [String: Any] {
 		let file = try resolve(rel)
 		guard FileManager.default.fileExists(atPath: file.path) else { throw ClewError.notFound(rel) }
-		if guarded, !force, Self.isPdf(rel) {
-			let onDisk = currentMtimeMs(file)
-			if let known = knownPdfMtimes[rel], abs(known - onDisk) > 0.5 {
-				return ["conflict": true, "mtimeMs": onDisk]
+		try coordinatedWrite(to: file) { try AtomicFile.write(data, to: $0) }
+		if Self.isPdf(rel) { recordPdf(file, rel: rel, data: data) }
+		return ["ok": true, "size": data.count]
+	}
+
+	// MARK: - PDF save safety (Clew-app main/pdf-guard.js, vault.writePdf;
+	// docs/dev/pdf-unification.md §7b)
+
+	static func sha1(_ data: Data) -> String {
+		Insecure.SHA1.hash(data: data).map { String(format: "%02x", $0) }.joined()
+	}
+
+	/// The SHA-1 of the PDF at `file`, read only when it changed since last
+	/// asked (stat: mtime and size).
+	private func pdfHash(_ file: URL, rel: String) throws -> String {
+		var st = stat()
+		guard stat(file.path, &st) == 0 else { throw ClewError.notFound(rel) }
+		let mtimeMs = AtomicFile.mtimeMs(file)
+		if let known = pdfHashes[rel], known.mtimeMs == mtimeMs, known.size == Int(st.st_size) { return known.hash }
+		let hash = Self.sha1(try Data(contentsOf: file))
+		pdfHashes[rel] = (mtimeMs, Int(st.st_size), hash)
+		return hash
+	}
+
+	/// After a write: the file holds `data`, as of a fresh stat.
+	@discardableResult
+	private func recordPdf(_ file: URL, rel: String, data: Data) -> String {
+		let hash = Self.sha1(data)
+		var st = stat()
+		if stat(file.path, &st) == 0 {
+			pdfHashes[rel] = (AtomicFile.mtimeMs(file), Int(st.st_size), hash)
+		} else {
+			pdfHashes.removeValue(forKey: rel)
+		}
+		return hash
+	}
+
+	/**
+	 A viewer's save of a PDF (renderer/pdf-save.js → the binary POST).
+	 GUARDED when the viewer names the version it loaded (`base`, the SHA-1
+	 of its bytes): over any other version nothing is written, BOTH versions
+	 go to the PDF's history first, and the answer is {conflict, mine,
+	 theirs} (their history names) for the conflict sheet. `force` writes
+	 regardless ("Keep mine"); `create` writes a NEW PDF and never
+	 overwrites ("Keep both": the copy beside it). No `base` (an older
+	 viewer) cannot be judged and writes, as every save did before.
+	 */
+	func writePdf(rel: String, data: Data, base: String?, force: Bool, create: Bool) throws -> [String: Any] {
+		guard Self.isPdf(rel) else { throw ClewError.message("Not a PDF: \(rel)") }
+		let file = try resolve(rel)
+		let fm = FileManager.default
+		if create {
+			guard !fm.fileExists(atPath: file.path) else { throw ClewError.message("Already exists: \(rel)") }
+			try fm.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+			try coordinatedWrite(to: file) { try AtomicFile.write(data, to: $0) }
+			return ["ok": true, "hash": recordPdf(file, rel: rel, data: data), "created": true]
+		}
+		guard fm.fileExists(atPath: file.path) else { throw ClewError.notFound(rel) }
+		if !force, let base, !base.isEmpty {
+			let disk = try pdfHash(file, rel: rel)
+			if disk != base, disk != Self.sha1(data) {
+				let theirs = keepBinaryVersion(rel: rel, data: try Data(contentsOf: file))
+				let mine = keepBinaryVersion(rel: rel, data: data)
+				return ["conflict": true, "mine": mine as Any? ?? NSNull(), "theirs": theirs as Any? ?? NSNull()]
 			}
 		}
 		try coordinatedWrite(to: file) { try AtomicFile.write(data, to: $0) }
-		let mtimeMs = currentMtimeMs(file)
-		if Self.isPdf(rel) { knownPdfMtimes[rel] = mtimeMs }
-		return ["ok": true, "mtimeMs": mtimeMs, "size": data.count]
+		return ["ok": true, "hash": recordPdf(file, rel: rel, data: data)]
+	}
+
+	/// A conflict's version of a PDF, from its history, as bytes, or nil.
+	func pdfVersion(rel: String, name: String) throws -> Data? {
+		guard Self.isPdf(rel), name.range(of: #"^[^/\\]+\.pdf$"#, options: [.regularExpression, .caseInsensitive]) != nil else { return nil }
+		return try? Data(contentsOf: try resolve(".clew/history/\(rel)/\(name)"))
+	}
+
+	/// history.js#keepVersion(…, { any: true }) for bytes: into
+	/// .clew/history/<rel>/<stamp>[-n].pdf, unless the newest version there
+	/// already holds them. Its name, or nil (never throws: safety must not
+	/// fail the thing it protects).
+	func keepBinaryVersion(rel: String, data: Data, now: Date = Date()) -> String? {
+		do {
+			let dir = try resolve(".clew/history/\(rel)")
+			let fm = FileManager.default
+			try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+			let pattern = #"^(\d{4})-(\d{2})-(\d{2}) (\d{2})\.(\d{2})\.(\d{2})(?:-(\d+))?$"#
+			let existing = ((try? fm.contentsOfDirectory(atPath: dir.path)) ?? []).filter {
+				(($0 as NSString).deletingPathExtension).range(of: pattern, options: .regularExpression) != nil
+			}
+			// Newest first by the stamp in the name (then the counter).
+			let newest = existing.sorted { a, b in
+				let sa = (a as NSString).deletingPathExtension, sb = (b as NSString).deletingPathExtension
+				return sa.compare(sb, options: .numeric) == .orderedDescending
+			}.first
+			if let newest, (try? Data(contentsOf: dir.appendingPathComponent(newest))) == data { return newest }
+			let formatter = DateFormatter()
+			formatter.locale = Locale(identifier: "en_US_POSIX")
+			formatter.dateFormat = "yyyy-MM-dd HH.mm.ss"
+			let stamp = formatter.string(from: now)
+			let sameSecond = existing.map { ($0 as NSString).deletingPathExtension }.filter { $0 == stamp || $0.hasPrefix(stamp + "-") }
+			let counter = sameSecond.compactMap { Int($0.dropFirst(stamp.count + 1)) }.max() ?? 0
+			let name = sameSecond.isEmpty ? "\(stamp).pdf" : "\(stamp)-\(counter + 1).pdf"
+			let target = dir.appendingPathComponent(name)
+			try coordinatedWrite(to: target) { try AtomicFile.write(data, to: $0) }
+			try? fm.setAttributes([.modificationDate: now], ofItemAtPath: target.path)
+			return name
+		} catch {
+			NSLog("clew: could not keep a version of %@: %@", rel, error.localizedDescription)
+			return nil
+		}
 	}
 
 	func mkdir(rel: String) throws {
@@ -810,14 +907,12 @@ final class VaultStore {
 			var seen = Set<String>()
 			var next: [String: Double] = [:]
 			var conflicts = Set<String>()
-			var nextPdf: [String: Double] = [:]
 			let root = URL(fileURLWithPath: vault, isDirectory: true)
 			// Rescans stay cheap: newly appearing evicted text gets a short
 			// shared download budget, the rest lands on a later pass.
 			let deadline = Date().addingTimeInterval(5)
 			self.walk(root, rel: "", downloadDeadline: deadline, ancestry: [self.currentVaultRealRoot ?? vault],
 				onConflict: { conflicts.insert($0) }) { rel, url, mtimeMs, size in
-				if Self.isPdf(rel) { nextPdf[rel] = mtimeMs }
 				guard Self.isText(rel) else { return }
 				seen.insert(rel)
 				next[rel] = mtimeMs
@@ -828,7 +923,6 @@ final class VaultStore {
 			}
 			let removed = previous.keys.filter { !seen.contains($0) }
 			self.knownMtimes = next
-			self.knownPdfMtimes = nextPdf
 			self.cloudConflicts = conflicts // the ones still unresolved
 			let sorted = conflicts.sorted()
 			DispatchQueue.main.async {

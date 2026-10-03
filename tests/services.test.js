@@ -56,6 +56,7 @@ let fakeTrusted = true;
 // vault would have them, the network on.
 let fakeDecided = true;
 let fakeAppGrants = '';
+let fakePdfVersions = 0;
 const fakeEnable = { scripts: true, plugins: ['charts', 'header'], noteApi: true, dataviewJs: false, network: true };
 const fakeAccess = () => ({
 	trusted: fakeTrusted, decided: fakeDecided,
@@ -213,6 +214,39 @@ const fakeBridge = {
 				return { action };
 			}
 			// The device's app grants (Application Support): text in, text out.
+			// VaultStore.writePdf (Clew-app 686232b's contract): guarded by the
+			// SHA-1 the viewer loaded; both versions into history on a refusal.
+			case 'writePdf': {
+				const abs = path.join(vaultDir, params.rel);
+				const bytes = Buffer.from(params.base64, 'base64');
+				const sha = (b) => createHash('sha1').update(b).digest('hex');
+				if (params.create) {
+					if (fs.existsSync(abs)) throw new Error(`Already exists: ${params.rel}`);
+					fs.mkdirSync(path.dirname(abs), { recursive: true });
+					fs.writeFileSync(abs, bytes);
+					return { ok: true, hash: sha(bytes), created: true };
+				}
+				if (!fs.existsSync(abs)) throw new Error(`No such vault file: ${params.rel}`);
+				const disk = fs.readFileSync(abs);
+				if (!params.force && params.base && sha(disk) !== params.base && sha(disk) !== sha(bytes)) {
+					const dir = path.join(vaultDir, '.clew', 'history', params.rel);
+					fs.mkdirSync(dir, { recursive: true });
+					const keep = (b) => {
+						const name = `2026-10-03 23.59.${String(++fakePdfVersions).padStart(2, '0')}.pdf`;
+						fs.writeFileSync(path.join(dir, name), b);
+						return name;
+					};
+					const theirs = keep(disk);
+					const mine = keep(bytes);
+					return { conflict: true, mine, theirs };
+				}
+				writeAtomic(abs, bytes);
+				return { ok: true, hash: sha(bytes) };
+			}
+			case 'pdfVersionRestore': {
+				const bytes = fs.readFileSync(path.join(vaultDir, '.clew', 'history', params.rel, params.name));
+				return fakeBridge.call('writePdf', { rel: params.to ?? params.rel, base64: bytes.toString('base64'), force: !params.create, create: params.create });
+			}
 			case 'appGrantsRead':
 				return fakeAppGrants;
 			case 'appGrantsWrite':
@@ -312,6 +346,7 @@ const CH = {
 	WORKSPACE_SAVE: 'clew:workspace-save',
 	WORKSPACE_LOAD: 'clew:workspace-load',
 	PDF_WRITE: 'clew:pdf-write',
+	PDF_VERSION_RESTORE: 'clew:pdf-version-restore',
 	PDF_FONTS_STATUS: 'clew:pdf-fonts-status',
 	PDF_FONTS_DOWNLOAD: 'clew:pdf-fonts-download',
 	EXCALIDRAW_LIB_GET: 'clew:excalidraw-lib-get',
@@ -506,7 +541,7 @@ test('pdf write overwrites an existing PDF in place', async () => {
 		path: 'Attachments/Paper.pdf',
 		bytes: new Uint8Array(annotated),
 	});
-	assert.equal(result, true);
+	assert.deepEqual(result, { ok: true, hash: createHash('sha1').update(annotated).digest('hex') }, 'no base: written, as every save was before');
 	const onDisk = fs.readFileSync(path.join(vaultDir, 'Attachments', 'Paper.pdf'));
 	assert.ok(onDisk.equals(annotated), 'the annotated bytes reached the vault file');
 });
@@ -1561,4 +1596,43 @@ test('apps: the clew-frame handler gets only the app\'s own files, with the app 
 	assert.equal(native.appServe(key, '/index.html').status, 403, 'asks again');
 	await clew.invoke('clew:vault-trust-set', { trusted: true });
 	await settle();
+});
+
+// ---- PDF save safety (Clew-app 686232b; pdf-unification.md §7b) ------------
+
+test('PDF save safety: a save over a version the viewer did not load is refused, both versions kept; force, create and restore', async () => {
+	const rel = 'Attachments/Paper.pdf';
+	const abs = path.join(vaultDir, rel);
+	const sha = (b) => createHash('sha1').update(b).digest('hex');
+	const loaded = fs.readFileSync(abs);
+	const base = sha(loaded);
+	const mine = Buffer.concat([loaded, Buffer.from('\n% mine\n')]);
+	// The viewer's own version on disk: saved.
+	assert.equal((await clew.invoke(CH.PDF_WRITE, { path: rel, bytes: new Uint8Array(mine), base })).ok, true);
+	// Another device writes; the viewer (which loaded `mine`) saves again.
+	const theirs = Buffer.concat([loaded, Buffer.from('\n% theirs, from the Mac\n')]);
+	fs.writeFileSync(abs, theirs);
+	const again = Buffer.concat([mine, Buffer.from('% more\n')]);
+	const refused = await clew.invoke(CH.PDF_WRITE, { path: rel, bytes: new Uint8Array(again), base: sha(mine) });
+	assert.equal(refused.conflict, true);
+	assert.ok(fs.readFileSync(abs).equals(theirs), 'nothing written over theirs');
+	const dir = path.join(vaultDir, '.clew', 'history', rel);
+	assert.ok(fs.readFileSync(path.join(dir, refused.theirs)).equals(theirs) && fs.readFileSync(path.join(dir, refused.mine)).equals(again), 'both in history first');
+	// The same bytes as the disk: nothing to refuse.
+	assert.equal((await clew.invoke(CH.PDF_WRITE, { path: rel, bytes: new Uint8Array(theirs), base: sha(mine) })).ok, true);
+	// Keep both: mine as a NEW file beside it — never over one.
+	const copy = 'Attachments/Paper (conflict 2026-10-03).pdf';
+	const made = await clew.invoke(CH.PDF_WRITE, { path: copy, bytes: new Uint8Array(again), create: true });
+	assert.equal(made.ok, true);
+	assert.ok(JSON.stringify(await clew.invoke(CH.VAULT_TREE)).includes('Paper (conflict 2026-10-03).pdf'), 'in the tree at once');
+	await assert.rejects(() => clew.invoke(CH.PDF_WRITE, { path: copy, bytes: new Uint8Array(again), create: true }), /Already exists/);
+	// Keep mine with the viewer gone: from history, over the PDF.
+	const restored = await clew.invoke(CH.PDF_VERSION_RESTORE, { path: rel, name: refused.mine });
+	assert.equal(restored.ok, true);
+	assert.ok(fs.readFileSync(abs).equals(again), 'mine, from history');
+	// Force: regardless.
+	fs.writeFileSync(abs, theirs);
+	assert.equal((await clew.invoke(CH.PDF_WRITE, { path: rel, bytes: new Uint8Array(mine), base, force: true })).ok, true);
+	assert.ok(fs.readFileSync(abs).equals(mine));
+	fs.rmSync(path.join(vaultDir, copy));
 });

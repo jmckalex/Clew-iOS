@@ -359,6 +359,30 @@ final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 		// ---- apps in notes: the device's grants (Application Support) -----
 		// The shim runs the grant logic (app-grants.js); the file is the
 		// device's, never the vault's — a vault sent on arrives with none.
+		// The PDF save contract over the bridge (base64): the Node harness's
+		// path, and a fallback; the app page sends the bytes as a binary POST
+		// (SchemeHandler `__clew_pdf_save__`).
+		case "writePdf":
+			guard let rel = params["rel"] as? String, let base64 = params["base64"] as? String,
+				let data = Data(base64Encoded: base64) else { throw ClewError.badPayload }
+			let base = params["base"] as? String
+			let force = params["force"] as? Bool ?? false
+			let create = params["create"] as? Bool ?? false
+			performIO(reply) { try self.vaults.writePdf(rel: rel, data: data, base: base, force: force, create: create) }
+
+		// A conflict's version from the PDF's history, over the PDF ("Keep
+		// mine") or to a new path ("Keep both"), when its viewer is gone.
+		case "pdfVersionRestore":
+			guard let rel = params["rel"] as? String, let name = params["name"] as? String else { throw ClewError.badPayload }
+			let to = params["to"] as? String
+			let create = params["create"] as? Bool ?? false
+			performIO(reply) {
+				guard let bytes = try self.vaults.pdfVersion(rel: rel, name: name) else {
+					throw ClewError.message("No such version of \(rel): \(name)")
+				}
+				return try self.vaults.writePdf(rel: to ?? rel, data: bytes, base: nil, force: !create, create: create)
+			}
+
 		case "appGrantsRead":
 			performIO(reply) { (try? String(contentsOf: Self.appGrantsFile, encoding: .utf8)) ?? "" }
 

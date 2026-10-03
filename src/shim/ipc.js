@@ -204,19 +204,47 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 	 * version this app has not seen: {conflict, mtimeMs}), `force` "keep
 	 * mine". Under Node (no clew-app origin) the bridge carries it.
 	 */
-	const savePdfBytes = async (rel, data, { guard = false, force = false } = {}) => {
+	const savePdfBytes = async (rel, data, { base = null, force = false, create = false } = {}) => {
 		if (globalThis.location?.protocol === 'clew-app:' && typeof fetch === 'function') {
+			// The query routes; the caller token and the session id ride in
+			// headers, never in a URL (frame-bridge.md §1.2). Same-origin: no
+			// preflight for them.
 			const query = new URLSearchParams({
-				rel, sid: vaults.sessionId ?? '', token: vaults.callerToken ?? '',
-				...(guard ? { guard: '1' } : {}), ...(force ? { force: '1' } : {}),
+				rel, ...(base ? { base } : {}), ...(force ? { force: '1' } : {}), ...(create ? { create: '1' } : {}),
 			});
-			const res = await fetch(`clew-app://app/__clew_pdf_save__?${query}`, { method: 'POST', body: data });
+			const res = await fetch(`clew-app://app/__clew_pdf_save__?${query}`, {
+				method: 'POST',
+				headers: { 'X-Clew-Token': vaults.callerToken ?? '', 'X-Clew-Session': vaults.sessionId ?? '' },
+				body: data,
+			});
 			const answer = await res.json().catch(() => null);
 			if (!res.ok) throw new Error(answer?.error ?? `The PDF was not saved (${res.status})`);
 			return answer;
 		}
-		await bridgeCall('updateBinary', { rel, base64: toBase64(data) });
-		return { ok: true };
+		return bridgeCall('writePdf', { rel, base64: toBase64(data), base, force, create });
+	};
+	/** A PDF path inside this vault, or a throw. resolve() would quietly pop
+	 *  a '..' back inside; a request carrying one is malformed either way. */
+	const pdfRel = (path) => {
+		const rel = typeof path === 'string' ? path : '';
+		if (!/\.pdf$/i.test(rel)) throw new Error(`Not a PDF: ${rel}`);
+		if (rel.split('/').some((seg) => seg === '..' || seg === '')) throw new Error(`Bad PDF path: ${rel}`);
+		vaults.resolve(rel);
+		return rel;
+	};
+	/** The mirror after a PDF write: its history versions on a conflict, the
+	 *  new file on a create (in the tree now), else a moved mtime so anything
+	 *  re-reading it knows the bytes are new. Answers the renderer's shape. */
+	const pdfWritten = (rel, answer, created) => {
+		if (answer?.conflict) {
+			for (const name of [answer.mine, answer.theirs]) {
+				if (typeof name === 'string' && name) vfs.patch(`${VAULT_ROOT}/.clew/history/${rel}/${name}`, '', Date.now());
+			}
+			return { conflict: true, mine: answer.mine ?? null, theirs: answer.theirs ?? null };
+		}
+		if (created) vaults.addedNatively(rel);
+		else vfs.patch(`${VAULT_ROOT}/${rel}`, '', Date.now());
+		return { ok: true, hash: answer?.hash ?? null };
 	};
 
 	// ---- apps in notes (apps.js; frame-bridge.md §7–§10) ---------------------
@@ -590,29 +618,36 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 		// overwrite a PDF the user already has, which is what annotating does
 		// on purpose. Swift's updateBinary re-enforces existence and
 		// containment and takes the coordinated-write lock.
-		[CH.PDF_WRITE]: async ({ path, bytes }) => {
-			const rel = typeof path === 'string' ? path : '';
-			if (!/\.pdf$/i.test(rel)) throw new Error(`Not a PDF: ${rel}`);
-			// resolve() would quietly pop a '..' back inside the vault; a save
-			// request carrying one is malformed either way, so refuse it.
-			if (rel.split('/').some((seg) => seg === '..' || seg === '')) {
-				throw new Error(`Bad PDF path: ${rel}`);
-			}
+		// A viewer's save (renderer/pdf-save.js; Clew-app 686232b, PDF save
+		// safety): guarded by the version the viewer loaded (`base`, the
+		// SHA-1 of its bytes) — over another version nothing is written, both
+		// go to the PDF's history, and the answer is {conflict, mine, theirs}
+		// for the sheet (renderer/pdf-conflicts.js). `force` is "Keep mine",
+		// `create` the copy beside it ("Keep both"), never over a file.
+		[CH.PDF_WRITE]: async ({ path, bytes, base = null, force = false, create = false }) => {
+			const rel = pdfRel(path);
 			const abs = vaults.resolve(rel);
-			if (!vfs.has(abs)) throw new Error(`No such PDF: ${rel}`);
-			// postMessage delivers a structured-clone Uint8Array; the bridge
-			// speaks base64.
+			if (create && vfs.has(abs)) throw new Error(`Already exists: ${rel}`);
+			if (!create && !vfs.has(abs)) throw new Error(`No such PDF: ${rel}`);
+			// postMessage delivers a structured-clone Uint8Array.
 			const data = bytes instanceof Uint8Array ? bytes
 				: ArrayBuffer.isView(bytes) ? new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength)
 				: bytes instanceof ArrayBuffer ? new Uint8Array(bytes)
 				: null;
 			if (!data?.length) throw new Error('Empty PDF payload');
-			await savePdfBytes(rel, data);
-			// Binaries live in the mirror as size-only stubs; move the mtime so
-			// anything re-reading the file (a viewer remount, a rescan diff)
-			// knows these bytes are new.
-			vfs.patch(abs, '', Date.now());
-			return true;
+			const answer = await savePdfBytes(rel, data, {
+				base: typeof base === 'string' ? base : null, force: force === true, create: create === true,
+			});
+			return pdfWritten(rel, answer, create === true);
+		},
+		// A conflict's version from the PDF's history — the sheet's way to
+		// "Keep mine" / "Keep both" when the viewer that held mine is gone.
+		// Copied natively: the bytes never cross.
+		[CH.PDF_VERSION_RESTORE]: async ({ path, name, to = null, create = false }) => {
+			const rel = pdfRel(path);
+			const target = to == null ? rel : pdfRel(to);
+			const answer = await bridgeCall('pdfVersionRestore', { rel, name: String(name ?? ''), ...(to == null ? {} : { to: target }), create: create === true });
+			return pdfWritten(target, answer, create === true);
 		},
 
 		// The Excalidraw shape library, per vault: it is a working set that
