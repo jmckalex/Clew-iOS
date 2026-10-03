@@ -221,7 +221,16 @@ export function registerIpc() {
 	handle(CH.RENDER_SUBSCRIBE, (s, { path }) => s.renderService.subscribe(path));
 	handle(CH.RENDER_UNSUBSCRIBE, (s, { path }) => s.renderService.unsubscribe(path));
 	handle(CH.RENDER_HTML, (s, { path }) => s.renderService.renderedHtml(path));
-	handle(CH.PDF_WRITE, (s, { path, bytes }) => s.vaults.writePdf(path, bytes));
+	// Guarded by the version the viewer loaded (`base`); `force` is "Keep
+	// mine", `create` the conflict copy (main/pdf-guard.js, vault.writePdf).
+	handle(CH.PDF_WRITE, (s, { path, bytes, base, force, create }) => s.vaults.writePdf(path, bytes, { base, force: Boolean(force), create: Boolean(create) }));
+	// A conflict's version from the PDF's history — the conflict sheet's way
+	// to "Keep mine" / "Keep both" when the viewer that held mine is gone.
+	handle(CH.PDF_VERSION_RESTORE, (s, { path, name, to, create }) => {
+		const bytes = s.vaults.pdfVersion(path, name);
+		if (!bytes) throw new Error(`No such version of ${path}: ${name}`);
+		return s.vaults.writePdf(to ?? path, bytes, { force: !create, create: Boolean(create) });
+	});
 	handle(CH.OFFICE_WRITE, (s, { path, bytes }) => s.vaults.writeOffice(path, bytes));
 	// The Excalidraw shape library, per vault: it is a working set that belongs
 	// with the notes it illustrates, so a vault carries its own.

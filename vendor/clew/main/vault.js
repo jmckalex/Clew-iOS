@@ -24,6 +24,7 @@ import { insideByRealpath } from '../engine/vault-bounds.js';
 import { compileExcludes } from './vault-excludes.js';
 import { snapshotBeforeWrite, renameHistory, keepVersion } from './history.js';
 import { WriteGuard } from './write-guard.js';
+import { PdfGuard } from './pdf-guard.js';
 import { renamePdfMeta } from './pdf-meta.js';
 
 // The walk/watch rules (which directories are never shown, and the
@@ -239,6 +240,8 @@ export class VaultManager {
 
 	/** What each note was when last read or written here (write-guard.js). */
 	guard = new WriteGuard();
+	// PDFs' (main/pdf-guard.js): what each PDF's bytes hash to, by mtime and size.
+	#pdfGuard = new PdfGuard();
 
 	readNote(rel) {
 		return this.guard.read(rel, this.resolve(rel));
@@ -319,11 +322,43 @@ export class VaultManager {
 	 * resolve inside the vault, end in .pdf, and already exist. Annotating
 	 * edits a file you are looking at; it never creates one.
 	 */
-	writePdf(rel, data) {
+	/**
+	 * A viewer's save of a PDF (renderer/pdf-save.js). GUARDED when the
+	 * viewer names the version it loaded (`base`, the SHA-1 of its bytes —
+	 * main/pdf-guard.js): over any other version nothing is written, BOTH
+	 * versions go to the PDF's history first, and the answer is `{ conflict,
+	 * mine, theirs }` (their history names) for the conflict sheet
+	 * (renderer/pdf-conflicts.js). `force` writes regardless ("Keep mine");
+	 * `create` writes a NEW PDF and never overwrites ("Keep both": the
+	 * conflict copy beside it). Otherwise only an existing PDF inside the
+	 * vault may be written, as before.
+	 * @returns {{ ok: true, hash: string } | { conflict: true, mine: string|null, theirs: string|null }}
+	 */
+	writePdf(rel, data, { base = null, force = false, create = false } = {}) {
 		if (!/\.pdf$/i.test(rel)) throw new Error(`Not a PDF: ${rel}`);
 		const abs = this.resolve(rel);
+		const bytes = Buffer.from(data);
+		if (create) {
+			fs.mkdirSync(path.dirname(abs), { recursive: true });
+			fs.writeFileSync(abs, bytes, { flag: 'wx' });   // EEXIST: never over a file
+			const hash = this.#pdfGuard.wrote(abs, bytes);
+			this.refreshTree();
+			return { ok: true, hash };
+		}
 		if (!fs.existsSync(abs)) throw new Error(`No such PDF: ${rel}`);
-		writeFileAtomic(abs, Buffer.from(data));
+		if (!force && this.#pdfGuard.check(abs, bytes, base)) {
+			const theirs = keepVersion(this.root, rel, fs.readFileSync(abs), { any: true });
+			const mine = keepVersion(this.root, rel, bytes, { any: true });
+			return { conflict: true, mine, theirs };
+		}
+		writeFileAtomic(abs, bytes);
+		return { ok: true, hash: this.#pdfGuard.wrote(abs, bytes) };
+	}
+
+	/** A PDF's version kept in its history (a conflict's), as bytes, or null. */
+	pdfVersion(rel, name) {
+		if (!/\.pdf$/i.test(rel) || !/^[^/\\]+\.pdf$/i.test(String(name ?? ''))) return null;
+		try { return fs.readFileSync(path.join(this.root, '.clew', 'history', rel, name)); } catch { return null; }
 	}
 
 	// The ZetaOffice viewer's save path, guarded like writePdf: only an

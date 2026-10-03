@@ -129,12 +129,14 @@ function snapshotName(existing, stamp, ext) {
  * when it equals the newest snapshot. Never throws; returns the snapshot's
  * name, or null.
  */
-export function keepVersion(root, rel, text, { now = Date.now() } = {}) {
-	if (!isTracked(rel)) return null;
+export function keepVersion(root, rel, text, { now = Date.now(), any = false } = {}) {
+	// `any`: a file history does not track by itself — a PDF in a conflict
+	// (main/pdf-guard.js) — kept all the same, its bytes as they are.
+	if (!any && !isTracked(rel)) return null;
 	try {
 		const dir = historyDir(root, rel);
 		const existing = entriesIn(dir);
-		const body = Buffer.from(String(text ?? ''));
+		const body = Buffer.isBuffer(text) || text instanceof Uint8Array ? Buffer.from(text) : Buffer.from(String(text ?? ''));
 		if (existing[0]) {
 			try { if (fs.readFileSync(path.join(dir, existing[0].name)).equals(body)) return existing[0].name; } catch { /* unreadable: keep anew */ }
 		}

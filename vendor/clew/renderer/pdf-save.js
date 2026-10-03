@@ -191,11 +191,16 @@ export function installPdfSaveBridge() {
 		const msg = event.data;
 		if (!fromPreviewOrigin(event)) return;
 		if (!msg || msg.source !== 'clew-pdf' || msg.type !== 'pdf-save') return;
-		const reply = (ok, error) => event.source?.postMessage(
-			{ source: 'clew-pdf-host', type: 'pdf-save-result', id: msg.id, ok, error }, event.origin);
+		const reply = (ok, error, result) => event.source?.postMessage(
+			{ source: 'clew-pdf-host', type: 'pdf-save-result', id: msg.id, ok, error, result }, event.origin);
 		try {
-			await ipc.invoke(CH.PDF_WRITE, { path: msg.path, bytes: msg.bytes });
-			reply(true);
+			// The answer goes back whole: `{ ok, hash }`, or `{ conflict, … }`
+			// when the disk holds a version the viewer did not load
+			// (main/pdf-guard.js) — the viewer pauses and says so.
+			const result = await ipc.invoke(CH.PDF_WRITE, {
+				path: msg.path, bytes: msg.bytes, base: msg.base ?? null, force: Boolean(msg.force), create: Boolean(msg.create),
+			});
+			reply(true, null, result ?? {});
 		} catch (err) {
 			console.warn('[clew] PDF save failed:', err);
 			reply(false, String(err?.message ?? err));

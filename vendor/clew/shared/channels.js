@@ -108,6 +108,7 @@ export const CH = {
 	RENDER_UNSUBSCRIBE: 'clew:render-unsubscribe',
 	RENDER_HTML: 'clew:render-html',
 	PDF_WRITE: 'clew:pdf-write',
+	PDF_VERSION_RESTORE: 'clew:pdf-version-restore',
 	OFFICE_WRITE: 'clew:office-write',
 
 	// invoke: office tabs (ZetaOffice). The slot is the app-global

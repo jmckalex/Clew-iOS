@@ -41,10 +41,31 @@ window.addEventListener('message', (event) => {
 	if (!pending) return;
 	pendingSaves.delete(msg.id);
 	clearTimeout(pending.timer);
-	msg.ok ? pending.resolve() : pending.reject(new Error(msg.error || 'save failed'));
+	msg.ok ? pending.resolve(msg.result ?? {}) : pending.reject(new Error(msg.error || 'save failed'));
 });
 
-function saveToVault(rel, bytes) {
+/**
+ * The version of a PDF a viewer loaded: the SHA-1 of its bytes, hex — what
+ * a save names as its `base`, so the host refuses it over any other version
+ * (main/pdf-guard.js; a port checks the same natively). null where the page
+ * cannot hash (no crypto.subtle), which leaves the save unguarded, as all
+ * were before.
+ */
+async function versionOf(buffer) {
+	try {
+		const digest = await crypto.subtle.digest('SHA-1', buffer);
+		return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+	} catch { return null; }
+}
+
+/**
+ * Save `bytes` as the vault's `rel`: resolves with the host's answer —
+ * `{ ok, hash }` (the version now on disk), or `{ conflict, mine, theirs }`
+ * when the disk holds a version this viewer did not load (nothing written;
+ * both versions in the PDF's history). `base` the version loaded; `force`
+ * writes regardless ("Keep mine"); `create` writes a new PDF ("Keep both").
+ */
+function saveToVault(rel, bytes, { base = null, force = false, create = false } = {}) {
 	return new Promise((resolve, reject) => {
 		const id = ++saveSeq;
 		pendingSaves.set(id, {
@@ -54,9 +75,26 @@ function saveToVault(rel, bytes) {
 				reject(new Error('save timed out'));
 			}, 30_000),
 		});
-		postTo(window.top, { source: 'clew-pdf', type: 'pdf-save', id, path: rel, bytes }, topOrigin());
+		postTo(window.top, { source: 'clew-pdf', type: 'pdf-save', id, path: rel, bytes, base, force, create }, topOrigin());
 	});
 }
+
+// ---- a conflict, resolved (renderer/pdf-conflicts.js) --------------------------
+// A refused save pauses the viewer and goes up as `pdf-conflict`; the host's
+// sheet answers with `pdf-resolve` — mine (save again, over theirs), theirs
+// (reload from disk; mine is in the history), both (mine as a new PDF beside
+// it, then theirs) — and hears `pdf-resolved` back.
+window.addEventListener('message', async (event) => {
+	const msg = event.data;
+	if ((event.source !== window.top && event.source !== window.parent) || msg?.source !== 'clew-pdf-host' || msg.type !== 'pdf-resolve') return;
+	const handles = [...liveHandles].filter((h) => h.path === msg.path && h.conflict);
+	let ok = handles.length > 0;
+	let error = handles.length ? null : 'no viewer holds that conflict';
+	for (const h of handles) {
+		try { await h.resolve(msg.choice, msg.copyPath); } catch (err) { ok = false; error = String(err?.message ?? err); }
+	}
+	postTo(event.source, { source: 'clew-pdf', type: 'pdf-resolved', requestId: msg.requestId, path: msg.path, choice: msg.choice, ok, error }, event.origin);
+});
 
 // ---- unsaved edits, as the host sees them ----------------------------------
 // A document that goes away takes a pending save with it, and nothing it does
@@ -191,7 +229,7 @@ export function vaultRelOf(src) {
 export async function createViewer({ target, src, onStatus = () => {}, readonly = false, buffer: given = null, name = null }) {
 	const rel = vaultRelOf(src);
 	const handle = {
-		target, container: null, saveTimer: null, path: rel, readonly,
+		target, container: null, saveTimer: null, path: rel, readonly, base: null, conflict: null,
 		// An edit still waiting on the debounce is written before the viewer
 		// goes (a note re-rendered without its embed, say), not dropped.
 		dispose() {
@@ -216,6 +254,9 @@ export async function createViewer({ target, src, onStatus = () => {}, readonly 
 		given ?? fetch(src).then((r) => r.arrayBuffer()),
 	]);
 	if (!target.isConnected) return handle;   // re-rendered away while loading
+	// The version loaded, before the bytes go to the engine (which may take
+	// the buffer): every save names it (main/pdf-guard.js).
+	handle.base = readonly ? null : await versionOf(buffer);
 
 	// CJK fallback fonts, if the user has downloaded them (Settings → PDF
 	// viewer). null — EmbedPDF's "no fallback, and no CDN either" — otherwise.
@@ -271,13 +312,29 @@ export async function createViewer({ target, src, onStatus = () => {}, readonly 
 	if (exportCap && annotationCap && !readonly) {
 		let saving = false;
 		let saveAgain = false;
-		const saveNow = async () => {
+		const saveNow = async ({ force = false } = {}) => {
+			// Held over a conflict: nothing is saved until it is resolved.
+			if (handle.conflict && !force) return;
 			if (saving) { saveAgain = true; return; }
 			saving = true;
 			onStatus('saving…');
 			try {
 				const bytes = await exportCap.saveAsCopy().toPromise();
-				await saveToVault(rel, new Uint8Array(bytes));
+				const result = await saveToVault(rel, new Uint8Array(bytes), { base: handle.base, force });
+				if (result?.conflict) {
+					// The disk holds a version this viewer did not load: nothing
+					// was written, both versions are in the PDF's history, and the
+					// host asks the user (renderer/pdf-conflicts.js).
+					handle.conflict = { mine: result.mine ?? null, theirs: result.theirs ?? null };
+					clearTimeout(handle.saveTimer);
+					handle.saveTimer = null;
+					saveAgain = false;
+					onStatus('not saved — changed elsewhere');
+					postTo(window.top, { source: 'clew-pdf', type: 'pdf-conflict', path: rel, ...handle.conflict }, topOrigin());
+					window.__clewPdfConflicts = (window.__clewPdfConflicts ?? 0) + 1;
+					return;
+				}
+				if (result?.hash) handle.base = result.hash;
 				onStatus('saved');
 				window.__clewPdfSaves = (window.__clewPdfSaves ?? 0) + 1;
 			} catch (err) {
@@ -294,7 +351,37 @@ export async function createViewer({ target, src, onStatus = () => {}, readonly 
 		// Unsaved: an edit waiting on the debounce, a save running, or one
 		// queued behind it. A FAILED save is not — the host must not keep a
 		// frame for ever over an edit that will not land.
-		handle.isDirty = () => Boolean(handle.saveTimer) || saving || saveAgain;
+		// Held over a conflict is not unsaved either: the edit is in the PDF's
+		// history, and nothing the host waits for will land it.
+		handle.isDirty = () => !handle.conflict && (Boolean(handle.saveTimer) || saving || saveAgain);
+		/** This viewer's document afresh from disk: the version there now. */
+		handle.reload = async () => {
+			const fresh = await fetch(src, { cache: 'no-store' }).then((r) => r.arrayBuffer());
+			handle.base = await versionOf(fresh);
+			const current = docManager.getActiveDocument?.();
+			if (current?.id) await docManager.closeDocument(current.id).toPromise();
+			await docManager.openDocumentBuffer({ buffer: fresh, name: name ?? rel.split('/').pop() ?? 'document.pdf' }).toPromise();
+		};
+		/** The host's choice for this viewer's conflict (the sheet's buttons). */
+		handle.resolve = async (choice, copyPath) => {
+			if (choice === 'mine') {
+				handle.conflict = null;
+				await saveNow({ force: true });
+			} else if (choice === 'both') {
+				if (!copyPath) throw new Error('no path for the copy');
+				const bytes = await exportCap.saveAsCopy().toPromise();
+				await saveToVault(copyPath, new Uint8Array(bytes), { create: true });
+				handle.conflict = null;
+				await handle.reload();
+			} else if (choice === 'theirs') {
+				handle.conflict = null;
+				clearTimeout(handle.saveTimer);
+				handle.saveTimer = null;
+				await handle.reload();
+			}
+			onStatus('saved');
+			reportDirty();
+		};
 		liveHandles.add(handle);
 		// The debounce keeps a burst of edits to one write; a pending edit is
 		// written at once when the document is hidden or unloads (owner's
@@ -321,6 +408,8 @@ export async function createViewer({ target, src, onStatus = () => {}, readonly 
 		};
 		annotationCap.onAnnotationEvent((event) => {
 			if (event?.type === 'loaded') { loadedResolve(); return; }   // opening a file is not a change
+			// Held over a conflict, an edit waits with the rest of "mine".
+			if (handle.conflict) { onStatus('not saved — changed elsewhere'); return; }
 			onStatus('unsaved');
 			clearTimeout(handle.saveTimer);
 			handle.saveTimer = setTimeout(() => { handle.saveTimer = null; saveNow(); }, SAVE_DEBOUNCE_MS);

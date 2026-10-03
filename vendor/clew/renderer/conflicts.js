@@ -94,7 +94,7 @@ function diffRows(theirs, mine) {
  *   compare?: boolean }} spec
  * @returns {Promise<string|null>} the chosen id, or null (Later / Esc)
  */
-export function openConflictSheet({ title, explain, mine, theirs, choices, compare = false }) {
+export function openConflictSheet({ title, explain, mine, theirs, choices, compare = false, textual = true }) {
 	document.querySelector('.clew-conflict-sheet')?.remove();
 	return new Promise((resolve) => {
 		const sheet = document.createElement('div');
@@ -110,8 +110,9 @@ export function openConflictSheet({ title, explain, mine, theirs, choices, compa
 		const legend = document.createElement('p');
 		legend.className = 'clew-conflict-legend';
 		legend.textContent = '− only on disk (theirs)   + only in the editor (mine)';
-		const diff = diffRows(theirs, mine);
-		legend.hidden = diff.hidden = !compare;
+		// `textual: false` (a PDF): no line diff — the choices say it all.
+		const diff = textual ? diffRows(theirs, mine) : document.createElement('div');
+		legend.hidden = diff.hidden = !compare || !textual;
 		const buttons = document.createElement('div');
 		buttons.className = 'clew-conflict-buttons';
 		const done = (id) => {
@@ -140,7 +141,8 @@ export function openConflictSheet({ title, explain, mine, theirs, choices, compa
 		later.textContent = 'Later';
 		later.dataset.choice = 'later';
 		later.addEventListener('click', () => done(null));
-		buttons.append(toggle, later);
+		if (textual) buttons.append(toggle);
+		buttons.append(later);
 		card.append(h, p, legend, diff, buttons);
 		sheet.append(card);
 		document.body.append(sheet);
@@ -193,7 +195,7 @@ export const conflictExplanation = (kind) => EXPLAIN[kind ?? 'disk'];
 /** Copies and marked notes already announced this session (until gone). */
 const announced = new Set();
 
-function persistentNotice(text, actions, key) {
+export function persistentNotice(text, actions, key) {
 	let host = document.querySelector('.clew-notices');
 	if (!host) {
 		host = document.createElement('div');

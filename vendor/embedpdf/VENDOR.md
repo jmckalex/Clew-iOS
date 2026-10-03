@@ -6,4 +6,4 @@ the owner's layers/OCG fork and is overwritten wholesale by
 (/Users/jalex/Source/EmbedPDF/v2) and re-sync. EmbedPDF is MIT (see LICENSE here); the OCG
 patch series lives in ~/Source/pdfium-ocg/patches/.
 
-Synced from: ocg-v2@9ab07c9a (dirty tree)
+Synced from: ocg-v2@7e5d802f (dirty tree)
