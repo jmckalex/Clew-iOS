@@ -700,10 +700,8 @@ final class VaultStore {
 		}
 	}
 
-	private func currentMtimeMs(_ url: URL) -> Double {
-		let date = (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
-		return (date?.timeIntervalSince1970 ?? 0) * 1000
-	}
+	/// stat(2), never a URL's cached resource values (AtomicFile.mtimeMs).
+	private func currentMtimeMs(_ url: URL) -> Double { AtomicFile.mtimeMs(url) }
 
 	// MARK: - Rescan (external-change detection)
 
