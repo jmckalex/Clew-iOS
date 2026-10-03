@@ -8,6 +8,7 @@ export { cheerio };
 import { configManager } from './config-manager.js';
 import { replaceTargetsBySources } from './sources-and-targets.js';
 import { resolveCitations } from './biblify-compile.js';
+import { checkMathPackages } from './latex-lint.js';
 import { resetCrossrefs, recordLabel, lookupLabel, typedRefText } from './crossref.js';
 import { addWarning } from './warnings.js';
 import { buildIndexes } from './indexing.js';
@@ -27,6 +28,10 @@ function warnUnresolvedRef(key, info) {
 
 // Post-process HTML output using cheerio
 export function postProcessHTML(html, options = {}) {
+	// The LaTeX-export lint's end-of-build check: maths needing a package that
+	// a LaTeX export of this document would not load (latex-lint.js).
+	checkMathPackages();
+
 	// Load into cheerio — in fragment mode, pass isDocument=false to prevent
 	// cheerio wrapping the content in <html><head><body> tags.
 	const $ = cheerio.load(html, null, !options.fragment);
@@ -85,6 +90,18 @@ export function postProcessHTML(html, options = {}) {
 	return $.html();
 }
 
+// Headings the engine GENERATES are not part of the document's outline: an
+// endnotes list's title and its group headings (inline-footnotes.js), a
+// bibliography's title (biblify-compile.js), an index's (indexing.js), and
+// marked-footnote's screen-reader "Footnotes". They take no number and leave
+// the count alone — an `@endnotes{title=…}` mid-document used to push every
+// later heading up by one — nor link back to the contents, which does not list
+// them. LaTeX already writes all of these unnumbered (\section*, a bold line,
+// thebibliography, \printindex, \tableofcontents). The bibliography and index
+// headings are inserted after this pass runs, but are listed so they do not
+// depend on it.
+const GENERATED_HEADINGS = '.endnotes-heading, .endnote-group-heading, .bibliography-title, .index-title, #footnote-label';
+
 // Add numeric headings, if requested.  (Right now, this is only supported if the
 // metadata header has 'Headings: numeric')
 function add_labels_to_headers($) {
@@ -99,7 +116,11 @@ function add_labels_to_headers($) {
 
 	$(":header").each((i, elem) => {
 		let $elem = $(elem);
-		switch($elem.prop('tagName')) {
+		if ($elem.is(GENERATED_HEADINGS)) return;
+		// A heading the author marked `{-}` is unnumbered and, like LaTeX's
+		// \section*, leaves the count alone — but it is in the contents, so it
+		// keeps its link back.
+		switch($elem.hasClass('unnumbered') ? null : $elem.prop('tagName')) {
 		case "H1":
 			$(elem).prepend(`<span class='header-label h1-label xref'>${++h1}.</span> `);
 			h2 = 0;
@@ -359,7 +380,12 @@ function process_crossrefs($) {
 		let anchor = $elem.attr('id');
 		let number;
 		let type;
-		let in_footnote = $elem.closest('[id^="footnote-"]').length > 0 ? true : false;
+		// The note a label sits in: a classic [^a] footnote (marked-footnote,
+		// li#footnote-…) or an inline / labelled / grouped one (inline-
+		// footnotes.js, li#fn-…). Looking only for `footnote-` left every
+		// inline note's label unresolved — "??".
+		const $note = $elem.closest('li[id^="footnote-"], li[id^="fn-"]');
+		let in_footnote = $note.length > 0;
 		// A :label INSIDE a numbered construct (theorem, figure, table, listing,
 		// equation — anything a numbering pass stamped data-xref-number on)
 		// adopts that construct's number and type: the HTML twin of LaTeX's
@@ -367,10 +393,10 @@ function process_crossrefs($) {
 		// natively. Equivalent to labelling via the {id=…} attribute.
 		const $host = $elem.closest('[data-xref-number]');
 		if (in_footnote) {
-			let $footnote = $elem.closest('[id^="footnote-"]');
-			const $ol = $footnote.closest("ol");
-			const $allItems = $ol.children('li');
-			const currentIndex = $allItems.index($footnote);
+			// Its number is its place in its own list: grouped endnotes number
+			// per group, as their lists do.
+			const $allItems = $note.closest("ol").children('li');
+			const currentIndex = $allItems.index($note);
 			number = `${currentIndex+1}`;
 			type = 'footnote';
 		}

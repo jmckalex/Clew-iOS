@@ -24,9 +24,9 @@
 // - A document's host messages come from ONE window: its parent (the print
 //   view's parent is itself, and main posts there), or, for the bridges'
 //   replies, the window the request went to.
-import { PREVIEW_ORIGIN } from './caller-token.js';
+import { PREVIEW_ORIGIN, APP_ORIGIN } from './caller-token.js';
 
-export { PREVIEW_ORIGIN };
+export { PREVIEW_ORIGIN, APP_ORIGIN };
 
 /** A message from a document on the preview origin (with a window to answer). */
 export function fromPreviewOrigin(event) {
@@ -36,4 +36,48 @@ export function fromPreviewOrigin(event) {
 /** A message from exactly `expected` — the window a document asked, or its parent. */
 export function fromWindow(event, expected) {
 	return expected != null && event?.source === expected;
+}
+
+// Who a window ADDRESSES (§2.8, step 2 — after the app page moved to its
+// own origin). Every post used to target '*', forced while the app page was
+// `null` (which cannot be a targetOrigin); a message that carries data now
+// names the origin it is for, so a frame that has navigated elsewhere in the
+// meantime receives nothing:
+//   - downward, the app page (and a preview document) addresses its preview
+//     frames as PREVIEW_ORIGIN;
+//   - upward, a preview document cannot hard-code its parent — the app page,
+//     a canvas scene's preview document, or itself in the print view — so it
+//     reads it: `location.ancestorOrigins` lists the parent first and the top
+//     last (measured on WebKit by the iOS session; Chromium has it too), and
+//     is EMPTY at the top, where the "parent" is the document itself;
+//   - a reply goes to the asker's own `event.origin`.
+
+/** The origin to address `window.parent` with (the document's own at the
+ *  top; '*' where the browser cannot say). */
+export function parentOrigin(loc = globalThis.location) {
+	const ancestors = loc?.ancestorOrigins;
+	if (!ancestors) return '*';
+	return ancestors.length ? ancestors[0] : loc.origin;
+}
+
+/** The origin to address `window.top` with. */
+export function topOrigin(loc = globalThis.location) {
+	const ancestors = loc?.ancestorOrigins;
+	if (!ancestors) return '*';
+	return ancestors.length ? ancestors[ancestors.length - 1] : loc.origin;
+}
+
+/**
+ * Post `msg` to `target` for `origin` only. An opaque ancestor (`null`) is
+ * not a valid targetOrigin and is not a window Clew talks to: nothing is
+ * sent. Never throws — a target being torn down is not the sender's error.
+ */
+export function postTo(target, msg, origin) {
+	if (!target || !origin || origin === 'null') return false;
+	try {
+		target.postMessage(msg, origin);
+		return true;
+	} catch {
+		return false;
+	}
 }

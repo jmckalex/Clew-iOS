@@ -32,6 +32,7 @@ import { tagCompletions } from './complete/tags.js';
 import { wikilinkClick } from './wikilink-click.js';
 import { linkHover } from './link-hover.js';
 import { previewPanePlugin } from './preview-pane-plugin.js';
+import { figureErrorField } from './figure-error-mark.js';
 import { codeHighlight } from './code-highlight.js';
 import { attachments } from './attachments.js';
 import { citationCompletions } from './complete/citations.js';
@@ -90,6 +91,7 @@ export function makeNoteState(doc, handlerRef, { normalSyntax = false } = {}) {
 			// The rendering of the formula or diagram being edited, beside it
 			// (preview-pane-plugin.js; both modes).
 			previewPanePlugin,
+			figureErrorField,
 			// Fences highlighted as reading mode highlights them (highlight.js).
 			codeHighlight,
 			attachments(),

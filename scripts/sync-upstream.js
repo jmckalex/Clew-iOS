@@ -7,6 +7,7 @@
 // Copied:
 //   ../Clew-app/vendor/jmarkdown/{src,package.json}  -> vendor/jmarkdown/
 //   ../Clew-app/vendor/embedpdf -> vendor/embedpdf/  (the owner's OCG viewer build)
+//   ../Clew-app/vendor/default-stamps -> vendor/default-stamps/  (the stamp tool's library)
 //   ../Clew-app/src/{renderer,shared,preview-client,engine,main,excalidraw} -> vendor/clew/
 //   ../Clew-app/demo-vault -> seed-vault/   (the bundled starter vault)
 import fs from 'node:fs';
@@ -45,6 +46,11 @@ fs.copyFileSync(
 // carries !vendor/embedpdf/dist/ exceptions: the blanket dist/ and *.map
 // rules silently eat the mirror otherwise.
 copyDir(path.join(upstream, 'vendor', 'embedpdf'), path.join(root, 'vendor', 'embedpdf'));
+
+// The PDF viewer's stamp library (@embedpdf/default-stamps, MIT), committed
+// upstream since 88b6dd2 so the stamp tool never asks jsdelivr. Served at
+// __clew_assets__/stamps (SchemeHandler), as desktop's protocol does.
+copyDir(path.join(upstream, 'vendor', 'default-stamps'), path.join(root, 'vendor', 'default-stamps'));
 
 for (const dir of ['renderer', 'shared', 'preview-client', 'engine', 'main', 'excalidraw']) {
 	copyDir(path.join(upstream, 'src', dir), path.join(root, 'vendor', 'clew', dir));

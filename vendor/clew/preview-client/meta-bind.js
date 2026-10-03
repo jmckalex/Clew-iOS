@@ -19,7 +19,8 @@
 // when a rendered document actually contains a widget: a note without them
 // never pays. Until the definitions arrive, custom elements are inert but
 // present; they upgrade in place when the script lands.
-const post = (msg) => window.parent.postMessage({ source: 'clew-preview', ...msg }, '*');
+import { parentOrigin, postTo } from '../shared/message-guard.js';
+const post = (msg) => postTo(window.parent, { source: 'clew-preview', ...msg }, parentOrigin());
 
 const WA_TAGS = 'wa-switch, wa-slider, wa-select, wa-input, wa-number-input, '
 	+ 'wa-time-input, wa-textarea, wa-rating, wa-color-picker, wa-progress-bar, '

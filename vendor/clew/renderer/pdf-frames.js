@@ -26,7 +26,7 @@
 // the closing tab's frames, and the window's close handshake waits for all
 // of them (office-dock.js#onCloseRequested).
 import { workspaceStore } from './state/workspace-store.js';
-import { fromPreviewOrigin } from '../shared/message-guard.js';
+import { fromPreviewOrigin, PREVIEW_ORIGIN } from '../shared/message-guard.js';
 
 /** A lingering view waits at most this long; a normal save takes ~10 ms. */
 const LINGER_MS = 10_000;
@@ -78,7 +78,7 @@ function flushed(frames, ms) {
 	// Asked of each dirty VIEWER, however deep: a note's frame does not pass
 	// a flush on to a scene's viewer inside it, and need not.
 	for (const win of dirtyUnder(frames)) {
-		try { win.postMessage({ source: 'clew-pdf-host', type: 'pdf-flush' }, '*'); } catch { /* gone */ }
+		try { win.postMessage({ source: 'clew-pdf-host', type: 'pdf-flush' }, PREVIEW_ORIGIN); } catch { /* gone */ }
 	}
 	return new Promise((resolve) => {
 		const finish = (clean) => {

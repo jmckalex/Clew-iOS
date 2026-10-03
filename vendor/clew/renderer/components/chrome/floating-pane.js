@@ -24,6 +24,7 @@ import { renderPost } from '../../lib/caller-token.js';
 import { viewportEdges } from '../../lib/viewport.js';
 import { effectiveChords } from '../../commands/registry.js';
 import { settingsStore } from '../../state/settings-store.js';
+import { PREVIEW_ORIGIN } from '../../../shared/message-guard.js';
 
 const HOST_SOURCE = 'clew-preview-host';
 const BLANK_MS = 30000;
@@ -46,7 +47,7 @@ export class FloatingPane extends HTMLElement {
 		this.frameHeight = null;
 		this.onPaneMessage = (event) => {
 			const msg = event.data;
-			if (!msg || msg.source !== 'clew-preview' || event.source !== this.frame.contentWindow) return;
+			if (!msg || msg.source !== 'clew-preview' || event.source !== this.frame.contentWindow || event.origin !== PREVIEW_ORIGIN) return;
 			if (msg.type === 'ready') {
 				this.frameReady = true;
 				this.postToFrame({ type: 'theme', theme: document.body.dataset.theme ?? 'dark' });
@@ -79,7 +80,7 @@ export class FloatingPane extends HTMLElement {
 	onFrameMessage() {}
 
 	postToFrame(msg) {
-		this.frame.contentWindow?.postMessage({ source: HOST_SOURCE, ...msg }, '*');
+		this.frame.contentWindow?.postMessage({ source: HOST_SOURCE, ...msg }, PREVIEW_ORIGIN);
 	}
 
 	/**
@@ -114,7 +115,7 @@ export class FloatingPane extends HTMLElement {
 		}
 		this.frameHash = hash;
 		this.frameReady = false;
-		this.frame.src = blockDocumentUrl(hash);
+		this.frame.src = blockDocumentUrl(hash) + (this.frameUrlSuffix ?? '');
 		return 'loaded';
 	}
 

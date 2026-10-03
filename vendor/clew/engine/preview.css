@@ -259,6 +259,50 @@ details.internal-embed:not([open]) > summary { margin-bottom: 0; }
 	border-radius: 6px;
 	background: var(--preview-bg);
 }
+/* @app[…] — an app in a note (app-embed.js; frame-bridge.md §7). The box is
+   the directive's (100% × 320px by default); the frame fills it once the
+   host lets the app run, and until then the label says why it is empty. */
+clew-app-embed {
+	display: block;
+	position: relative;
+	margin: 1em auto;
+	border: 1px solid var(--preview-border);
+	border-radius: 6px;
+	background: var(--preview-bg);
+	overflow: hidden;
+}
+clew-app-embed > .clew-app-label {
+	position: absolute;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 1em;
+	text-align: center;
+	color: var(--preview-muted, #888);
+	font-size: 0.92em;
+}
+clew-app-embed > .clew-app-label[hidden] { display: none; }
+/* On a website (main/site-files.js#staticAppEmbeds) no app runs: the box
+   is only its sentence. `!important` outranks the engine's inline size. */
+clew-app-embed[data-static] { height: auto !important; aspect-ratio: auto !important; }
+clew-app-embed[data-static] > .clew-app-label { position: static; }
+/* The running frame, hoisted out of the morphed flow (app-embed.js) and
+   laid over its placeholder. */
+.clew-app-holder {
+	position: absolute;
+	z-index: 1;
+	border-radius: 6px;
+	overflow: hidden;
+}
+.clew-app-holder > iframe.clew-app-frame {
+	display: block;
+	width: 100%;
+	height: 100%;
+	border: 0;
+	background: transparent;
+}
+
 /* A target Clew will not embed, said in the note rather than left blank —
    a missing path, a .php that needs its server, a javascript: URL. */
 .clew-embed-refused {
@@ -397,6 +441,33 @@ html[data-theme='light'] .mpw-figure .mpw-console {
 	background: #fff5f5;
 	border-color: #f0c0c0;
 }
+/* A failed figure (preview-client/figures.js#compactError): the first error
+   and TeX's line up to it, the log folded away under "Show log". */
+.mpw-figure.mpw-error {
+	display: block;
+	max-width: 60em;
+	text-align: left;
+}
+.mpw-figure .mpw-error-head {
+	font: 12px/1.45 ui-monospace, Menlo, monospace;
+	color: #f0a0a0;
+	background: #2a1f1f;
+	border: 1px solid #5a3535;
+	border-radius: 4px;
+	padding: 6px 8px;
+}
+.mpw-figure .mpw-error-message { font-weight: 600; }
+.mpw-figure .mpw-error-where { display: block; margin-top: 2px; color: #e8c6c6; white-space: pre-wrap; }
+.mpw-figure .mpw-error-rest { opacity: 0.55; }
+.mpw-figure .mpw-error-rest::before { content: '⏐'; color: #ff8080; opacity: 1; }
+.mpw-figure .mpw-log { margin-top: 4px; font: 12px system-ui, sans-serif; color: #9aa0a6; }
+.mpw-figure .mpw-log > summary { cursor: pointer; }
+/* In the live preview pane's mirror the pane shows the log itself. */
+html[data-clew-mirror] .mpw-figure .mpw-log { display: none; }
+.mpw-figure .mpw-log > .mpw-console { max-height: 16em; overflow: auto; }
+html[data-theme='light'] .mpw-figure .mpw-error-head { color: #a33; background: #fff5f5; border-color: #f0c0c0; }
+html[data-theme='light'] .mpw-figure .mpw-error-where { color: #7a2a2a; }
+html[data-theme='light'] .mpw-figure .mpw-log { color: #6b7280; }
 .mermaid { text-align: center; }
 
 /* ==highlight== emits span.highlight; the engine's yellow needs dark text
@@ -768,7 +839,7 @@ td.clew-q-cell:hover { background: rgba(168, 130, 255, 0.08); }
 .clew-card-title { font-weight: 600; font-size: 0.92em; }
 .clew-card-meta { color: var(--preview-muted); font-size: 0.82em; margin-top: 2px; }
 
-/* ---- ```tabbing (engine/tabbing.js; laid out by preview-client/tabbing.js) -- */
+/* ---- ```tabbing (the engine's tabbing.js; laid out by preview-client/tabbing.js) -- */
 .clew-tabbing { position: relative; margin: 0.8em 0; }
 .clew-tabbing .tb-row { white-space: nowrap; }
 /* `pre`, not `nowrap`: a piece's trailing space is part of its width — the

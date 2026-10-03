@@ -95,8 +95,8 @@ button {
 	transition: opacity 300ms;
 }
 .clew-notice.is-leaving { opacity: 0; }
-/* The interim vault-trust banner (trust-banner.js): a notice that stays, and
-   takes clicks in a column that otherwise lets them through. */
+/* The vault-trust notice (trust-banner.js): a notice that stays, and takes
+   clicks in a column that otherwise lets them through. */
 .clew-trust-banner {
 	pointer-events: auto;
 	display: flex;
@@ -124,3 +124,137 @@ button {
 	padding: 0 4px;
 	font-size: 16px;
 }
+
+/* ---- edit conflicts: the choice and the compare view (renderer/conflicts.js) */
+.clew-conflict-sheet {
+	position: fixed;
+	inset: 0;
+	z-index: 300;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: var(--clew-overlay, rgba(0, 0, 0, 0.35));
+}
+.clew-conflict-card {
+	width: min(720px, calc(100vw - 32px));
+	max-height: calc(100vh - 64px);
+	display: flex;
+	flex-direction: column;
+	background: var(--clew-bg-secondary);
+	border: 1px solid var(--clew-border);
+	border-radius: 10px;
+	padding: 18px 20px 14px;
+	box-shadow: 0 12px 40px var(--clew-shadow);
+	color: var(--clew-text-normal);
+	font-size: 13.5px;
+	line-height: 1.45;
+}
+.clew-conflict-card h2 { margin: 0 0 8px; font-size: 16px; }
+.clew-conflict-card p { margin: 0 0 8px; }
+.clew-conflict-legend { color: var(--clew-text-muted); font-size: 12px; white-space: pre; }
+.clew-conflict-diff {
+	flex: 1 1 auto;
+	min-height: 0;
+	overflow: auto;
+	margin: 0 0 10px;
+	padding: 6px 0;
+	border: 1px solid var(--clew-border);
+	border-radius: 6px;
+	background: var(--clew-bg-primary);
+	font-family: var(--clew-mono-font);
+	font-size: 12px;
+}
+.clew-conflict-diff[hidden], .clew-conflict-legend[hidden] { display: none; }
+.clew-diff-line { white-space: pre-wrap; padding: 0 10px; }
+.clew-diff-line.is-theirs { color: var(--clew-danger); background: color-mix(in srgb, var(--clew-danger) 10%, transparent); }
+.clew-diff-line.is-mine { color: var(--clew-accent); background: color-mix(in srgb, var(--clew-accent) 10%, transparent); }
+.clew-diff-line.is-same { color: var(--clew-text-muted); }
+.clew-diff-fold { padding: 2px 10px; color: var(--clew-text-faint); font-style: italic; }
+.clew-conflict-buttons { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.clew-conflict-buttons button {
+	font: inherit;
+	border-radius: 6px;
+	padding: 5px 12px;
+	cursor: pointer;
+	background: none;
+	border: 1px solid var(--clew-border);
+	color: var(--clew-text-normal);
+}
+.clew-conflict-buttons button:hover { background: var(--clew-hover); }
+.clew-conflict-buttons button.is-primary { background: var(--clew-accent); border-color: var(--clew-accent); color: var(--clew-text-on-accent, #fff); }
+.clew-conflict-buttons button.is-primary:hover { background: var(--clew-accent-hover); }
+
+/* ---- vault trust: the prompt and the status-bar indicator (trust-banner.js) */
+.clew-trust-sheet {
+	position: fixed;
+	inset: 0;
+	z-index: 300;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: var(--clew-overlay, rgba(0, 0, 0, 0.35));
+}
+.clew-trust-card {
+	width: min(520px, calc(100vw - 32px));
+	max-height: calc(100vh - 64px);
+	overflow: auto;
+	background: var(--clew-bg-secondary);
+	border: 1px solid var(--clew-border);
+	border-radius: 10px;
+	padding: 18px 20px 14px;
+	box-shadow: 0 12px 40px var(--clew-shadow);
+	color: var(--clew-text-normal);
+	font-size: 13.5px;
+	line-height: 1.45;
+}
+.clew-trust-card h2 { margin: 0 0 8px; font-size: 16px; }
+.clew-trust-card p { margin: 0 0 8px; }
+.clew-trust-why { color: var(--clew-text-muted); }
+.clew-trust-details { margin: 4px 0 10px; color: var(--clew-text-muted); }
+.clew-trust-details summary { cursor: pointer; }
+.clew-trust-details ul { margin: 6px 0 0; padding-left: 18px; max-height: 180px; overflow: auto; font-size: 12.5px; }
+.clew-trust-network { display: flex; align-items: center; gap: 6px; margin: 0 0 10px; }
+.clew-trust-buttons { display: flex; justify-content: flex-end; gap: 8px; }
+.clew-trust-buttons button {
+	font: inherit;
+	border-radius: 6px;
+	padding: 5px 12px;
+	cursor: pointer;
+}
+.clew-trust-keep {
+	background: none;
+	border: 1px solid var(--clew-border);
+	color: var(--clew-text-normal);
+}
+.clew-trust-keep:hover { background: var(--clew-hover); }
+.clew-trust-indicator {
+	font: inherit;
+	background: none;
+	border: none;
+	padding: 0;
+	color: var(--clew-text-accent, var(--clew-accent));
+	cursor: pointer;
+	margin-right: auto;
+}
+.clew-trust-indicator:hover { text-decoration: underline; }
+/* An app with a write grant is live (renderer/app-host.js, frame-bridge §9). */
+.clew-app-write-indicator {
+	font: inherit;
+	background: none;
+	border: none;
+	padding: 0;
+	color: var(--clew-text-accent, var(--clew-accent));
+	cursor: pointer;
+}
+.clew-app-write-indicator:hover { text-decoration: underline; }
+/* The active note's last build had warnings (renderer/build-warnings.js):
+   quiet, in the warning colour, a list behind the click. */
+.clew-build-warnings {
+	font: inherit;
+	background: none;
+	border: none;
+	padding: 0;
+	color: var(--clew-warning);
+	cursor: pointer;
+}
+.clew-build-warnings:hover { text-decoration: underline; }

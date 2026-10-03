@@ -33,6 +33,8 @@ let token = null;
 /** The ask in flight: { promise, resolve, reject, tries, timer }. */
 let waiting = null;
 
+// A content-free signal, so '*' stays (frame-bridge.md §2.8 step 2): the
+// answer is what is addressed, to this document's origin only.
 const ask = () => window.parent.postMessage({ source: 'clew-preview', type: TOKEN_MESSAGE }, '*');
 
 function tick() {

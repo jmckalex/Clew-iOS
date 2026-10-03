@@ -26,6 +26,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { sliceBlock } from './block-refs.js';
+import { withinVault } from './vault-bounds.js';
 import { renderBaseEmbed } from './bases.js';
 
 const NOTE_EXT = /\.(md|jmd)$/i;
@@ -99,6 +100,17 @@ const shortestOf = (matches) =>
  * basename with the shortest path winning. Returns null when unresolved.
  */
 export function resolveTarget(target) {
+	const rel = rawResolveTarget(target);
+	return rel !== null && !outside(rel) ? rel : null;
+}
+
+/** In a vault this device has not trusted, a target whose realpath leaves
+ *  the vault resolves to nothing (vault-bounds.js); an embed of one says so. */
+function outside(rel) {
+	return !withinVault(path.join(vaultRoot(), rel));
+}
+
+function rawResolveTarget(target) {
 	const root = vaultRoot();
 	if (!root) return null;
 	if (noteIndex === null) buildIndexes(root);
@@ -116,6 +128,11 @@ export function resolveTarget(target) {
 
 /** Resolve a non-note file target (attachment) to a vault-relative path. */
 export function resolveFileTarget(target) {
+	const rel = rawResolveFileTarget(target);
+	return rel !== null && !outside(rel) ? rel : null;
+}
+
+function rawResolveFileTarget(target) {
 	const root = vaultRoot();
 	if (!root) return null;
 	if (fileIndex === null) buildIndexes(root);
@@ -261,6 +278,14 @@ export const wikiembed = {
 		if (!match) return;
 		const link = parseLink(match);
 		const token = { type: 'wikiembed', raw: match[0], ...link, tokens: [], failed: null };
+		// A link out of a restricted vault: said in place, never followed.
+		if (link.target) {
+			const raw = rawResolveFileTarget(link.target) ?? rawResolveTarget(link.target);
+			if (raw !== null && outside(raw)) {
+				token.failed = 'outside';
+				return token;
+			}
+		}
 
 		// Media embeds: ![[img.png]], ![[paper.pdf]], ![[clip.mp3]] …
 		let fileRel = link.target ? resolveFileTarget(link.target) : null;
@@ -464,7 +489,8 @@ export const wikiembed = {
 		const title = escapeHtml(token.label);
 		const target = escapeAttr(token.full);
 		if (token.failed) {
-			const reason = token.failed === 'cycle' ? 'circular embed'
+			const reason = token.failed === 'outside' ? 'this link leaves the vault, and a vault you have not trusted is not followed out of itself'
+				: token.failed === 'cycle' ? 'circular embed'
 				: token.failed === 'missing-block' ? 'no such block'
 				: token.failed === 'missing-heading' ? 'no such heading'
 				: 'not found';

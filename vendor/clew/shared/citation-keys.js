@@ -18,6 +18,9 @@
 /** The engine's citation keys, by normalised name. */
 export const CITATION_KEYS = new Map([
 	['bibliography', 'Bibliography'],
+	// `add` (the default since jmarkdown 909af7a: the note's files ADD to the
+	// configured one) or `replace` (the note's alone, as before).
+	['bibliography mode', 'Bibliography mode'],
 	['bibliography style', 'Bibliography style'],
 	['resolve citations', 'Resolve citations'],
 	['citation tooltips', 'Citation tooltips'],
@@ -29,7 +32,11 @@ export const CITATION_KEYS = new Map([
 
 /**
  * The citation keys in a note's `---`-fenced header (at the very top), as
- * written.
+ * written. A value may run over several lines, as the engine reads a header
+ * (metadata-header.js#parseKeyedData): a non-blank line that is not itself
+ * `key: value` continues the key before it — how a YAML list
+ * (`Bibliography:` then `  - a.bib`) is written. Continuation lines join the
+ * value with a newline.
  *
  * @param {string} noteText
  * @returns {{ key: string, name: string, value: string }[]} key normalised, name canonical
@@ -38,12 +45,18 @@ export function citationLines(noteText) {
 	const header = /^---[ \t]*\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(noteText);
 	if (!header) return [];
 	const out = [];
+	let current = null;   // the record the key line before this one made, or null
 	for (const line of header[1].split(/\r?\n/)) {
-		const kv = /^([A-Za-z][A-Za-z _-]*?)\s*:\s*(.*)$/.exec(line);
-		if (!kv) continue;
-		const key = kv[1].trim().toLowerCase().replace(/[\s_-]+/g, ' ');
-		const name = CITATION_KEYS.get(key);
-		if (name) out.push({ key, name, value: kv[2].trim() });
+		// The engine's key line: letters, digits, spaces and hyphens, a colon.
+		const kv = /^([-a-zA-Z0-9 _]+):\s*(.*)$/.exec(line);
+		if (kv) {
+			const key = kv[1].trim().toLowerCase().replace(/[\s_-]+/g, ' ');
+			const name = CITATION_KEYS.get(key);
+			current = name ? { key, name, value: kv[2].trim() } : null;
+			if (current) out.push(current);
+		} else if (current && line.trim()) {
+			current.value = current.value ? `${current.value}\n${line.trim()}` : line.trim();
+		}
 	}
 	return out;
 }

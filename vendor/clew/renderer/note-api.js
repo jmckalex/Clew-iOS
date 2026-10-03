@@ -28,16 +28,20 @@ const isTextPath = (p) => typeof p === 'string' && TEXT_EXT.some((ext) => p.toLo
 
 let gate = null; // null = unknown, else boolean
 ipc.on(CH.EV_VAULT_OPENED, () => { gate = null; });
+ipc.on(CH.EV_VAULT_ACCESS_CHANGED, () => { gate = null; });
 
 /** Called by the settings view when the vault toggle changes. */
 export function invalidateNoteApiGate() {
 	gate = null;
 }
 
+// The DEVICE's answer (frame-bridge.md §4.6): the Note API is on only in a
+// vault this device trusts, with the API enabled for it there — never because
+// the vault's own vault-settings.json says `noteApi` (that is its request).
 async function apiEnabled() {
 	if (gate === null) {
-		const vaultSettings = await ipc.invoke(CH.VAULT_SETTINGS_GET).catch(() => ({}));
-		gate = vaultSettings?.noteApi === true;
+		const access = await ipc.invoke(CH.VAULT_ACCESS_GET).catch(() => null);
+		gate = access?.noteApi === true;
 	}
 	return gate;
 }

@@ -1,44 +1,46 @@
-// Clew — an Obsidian-style note app built on the jmarkdown engine.
-// Copyright © 2026 J. McKenzie Alexander <jmckalex@gmail.com> · https://jmckalex.org
-//
-// This file is part of Clew, free software released under the GNU General
-// Public License, version 3 or later. Clew is distributed in the hope that it
-// will be useful, but WITHOUT ANY WARRANTY. See LICENSE at the repository
-// root, or <https://www.gnu.org/licenses/>.
-//
-// SPDX-License-Identifier: GPL-3.0-or-later
+/*
+	Tabbing: all of LaTeX's `tabbing` environment, in a notation of its own
+	with the LaTeX commands accepted alongside. Two forms, one body:
 
-// Tabbing: all of LaTeX's `tabbing` environment, in a notation of its own
-// with the LaTeX commands accepted alongside. Two forms, one body:
-//
-//   ```tabbing                         @begin(tabbing)
-//   Name:     |= Street:    |= Phone   Name: \= Street: \= Phone \\
-//   Alice     |> 12 Oak St  |> 555     Alice \> 12 Oak St \> 555 \\
-//   ```                                @end(tabbing)
-//
-// One source line is one row (`\\` ends one too). A bar plus one character
-// is a tab command, the character echoing LaTeX's:
-//
-//   |=  \=  set a stop here            |'  \'  the text so far, flush right
-//   |>  \>  to the next stop                   before this column
-//   |<  \<  (row start) back one stop  |`  \`  the rest, flush right
-//   |+  \+  margin in for later rows   |[ |]   \pushtabs \poptabs
-//   |-  \-  margin out                 …|kill  \kill: a RULER row, sets stops
-//                                              and is not shown
-//
-// `\|` is a literal bar; marks are not read inside $…$ or `code`; `\a=`,
-// `\a'`, `` \a` `` are the accents LaTeX's own commands took over.
-//
-// The layout is LaTeX's, from latex.ltx (lttab.dtx: \@settab, \@rtab,
-// \@ltab, \@tabplus, \@tabminus, \@tablab, \@tabrj, \pushtabs, \kill):
-// `layoutTabbing` below replays it over measured widths. A stop depends on
-// the RENDERED width of the text before it, so the preview measures
-// (preview-client/tabbing.js); before that, the pieces sit inline.
-//
-// A self-contained engine extension (no imports), so the backport to the
-// jmarkdown engine is a move: parser, renderers and layout go; Clew's glue —
-// the preview's measuring, live edit's frame kind, the editor's highlighting
-// — stays.
+	  ```tabbing                         @begin(tabbing)
+	  Name:     |= Street:    |= Phone   Name: \= Street: \= Phone \\
+	  Alice     |> 12 Oak St  |> 555     Alice \> 12 Oak St \> 555 \\
+	  ```                                @end(tabbing)
+
+	One source line is one row (`\\` ends one too). A bar plus one character
+	is a tab command, the character echoing LaTeX's:
+
+	  |=  \=  set a stop here            |'  \'  the text so far, flush right
+	  |>  \>  to the next stop                   before this column
+	  |<  \<  (row start) back one stop  |`  \`  the rest, flush right
+	  |+  \+  margin in for later rows   |[ |]   \pushtabs \poptabs
+	  |-  \-  margin out                 …|kill  \kill: a RULER row, sets stops
+	                                             and is not shown
+
+	`\|` is a literal bar; marks are not read inside $…$ or `code`; `\a=`,
+	`\a'`, `` \a` `` are the accents LaTeX's own commands took over.
+
+	The layout is LaTeX's, from latex.ltx (lttab.dtx: \@settab, \@rtab,
+	\@ltab, \@tabplus, \@tabminus, \@tablab, \@tabrj, \pushtabs, \kill):
+	`layoutTabbing` below replays it over measured widths. A stop depends on
+	the RENDERED width of the text before it, so the HTML is laid out in the
+	browser, by measuring: tabbing-page.js for a page jmarkdown writes, Clew's
+	own preview client in Clew. Before that, the pieces sit inline.
+
+	Ported from Clew-app's src/engine/tabbing.js (@03bb33a), so the jmarkdown
+	CLI, Clew's exports and Clew's reading view share ONE implementation: the
+	HTML is byte-identical to Clew's (hence the `clew-tabbing` class). What
+	this port changes, all in the LaTeX (tabbingLatex): an accent goes back to
+	\a'{e}, since the parser writes it as a combining mark, which pdfLaTeX
+	cannot typeset; and the environment ends with a blank line, as every
+	block the engine writes does.
+
+	NO IMPORTS, and it must keep none: Clew's preview client (a browser
+	bundle) imports layoutTabbing from this module, and tabbing-page.js turns
+	layoutTabbing into page script by its source text. So it does not
+	register itself; index.js registers the fence (both marked instances, as
+	a configured extension would be) and the environment.
+*/
 
 const MARK_OPS = { '=': 'set', '>': 'next', '<': 'back', '+': 'plus', '-': 'minus', "'": 'lab', '`': 'rj', '[': 'push', ']': 'pop' };
 const COMMANDS = [
@@ -252,6 +254,15 @@ export function tabbingHtml(rows, inline, key = '') {
 	return `<div class="clew-tabbing" data-tabbing-key="${key}">${body}</div>\n`;
 }
 
+// \a= \a' \a` came out of the parser as combining marks (ACCENTS), which
+// the HTML keeps. pdfLaTeX cannot typeset a combining mark, and inside tabbing
+// \=, \' and \` are tab commands, so a marked letter goes back to the accent
+// commands LaTeX's tabbing provides for exactly this.
+const LATEX_ACCENT_OF = { '\u0304': '=', '\u0301': "'", '\u0300': '`' };
+function latexAccents(tex) {
+	return tex.replace(/(\p{L})([\u0300\u0301\u0304])/gu, (_, letter, mark) => `\\a${LATEX_ACCENT_OF[mark]}{${letter}}`);
+}
+
 /** The LaTeX: the environment itself, every mark its command. */
 export function tabbingLatex(rows, inline) {
 	// A push/pop row is not a line in LaTeX (`\\` after it would print an empty
@@ -260,11 +271,14 @@ export function tabbingLatex(rows, inline) {
 	let lastShown = -1;
 	rows.forEach((row, r) => { if (!row.silent) lastShown = r; });
 	const lines = rows.map((row, r) => {
-		const parts = row.items.map((item) => (item.op === 'text' ? inline(item) : LATEX_OF[item.op]));
+		const parts = row.items.map((item) => (item.op === 'text' ? latexAccents(inline(item)) : LATEX_OF[item.op]));
 		const end = row.kill ? ' \\kill' : row.silent || r >= lastShown ? '' : ' \\\\';
 		return parts.join(' ') + end;
 	});
-	return `\\begin{tabbing}\n${lines.join('\n')}\n\\end{tabbing}\n`;
+	// A blank line after, as every block the engine writes ends: the fence
+	// consumed the one in the source, and without it the text that follows
+	// would run on as the same paragraph.
+	return `\\begin{tabbing}\n${lines.join('\n')}\n\\end{tabbing}\n\n`;
 }
 
 // ---- the engine surfaces --------------------------------------------------

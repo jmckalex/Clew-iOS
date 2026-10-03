@@ -26,6 +26,7 @@ import { paths } from './paths.js';
 import { readNoteFonts } from './note-fonts.js';
 import { settings } from './settings.js';
 import { engineExtensionEntries } from './plugins.js';
+import { inlineScriptHashes } from './preview-csp.js';
 import { writeFileAtomic } from './fs-utils.js';
 import { isDependentFragment } from '../shared/fragment-deps.js';
 import { citationHeader, noteBibFiles } from './citation-header.js';
@@ -88,6 +89,11 @@ export class RenderService {
 	 *  before openVault — deliberately not one of #vaultOptions, which are
 	 *  read from a file the vault carries. Closed until someone says. */
 	#noteCode = false;
+	/** What else the device lets this vault run (vault-trust.js#
+	 *  effectiveAccess): the enabled plugins' engine surfaces, dataviewJs.
+	 *  Never read from #vaultOptions — those keys are only the vault's
+	 *  request now (frame-bridge.md §4.2). */
+	#access = { trusted: false, plugins: [], dataviewJs: false };
 	/** What the engine refused while #noteCode is off: path → names. */
 	#refused = new Map();
 	/** vault-relative note paths with an open preview (rendered eagerly on change) */
@@ -139,10 +145,27 @@ export class RenderService {
 	 * reconfigured, which re-renders every open preview under the new answer.
 	 */
 	setNoteCode(allowed) {
-		allowed = allowed === true;
-		if (allowed === this.#noteCode) return;
-		this.#noteCode = allowed;
-		this.#refused.clear();
+		this.setAccess({ ...this.#access, trusted: allowed === true });
+	}
+
+	/**
+	 * The session's effective access changed (trust, an enablement) or a
+	 * vault is about to open. Note code follows trust; the engine config
+	 * carries the enabled plugins' engine surfaces and the worker's
+	 * dataviewJs switch — so a change reconfigures, which re-renders every
+	 * open preview under the new answer.
+	 */
+	setAccess(access) {
+		const next = {
+			trusted: access?.trusted === true,
+			plugins: Array.isArray(access?.plugins) ? [...access.plugins] : [],
+			dataviewJs: access?.dataviewJs === true,
+		};
+		if (JSON.stringify(next) === JSON.stringify(this.#access)) return;
+		const trustChanged = next.trusted !== this.#noteCode;
+		this.#access = next;
+		this.#noteCode = next.trusted;
+		if (trustChanged) this.#refused.clear();
 		if (this.vaultRoot) this.reconfigure({});
 	}
 
@@ -242,9 +265,9 @@ export class RenderService {
 				// directive win — see src/engine/figures.js.
 				`tikzFence, metapostFence, latexFence, texFence, tikzDirective from ${path.join(engineAssets, 'figures.js')}`,
 				`queryFence, tasksFence, kanbanFence from ${path.join(engineAssets, 'query-fences.js')}`,
-				// ```tabbing — LaTeX's tabbing, laid out in the preview
-				// (engine/tabbing.js; preview-client/tabbing.js measures).
-				`tabbingFence from ${path.join(engineAssets, 'tabbing.js')}`,
+				// (```tabbing and @begin(tabbing) are the ENGINE's since jmarkdown
+				// 4ab3d6a — registered there after callouts; preview-client/
+				// tabbing.js lays them out with the engine's own layoutTabbing.)
 				`tableBeforeAnchor, blockAnchorLine, blockAnchor from ${path.join(engineAssets, 'block-refs.js')}`,
 				// Obsidian's Dataview, for vaults that arrive carrying it.
 				`dataviewFence, dataviewJsFence, dataviewInline from ${path.join(engineAssets, 'dataview.js')}`,
@@ -266,7 +289,7 @@ export class RenderService {
 				// as prose. Inert for every other note.
 				`kanbanBoard from ${path.join(engineAssets, 'kanban-board.js')}`,
 				// Enabled vault plugins' engine surfaces (custom syntax).
-				...engineExtensionEntries(this.vaultRoot, this.#vaultOptions, paths.globalPlugins),
+				...engineExtensionEntries(this.vaultRoot, this.#access, paths.globalPlugins),
 			],
 			// @begin(TiKZ) / @begin(metapost) are block ENVIRONMENTS, not
 			// marked extensions: the engine keys them by name in a registry,
@@ -279,8 +302,9 @@ export class RenderService {
 				// @reveal[…] — a presentation in an iframe. One registry entry
 				// serves the inline, block and @begin forms (reveal-embed.js).
 				`reveal from ${path.join(engineAssets, 'reveal-embed.js')}`,
-				// @begin(tabbing): the same body as the ```tabbing fence.
-				`tabbing from ${path.join(engineAssets, 'tabbing.js')}`,
+				// @app[…] — an app in a note (app-embed.js marks the place;
+				// main resolves it as the document is served).
+				`app from ${path.join(engineAssets, 'app-embed.js')}`,
 			],
 			...this.#biblifyConfig(),
 			// dvisvgm needs ghostscript to convert MetaPost EPS output (and
@@ -345,11 +369,16 @@ export class RenderService {
 				...process.env,
 				PATH: toolchainPath(),
 				CLEW_VAULT_ROOT: this.vaultRoot,
+				// Where the vault ends (engine/vault-bounds.js): a restricted
+				// vault's links are not followed out of it by the extensions.
+				CLEW_VAULT_RESTRICTED: this.#access.trusted ? '' : '1',
 				CLEW_SESSION_ID: this.sessionId ?? '',
-				// Per-vault opt-in for running ```dataviewjs. Safe as spawn-time
-				// env because reconfigure() discards the warm standby whenever
-				// vault options change.
-				CLEW_DATAVIEW_JS: this.#vaultOptions.dataviewJs === true ? '1' : '',
+				// Per-vault opt-in for running ```dataviewjs — the DEVICE's
+				// enablement, gated by trust; 'restricted' makes the block's
+				// refusal say why (engine/dataview.js). Safe as spawn-time env
+				// because reconfigure() discards the warm standby whenever the
+				// vault's options or access change.
+				CLEW_DATAVIEW_JS: this.#access.dataviewJs ? '1' : (this.#access.trusted ? '' : 'restricted'),
 				// The note's typeface, face → file name, for the `font=note`
 				// wrapper (engine/figures.js#noteFontPreamble). App-global
 				// (main/note-fonts.js prepared it before any vault opened).
@@ -477,7 +506,9 @@ export class RenderService {
 			if (!this.#noteCode) {
 				try { this.#noteRefusals(relPath, fs.readFileSync(entry.htmlFile, 'utf8')); } catch { /* unreadable: nothing to say */ }
 			}
-			this.send(CH.EV_RENDER_DONE, { path: relPath });
+			// The build's warnings (incl. the LaTeX-export lint, jmarkdown
+			// 0631c42), for the status bar (renderer/build-warnings.js).
+			this.send(CH.EV_RENDER_DONE, { path: relPath, warnings: Array.isArray(result.warnings) ? result.warnings : [] });
 			return entry.htmlFile;
 		}
 		this.send(CH.EV_RENDER_ERROR, { path: relPath, message: result.message, stack: result.stack });
@@ -553,6 +584,30 @@ export class RenderService {
 	/** A built block document by key, or undefined once evicted. */
 	blockDocument(key) {
 		return this.#fragments.get(key);
+	}
+
+	#templateHashes = null; // { generation, promise }
+
+	/**
+	 * The CSP hash sources of the inline scripts Clew's own template emits
+	 * for a note with NO code (today: the MathJax configuration) — what a
+	 * restricted vault's documents may run inline (preview-csp.js). Read off
+	 * a real render of an empty document, once per configuration, so it is
+	 * whatever the engine and this config produce, never a copy that could
+	 * drift; anything a note adds (its own <script>, an HTML header) hashes
+	 * differently and is refused.
+	 */
+	templateScriptHashes() {
+		if (this.#templateHashes?.generation === this.#configGeneration) return this.#templateHashes.promise;
+		const generation = this.#configGeneration;
+		const promise = this.#cachedBuild('', { document: true, dependent: false })
+			.then((html) => inlineScriptHashes(html))
+			.catch(() => {
+				if (this.#templateHashes?.promise === promise) this.#templateHashes = null;
+				return [];
+			});
+		this.#templateHashes = { generation, promise };
+		return promise;
 	}
 
 	#fragmentKey(text, { sourcePath = null, dependent = isDependentFragment(text), document = false }) {

@@ -16,7 +16,8 @@ import Mustache from 'mustache';
 import fs from 'fs';
 import path from 'path';
 import { configManager } from './config-manager.js';
-import { assemblePreamble, requirePackage, addPreamble, addLatePreamble } from './preamble.js';
+import { assemblePreamble, requirePackage, addPreamble, addLatePreamble, requiredPackageNames } from './preamble.js';
+import { checkMathPackages } from './latex-lint.js';
 import { escapeLatexText } from './latex-escape.js';
 
 // Metadata values arrive as single-element arrays (from the metadata-header
@@ -100,6 +101,10 @@ export function processLatexTemplate(content) {
 	if (title) pdf.push(`pdftitle={${title}}`);
 	if (author) pdf.push(`pdfauthor={${author}}`);
 	if (pdf.length) addLatePreamble(`\\hypersetup{${pdf.join(', ')}}`);
+
+	// Every package the document will load is known now: warn for maths that
+	// needs one it won't (latex-lint.js).
+	checkMathPackages(requiredPackageNames());
 
 	const preamble = assemblePreamble({ engine, userPackages, userPreamble });
 

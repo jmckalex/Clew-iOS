@@ -190,6 +190,25 @@ table.game td.columnLabel p {
 	background-color: #FFEBE9;
 }
 
+/* ---- ```tabbing / @begin(tabbing) (src/tabbing.js) --------------------------
+   Clew's rules (Clew-app src/engine/preview.css), for the same markup. The
+   page script (src/tabbing-page.js) measures the pieces and places them;
+   these rules show them before it runs, and position them after. */
+.clew-tabbing { position: relative; margin: 0.8em 0; }
+.clew-tabbing .tb-row { white-space: nowrap; }
+/* `pre`, not `nowrap`: a piece's trailing space is part of its width — the
+   stop after `Name: |=` lands after the space, as TeX's \= does — and nowrap
+   would drop it at the end of the piece. (The parser already made every run
+   of spaces one.) */
+.clew-tabbing .tb-t { white-space: pre; }
+/* Before the layout runs (or where it cannot): the pieces inline, a gap for
+   each move to a stop, ruler rows and push/pop rows not shown. */
+.clew-tabbing .tb-op[data-op="set"], .clew-tabbing .tb-op[data-op="next"] { display: inline-block; width: 1.5em; }
+.clew-tabbing .tb-kill, .clew-tabbing .tb-silent { height: 0; overflow: hidden; visibility: hidden; }
+.clew-tabbing.tb-laid .tb-row { position: relative; }
+.clew-tabbing.tb-laid .tb-t { position: absolute; top: 0; }
+.clew-tabbing.tb-laid .tb-op { display: none; }
+
 /* ---- Obsidian callouts (src/callouts.js) ------------------------------------
    Clew's reading-view styling (Clew-app src/engine/preview.css), for this
    light page. One accent colour per type drives the border, the icon and the

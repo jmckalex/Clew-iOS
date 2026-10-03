@@ -49,7 +49,8 @@ async function upgradeCard(el, text) {
 		el.classList.add('is-engine');
 		el.innerHTML = html;
 		// The engine emits root-relative vault URLs (media embeds in cards);
-		// the app window is file://, so pin them to the preview origin.
+		// the app page is clew-app://app, which serves none of the vault, so
+		// pin them to the preview origin.
 		for (const media of el.querySelectorAll('[src^="/"]')) {
 			media.setAttribute('src', previewOrigin() + media.getAttribute('src'));
 		}

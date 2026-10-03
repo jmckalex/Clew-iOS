@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Flashcards</title>
+<style>
+	:root { color-scheme: light dark; --fg: #1d1d1f; --bg: #fbfbfd; --card: #ffffff; --line: #d8d8de; --accent: #6c5ce7; }
+	body[data-theme="dark"] { --fg: #e6e6ea; --bg: #1e1e22; --card: #26262b; --line: #3a3a42; --accent: #9d8cff; }
+	html, body { margin: 0; height: 100%; }
+	body { font: 15px/1.45 -apple-system, "Segoe UI", system-ui, sans-serif; color: var(--fg); background: var(--bg);
+		display: flex; flex-direction: column; gap: 10px; padding: 14px; box-sizing: border-box; }
+	#card { flex: 1; display: flex; flex-direction: column; gap: 10px; align-items: center; justify-content: center; text-align: center;
+		background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; font-size: 18px; }
+	#card .answer { color: var(--accent); }
+	.bar { display: flex; gap: 8px; justify-content: center; }
+	button { font: inherit; border: 1px solid var(--line); background: var(--card); color: var(--fg); border-radius: 6px; padding: 5px 12px; cursor: pointer; }
+	button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+	button:disabled { opacity: 0.4; cursor: default; }
+	#score { margin: 0; text-align: center; font-size: 13px; opacity: 0.75; }
+</style>
+</head>
+<body>
+	<div id="card">Loading…</div>
+	<div class="bar">
+		<button id="flip" class="primary">Show answer</button>
+		<button id="know" disabled>I knew it</button>
+		<button id="again" disabled>Again</button>
+	</div>
+	<p id="score"></p>
+	<script src="app.js"></script>
+</body>
+</html>

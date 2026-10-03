@@ -12,7 +12,7 @@
 // sender's VaultSession, validate, delegate, return plain JSON-safe values.
 // App-global concerns (settings, the recents list, the menu) stay
 // session-free; everything vault-shaped routes through the session.
-import { app, dialog, ipcMain, shell } from 'electron';
+import { app, clipboard, dialog, ipcMain, shell } from 'electron';
 import * as pdfFonts from './pdf-fonts.js';
 import * as officeSlot from './office-slot.js';
 import * as zetaAssets from './zeta-assets.js';
@@ -30,10 +30,19 @@ import { exportSite } from './export-site.js';
 import { parseBib, bibFilePath } from '../shared/bib.js';
 import { direntKind, shouldRecurse, walkGuard, writeFileAtomic } from './fs-utils.js';
 import { listSnapshots, readSnapshot } from './history.js';
-import { listPlugins } from './plugins.js';
+import { getPdfMeta, setPdfMeta } from './pdf-meta.js';
+import { listPlugins, enabledPlugins } from './plugins.js';
 import { ShellSessions } from './shell-core.js';
 import { paths } from './paths.js';
-import { trust } from './trust.js';
+import { trust, takeTrustNotice } from './trust.js';
+import { ENABLE_KEYS, identityKey } from './vault-trust.js';
+import { readVaultRequests } from './vault-requests.js';
+import { codeSummary } from './vault-code.js';
+import { insideByRealpath } from '../engine/vault-bounds.js';
+import { appByKey, stateOf, grants } from './app-registry.js';
+import { appKey, appsById, describeCapabilities } from './app-frames.js';
+import { callApp } from './app-calls.js';
+import { checkForUpdate } from './updater.js';
 import { registeredRemoteUrl, saveRemoteCopy } from './remote-pdfs.js';
 import { planOpen, pathFromFileUrl } from './open-file.js';
 import { iconTable, resolvedCallouts } from './callout-types.js';
@@ -70,6 +79,24 @@ function resolveBibFile(value, bibDir, root) {
 	return { path: inVault ? rel.split(nodePath.sep).join('/') : abs, inVault, exists: Boolean(found) };
 }
 
+/** Settings → General → Trusted vaults: every vault this device has
+ *  decided on, newest decision first, with whether a window has it open. */
+function trustedVaultsList() {
+	const open = new Map(allSessions().filter((x) => x.vaults.root).map((x) => [identityKey(x.vaults.root), x]));
+	return Object.entries(trust.entries())
+		.map(([key, entry]) => ({
+			key,
+			name: nodePath.basename(key),
+			trusted: entry.trusted === true,
+			decided: entry.decided !== false,
+			source: entry.source ?? null,
+			at: entry.at ?? null,
+			exists: fs.existsSync(key),
+			open: open.has(key),
+		}))
+		.sort((a, b) => String(b.at).localeCompare(String(a.at)));
+}
+
 export function registerIpc() {
 	// Session-scoped handler: fn(session, payload, event).
 	const handle = (channel, fn) => ipcMain.handle(channel, (event, payload) => {
@@ -93,7 +120,9 @@ export function registerIpc() {
 	handle(CH.VAULT_TREE, (s) => s.vaults.tree());
 
 	handle(CH.NOTE_READ, (s, { path }) => s.vaults.readNote(path));
-	handle(CH.NOTE_WRITE, (s, { path, content }) => s.vaults.writeNote(path, content));
+	// `guard`: an editor's save, refused over a version not seen
+	// (write-guard.js) — answered `{ conflict, disk }`; `force` overrides.
+	handle(CH.NOTE_WRITE, (s, { path, content, guard = false, force = false }) => s.vaults.writeNote(path, content, { guard, force }));
 	handle(CH.NOTE_CREATE, (s, { path }) => s.vaults.createNote(path));
 	handle(CH.FS_CREATE_FOLDER, (s, { path }) => s.vaults.createFolder(path));
 	handle(CH.FS_RENAME, (s, { path, newPath }) => {
@@ -116,6 +145,20 @@ export function registerIpc() {
 		s.vaults.resolve(path);
 		return readSnapshot(s.vaults.root, path, id);
 	});
+	// Quote-and-cite's memory of a PDF (pdf-meta.js): its chosen entry, its
+	// printed-page offset. The path is checked to be the vault's own PDF.
+	handle(CH.PDF_META_GET, (s, { path }) => {
+		if (!s.vaults.root || !/\.pdf$/i.test(String(path))) return null;
+		s.vaults.resolve(path);
+		return getPdfMeta(s.vaults.root, path);
+	});
+	handle(CH.PDF_META_SET, (s, { path, patch }) => {
+		if (!s.vaults.root || !/\.pdf$/i.test(String(path))) throw new Error('Not a PDF in this vault');
+		s.vaults.resolve(path);
+		return setPdfMeta(s.vaults.root, path, patch);
+	});
+	// A conflict's versions, kept before anything is chosen (conflicts.js).
+	handle(CH.HISTORY_KEEP, (s, { path, text }) => s.vaults.keepVersion(path, text));
 	handle(CH.HISTORY_RESTORE, (s, { path, id }) => {
 		s.vaults.resolve(path);
 		const text = readSnapshot(s.vaults.root, path, id);
@@ -147,6 +190,8 @@ export function registerIpc() {
 				if (s.vaults.excludes.isUnindexed(childRel)) continue;
 				const abs = nodePath.join(dir, entry.name);
 				const kind = direntKind(dir, entry);
+				// A restricted vault's link out is not part of it.
+				if (s.vaults.restricted && kind && !insideByRealpath(abs, s.vaults.root)) continue;
 				if (kind === 'dir') {
 					if (shouldRecurse(abs, seen)) walk(abs, childRel);
 				} else if (kind === 'file' && entry.name.toLowerCase().endsWith('.bib')) {
@@ -219,7 +264,10 @@ export function registerIpc() {
 		return ['save', 'discard', 'cancel'][response];
 	});
 	handleGlobal(CH.SHELL_OPEN_EXTERNAL, ({ url }) => {
-		if (/^https?:|^mailto:/i.test(url)) shell.openExternal(url);
+		if (!/^https?:|^mailto:/i.test(url)) return;
+		// A scenario must never launch a browser: it reads this line instead.
+		if (process.env.CLEW_SMOKE) console.log(`smoke-open-external: ${url}`);
+		else shell.openExternal(url);
 	});
 
 	// Hand a file to the OS default app: `[[paper.pdf|external]]` sends a
@@ -297,17 +345,209 @@ export function registerIpc() {
 	// chrome — the banner and Settings → This vault.
 	handle(CH.VAULT_TRUST_GET, (s) => ({
 		trusted: s.trusted === true,
+		decided: s.access.decided === true,
 		refused: s.trusted ? [] : s.renderService.refusedNames(),
+		notice: takeTrustNotice(),
+		// The prompt is modal; under the smoke harness every fixture is
+		// undecided, and one over a fixture with code would swallow a
+		// scenario's input — so it is drawn there only when asked for.
+		prompt: !process.env.CLEW_SMOKE || !!process.env.CLEW_SMOKE_TRUST_PROMPT,
 	}));
-	handle(CH.VAULT_TRUST_SET, (s, { trusted }) => {
+	// Trusting or restricting reloads the window (§4.6): code that already
+	// runs — vault scripts in previews, plugins in the app page — can only be
+	// stopped, or started under a new CSP, by a fresh page. Asked first with
+	// the close question, so an unsaved office document or PDF annotation
+	// gets its Save/Discard/Cancel moment; a Cancel changes nothing.
+	// `enable` (the prompt's yes) is what the vault asked for; a vault never
+	// decided about and trusted from Settings gets its request too.
+	handle(CH.VAULT_TRUST_SET, async (s, { trusted, enable = null }) => {
 		if (!s.vaults.root) return { trusted: false };
-		if (trusted === true) trust.trust(s.vaults.root);
-		else trust.revoke(s.vaults.root);
-		s.trusted = trusted === true;
-		// Rewrites the engine config and re-renders every open preview.
-		s.renderService.setNoteCode(s.trusted);
+		const root = s.vaults.root;
+		// Keep restricted, for a vault already restricted: the answer is
+		// recorded and nothing that runs changes — no reload.
+		if (trusted !== true && !s.trusted) {
+			trust.revoke(root);
+			s.refreshAccess();
+			return { trusted: false };
+		}
+		const proceed = await (s.askToReload ? s.askToReload() : Promise.resolve(true));
+		if (!proceed) return { trusted: s.trusted, cancelled: true };
+		if (trusted === true) {
+			const grant = enable ?? (s.access.decided ? null : readVaultRequests(root)?.enable ?? null);
+			trust.trust(root, 'user', grant);
+		} else {
+			trust.revoke(root);
+		}
+		s.refreshAccess();
 		s.send(CH.EV_VAULT_TRUST_CHANGED, { trusted: s.trusted });
-		return { trusted: s.trusted };
+		setImmediate(() => { if (!s.win?.isDestroyed()) s.win.webContents.reload(); });
+		return { trusted: s.trusted, reloading: true };
+	});
+	// What this vault may run here, with the device's enablement record and
+	// the vault's own request beside it (Settings → This vault).
+	handle(CH.VAULT_ACCESS_GET, (s) => {
+		if (!s.vaults.root) return null;
+		return {
+			...s.access,
+			enable: trust.enablements(s.vaults.root),
+			requests: readVaultRequests(s.vaults.root)?.enable ?? null,
+			refused: s.trusted ? [] : s.renderService.refusedNames(),
+		};
+	});
+	// One enablement (§4.6). Also written into the vault's own settings as
+	// its REQUEST, so a vault keeps asking for what its author uses when it
+	// is shared onwards — never read back as a grant. Vault scripts and the
+	// network change what a loaded preview runs, so they reload the window
+	// like trust; the rest apply live (plugins as their toggle always has).
+	handle(CH.VAULT_ACCESS_SET, async (s, { key, value }) => {
+		if (!s.vaults.root || !ENABLE_KEYS.includes(key)) return null;
+		const root = s.vaults.root;
+		const reload = (key === 'scripts' || key === 'network') && s.trusted;
+		if (reload && s.askToReload && !(await s.askToReload())) return { cancelled: true };
+		trust.setEnable(root, { [key]: value });
+		if (key !== 'scripts') {
+			const current = s.vaults.loadState('vault-settings.json') ?? {};
+			if (key === 'plugins' ? JSON.stringify(current.plugins ?? []) !== JSON.stringify(value) : (current[key] === true) !== (value === true)) {
+				current[key] = key === 'plugins' ? value : value === true;
+				s.vaults.saveState('vault-settings.json', current);
+			}
+		}
+		s.refreshAccess();
+		s.send(CH.EV_VAULT_ACCESS_CHANGED, s.access);
+		if (reload) setImmediate(() => { if (!s.win?.isDestroyed()) s.win.webContents.reload(); });
+		return { ...s.access, reloading: reload };
+	});
+	// What the vault contains that would run (§4.5): the prompt's counts
+	// and Details, read from the tree and the index.
+	handle(CH.VAULT_CODE_SUMMARY, (s) => {
+		if (!s.vaults.root) return null;
+		return codeSummary({
+			root: s.vaults.root,
+			notePaths: s.indexer.notes.keys(),
+			requests: readVaultRequests(s.vaults.root),
+			globalDir: paths.globalPlugins,
+		});
+	});
+	// Settings → General → Trusted vaults: every vault this device has
+	// decided on, and whether a window has it open.
+	handleGlobal(CH.TRUSTED_VAULTS_LIST, () => trustedVaultsList());
+	// Revoke, trust or forget one of them. A vault open in a window goes
+	// through that window (the reload, its close question).
+	handleGlobal(CH.TRUSTED_VAULTS_SET, async ({ key, action }) => {
+		const open = allSessions().find((x) => x.vaults.root && identityKey(x.vaults.root) === key);
+		if (open) {
+			const proceed = await (open.askToReload ? open.askToReload() : Promise.resolve(true));
+			if (!proceed) return { cancelled: true, list: trustedVaultsList() };
+		}
+		const root = open?.vaults.root ?? key;
+		if (action === 'forget') trust.forgetKey(key);
+		else if (action === 'trust') trust.trust(root);
+		else if (action === 'revoke') trust.revoke(root);
+		if (open) {
+			open.refreshAccess();
+			open.send(CH.EV_VAULT_TRUST_CHANGED, { trusted: open.trusted });
+			setImmediate(() => { if (!open.win?.isDestroyed()) open.win.webContents.reload(); });
+		}
+		return { list: trustedVaultsList() };
+	});
+	// ---- the update check (docs/dev/auto-update.md) -------------------------
+	handleGlobal(CH.UPDATE_CHECK, () => checkForUpdate({ manual: true }));
+	handleGlobal(CH.UPDATE_SKIP, ({ version }) => {
+		if (typeof version === 'string' && /^\d+\.\d+\.\d+/.test(version)) settings.set('skippedUpdate', version);
+		return true;
+	});
+
+	// ---- apps in notes (frame-bridge.md §7–§9) ---------------------------
+	// An app's clipboard (the `clipboard` capability) is the system's — but
+	// never under the smoke harness, which must leave the user's clipboard
+	// alone, unless a scenario asks for the real one (CLEW_SMOKE_CLIPBOARD).
+	const memoryClipboard = (() => { let text = ''; return { writeText: (t) => { text = String(t); }, readText: () => text }; })();
+	const appClipboard = process.env.CLEW_SMOKE && !process.env.CLEW_SMOKE_CLIPBOARD ? memoryClipboard : clipboard;
+	// Only for an app THIS window registered (it served the note embedding
+	// it): a key another window holds is not this window's business.
+	const ownApp = (s, key) => {
+		const registered = appByKey(key);
+		return registered && registered.sessionId === s.id ? registered : null;
+	};
+	const appStatus = (s, key, registered) => {
+		const restricted = !s.trusted;
+		const st = stateOf(registered, restricted);
+		return {
+			key, id: registered.manifest.id, name: registered.manifest.name, folder: registered.folder,
+			capabilities: registered.manifest.capabilities, network: registered.manifest.network,
+			ask: st.ask, askRun: st.askRun, changed: st.changed, mayRun: st.mayRun, granted: st.granted,
+			restricted, describe: Object.fromEntries(registered.manifest.capabilities.map((c, i) => [c, describeCapabilities(registered.manifest.capabilities, registered.manifest.network)[i]])),
+		};
+	};
+	handle(CH.APP_STATUS, (s, { key }) => {
+		const registered = ownApp(s, key);
+		return registered ? appStatus(s, key, registered) : null;
+	});
+	// The prompt's answer, for everything it asked: Allow grants the asked
+	// capabilities (and, restricted, the run); Don't allow denies them. In a
+	// restricted vault an app holding `network` is pinned to the code that
+	// was approved (choice C).
+	handle(CH.APP_ANSWER, (s, { key, allow }) => {
+		const registered = ownApp(s, key);
+		if (!registered) return null;
+		const restricted = !s.trusted;
+		const st = stateOf(registered, restricted);
+		const asked = st.ask;
+		const pin = restricted && allow === true && (asked.includes('network') || st.granted.includes('network'));
+		grants.answer(registered.vault, registered.manifest.id, {
+			granted: allow === true ? asked : [],
+			denied: allow === true ? [] : asked,
+			...(st.askRun || st.changed ? { run: allow === true } : {}),
+			...(pin ? { code: st.code() } : (allow === true && st.changed ? { code: null } : {})),
+			folder: registered.folder,
+		});
+		// No EV_APP_GRANTS_CHANGED here: the host that asked is waiting on
+		// this answer and carries on (app-host.js); that event is for a grant
+		// changed from elsewhere (Settings → Revoke), which reloads frames.
+		return appStatus(s, key, registered);
+	});
+	handle(CH.APP_CALL, (s, { key, notePath, method, params }) => {
+		const registered = ownApp(s, key);
+		if (!registered) return { ok: false, error: { code: 'denied', message: 'no such app in this window' } };
+		const restricted = !s.trusted;
+		const st = stateOf(registered, restricted);
+		if (!st.mayRun) return { ok: false, error: { code: 'denied', message: 'this app has not been allowed to run here' } };
+		const out = callApp({
+			root: s.vaults.root, restricted, excludes: s.vaults.excludes,
+			notePath: typeof notePath === 'string' ? notePath : null,
+			app: registered, granted: new Set(st.granted),
+			indexer: s.indexer, search: s.searchService, kv: s.kvStore, clipboard: appClipboard,
+		}, String(method), params);
+		// A note an app created is a new file Clew wrote: the tree shows it
+		// now, whatever the watcher's budget (CLAUDE.md).
+		if (out.ok && out.result?.created) s.vaults.refreshTree();
+		return out;
+	});
+	// Settings → This vault → Apps: every app the vault carries, with what
+	// this device has let it do.
+	handle(CH.APPS_LIST, (s) => {
+		if (!s.vaults.root) return [];
+		const vault = identityKey(s.vaults.root);
+		const records = grants.list(vault);
+		const ids = appsById(s.vaults.root, s.indexer.appFolders);
+		const out = [];
+		for (const [id, folders] of ids) {
+			const r = records[id] ?? null;
+			out.push({ id, key: appKey(vault, id), folders, duplicate: folders.length > 1, granted: Object.keys(r?.granted ?? {}), denied: Object.keys(r?.denied ?? {}), run: Boolean(r?.run), runDenied: Boolean(r?.runDenied), pinned: Boolean(r?.code) });
+		}
+		for (const [id, r] of Object.entries(records)) {
+			if (!ids.has(id)) out.push({ id, key: appKey(vault, id), folders: r.folder ? [r.folder] : [], missing: true, granted: Object.keys(r.granted ?? {}), denied: Object.keys(r.denied ?? {}), run: Boolean(r.run), runDenied: Boolean(r.runDenied), pinned: Boolean(r.code) });
+		}
+		return out.sort((a, b) => a.id.localeCompare(b.id));
+	});
+	// Revoking forgets the app here: its ports close and its frames reload,
+	// so it asks again (§9).
+	handle(CH.APP_REVOKE, (s, { id }) => {
+		if (!s.vaults.root) return false;
+		const vault = identityKey(s.vaults.root);
+		const done = grants.revoke(vault, String(id));
+		s.send(CH.EV_APP_GRANTS_CHANGED, { key: appKey(vault, String(id)) });
+		return done;
 	});
 	// Web PDFs (remote-pdfs.js): the viewer names a HASH; the URL is looked
 	// up in this window's own registrations, never taken from the message.
@@ -325,11 +565,11 @@ export function registerIpc() {
 		const current = s.vaults.loadState('vault-settings.json') ?? {};
 		current[key] = value;
 		s.vaults.saveState('vault-settings.json', current);
-		// dataviewJs reaches the worker only at spawn (CLEW_DATAVIEW_JS), so
-		// it needs the fresh standby too — without it the toggle waited for
-		// the vault's next opening.
-		if (key === 'jmarkdownProject' || key === 'normalSyntax' || key === 'pandocCitations'
-			|| key === 'dataviewJs') {
+		// (`plugins`, `noteApi`, `dataviewJs` and `network` written here are
+		// the vault's REQUEST only — frame-bridge.md §4.2. What runs is the
+		// device's enablement, changed through VAULT_ACCESS_SET, which
+		// reconfigures through the session's access.)
+		if (key === 'jmarkdownProject' || key === 'normalSyntax' || key === 'pandocCitations') {
 			s.renderService.reconfigure({ [key]: value === true });
 		}
 		// Bibliography settings rewrite the engine config the same way.
@@ -352,9 +592,6 @@ export function registerIpc() {
 			s.renderService.reconfigure({ callouts: value });
 			s.send(CH.EV_CALLOUTS_CHANGED);
 		}
-		// Plugin toggles change the engine config (engine surfaces) and the
-		// preview injection; re-render open previews with the new set.
-		if (key === 'plugins') s.renderService.reconfigure({ plugins: value });
 		return current;
 	});
 
@@ -377,12 +614,20 @@ export function registerIpc() {
 	handle(CH.SHELL_RESIZE, (s, { cols, rows }) => ({ ok: shells.resize(s.id, cols, rows) }));
 	handle(CH.SHELL_CLOSE, (s) => ({ ok: shells.close(s.id) }));
 
+	// Every plugin available here, and which may run: `enabled` is what the
+	// DEVICE enabled for this vault and trust allows (a vault plugin only in
+	// a trusted vault — enabledPlugins), `requested` the vault's own ask.
+	// The list includes a restricted vault's own plugins, so Settings can
+	// show them as held back.
 	handle(CH.PLUGINS_LIST, (s) => {
-		if (!s.vaults.isOpen) return { plugins: [], enabled: [], globalDir: paths.globalPlugins };
+		if (!s.vaults.isOpen) return { plugins: [], enabled: [], requested: [], trusted: false, globalDir: paths.globalPlugins };
 		const vaultSettings = s.vaults.loadState('vault-settings.json') ?? {};
 		return {
-			plugins: listPlugins(s.vaults.root, paths.globalPlugins),
-			enabled: Array.isArray(vaultSettings.plugins) ? vaultSettings.plugins : [],
+			plugins: listPlugins(s.vaults.root, paths.globalPlugins, { vault: true }),
+			enabled: enabledPlugins(s.vaults.root, s.access, paths.globalPlugins).map((p) => p.id),
+			switchedOn: [...s.access.plugins],
+			requested: Array.isArray(vaultSettings.plugins) ? vaultSettings.plugins : [],
+			trusted: s.trusted === true,
 			globalDir: paths.globalPlugins,
 		};
 	});
@@ -428,6 +673,7 @@ export function registerIpc() {
 			distDir: nodePath.join(app.getAppPath(), 'dist'),
 			outDir: target,
 			vaultOptions,
+			access: s.access,
 		});
 		s.vaults.refreshIfInside(target);
 		return { outDir: target, ...result };

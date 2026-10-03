@@ -31,7 +31,7 @@ import { ViewPlugin } from '@codemirror/view';
 import { liveStateField } from './reveal-field.js';
 import { liveConfigFacet } from './config.js';
 import {
-	frameKind, frameText, wantsFrame, isPinnedKind, setFrameHeight,
+	frameKind, frameText, wantsFrame, isPinnedKind, revealIconOutside, setFrameHeight, defaultHeight,
 } from './frames.js';
 import { handlePreviewMessage } from './frame-host.js';
 import { blockUrl, blockDocumentUrl } from '../../lib/preview-url.js';
@@ -43,6 +43,8 @@ import { vaultSettingsStore } from '../../state/vault-settings-store.js';
 import { isDependentFragment } from '../../../shared/fragment-deps.js';
 import { retire } from '../../pdf-frames.js';
 import { citationLines } from '../../../shared/citation-keys.js';
+import { PREVIEW_ORIGIN } from '../../../shared/message-guard.js';
+import { icon } from '../../lib/icons.js';
 
 const HOST_SOURCE = 'clew-preview-host';
 const RESTALE_MS = 300;
@@ -69,6 +71,16 @@ class FrameLayer {
 		this.live = null;
 		this.onMessage = (event) => this.#message(event);
 		window.addEventListener('message', this.onMessage);
+		// This page sees the pointer only where no frame is: a move here, off
+		// an "Edit source" icon, means the pointer has left every block —
+		// which a frame does not always manage to say.
+		this.outsideAt = 0;
+		this.onPointerMove = (e) => {
+			if (e.target?.closest?.('.le-frame-reveal')) return;
+			this.outsideAt = Math.max(this.outsideAt, performance.timeOrigin + e.timeStamp);
+			for (const record of this.records.values()) record.reveal?.dispatchEvent(new Event('clew-out'));
+		};
+		window.addEventListener('pointermove', this.onPointerMove, { passive: true });
 		this.offFile = ipc.on(CH.EV_FILE_CHANGED, ({ path }) => this.#fileChanged(path));
 		// Every block renders under the note's citation keys (main/
 		// citation-header.js); a save that changes them re-renders the frames.
@@ -109,6 +121,7 @@ class FrameLayer {
 
 	destroy() {
 		window.removeEventListener('message', this.onMessage);
+		window.removeEventListener('pointermove', this.onPointerMove);
 		this.offFile?.();
 		this.offKv?.();
 		this.offTheme?.();
@@ -154,6 +167,7 @@ class FrameLayer {
 		for (const [id, record] of this.records) {
 			if (!seen.has(id)) {
 				if (record.iframe) retire(record.iframe);   // a PDF edit still saving keeps it, hidden
+				record.reveal?.remove();
 				this.records.delete(id);
 			}
 		}
@@ -202,6 +216,7 @@ class FrameLayer {
 			const place = measured.get(id);
 			if (!place) {
 				if (record.iframe) record.iframe.style.visibility = 'hidden';
+				if (record.reveal) record.reveal.style.visibility = 'hidden';
 				continue;
 			}
 			if (place.onScreen) record.lastVisible = now;
@@ -213,6 +228,16 @@ class FrameLayer {
 					left: `${place.left}px`,
 					width: `${place.width}px`,
 					height: `${place.height}px`,
+				});
+			}
+			if (record.reveal) {
+				// Its top-right corner on the block's, 6px in — or, outside,
+				// its top-left 6px beyond the block's right edge.
+				const outside = record.reveal.classList.contains('is-outside');
+				Object.assign(record.reveal.style, {
+					visibility: 'visible',
+					top: `${place.top + (outside ? 0 : 6)}px`,
+					left: `${place.left + place.width + (outside ? 6 : -6)}px`,
 				});
 			}
 		}
@@ -241,6 +266,8 @@ class FrameLayer {
 		if (!victim) return false;
 		retire(victim.iframe);
 		victim.iframe = null;
+		victim.reveal?.remove();
+		victim.reveal = null;
 		victim.ready = false;
 		victim.state = 'idle';
 		return true;
@@ -261,6 +288,11 @@ class FrameLayer {
 		iframe.allow = 'fullscreen';
 		iframe.dataset.frameId = record.id;
 		iframe.style.visibility = 'hidden';
+		// Its height from the start: a render that returns after its block
+		// scrolled away is not placed until the block is drawn again, and was
+		// left at the iframe default, 150 px, in the meantime (live-blocks'
+		// `content=79 frame=150`, 2026-10-03).
+		iframe.style.height = `${record.height ?? defaultHeight(record.kind)}px`;
 		// A restale MORPHS the new render in and leaves src naming the old
 		// one, which an engine reconfigure has dropped from main's cache — so
 		// a frame that later RELOADS (its pane re-mounted by a mode switch in
@@ -273,6 +305,7 @@ class FrameLayer {
 			record.ready = false;
 			iframe.src = blockDocumentUrl(record.hash);
 		});
+		record.reveal = this.#revealButton(record, iframe);
 		this.layer.append(iframe);
 		// src AFTER insertion (the lesson from office embeds: a frame built
 		// with its src and then moved may never navigate).
@@ -282,6 +315,72 @@ class FrameLayer {
 		this.#schedule();
 	}
 
+	/**
+	 * The block's "Edit source" icon (the owner's design, 2026-10-03): one
+	 * for every rendered block, over its upper-right corner — or just
+	 * outside it, for kinds with their own controls there
+	 * (frames.js#revealIconOutside). It fades in while the pointer is over
+	 * the block or the icon, and a click puts the cursor at the block's
+	 * start, which reveals its source — what the arrow keys do. A click on
+	 * the graphic itself is the graphic's: a map pans, a board drags, a
+	 * figure does nothing. Touch screens, with no hover, keep it faintly
+	 * visible (live-edit.css): a tap inside a frame never reaches this page.
+	 */
+	#revealButton(record, iframe) {
+		const button = document.createElement('button');
+		button.type = 'button';
+		button.className = 'le-frame-reveal';
+		button.title = 'Edit source';
+		button.setAttribute('aria-label', 'Edit source');
+		button.dataset.frameId = record.id;
+		button.dataset.kind = record.kind;
+		if (revealIconOutside(record.kind)) button.classList.add('is-outside');
+		button.append(icon('code'));
+		// mousedown, not click: the editor keeps its focus and selection
+		// until the cursor is moved deliberately.
+		button.addEventListener('mousedown', (e) => {
+			if (e.button !== 0) return;
+			e.preventDefault();
+			this.#revealSource(record);
+		});
+		// The keyboard's way to it: Enter/Space on the focused button.
+		button.addEventListener('click', (e) => {
+			if (e.detail === 0) this.#revealSource(record);
+		});
+		let timer = null;
+		let over = false;   // the pointer over the frame, as last reported
+		const show = (e) => {
+			if (e?.type === 'clew-over' || e?.type === 'mouseenter' && e.target === iframe) over = true;
+			clearTimeout(timer);
+			button.classList.add('is-shown');
+		};
+		// Crossing from the block to the icon (or back) is not leaving.
+		const hide = (e) => {
+			if (e?.type === 'clew-out' || e?.type === 'mouseleave' && e.target === iframe) over = false;
+			clearTimeout(timer);
+			timer = setTimeout(() => {
+				if (!button.matches(':hover') && !over) button.classList.remove('is-shown');
+			}, 200);
+		};
+		// The frame says when the pointer is over it ('pointer' messages, as
+		// these events); the iframe element's own enter/leave are a fallback.
+		button.addEventListener('clew-over', show);
+		button.addEventListener('clew-out', hide);
+		iframe.addEventListener('mouseenter', show);
+		iframe.addEventListener('mouseleave', hide);
+		button.addEventListener('mouseenter', show);
+		button.addEventListener('mouseleave', hide);
+		this.layer.append(button);
+		return button;
+	}
+
+	/** The cursor to the block's start: its source, revealed. */
+	#revealSource(record) {
+		if (record.from === undefined || record.from > this.view.state.doc.length) return;
+		this.view.dispatch({ selection: { anchor: record.from }, scrollIntoView: false });
+		this.view.focus();
+	}
+
 	#slotError(record, message) {
 		const slot = this.view.contentDOM.querySelector(`.le-frame-slot[data-frame-id="${CSS.escape(record.id)}"] .le-frame-skeleton`);
 		if (slot) slot.textContent = `${record.kind} — ${message}`;
@@ -289,7 +388,7 @@ class FrameLayer {
 
 	#post(record, msg) {
 		if (!record.ready) { record.queue.push(msg); return; }
-		record.iframe?.contentWindow?.postMessage({ source: HOST_SOURCE, ...msg }, '*');
+		record.iframe?.contentWindow?.postMessage({ source: HOST_SOURCE, ...msg }, PREVIEW_ORIGIN);
 	}
 
 	#broadcast(msg) {
@@ -298,13 +397,19 @@ class FrameLayer {
 
 	#message(event) {
 		const msg = event.data;
-		if (!msg || msg.source !== 'clew-preview') return;
+		if (!msg || msg.source !== 'clew-preview' || event.origin !== PREVIEW_ORIGIN) return;
 		let record = null;
 		for (const r of this.records.values()) {
 			if (r.iframe && event.source === r.iframe.contentWindow) { record = r; break; }
 		}
 		if (!record) return;
 		switch (msg.type) {
+			case 'pointer':
+				// The pointer over the block, as the frame sees it (client.js) —
+				// unless this page has seen it outside every frame since.
+				if (msg.over && Number(msg.at) < this.outsideAt) return;
+				record.reveal?.dispatchEvent(new Event(msg.over ? 'clew-over' : 'clew-out'));
+				return;
 			case 'ready':
 				record.ready = true;
 				record.state = 'ready';
@@ -316,6 +421,10 @@ class FrameLayer {
 				const height = Math.max(8, Math.round(msg.height));
 				if (record.height === height) return;
 				record.height = height;
+				// A frame whose block is not drawn (not placed, hidden) follows
+				// its content now; a placed one resizes WITH its placeholder in
+				// #write, or for a frame it would overlap the text below.
+				if (record.iframe?.style.visibility === 'hidden') record.iframe.style.height = `${height}px`;
 				// Out of the message handler, never inside a view update.
 				requestAnimationFrame(() => {
 					if (!this.records.has(record.id)) return;

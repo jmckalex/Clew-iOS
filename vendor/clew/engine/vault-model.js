@@ -26,6 +26,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { readFrontmatter, extractTasks } from './query-fences.js';
+import { withinVault } from './vault-bounds.js';
 
 const NOTE_FILE = /\.(md|jmd)$/i;
 const IGNORED = new Set(['.obsidian', '.clew', '.git', 'node_modules', '.trash']);
@@ -127,6 +128,7 @@ function walk(root) {
 		try { real = fs.realpathSync(dir); } catch { return; }
 		if (seen.has(real)) return;      // symlink cycles — vaults may contain them
 		seen.add(real);
+		if (!withinVault(dir, root)) return;   // a restricted vault's link out (vault-bounds.js)
 		let entries;
 		try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
 		for (const entry of entries) {
@@ -136,7 +138,7 @@ function walk(root) {
 			let stat;
 			try { stat = fs.statSync(abs); } catch { continue; }   // follows symlinks
 			if (stat.isDirectory()) step(abs, childRel);
-			else files.push({ abs, rel: childRel, stat });
+			else if (withinVault(abs, root)) files.push({ abs, rel: childRel, stat });
 		}
 	};
 	step(root, '');

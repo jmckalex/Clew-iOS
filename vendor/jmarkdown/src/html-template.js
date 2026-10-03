@@ -4,6 +4,8 @@ import { fileURLToPath } from 'url';
 import path from 'path';
 import { configManager } from './config-manager.js';
 import { custom_elements } from './metadata-header.js';
+import { tabbingPageScript } from './tabbing-page.js';
+import { runtimeBibliography } from './bibliographies.js';
 
 export function processTemplate(content) {
 	const default_template = fs.readFileSync(path.join(configManager.get('Jmarkdown app directory'), 'default-template.html.mustache'), 'utf8');
@@ -16,6 +18,18 @@ export function processTemplate(content) {
 	config['Jmarkdown_css'] = jmarkdown_css;
 	config['Custom_elements'] = custom_elements;
 	config['Content'] = content;
+	// The runtime Biblify client reads ONE file: with several bibliographies
+	// (the configured and the note's) it is handed their merge, written beside
+	// the page (bibliographies.js).
+	if (config['Biblify_activate'] && config['Biblify'] && !config['Biblify']['resolve']) {
+		config['Biblify']['bibliography'] = runtimeBibliography();
+	}
+	// A page with a tabbing block gets the script that lays it out
+	// (tabbing-page.js); only a template with a {{#Tabbing_script}} section
+	// places it, so a host with its own layout (Clew) is untouched.
+	if (content.includes('<div class="clew-tabbing"')) {
+		config['Tabbing_script'] = tabbingPageScript();
+	}
 	
 	// Checking whether the bibliography should be activated is complicated because it
 	// might be set to 'true' in either a configuration file — in which case it won't be an array —

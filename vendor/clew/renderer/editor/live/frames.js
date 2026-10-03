@@ -27,6 +27,18 @@ const DEFAULT_HEIGHT = {
 	reveal: 520, pdf: 480, office: 320, canvas: 320, excalidraw: 320, video: 240, audio: 54,
 };
 
+/**
+ * Where a rendered block's "Edit source" icon sits (frame-layer.js): at the
+ * graphic's upper-right corner, INSIDE it — except for kinds whose own
+ * controls live there, where it sits just OUTSIDE the corner, in the margin
+ * beside the block: a PDF (the viewer's toolbar ends in buttons), a note
+ * embed (its disclosure chevron is at the right of its title), Excalidraw
+ * (its title bar and view-mode UI), an app and raw HTML (anything at all).
+ */
+const ICON_OUTSIDE = new Set(['pdf', 'note', 'excalidraw', 'app', 'html']);
+
+export function revealIconOutside(kind) { return ICON_OUTSIDE.has(kind); }
+
 /** Kinds with state worth keeping alive while near the viewport. */
 const PINNED = new Set(['leaflet', 'kanban', 'query', 'pdf', 'canvas', 'reveal', 'excalidraw']);
 
@@ -118,9 +130,13 @@ export class FramePlaceholder extends WidgetType {
 		el.className = 'le-frame-slot';
 		el.dataset.frameId = this.id;
 		el.dataset.kind = this.kind;
+		// A spacer. It was a thin bar that revealed the source when clicked
+		// and lit up under the pointer — the owner found it by accident and
+		// wanted it gone (2026-10-03); the "Edit source" icon over the
+		// block's corner (frame-layer.js) is the way now. It keeps its 6px,
+		// so no block moves.
 		const edge = document.createElement('div');
-		edge.className = 'le-frame-edge le-reveal-on-click';
-		edge.title = 'Edit source';
+		edge.className = 'le-frame-edge';
 		const body = document.createElement('div');
 		body.className = 'le-frame-body';
 		const skeleton = document.createElement('div');
@@ -141,5 +157,10 @@ export class FramePlaceholder extends WidgetType {
 
 	get estimatedHeight() { return this.height + 8; }
 
-	ignoreEvent(event) { return event.type !== 'mousedown'; }
+	// Every event: a press on the slot — the spacer above the frame, or the
+	// slot around it — is nobody's. CodeMirror took the mousedown and put the
+	// cursor on the block, which revealed it (the thin bar's behaviour, which
+	// the owner did not want); the frame takes the clicks on the block, and
+	// the "Edit source" icon is the way to its source.
+	ignoreEvent() { return true; }
 }

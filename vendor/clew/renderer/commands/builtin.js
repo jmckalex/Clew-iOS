@@ -28,6 +28,9 @@ import { bookmarkStore } from '../state/bookmark-store.js';
 import { editorPool } from '../editor/pool.js';
 import { openQuickSwitcher } from '../components/modals/clew-quick-switcher.js';
 import { extractAnnotations } from '../pdf-annotations.js';
+import { quoteSelection, changePdfCitation, setPrintedPage } from '../pdf-quote.js';
+import { buildWarnings } from '../build-warnings.js';
+import { warningSummary } from '../../shared/build-warnings.js';
 import { openListModal } from '../components/modals/list-modal.js';
 import { openHistoryModal } from '../components/modals/clew-history-modal.js';
 import { ipc, CH } from '../ipc.js';
@@ -104,6 +107,12 @@ async function exportActiveNote(format) {
 	try {
 		const result = await ipc.invoke(CH.EXPORT_NOTE, { path: ctx.notePath, format });
 		if (result?.output) console.log(`Exported to ${result.output}`);
+		// What the build said (the LaTeX-export lint, among others), grouped;
+		// the status bar's ⚠ lists them.
+		if (Array.isArray(result?.warnings)) {
+			buildWarnings.set(ctx.notePath, result.warnings);
+			if (result.warnings.length) notice(`Exported ${result.output?.split('/').pop() ?? ''} — ${warningSummary(result.warnings)} (⚠ in the status bar lists them)`, 6000);
+		}
 	} catch (err) {
 		console.error('Export failed:', err);
 		alert(`Export failed: ${err.message ?? err}`);
@@ -169,6 +178,19 @@ export function registerBuiltinCommands() {
 		{ id: 'pdf:extract-annotations', name: 'PDF: extract annotations to a note',
 			when: (ctx) => ctx.activeTabKind === 'file' && /\.pdf$/i.test(ctx.activeTab?.path ?? ''),
 			run: (ctx) => extractAnnotations(ctx.activeTab.path) },
+		// FEATURE-IDEAS #2: the text selected in any PDF viewer, quoted into
+		// the note being written with its citation and page (pdf-quote.js).
+		// Always offered: with nothing selected it says so.
+		{ id: 'pdf:quote-selection', name: 'PDF: quote the selection in the note', hotkeys: ['Mod-Alt-q'], when: needsVault,
+			run: () => quoteSelection() },
+		// Which .bib entry a PDF is, when no `file` field says (remembered in
+		// .clew/pdf-citations.json): choose again.
+		{ id: 'pdf:change-citation', name: 'PDF: change the citation for this PDF…', when: needsVault,
+			run: () => changePdfCitation() },
+		// The number printed on the page in view, when the PDF's labels and
+		// its text do not say (remembered in .clew/pdf-citations.json).
+		{ id: 'pdf:set-printed-page', name: 'PDF: set the printed page number…', when: needsVault,
+			run: () => setPrintedPage() },
 		{ id: 'nav:quick-switcher', name: 'Open quick switcher', hotkeys: ['Mod-o'], when: needsVault,
 			inModal: false, run: () => openQuickSwitcher() },
 		{ id: 'nav:back', name: 'Navigate back', hotkeys: ['Mod-[', 'Mod-Alt-ArrowLeft'], when: needsVault,
@@ -295,6 +317,8 @@ export function registerBuiltinCommands() {
 			run: () => workspaceStore.setSidebar('right', { open: true, activeTool: 'props' }) },
 		{ id: 'app:settings', name: 'Open settings', hotkeys: ['Mod-,'],
 			run: () => actions.openSettings() },
+		{ id: 'app:check-updates', name: 'Check for updates…',
+			run: () => import('../update-notice.js').then((m) => m.checkForUpdatesNow()) },
 		{ id: 'view:toggle-theme', name: 'Toggle light/dark theme',
 			run: () => settingsStore.set('theme', settingsStore.get('theme') === 'dark' ? 'light' : 'dark') },
 		{ id: 'view:theme-dark', name: 'Use dark theme',

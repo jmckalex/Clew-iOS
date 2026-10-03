@@ -21,6 +21,9 @@
 
 /** The one origin a token may be handed to. */
 export const PREVIEW_ORIGIN = 'clew-preview://vault';
+/** The app page's own origin (frame-bridge.md §2), the same on desktop and
+ *  iOS: the one reader every clew-preview:// response grants (§2.6). */
+export const APP_ORIGIN = 'clew-app://app';
 
 /** The message type, both ways: the ask and the answer. */
 export const TOKEN_MESSAGE = 'caller-token';

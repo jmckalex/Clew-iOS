@@ -15,6 +15,9 @@
 import { viewerHandles } from './pdf-handles.js';
 // The pen convention (a pen draws, a finger pans) for every viewer built here.
 import './pdf-pen.js';
+import { topOrigin, postTo } from '../shared/message-guard.js';
+import { bandNumbers, edgeRuns, textPageOffset, usefulPageLabels } from '../shared/pdf-quote.js';
+import { installQuietNavigator } from './pdf-quiet-nav.js';
 
 const EMBEDPDF_ASSETS = '/__clew_assets__/embedpdf';
 const SAVE_DEBOUNCE_MS = 2500;
@@ -51,7 +54,7 @@ function saveToVault(rel, bytes) {
 				reject(new Error('save timed out'));
 			}, 30_000),
 		});
-		window.top.postMessage({ source: 'clew-pdf', type: 'pdf-save', id, path: rel, bytes }, '*');
+		postTo(window.top, { source: 'clew-pdf', type: 'pdf-save', id, path: rel, bytes }, topOrigin());
 	});
 }
 
@@ -67,7 +70,7 @@ function reportDirty() {
 	const dirty = [...liveHandles].some((h) => h.isDirty());
 	if (dirty === reportedDirty) return;
 	reportedDirty = dirty;
-	window.top.postMessage({ source: 'clew-pdf', type: 'pdf-dirty', dirty }, '*');
+	postTo(window.top, { source: 'clew-pdf', type: 'pdf-dirty', dirty }, topOrigin());
 }
 window.addEventListener('message', (event) => {
 	const msg = event.data;
@@ -77,6 +80,95 @@ window.addEventListener('message', (event) => {
 		|| msg?.source !== 'clew-pdf-host' || msg.type !== 'pdf-flush') return;
 	for (const h of liveHandles) h.flush?.();
 });
+
+// ---- quote-and-cite (FEATURE-IDEAS #2) -------------------------------------
+// The app page (renderer/pdf-quote.js) puts the text selected in a PDF into
+// the note being written. It needs to know WHERE a selection is — each
+// document says when it gains or loses one (`pdf-selection`), and the app
+// keeps the newest — and then the text: asked for by the app's command
+// (`pdf-quote-request`), or sent unasked by the "Quote in note" item each
+// viewer adds to EmbedPDF's selection menu. Either way the answer is one
+// `pdf-quote` message.
+let quoting = null;           // the viewer in this document with the newest selection
+let reportedSelection = false;
+function noteSelection(handle, has) {
+	if (has) quoting = handle;
+	else if (quoting === handle) quoting = null;
+	if (has || reportedSelection !== Boolean(quoting)) {
+		reportedSelection = Boolean(quoting);
+		postTo(window.top, { source: 'clew-pdf', type: 'pdf-selection', has: reportedSelection }, topOrigin());
+	}
+}
+window.addEventListener('message', (event) => {
+	const msg = event.data;
+	if (event.source !== window.top || msg?.source !== 'clew-pdf-host') return;
+	if (msg.type === 'pdf-quote-request') {
+		if (quoting) quoting.sendQuote(msg.requestId);
+		else postTo(window.top, { source: 'clew-pdf', type: 'pdf-quote', requestId: msg.requestId, empty: true }, topOrigin());
+	}
+	// The page in view and what it is printed as — for "PDF: set the printed
+	// page number…" (renderer/pdf-quote.js), asked of a tab's viewer.
+	if (msg.type === 'pdf-current-page') {
+		const handle = quoting ?? [...viewerHandles].find((h) => h.currentPage);
+		const reply = (page, label = null, textOffset = null) => postTo(window.top, {
+			source: 'clew-pdf', type: 'pdf-current-page', requestId: msg.requestId, path: handle?.path ?? null, page, label, textOffset,
+		}, topOrigin());
+		if (!handle) reply(null);
+		else {
+			const page = handle.currentPage?.() ?? null;
+			(async () => {
+				const label = page ? (await handle.pageLabels())?.[page - 1] ?? null : null;
+				reply(page, label, await handle.textOffset().catch(() => null));
+			})().catch(() => reply(page));
+		}
+	}
+	// For scenarios (smoke/pdf-nav-scenario.js): the page navigator's state —
+	// its opacity as drawn, its box in this document, whether it holds the
+	// keyboard focus; `focus`/`blur` move the focus into its page field or
+	// out first.
+	if (msg.type === 'test-nav') {
+		const root = [...viewerHandles].find((h) => h.container?.shadowRoot)?.container.shadowRoot;
+		const pill = root?.querySelector('[data-overlay-id="page-controls"]');
+		if (msg.focus) pill?.querySelector('input')?.focus();
+		if (msg.blur) root?.activeElement?.blur?.();
+		// A synthetic touch tap at a point in this document (the harness has
+		// no touch input): the host hears it as a finger's pointerdown.
+		if (msg.tap) {
+			const host = root.host;
+			host.dispatchEvent(new PointerEvent('pointerdown', { pointerType: 'touch', clientX: msg.tap.x, clientY: msg.tap.y, bubbles: true, composed: true }));
+		}
+		const box = pill?.firstElementChild?.firstElementChild;
+		const r = box?.getBoundingClientRect();
+		postTo(window.top, {
+			source: 'clew-pdf', type: 'test-nav', requestId: msg.requestId,
+			opacity: box ? Number(getComputedStyle(box).opacity) : null,
+			rect: r ? { x: r.left, y: r.top, width: r.width, height: r.height } : null,
+			focused: Boolean(pill?.matches(':has(:focus-visible)')),
+		}, topOrigin());
+	}
+	// For scenarios (smoke/pdf-quote-scenario.js): select `match` on `page`,
+	// through to `to.match` on `to.page` — EmbedPDF's own setSelection, which
+	// is what a drag ends in, so its selection menu appears as for a drag.
+	if (msg.type === 'test-select-text') {
+		const handle = [...viewerHandles].find((h) => h.selectText);
+		const reply = (ok, text = null) => postTo(window.top, { source: 'clew-pdf', type: 'test-selected', ok, text }, topOrigin());
+		if (!handle) reply(false);
+		else {
+			handle.selectText(msg.page, msg.match, msg.to)
+				.then(async (ok) => reply(ok, ok ? (await handle.selectedQuote())?.text ?? null : null), () => reply(false));
+		}
+	}
+});
+// A quotation-mark icon for the menu item, drawn here (no icon set copied).
+const QUOTE_ICON = {
+	viewBox: '0 0 24 24',
+	strokeLinecap: 'round',
+	strokeLinejoin: 'round',
+	paths: [
+		{ d: 'M5 7h4v5H5z M9 12c0 2.8-1.4 4.4-4 5', stroke: 'currentColor', fill: 'none', strokeWidth: 2 },
+		{ d: 'M14 7h4v5h-4z M18 12c0 2.8-1.4 4.4-4 5', stroke: 'currentColor', fill: 'none', strokeWidth: 2 },
+	],
+};
 
 /** clew-preview://vault/<sid>/<path> → the vault-relative <path>. */
 export function vaultRelOf(src) {
@@ -99,11 +191,13 @@ export function vaultRelOf(src) {
 export async function createViewer({ target, src, onStatus = () => {}, readonly = false, buffer: given = null, name = null }) {
 	const rel = vaultRelOf(src);
 	const handle = {
-		target, container: null, saveTimer: null,
+		target, container: null, saveTimer: null, path: rel, readonly,
 		// An edit still waiting on the debounce is written before the viewer
 		// goes (a note re-rendered without its embed, say), not dropped.
 		dispose() {
 			this.unlisten?.();
+			this.unquote?.();
+			this.unquiet?.();
 			liveHandles.delete(this);
 			viewerHandles.delete(this);
 			const pending = this.flush?.();
@@ -138,14 +232,23 @@ export async function createViewer({ target, src, onStatus = () => {}, readonly 
 		wasmUrl: new URL(`${EMBEDPDF_ASSETS}/pdfium.wasm`, location.href).href,
 		fontFallback,                          // local files only, never a CDN
 		fonts: { ui: null, signature: null },  // airgapped: no Google Fonts
+		// The stamp tool's default library (@embedpdf/default-stamps, MIT,
+		// served from __clew_assets__/stamps) — EmbedPDF fetches it from
+		// cdn.jsdelivr.net otherwise, on every open: an outbound request the
+		// preview CSP now blocks in a note (frame-bridge.md §4.9a). Built from
+		// location.origin, not URL(): `{locale}` must reach EmbedPDF unescaped.
+		stamp: { manifests: [{ url: `${location.origin}/__clew_assets__/stamps/{locale}/manifest.json`, fallbackLocale: 'en' }] },
 		theme: { preference: document.documentElement.dataset.theme === 'light' ? 'light' : 'dark' },
 		tabBar: 'never',
+		icons: { clewQuote: QUOTE_ICON },
 		...(readonly ? { disabledCategories: ['annotation', 'redaction'] } : {}),
 	});
 	if (!container) throw new Error('EmbedPDF.init returned nothing');
 	handle.container = container;
 
 	const registry = await container.registry;
+	// The page navigator shows when asked for, not on every scroll.
+	handle.unquiet = installQuietNavigator(container);
 	const docManager = registry.getPlugin('document-manager')?.provides();
 	if (!docManager) throw new Error('document-manager plugin unavailable');
 	// Buffer, not URL: third-party URL loaders allowlist http(s)/blob and read
@@ -280,6 +383,144 @@ export async function createViewer({ target, src, onStatus = () => {}, readonly 
 		scrollCap?.scrollToPage?.({ pageNumber: Math.max(1, Number(page) || 1), behavior: 'instant' });
 	};
 	handle.currentPage = () => scrollCap?.getCurrentPage?.() ?? null;
+	// The selection, for quote-and-cite: its text (one string per page) and
+	// the first page it touches, 1-based.
+	const selectionCap = registry.getPlugin('selection')?.provides();
+	handle.selectedQuote = async () => {
+		const formatted = selectionCap?.getFormattedSelection?.() ?? [];
+		if (!formatted.length) return null;
+		const text = await selectionCap.getSelectedText().toPromise();
+		return { page: Math.min(...formatted.map((f) => f.pageIndex)) + 1, text };
+	};
+	/** [first, last] char index of `match` on `page` (1-based) — a string,
+	 *  or { index, length } — or null. Searched run by run: the page's text
+	 *  as one slice carries line breaks (CRLF) that are no char index. */
+	const charsOf = async (page, match) => {
+		const d = doc();
+		const pageIndex = page - 1;
+		if (!engine || !d?.pages?.[pageIndex]) return null;
+		if (typeof match === 'object' && match) return [match.index, match.index + match.length - 1];
+		const { runs } = await engine.getPageGeometry(d, d.pages[pageIndex]).toPromise();
+		const slices = (runs ?? []).map((r) => ({ pageIndex, charIndex: r.charStart, charCount: r.glyphs.length }));
+		const texts = slices.length ? await engine.getTextSlices(d, slices).toPromise() : [];
+		let all = '';
+		const index = [];
+		texts.forEach((t, i) => {
+			[...(t ?? '')].forEach((c, j) => { all += c; index.push(slices[i].charIndex + j); });
+		});
+		const at = all.indexOf(match);
+		return at < 0 ? null : [index[at], index[at + match.length - 1]];
+	};
+	handle.selectText = async (page, match, to = null) => {
+		const start = await charsOf(page, match);
+		const end = to ? await charsOf(to.page, to.match) : start;
+		if (!start || !end || !selectionCap?.setSelection) return false;
+		await selectionCap.setSelection({ start: { page: page - 1, index: start[0] }, end: { page: (to?.page ?? page) - 1, index: end[1] } }).toPromise();
+		return true;
+	};
+	// What its pages are PRINTED as (quote-and-cite cites that, not the PDF
+	// page; shared/pdf-quote.js#printedPage decides between them): the
+	// document's /PageLabels through the fork's getPageLabels, cleaned (null
+	// when it has none, when they say nothing, or on a build without the
+	// method); and the offset its header and footer numbers agree on. Each
+	// asked once per viewer.
+	let labelsTask = null;
+	handle.pageLabels = () => (labelsTask ??= (async () => {
+		const d = doc();
+		if (!engine?.getPageLabels || !d) return null;
+		try { return usefulPageLabels(await engine.getPageLabels(d).toPromise()); } catch { return null; }
+	})());
+	let offsetTask = null;
+	handle.textOffset = () => (offsetTask ??= (async () => {
+		const d = doc();
+		const count = d?.pages?.length ?? 0;
+		if (!engine?.getPageGeometry || !engine.getTextSlices || !count) return null;
+		// Up to twelve pages, spread over the document: front matter, a page
+		// with a figure, a blank page do not decide it alone.
+		const picks = count <= 12 ? [...Array(count).keys()] : [...new Set(Array.from({ length: 12 }, (_, i) => Math.round((i * (count - 1)) / 11)))];
+		const samples = [];
+		for (const i of picks) {
+			const page = d.pages[i];
+			const height = page.size?.height ?? 0;
+			if (!height) continue;
+			// The runs that may hold the page's number (edgeRuns): its two
+			// outermost lines at top and bottom, wherever they sit — LaTeX's
+			// default article prints its number 1.5in up a letter page — and
+			// the top and bottom 12% (a small journal format's margins are
+			// proportionally wide: the Parekh PDF's "268" ends at 91% of its
+			// height). A stray number in the body agrees with no other page.
+			// Their text through getTextSlices, the selection's own reader:
+			// getPageTextRects' text runs on into stale memory after a run's
+			// last character ("212" + junk, measured), which can glue a digit
+			// onto a page number.
+			let runs = [];
+			try { ({ runs } = await engine.getPageGeometry(d, page).toPromise()); } catch { continue; }
+			// Text with a box: a line break is a run of its own, sized 0 at 0,0.
+			const withText = (runs ?? []).filter((r) => r.glyphs?.length && r.rect.width > 0 && r.rect.height > 0);
+			const band = edgeRuns(withText.map((r) => r.rect), height).map((k) => withText[k]);
+			const numbers = [];
+			if (band.length) {
+				const slices = band.map((r) => ({ pageIndex: i, charIndex: r.charStart, charCount: r.glyphs.length }));
+				let texts = [];
+				try { texts = await engine.getTextSlices(d, slices).toPromise(); } catch { continue; }
+				for (const t of texts ?? []) numbers.push(...bandNumbers(t));
+			}
+			samples.push({ page: i + 1, numbers });
+		}
+		return textPageOffset(samples);
+	})());
+	handle.sendQuote = async (requestId = null) => {
+		let quote = null;
+		let error = null;
+		try { quote = await handle.selectedQuote(); } catch (err) {
+			// EmbedPDF refuses a document that forbids copying its text.
+			error = /permission/i.test(String(err?.message ?? err)) ? 'copy-denied' : String(err?.message ?? err);
+		}
+		let label = null;
+		let textOffset = null;
+		if (quote) {
+			label = (await handle.pageLabels())?.[quote.page - 1] ?? null;
+			textOffset = await handle.textOffset().catch(() => null);
+		}
+		postTo(window.top, {
+			source: 'clew-pdf', type: 'pdf-quote', requestId,
+			path: rel, remote: readonly, page: quote?.page ?? null, text: quote?.text ?? null,
+			label, textOffset,
+			empty: !quote && !error, error,
+		}, topOrigin());
+	};
+	if (selectionCap) {
+		let has = false;
+		const off = selectionCap.onSelectionChange?.(() => {
+			const now = (selectionCap.getFormattedSelection?.() ?? []).length > 0;
+			if (now !== has) { has = now; noteSelection(handle, now); }
+		});
+		handle.unquote = () => { off?.(); if (has) noteSelection(handle, false); };
+		// The item in EmbedPDF's own selection menu, beside Copy. Its schema is
+		// read when the menu is drawn, so merging at runtime is enough — no
+		// change to the vendored viewer.
+		const commandsCap = registry.getPlugin('commands')?.provides();
+		const uiCap = registry.getPlugin('ui')?.provides();
+		const menus = uiCap?.getSchema?.()?.selectionMenus;
+		const menu = menus?.selection;
+		if (commandsCap?.registerCommand && menu && !menu.items.some((i) => i.id === 'clew-quote')) {
+			commandsCap.registerCommand({
+				id: 'clew:quote-in-note',
+				label: 'Quote in note',
+				icon: 'clewQuote',
+				categories: ['selection', 'selection-quote'],
+				action: () => { handle.sendQuote(); },
+			});
+			const item = { type: 'command-button', id: 'clew-quote', commandId: 'clew:quote-in-note', variant: 'icon', categories: ['selection', 'selection-quote'] };
+			const copyAt = menu.items.findIndex((i) => i.id === 'copy-selection');
+			const items = [...menu.items];
+			items.splice(copyAt + 1, 0, item);
+			const depends = menu.visibilityDependsOn
+				? { ...menu.visibilityDependsOn, itemIds: [...(menu.visibilityDependsOn.itemIds ?? []), 'clew-quote'] }
+				: menu.visibilityDependsOn;
+			uiCap.mergeSchema({ selectionMenus: { ...menus, selection: { ...menu, items, visibilityDependsOn: depends } } });
+		}
+	}
 	/**
 	 * For scenarios: annotations made from script as the UI makes them — a
 	 * highlight over the text run holding `match` on `page` (1-based), or a

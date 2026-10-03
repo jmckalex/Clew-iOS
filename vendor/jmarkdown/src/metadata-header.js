@@ -695,6 +695,9 @@ function create_inline_comment_extension(character, include_in_comment) {
 	    }
 	  },
 	  renderer(token) {
+	  	// A comment is not part of the document in print either; the HTML
+	  	// comment below printed as text in the .tex.
+	  	if (global.isLatex) return '';
 	  	if (include_in_comment) {
 	  		return `<!-- ${token.text} -->`;	
 	  	}

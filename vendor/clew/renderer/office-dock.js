@@ -34,7 +34,7 @@ import { ipc, CH } from './ipc.js';
 import { workspaceStore } from './state/workspace-store.js';
 import { zetaOfficeUrl } from './lib/preview-url.js';
 import { hasUnsavedPdf, flushAllPdf } from './pdf-frames.js';
-import { fromPreviewOrigin } from '../shared/message-guard.js';
+import { fromPreviewOrigin, PREVIEW_ORIGIN } from '../shared/message-guard.js';
 
 const SAVE_TIMEOUT = 20000; // a big spreadsheet store is seconds, not minutes
 const ECHO_WINDOW = 3000; // watcher events this close to our save are the save
@@ -249,7 +249,7 @@ class OfficeDock extends Emitter {
 			let settled = false;
 			const once = (ok) => { if (!settled) { settled = true; resolve(ok); } };
 			st.saveWaiters.push(once);
-			st.frame.contentWindow?.postMessage({ cmd: 'zeta-save' }, '*');
+			st.frame.contentWindow?.postMessage({ cmd: 'zeta-save' }, PREVIEW_ORIGIN);
 			setTimeout(() => once(false), SAVE_TIMEOUT);
 		});
 	}
@@ -313,7 +313,7 @@ class OfficeDock extends Emitter {
 	#onMessage = (e) => {
 		const msg = e.data;
 		const st = this.#state;
-		const isDock = Boolean(st && e.source === st.frame?.contentWindow);
+		const isDock = Boolean(st && e.source === st.frame?.contentWindow && e.origin === PREVIEW_ORIGIN);
 		// The save-back REQUEST passes through this window on its way to the
 		// office-save bridge. Stamp the echo window here, before the write:
 		// the vault watcher fires faster than the save-result round-trip,
@@ -410,7 +410,7 @@ class OfficeDock extends Emitter {
 			let settled = false;
 			const once = (ok) => { if (!settled) { settled = true; resolve(ok); } };
 			entry.waiters.push(once);
-			try { win.postMessage({ cmd: 'zeta-save' }, '*'); } catch { once(false); }
+			try { win.postMessage({ cmd: 'zeta-save' }, PREVIEW_ORIGIN); } catch { once(false); }
 			setTimeout(() => once(false), SAVE_TIMEOUT);
 		}))).then((results) => results.every(Boolean));
 	}

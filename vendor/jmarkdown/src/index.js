@@ -29,6 +29,9 @@ import { targets, sources, inlineTarget } from './sources-and-targets.js';
 import markedAlert from 'marked-alert';
 import { renderAlertLatex } from './alerts.js';
 import { calloutBlock } from './callouts.js';
+import { tabbingFence, tabbing } from './tabbing.js';
+import { escapedCharacters } from './escapes.js';
+import { latexLint, resetLatexLint } from './latex-lint.js';
 import createMarkdownDemo from './markdown-demo.js';
 import strategicFormGame from './strategic-form-games.js';
 import createTiKZ from './tikz.js';
@@ -96,6 +99,7 @@ global.isLatex = isLatex;
 // Start each build with a clean warning list (module state survives across
 // processFile calls in library/watch use); the summary prints after writeOutput.
 resetWarnings();
+resetLatexLint();
 resetIndexing();
 const markdownFile = filename;
 // In stdin mode, [[file.md]] inclusions and the "Markdown file directory"
@@ -391,6 +395,14 @@ marked_copy.use(alertExtension);
 // are standard Obsidian syntax, not JMarkdown's dialect.
 registerExtension(calloutBlock);
 
+// LaTeX's tabbing (tabbing.js): the ```tabbing fence and @begin(tabbing), one
+// body. tabbing.js has no imports (Clew's preview client imports its layout),
+// so it does not register itself: the fence goes on both instances and the
+// environment through defineEnvironment, as Clew's configured `Extensions` /
+// `Environments` entries did.
+registerExtension(tabbingFence);
+defineEnvironment('tabbing', tabbing);
+
 
 const markdownDemos = [
   createMarkdownDemo(':::'),
@@ -422,6 +434,14 @@ marked_copy.use(markedMoreLists());
 // (last-registered wins), claiming the whole block before a line that starts
 // with +/-/* inside an aligned equation can be mistaken for a list item.
 registerExtension(jmarkdownSyntaxEnhancements.mathBlock);
+
+// A backslash-escaped character prints as itself in both outputs (escapes.js):
+// TeX-escaped in LaTeX, and `\$` kept out of MathJax's reach in HTML.
+registerExtension(escapedCharacters);
+
+// The LaTeX-export lint (latex-lint.js): warnings, in every build, for what
+// renders in HTML but breaks a LaTeX export. Main parser only.
+marked.use({ walkTokens: latexLint });
 
 // This extension has to be registered after the directives in order for it to work.
 registerExtensions([
@@ -616,6 +636,13 @@ const input = isStdin ? await readStdin() : fs.readFileSync(filename, 'utf8');
 // In stdin mode without -o, write to stdout (outFile === null is the sentinel).
 const outFile = options.output
 	|| (isStdin ? null : filename.replace(/\.([^.]+)$/, isLatex ? '.tex' : '.html'));
+// Where the output goes, for what is written beside it: several bibliographies
+// merged into one, for bibtex or the runtime client (bibliographies.js).
+configManager.set('Output file', outFile ? path.resolve(outFile) : null);
+// Bibliography files a HOST names for this build (`--bibliography`, or the
+// `bibliography` option of processFile): treated as configured ones, after the
+// config files' (bibliographies.js). Set every build, so none outlives it.
+configManager.set('Biblify.host bibliography', [options.bibliography ?? []].flat().filter(Boolean));
 
 function writeOutput(text) {
 	if (outFile === null) {
@@ -839,6 +866,8 @@ const isCliEntry = (() => {
 })();
 if (isCliEntry) {
 	const program = new Command();
+	// A repeatable option: each use adds to the list.
+	const collectOption = (value, list) => [...list, value];
 
 	program
 		.version('0.5')
@@ -878,6 +907,7 @@ if (isCliEntry) {
 		.option('--fragment', 'Output an HTML fragment without the template wrapper (no <html>, <head>, <body>)')
 		.option('--to <format>', 'Output format: html (default) or latex', 'html')
 		.option('-o, --output <file>', 'Output file path (default: input filename with .html or .tex extension; stdout in stdin mode)')
+		.option('--bibliography <file>', 'Add a bibliography file for this build, as a configured one (repeatable)', collectOption, [])
 		.action(async (filename, options) => {
 			await processFile(filename, { ...program.opts(), ...options });
 		});
@@ -894,6 +924,7 @@ if (isCliEntry) {
 		.option('--css', 'Live-track CSS assets (fast inject, no reload). Omit BOTH --css/--js to track both kinds')
 		.option('--js', 'Live-track JS assets (full page reload). Omit BOTH --css/--js to track both kinds')
 		.option('--no-sync', 'Do not inject the editor preview-sync bridge (forward/inverse search when embedded)')
+		.option('--bibliography <file>', 'Add a bibliography file for every build, as a configured one (repeatable)', collectOption, [])
 		.action(async (filename, options) => {
 			const { startWatch } = await import('./watch.js');
 			await startWatch(filename, options);

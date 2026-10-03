@@ -1,6 +1,7 @@
 /* <clew-preview-pane> (editor/preview-pane.js): the rendering of the
-   formula or diagram being edited. Fixed, one per window, never focused,
-   a mirror — its frame takes no pointer events; its body scrolls. */
+   formula or diagram being edited. Fixed, one per window, never focused, a
+   mirror — it takes no pointer events at all: a click or a wheel over it
+   reaches the note under it. */
 clew-preview-pane {
 	position: fixed;
 	z-index: 940;
@@ -11,12 +12,16 @@ clew-preview-pane {
 	border-radius: 8px;
 	box-shadow: 0 8px 22px var(--clew-shadow);
 	overflow: hidden;
-	pointer-events: auto;
+	pointer-events: none;
 }
 clew-preview-pane[hidden] { display: none; }
 clew-preview-pane .preview-pane-body {
 	overflow: auto;
 	padding: 6px 14px;
+	/* Shrunk to its room (preview-pane.js#placeBlock), the figure gives way
+	   before the log row under it does. */
+	flex: 0 1 auto;
+	min-height: 0;
 }
 clew-preview-pane[data-kind='math-inline'] .preview-pane-body { padding: 4px 10px; }
 clew-preview-pane .preview-pane-math {
@@ -47,3 +52,43 @@ clew-preview-pane .preview-pane-error {
 	color: var(--clew-danger);
 }
 clew-preview-pane [hidden] { display: none !important; }
+/* The line a failed figure's error is about (editor/figure-error-mark.js): a
+   tint and a bar at its left edge — a line decoration, so nothing moves. */
+.cm-line.cm-figure-error {
+	background: color-mix(in srgb, var(--clew-danger) 12%, transparent);
+	box-shadow: inset 3px 0 0 var(--clew-danger);
+}
+
+/* A failed figure's log (preview-pane.js): the one part of the pane that
+   takes the pointer — its button, and the log to scroll — so the log can be
+   read without the cursor leaving the figure. Never over the figure: the
+   pane never is. */
+clew-preview-pane .preview-pane-log {
+	flex: 0 0 auto;
+	padding: 0 14px 8px;
+	pointer-events: auto;
+}
+clew-preview-pane .preview-pane-log-toggle {
+	font: 12px var(--clew-ui-font, system-ui), sans-serif;
+	color: var(--clew-text-muted);
+	background: none;
+	border: none;
+	padding: 2px 0;
+	cursor: pointer;
+}
+clew-preview-pane .preview-pane-log-toggle::before { content: '▸ '; }
+clew-preview-pane .preview-pane-log-text:not([hidden]) ~ .preview-pane-log-toggle::before,
+clew-preview-pane .preview-pane-log-toggle:has(+ .preview-pane-log-text:not([hidden]))::before { content: '▾ '; }
+clew-preview-pane .preview-pane-log-toggle:hover { color: var(--clew-text-normal); }
+clew-preview-pane .preview-pane-log-text {
+	margin: 4px 0 0;
+	max-height: 14em;
+	overflow: auto;
+	font: 11px/1.4 var(--clew-mono-font), monospace;
+	white-space: pre-wrap;
+	color: var(--clew-text-muted);
+	background: var(--clew-bg-secondary);
+	border: 1px solid var(--clew-border);
+	border-radius: 4px;
+	padding: 6px 8px;
+}

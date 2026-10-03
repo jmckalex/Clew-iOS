@@ -23,6 +23,7 @@ import { previewMode, vaultResolvers } from '../../editor/link-hover.js';
 import { parseTarget, previewSpec } from '../../editor/link-at.js';
 import { scrollSyncBus, makeSuppressor } from '../../preview/scroll-sync.js';
 import { previewUrl } from '../../lib/preview-url.js';
+import { PREVIEW_ORIGIN } from '../../../shared/message-guard.js';
 
 const HOST_SOURCE = 'clew-preview-host';
 /** After the frame's `load`, a client that has not said 'ready' within this
@@ -149,7 +150,7 @@ class ClewPreviewView extends ClewElement {
 			this.#pending.push(msg);
 			return;
 		}
-		this.#iframe?.contentWindow?.postMessage({ source: HOST_SOURCE, ...msg }, '*');
+		this.#iframe?.contentWindow?.postMessage({ source: HOST_SOURCE, ...msg }, PREVIEW_ORIGIN);
 	}
 
 	/** Where the reader is now — consumed once by the editor view when this
@@ -169,7 +170,7 @@ class ClewPreviewView extends ClewElement {
 	}
 
 	#onMessage = (event) => {
-		if (event.source !== this.#iframe?.contentWindow) return;
+		if (event.source !== this.#iframe?.contentWindow || event.origin !== PREVIEW_ORIGIN) return;
 		const msg = event.data;
 		if (!msg || msg.source !== 'clew-preview') return;
 

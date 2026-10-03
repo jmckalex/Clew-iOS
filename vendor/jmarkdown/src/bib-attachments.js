@@ -30,7 +30,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { configManager } from './config-manager.js';
+import { bibliographyFiles } from './bibliographies.js';
 
 /* --- binary property lists (bplist00) ---------------------------------------- */
 
@@ -146,12 +146,7 @@ function indexEntries(source) {
 // process may build several documents (library use, watch mode's worker).
 const bibCache = new Map();
 
-function loadBib() {
-	const raw = configManager.get('Biblify.bibliography') || '';
-	if (!raw) return null;
-	const baseDir = configManager.get('Markdown file directory') || process.cwd();
-	const bibPath = path.resolve(baseDir, raw);
-
+function loadBib(bibPath) {
 	let stamp;
 	try { stamp = fs.statSync(bibPath).mtimeMs; } catch { return { bibPath, entries: new Map(), missing: true }; }
 
@@ -217,13 +212,22 @@ function resolveFileField(value, bibDir) {
 	so the caller can tell "nothing attached" from "couldn't look".
 */
 export function attachmentsFor(key) {
-	const bib = loadBib();
-	if (!bib) return { error: 'no-bibliography', attachments: [] };
-	if (bib.missing) return { error: 'bibliography-missing', attachments: [], bibPath: bib.bibPath };
+	// Every bibliography file, strongest first — the note's, then the
+	// configured (bibliographies.js) — and the first that has the key is the
+	// entry's, as it is for the citation itself. Its attachments resolve
+	// against ITS folder.
+	const files = bibliographyFiles().filter((file) => file.path).reverse();
+	if (files.length === 0) return { error: 'no-bibliography', attachments: [] };
+	const loaded = files.map((file) => loadBib(file.path));
+	const bib = loaded.find((candidate) => !candidate.missing && candidate.entries.has(key));
+	if (!bib) {
+		const missing = loaded.find((candidate) => candidate.missing);
+		return missing
+			? { error: 'bibliography-missing', attachments: [], bibPath: missing.bibPath }
+			: { error: 'unknown-key', attachments: [] };
+	}
 
 	const entry = bib.entries.get(key);
-	if (entry === undefined) return { error: 'unknown-key', attachments: [] };
-
 	const bibDir = path.dirname(bib.bibPath);
 	const attachments = [];
 

@@ -44,6 +44,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { coerceDate } from './dv-expr.js';
+import { withinVault } from './vault-bounds.js';
 
 const NOTE_FILE = /\.(md|jmd)$/i;
 const IGNORED = new Set(['.obsidian', '.clew', '.git', 'node_modules', '.trash']);
@@ -130,7 +131,7 @@ function scanNotes() {
 			if (entry.name.startsWith('.') || IGNORED.has(entry.name)) continue;
 			const childRel = rel ? `${rel}/${entry.name}` : entry.name;
 			if (entry.isDirectory()) walk(path.join(dir, entry.name), childRel);
-			else if (NOTE_FILE.test(entry.name)) {
+			else if (NOTE_FILE.test(entry.name) && withinVault(path.join(dir, entry.name), root)) {
 				try {
 					const abs = path.join(dir, entry.name);
 					const text = fs.readFileSync(abs, 'utf8');

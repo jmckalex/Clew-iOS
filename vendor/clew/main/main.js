@@ -20,9 +20,11 @@ import { fileURLToPath } from 'node:url';
 import { registerIpc } from './ipc.js';
 import { appMenu } from './menu.js';
 import { settings } from './settings.js';
-import { trust } from './trust.js';
+import { trust, setTrustNotice } from './trust.js';
+import { readVaultRequests } from './vault-requests.js';
+import { startUpdateChecks } from './updater.js';
 import { CH } from '../shared/channels.js';
-import { registerPreviewScheme, installPreviewProtocol } from './protocol.js';
+import { registerPreviewScheme, installPreviewProtocol, installAppProtocol, installFrameProtocol } from './protocol.js';
 import { VaultSession, focusedSession, sessionForVault, sessionForWindow } from './session.js';
 import { paths } from './paths.js';
 import { prepareNoteFonts } from './note-fonts.js';
@@ -37,7 +39,7 @@ registerPreviewScheme();
 
 // SharedArrayBuffer for the ZetaOffice (LibreOffice wasm) viewer, which is
 // a pthreads build. True cross-origin isolation (COOP/COEP) is off the
-// table by architecture: the app page is file:// and previews are
+// table by architecture: the app page is clew-app://app and previews are
 // DELIBERATELY cross-origin clew-preview://, so the top-level document can
 // never satisfy COEP for its frames. This switch enables SAB without COI —
 // a conscious relaxation. The exposure is bounded: arbitrary web content
@@ -88,7 +90,33 @@ export function createWindow(vaultPath = null) {
 	const session = new VaultSession(win, distDir);
 	windowOrder.push(win);
 
-	win.loadFile(path.join(distDir, 'renderer', 'index.html'));
+	// The app page on its own origin (frame-bridge.md §2), not file://, whose
+	// origin is `null` — the one every sandboxed frame has too. Served by
+	// protocol.js#installAppProtocol from dist/renderer and nothing else.
+	win.loadURL('clew-app://app/index.html');
+
+	// Nothing legitimate frames the app page, so no SUBFRAME may load it
+	// (§2.7) — beside `frame-ancestors 'none'` on the document itself.
+	win.webContents.on('will-frame-navigate', (event) => {
+		if (!event.isMainFrame && /^clew-app:/i.test(event.url)) {
+			event.preventDefault();
+			if (process.env.CLEW_SMOKE) console.log(`smoke-app-frame-refused: ${event.url}`);
+			return;
+		}
+		// An app frame stays on its own origin (frame-bridge.md §7, R2): a
+		// frame navigating itself to https://…?<data> is an outbound channel
+		// no CSP closes. Its first load (from about:blank) is the preview
+		// client's own doing and passes.
+		const from = event.frame?.url ?? '';
+		if (!event.isMainFrame && /^clew-frame:/i.test(from)) {
+			let same = false;
+			try { same = new URL(from).origin === new URL(event.url).origin; } catch { /* not a URL */ }
+			if (!same) {
+				event.preventDefault();
+				if (process.env.CLEW_SMOKE) console.log(`smoke-app-nav-refused: ${event.url}`);
+			}
+		}
+	});
 
 	// External links open in the browser, never inside the app window. This
 	// also catches target=_blank clicks inside canvas-embed web iframes
@@ -140,6 +168,27 @@ export function createWindow(vaultPath = null) {
 			if (proceed !== 'pending') finish(proceed);
 		};
 		win.webContents.send(CH.EV_CLOSE_REQUESTED);
+	});
+
+	// A trust change reloads the window (frame-bridge.md §4.6), and a reload
+	// loses what a close would: the same question first. Resolves true when
+	// the page may reload now; false on Cancel, or while a close is already
+	// being asked about. A 'pending' answer (a dialog is up, or PDF
+	// annotations are being written) stops the fail-open timer, as above.
+	session.askToReload = () => new Promise((resolve) => {
+		if (closePending || session.resolveClose) return resolve(false);
+		let timer = null;
+		const done = (proceed) => {
+			clearTimeout(timer);
+			session.resolveClose = null;
+			resolve(proceed === true);
+		};
+		timer = setTimeout(() => done(true), 3000);
+		session.resolveClose = (proceed) => {
+			if (proceed === 'pending') { clearTimeout(timer); return; }
+			done(proceed);
+		};
+		win.webContents.send(CH.EV_CLOSE_REQUESTED, { reason: 'reload' });
 	});
 
 	win.on('closed', () => {
@@ -270,7 +319,7 @@ export function openDemoVault(fromSession = null) {
 	// Clew's own vault (§4.8) is trusted by construction: a copy made just
 	// now from the bundle, or one this device has never decided about. A
 	// decision already recorded — a revoke — stands.
-	if (fresh || !trust.entries()[fs.realpathSync(target)]) trust.trust(target, 'demo');
+	if (fresh || !trust.entries()[fs.realpathSync(target)]) trust.trust(target, 'demo', readVaultRequests(target)?.enable ?? null);
 	return openVaultAnywhere(target, { preferSession: fromSession }).vaults.info;
 }
 
@@ -319,11 +368,25 @@ app.whenReady().then(async () => {
 	} catch (err) {
 		console.error('note fonts:', err);
 	}
+	installAppProtocol({ rendererDir: path.join(distDir, 'renderer') });
+	installFrameProtocol({ bridgeFile: path.join(distDir, 'preview-client', 'clew-bridge.js') });
+	// CLEW_SMOKE_NET_LOG=1: every request that LEAVES the machine (http(s),
+	// ws(s)) from any page, as `smoke-net: <method> <url>` — how a scenario
+	// proves Clew made no outbound request (frame-bridge.md §4.9a). What a
+	// CSP blocks never gets this far.
+	if (process.env.CLEW_SMOKE && process.env.CLEW_SMOKE_NET_LOG) {
+		const logNet = (ses) => ses.webRequest.onBeforeRequest(
+			{ urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] },
+			(details, callback) => { console.log(`smoke-net: ${details.method} ${details.url}`); callback({}); });
+		logNet(electronSession.defaultSession);
+		app.on('session-created', logNet);
+	}
 	installPreviewProtocol({
 		distDir,
 		nodeModulesDir: paths.previewAssets,
 		engineAssetsDir: paths.engineAssets,
 		embedpdfDir: paths.embedpdfAssets,
+		stampsDir: paths.stampsAssets,
 		mptikzDir: paths.mptikzAssets,
 		zetaDir: paths.zetaAssets,
 		noteFontsDir: paths.noteFonts,
@@ -339,11 +402,21 @@ app.whenReady().then(async () => {
 	// has run their code already — so nothing changes for their owner. Only
 	// a vault first opened AFTER this asks. Before any window: the windows
 	// being restored below are exactly those vaults.
-	trust.migrate([
+	const known = [
 		...(settings.get('openVaults') ?? []),
 		...(settings.get('recentVaults') ?? []),
 		settings.get('lastVault'),
-	]);
+	].filter(Boolean);
+	trust.migrate(known);
+	// The full design (2026-10-02): the store moves to version 2 once, and
+	// that launch says so — naming any known vault this device has NOT
+	// trusted, since those now run none of their code (scripts, plugins
+	// included). Every vault known when the guard arrived is trusted already.
+	if ((!process.env.CLEW_SMOKE || process.env.CLEW_SMOKE_TRUST_NOTICE) && trust.takeNotice()) {
+		const restricted = [...new Set(known)].filter((root) => fs.existsSync(root) && !trust.isTrusted(root))
+			.map((root) => path.basename(root));
+		setTrustNotice({ restricted });
+	}
 
 	// Smoke runs open EXACTLY the given vault — never the user's restored
 	// set. The rest of the isolation lives in settings.js#save: under
@@ -351,6 +424,8 @@ app.whenReady().then(async () => {
 	// flips inside a scenario cannot leak into the user's real settings.
 	if (process.env.CLEW_SMOKE && process.env.CLEW_SMOKE_VAULT) {
 		createWindow(process.env.CLEW_SMOKE_VAULT);
+		// Only ever against a LOOPBACK feed here (updater.js#checkAllowed).
+		startUpdateChecks();
 		return;
 	}
 
@@ -364,6 +439,8 @@ app.whenReady().then(async () => {
 	settings.set('openVaults', toOpen);
 	if (toOpen.length === 0) createWindow(null);
 	else for (const vaultPath of toOpen) createWindow(vaultPath);
+	// The daily update check: packaged builds only (updater.js).
+	startUpdateChecks();
 
 	app.on('activate', () => {
 		if (BrowserWindow.getAllWindows().length === 0) createWindow(null);
@@ -381,7 +458,7 @@ app.on('before-quit', () => {
 
 // Canvas web-page nodes run in <webview> guests: no popups (external links
 // go to the browser), and navigation stays on the open web — never into
-// file:// or clew-preview:// where vault content lives.
+// file://, clew-preview:// where vault content lives, or clew-app://.
 app.on('web-contents-created', (_event, contents) => {
 	if (contents.getType() !== 'webview') return;
 	contents.setWindowOpenHandler(({ url }) => {
@@ -483,6 +560,18 @@ if (process.env.CLEW_SMOKE) {
 						console.log(`[smoke:${details.level}] ${details.message}`);
 					});
 				}
+				// CLEW_SMOKE_WEBRTC_POLICY=<policy>: this window's WebRTC IP
+				// handling, for measuring choice D (frame-bridge.md §6) — what an
+				// app frame's ICE can do — before anything is set for real.
+				if (process.env.CLEW_SMOKE_WEBRTC_POLICY) {
+					primary.webContents.setWebRTCIPHandlingPolicy(process.env.CLEW_SMOKE_WEBRTC_POLICY);
+					console.log(`smoke-webrtc-policy: ${primary.webContents.getWebRTCIPHandlingPolicy()}`);
+				}
+				// A trust change reloads the window (frame-bridge.md §4.6), which
+				// ends whatever scenario was running in it. Listening from here
+				// on: a load after this point IS that reload.
+				let reloads = 0;
+				primary.webContents.on('did-finish-load', () => { reloads++; });
 				if (process.env.CLEW_SMOKE_SCRIPT) {
 					const script = fs.readFileSync(process.env.CLEW_SMOKE_SCRIPT, 'utf8');
 					await primary.webContents.executeJavaScript(`(async () => { ${script} })()`);
@@ -582,11 +671,15 @@ if (process.env.CLEW_SMOKE) {
 							// at dispatch time from the frame (webFrameMain) and the
 							// iframe's own box in the app page. `match` is a substring
 							// of the frame's URL (the note), as CLEW_SMOKE_FRAME_MATCH.
+							// The selector also reaches into open shadow roots: the
+							// PDF viewer draws its UI in one.
 							const { match, selector } = ev.frameClick;
 							const frame = primary.webContents.mainFrame.framesInSubtree.find((f) =>
 								f.url.startsWith('clew-preview:') && f.url.includes(match) && f.parent === primary.webContents.mainFrame);
 							const inner = frame && await frame.executeJavaScript(`(() => {
-								const r = document.querySelector(${JSON.stringify(selector)})?.getBoundingClientRect();
+								const deep = (root) => root.querySelector(${JSON.stringify(selector)})
+									?? [...root.querySelectorAll('*')].reduce((hit, el) => hit ?? (el.shadowRoot ? deep(el.shadowRoot) : null), null);
+								const r = deep(document)?.getBoundingClientRect();
 								return r ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null; })()`);
 							const outer = inner && await primary.webContents.executeJavaScript(`(() => {
 								const f = [...document.querySelectorAll('iframe')].find((el) => el.offsetParent && (el.src || '').includes(${JSON.stringify(match)}));
@@ -658,6 +751,9 @@ if (process.env.CLEW_SMOKE) {
 							// every older scenario was written against) CDP's key
 							// inserts nothing.
 							if (ev.combo.text) Object.assign(params, { text: ev.combo.text, unmodifiedText: ev.combo.text });
+							// `code`: the physical key, when it is not the one `key`
+							// implies — a Mac's ⌥Q is key "œ" on code "KeyQ".
+							if (ev.combo.code) params.code = ev.combo.code;
 							await dbg.sendCommand('Input.dispatchKeyEvent', { type: 'keyDown', ...params });
 							await dbg.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', ...params });
 							for (const [bit, mod] of pressed.reverse()) {
@@ -720,6 +816,17 @@ if (process.env.CLEW_SMOKE) {
 					const windowMenu = (Menu.getApplicationMenu()?.items ?? []).find((m) => m.label === 'Window');
 					if (process.env.CLEW_SMOKE_MENU && windowMenu) walk([windowMenu], [], 'smoke-menu-closed');
 				}
+				// CLEW_SMOKE_SCRIPT_RELOADED=/path.js: the scenario's second half,
+				// run in the page that a reload brought (a trust change reloads the
+				// window — vault-trust's scenarios). Waits for that reload — at
+				// most a minute, logging `smoke-reloaded: <n>` — then for the vault.
+				if (process.env.CLEW_SMOKE_SCRIPT_RELOADED) {
+					for (let i = 0; i < 600 && reloads === 0; i++) await sleep(100);
+					console.log(`smoke-reloaded: ${reloads}`);
+					await sleep(3000);
+					const second = fs.readFileSync(process.env.CLEW_SMOKE_SCRIPT_RELOADED, 'utf8');
+					await primary.webContents.executeJavaScript(`(async () => { ${second} })()`);
+				}
 				// Optionally drive the preview iframe's document (cross-origin from
 				// the app, but reachable from main via webFrameMain).
 				// CLEW_SMOKE_FRAME_MATCH=<substring>: run it in EVERY
@@ -730,8 +837,9 @@ if (process.env.CLEW_SMOKE) {
 				if (process.env.CLEW_SMOKE_FRAME_SCRIPT) {
 					const frameScript = fs.readFileSync(process.env.CLEW_SMOKE_FRAME_SCRIPT, 'utf8');
 					const match = process.env.CLEW_SMOKE_FRAME_MATCH;
+					// Preview documents, and apps in notes (clew-frame:).
 					const previews = primary.webContents.mainFrame.framesInSubtree
-						.filter((f) => f.url.startsWith('clew-preview:'));
+						.filter((f) => /^clew-(preview|frame):/.test(f.url));
 					const frames = match
 						? previews.filter((f) => f.url.includes(match))
 						: previews.filter((f) => f.parent === primary.webContents.mainFrame).slice(0, 1);

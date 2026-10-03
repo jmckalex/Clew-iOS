@@ -27,6 +27,10 @@ let loaded = []; // [{id, cleanup: fn[]}]
 
 export function initPlugins() {
 	vaultStore.on('vault-changed', () => reloadPlugins());
+	// What may run changed on this device (an enablement in Settings →
+	// This vault): load or unwind app surfaces now. Trust itself reloads
+	// the window, which starts from scratch anyway.
+	ipc.on(CH.EV_VAULT_ACCESS_CHANGED, () => reloadPlugins());
 	reloadPlugins();
 }
 

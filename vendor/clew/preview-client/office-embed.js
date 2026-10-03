@@ -28,6 +28,7 @@
 // iframe with a placeholder again and reposition the holder; a slot that
 // disappears takes its holder (and editor) with it.
 
+import { topOrigin, postTo } from '../shared/message-guard.js';
 let seq = 0;
 const pending = new Map(); // id → element
 const holders = new Map(); // frameId → holder element on document.body
@@ -63,8 +64,8 @@ export function initOfficeEmbeds() {
 		const id = `ot${++seq}`;
 		pending.set(id, el);
 		try {
-			window.top.postMessage(
-				{ source: 'clew-office-embed', type: 'office-thumb', id, path: el.dataset.officePath }, '*');
+			postTo(window.top,
+				{ source: 'clew-office-embed', type: 'office-thumb', id, path: el.dataset.officePath }, topOrigin());
 		} catch { /* no app page (static host) — the title link still works */ }
 	}
 	hoistLiveEmbeds();

@@ -8,7 +8,7 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// Lays out ```tabbing blocks (src/engine/tabbing.js) in the preview. A stop
+// Lays out ```tabbing blocks (the engine's tabbing.js) in the preview. A stop
 // depends on the RENDERED width of the text before it, so this measures each
 // piece and replays LaTeX's own algorithm (`layoutTabbing`, the engine's —
 // one implementation) to place it. Before this runs the pieces sit inline
@@ -19,7 +19,9 @@
 // piece changes size — a web font arriving, MathJax typesetting a cell, the
 // pane resizing a `\`` row. A block whose source is unchanged survives a
 // re-render (tabbingMorph); a changed one is laid out afresh.
-import { layoutTabbing } from '../engine/tabbing.js';
+// The engine's own (jmarkdown at-migration 4ab3d6a, the backport of what
+// was Clew's own copy) — one copy of the layout, never two.
+import { layoutTabbing } from '#jmarkdown/tabbing.js';
 
 const pending = new Set();
 let scheduled = false;

@@ -59,6 +59,10 @@ const DEFAULTS = {
 	// generated document (main/latex-engine.js — fontspec and friends take
 	// LuaLaTeX), or 'pdflatex' | 'lualatex' | 'xelatex' for what it cannot see.
 	latexEngine: 'auto',
+	// The daily update check (main/updater.js): 'on' | 'off'; and a version
+	// the user chose to skip, which is not told again.
+	updateCheck: 'on',
+	skippedUpdate: null,
 	// Named TeX fragments a figure can ask for with `clew-fragments=`
 	// ([{ name, text }] — src/engine/tex-fragments.js). These are the
 	// GLOBAL ones; a vault's own live in its vault-settings.json and

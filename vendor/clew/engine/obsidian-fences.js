@@ -21,6 +21,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { resolveTarget, resolveFileTarget, sitePath } from './wikilinks.js';
 import { exifGps } from './exif-gps.js';
+import { withinVault } from './vault-bounds.js';
 
 const escapeHtml = (s) =>
 	s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -263,6 +264,7 @@ function collectNoteMarkers(config) {
 		const rel = path.relative(root, abs).split(path.sep).join('/');
 		if (seen.has(rel)) return;
 		seen.add(rel);
+		if (!withinVault(abs, root)) return;   // a restricted vault's link out (vault-bounds.js)
 		try {
 			const marker = noteMarkerFrom(fs.readFileSync(abs, 'utf8'), rel);
 			if (marker) markers.push(marker);
@@ -306,7 +308,7 @@ function resolvePhotoFolder(target) {
 	const root = process.env.CLEW_VAULT_ROOT;
 	if (!root) return null;
 	const direct = path.join(root, target);
-	if (fs.existsSync(direct) && fs.statSync(direct).isDirectory()) return direct;
+	if (fs.existsSync(direct) && fs.statSync(direct).isDirectory()) return withinVault(direct, root) ? direct : null;
 	const wanted = ('/' + target).toLowerCase();
 	const IGNORED = new Set(['.obsidian', '.clew', '.git', 'node_modules', '.trash']);
 	const stack = [''];
@@ -361,6 +363,7 @@ function scanPhotoFolder(target) {
 		}
 		if (!JPEG_EXT.test(name)) continue;
 		const abs = path.join(dir, name);
+		if (!withinVault(abs, root)) { skipped++; continue; }
 		let gps = null;
 		try {
 			// EXIF lives at the front of the file; 256KB is generous.

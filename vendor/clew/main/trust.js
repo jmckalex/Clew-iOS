@@ -15,3 +15,16 @@ import { paths } from './paths.js';
 import { createTrustStore } from './vault-trust.js';
 
 export const trust = createTrustStore({ file: paths.vaultTrust, persist: !process.env.CLEW_SMOKE });
+
+// The one-time notice (frame-bridge.md §4.8): the first launch with the full
+// trust design tells its user what changed and where Trusted vaults live.
+// main.js decides at launch (trust.takeNotice — once per store, never under
+// the smoke harness unless CLEW_SMOKE_TRUST_NOTICE asks); the first window
+// to ask for its trust state receives it, and nobody after.
+let notice = null;
+export function setTrustNotice(payload) { notice = payload; }
+export function takeTrustNotice() {
+	const out = notice;
+	notice = null;
+	return out;
+}

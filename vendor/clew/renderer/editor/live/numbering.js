@@ -24,11 +24,12 @@
 //   - a label: `{#key}` / `{id=key}` on a numbered opener takes its number;
 //     `@label[key]` takes the innermost numbered construct's, else its
 //     heading's (numeric headings only), else NONE — and a reference to it
-//     prints `??`. A label in a FOOTNOTE gets none either: the
-//     post-processor's footnote branch looks for `[id^="footnote-"]`, but the
-//     engine's endnotes carry `id="fn-…"`, so the branch never runs and such
-//     a reference prints `??` (measured 2026-09-27; an engine bug, reported
-//     upstream, mirrored here until it is fixed there).
+//     prints `??`. A label in a FOOTNOTE takes the note's number — its place
+//     in its own list (jmarkdown ffb39ea, 2026-10-02; until then the engine
+//     printed `??` and so did this): an inline, labelled or grouped note
+//     (`[fn: …]`, `[^a: …]`, `[^a(group): …]`) counts within its group in
+//     order of appearance, a classic `[^a]` note in the order of its first
+//     reference — the two are separate lists, as in the engine.
 //
 // Pure over the note's TEXT, so live edit, source-mode completion and the
 // hover preview share one pass; keyed by LINE (an environment's opener, a
@@ -55,8 +56,24 @@ const VERBATIM = new Set(['equation', 'TeX', 'HTML', 'comment', 'mermaid', 'TiKZ
 const ENV_OPEN_RE = /^[ \t]*(?:@begin\(([\w*-]+)\)|(:{3,})[ \t]*([\w*-]+))(?:\[([^\]\n]*)\])?(?:\{([^}\n]*)\})?/;
 const ENV_CLOSE_RE = /^[ \t]*(?:@end\(([\w*-]+)\)|(:{3,})[ \t]*$)/;
 const HEADING_RE = /^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$/;
+const UNNUMBERED_RE = /\{-\}/;
 const LABEL_RE = /(^|[^\w@:\\])[@:]label\[([^\]\n]+)\]/g;
-const FOOTNOTE_RE = /\[(?:fn:|\^[^\]\s:]+:)/g;
+const FOOTNOTE_RE = /\[(?:fn:|\^([^\]\s:]+):)/g;
+// A classic note's definition line, `[^a]: …`, and its references, `[^a]`.
+const CLASSIC_DEF_RE = /^\s{0,3}\[\^([^\]\s]+)\]:/;
+const CLASSIC_REF_RE = /\[\^([^\]\s:]+)\](?!:)/g;
+
+/** Classic notes, numbered by their first reference (marked-footnote's
+ *  list order): label → number. */
+function classicOrder(lines) {
+	const order = new Map();
+	for (const line of lines) {
+		if (CLASSIC_DEF_RE.test(line)) continue;
+		CLASSIC_REF_RE.lastIndex = 0;
+		for (let m; (m = CLASSIC_REF_RE.exec(line));) if (!order.has(m[1])) order.set(m[1], order.size + 1);
+	}
+	return order;
+}
 
 /** Anything this pass could number: when none of it is there, skip it — a
  *  note full of diagrams (@begin(TiKZ)) costs a keystroke nothing. Plugin-
@@ -143,7 +160,8 @@ function compute(text, numbered) {
 	const h = [0, 0, 0, 0, 0, 0];
 	const counters = { figure: 0, table: 0, listing: 0, theorem: 0, equation: 0 };
 	const custom = {};
-	let footnotes = 0;
+	const footnotes = new Map();   // group → inline notes so far
+	const classic = classicOrder(raw.slice(meta.end));
 	/** Open environments: {name, colons, line, number, type, numbered, title, sub}. */
 	const envs = [];
 
@@ -216,7 +234,12 @@ function compute(text, numbered) {
 		let headingType;
 		if (heading) {
 			const depth = heading[1].length;
-			if (meta.headingsNumeric) {
+			// `{-}` marks a heading unnumbered (index.js#stripUnnumberedMarker);
+			// like LaTeX's \section* it leaves the count alone — the engine's
+			// numbering pass honours it since jmarkdown b212e82. Headings the
+			// engine GENERATES (an endnotes title, the bibliography's) are no
+			// `#` line here, and take no number there either.
+			if (meta.headingsNumeric && !UNNUMBERED_RE.test(heading[2])) {
 				h[depth - 1] += 1;
 				for (let d = depth; d < 6; d += 1) h[d] = 0;
 				headingNumber = h.slice(0, depth).join('.');
@@ -225,22 +248,30 @@ function compute(text, numbered) {
 			headingType = commandForDepth(depth, meta);
 		}
 
-		// Footnotes in document order, for a label inside one.
+		// Footnotes in document order, for a label inside one: inline notes
+		// per group, a classic note's definition by its reference order.
 		const notes = [];
 		FOOTNOTE_RE.lastIndex = 0;
-		for (let m; (m = FOOTNOTE_RE.exec(line));) notes.push({ at: m.index, number: ++footnotes });
+		for (let m; (m = FOOTNOTE_RE.exec(line));) {
+			const group = /\(([^)\s]+)\)$/.exec(m[1] ?? '')?.[1] ?? '';
+			const n = (footnotes.get(group) ?? 0) + 1;
+			footnotes.set(group, n);
+			notes.push({ at: m.index, number: n });
+		}
+		const def = CLASSIC_DEF_RE.exec(line);
+		if (def && classic.has(def[1])) notes.push({ at: 0, number: classic.get(def[1]), classic: true });
 
 		LABEL_RE.lastIndex = 0;
 		for (let m; (m = LABEL_RE.exec(line));) {
 			const col = m.index + m[1].length;
 			const key = m[2].trim();
-			const note = notes.filter((n) => n.at < col && !line.slice(n.at, col).includes(']')).pop();
+			const note = notes.filter((n) => n.at < col && (n.classic || !line.slice(n.at, col).includes(']'))).pop();
 			const hostEnv = [...envs].reverse().find((e) => e.numbered);
 			let info;
-			// The engine's own behaviour, not its intent: no number (see above).
-			if (note) info = { number: '', type: 'footnote', kind: 'footnote', title: '', status: 'numberless' };
+			// A footnote's own number, before any construct it sits in (above).
+			if (note) info = { number: String(note.number), type: 'footnote', kind: 'footnote', title: '', status: 'ok' };
 			else if (hostEnv) info = { number: hostEnv.number, type: hostEnv.type, kind: hostEnv.name, title: hostEnv.title, status: 'ok' };
-			else if (heading) info = { number: headingNumber, type: headingType, kind: 'heading', title: heading[2].replace(/[@:]label\[[^\]]*\]/g, '').trim(), status: headingNumber ? 'ok' : 'numberless' };
+			else if (heading) info = { number: headingNumber, type: headingType, kind: 'heading', title: heading[2].replace(/[@:]label\[[^\]]*\]/g, '').replace(/\s*\{-\}\s*/, ' ').trim(), status: headingNumber ? 'ok' : 'numberless' };
 			else info = { number: '', type: undefined, kind: 'plain', title: '', status: 'numberless' };
 			const host = hostEnv && !note ? { from: hostEnv.line, to: hostEnv.line } : { from: lineNo, to: lineNo };
 			record(key, { ...info, line: lineNo, host });
@@ -268,9 +299,7 @@ export function refDisplay(numbering, key, form) {
 	if (target.status !== 'ok' || !target.number) {
 		const tip = target.kind === 'heading'
 			? `“${key}” labels a heading, and headings are numbered only under “Headings: numeric”`
-			: target.kind === 'footnote'
-				? `“${key}” is inside a footnote, and the engine does not number footnote labels (it prints ??)`
-				: `“${key}” labels something with no number — the engine prints ??`;
+			: `“${key}” labels something with no number — the engine prints ??`;
 		return { text: '??', state: 'numberless', tip, target };
 	}
 	const text = form === 'ref' ? target.number : typedRefText(target.type, target.number, form === 'Cref');

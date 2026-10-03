@@ -13,6 +13,7 @@ import { ClewElement } from '../base/clew-element.js';
 import { workspaceStore } from '../../state/workspace-store.js';
 import { editorPool } from '../../editor/pool.js';
 import { debounce } from '../../lib/debounce.js';
+import { buildWarnings, warningsItem } from '../../build-warnings.js';
 
 class ClewStatusBar extends ClewElement {
 	#update = debounce(() => this.render(), 200);
@@ -23,13 +24,26 @@ class ClewStatusBar extends ClewElement {
 		this.listen(editorPool, 'doc-changed', ({ tabId }) => {
 			if (workspaceStore.activeTab()?.id === tabId) this.#update();
 		});
+		// The active note's last build said something (build-warnings.js).
+		this.listen(buildWarnings, 'changed', ({ path }) => {
+			if (!path || workspaceStore.activeTab()?.path === path) this.#update();
+		});
+	}
+
+	// Items another module owns (the vault-trust indicator, trust-banner.js)
+	// carry `data-status-keep` and survive every redraw, leftmost.
+	#kept() {
+		return [...this.children].filter((el) => el.hasAttribute('data-status-keep'));
 	}
 
 	render() {
 		const tab = workspaceStore.activeTab();
-		const entry = tab?.kind === 'note' ? editorPool.get(tab.id) : null;
+		const isNote = tab?.kind === 'note';
+		// Shown in reading mode too, where the warnings come from.
+		const warnings = isNote ? warningsItem(tab.path) : null;
+		const entry = isNote ? editorPool.get(tab.id) : null;
 		if (!entry?.view) {
-			this.replaceChildren();
+			this.replaceChildren(...this.#kept(), ...(warnings ? [warnings] : []));
 			return;
 		}
 		const text = entry.view.state.doc.toString();
@@ -42,7 +56,7 @@ class ClewStatusBar extends ClewElement {
 		const charsEl = document.createElement('span');
 		charsEl.className = 'status-item';
 		charsEl.textContent = `${chars} character${chars === 1 ? '' : 's'}`;
-		this.replaceChildren(wordsEl, charsEl);
+		this.replaceChildren(...this.#kept(), ...(warnings ? [warnings] : []), wordsEl, charsEl);
 	}
 }
 

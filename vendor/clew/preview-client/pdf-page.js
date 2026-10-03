@@ -12,6 +12,7 @@
 // does. Same pdf-core.js, same autosave, same annotations.
 import { createViewer } from './pdf-core.js';
 import { FAILURES } from './remote-failures.js';
+import { topOrigin, postTo } from '../shared/message-guard.js';
 
 const params = new URLSearchParams(location.search);
 const src = params.get('src');
@@ -71,7 +72,7 @@ function askHost(type) {
 			resolve(msg);
 		};
 		window.addEventListener('message', onReply);
-		window.top.postMessage({ source: 'clew-pdf', type, key: remoteKey, id }, '*');
+		postTo(window.top, { source: 'clew-pdf', type, key: remoteKey, id }, topOrigin());
 	});
 }
 
@@ -224,14 +225,14 @@ window.addEventListener('message', (event) => {
 	const asker = event.source;
 	if (msg?.source === 'clew-preview-host' && msg.type === 'pdf-page' && viewer?.scrollToPage) {
 		showPage(msg.page).then((ok) => {
-			if (ok) asker.postMessage({ source: 'clew-preview', type: 'pdf-page-shown', page: msg.page }, '*');
+			if (ok) postTo(asker, { source: 'clew-preview', type: 'pdf-page-shown', page: msg.page }, event.origin);
 		});
 	}
 	if (msg?.source === 'clew-preview-host' && msg.type === 'test-create-annotations') {
-		viewer?.createAnnotations?.(msg.specs ?? []).then((made) => asker.postMessage({ source: 'clew-preview', type: 'test-created', made }, '*'));
+		viewer?.createAnnotations?.(msg.specs ?? []).then((made) => postTo(asker, { source: 'clew-preview', type: 'test-created', made }, event.origin));
 	}
 	if (msg?.source === 'clew-preview-host' && msg.type === 'list-annotations') {
-		const reply = (annotations, error) => asker.postMessage({ source: 'clew-preview', type: 'annotations', requestId: msg.requestId, annotations, error }, '*');
+		const reply = (annotations, error) => postTo(asker, { source: 'clew-preview', type: 'annotations', requestId: msg.requestId, annotations, error }, event.origin);
 		if (!viewer?.listAnnotations) reply([], 'The viewer is still loading');
 		else viewer.listAnnotations().then((a) => reply(a, null), (err) => reply([], String(err?.message ?? err)));
 	}

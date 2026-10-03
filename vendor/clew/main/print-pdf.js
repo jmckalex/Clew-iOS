@@ -104,7 +104,7 @@ export async function printNoteToPdf({ sessionId, callerToken = null, relPath, o
 		await win.loadURL(url);
 		await win.webContents.executeJavaScript(ARM_SCRIPT);
 		win.webContents.executeJavaScript(
-			`window.postMessage({ source: 'clew-preview-host', type: 'theme', theme: 'light' }, '*'); true;`);
+			`window.postMessage({ source: 'clew-preview-host', type: 'theme', theme: 'light' }, 'clew-preview://vault'); true;`);
 		// The caller token (docs/dev/frame-bridge.md §1): this page is TOP-level,
 		// with no host to answer its ask, so it is handed the token the same
 		// way — a canvas embed's cards render through the fragment endpoint,

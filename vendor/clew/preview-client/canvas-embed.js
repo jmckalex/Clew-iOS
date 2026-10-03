@@ -18,6 +18,7 @@ import { parseCanvas, canvasBounds, nodeRect } from '../renderer/canvas/canvas-m
 import { shapeSvg, edgeSvg, strokeSvg, escapeXml } from '../renderer/canvas/shape-svg.js';
 import { renderCardHtml } from '../renderer/canvas/card-markdown.js';
 import { callerToken } from './caller-token.js';
+import { PREVIEW_ORIGIN, parentOrigin, postTo } from '../shared/message-guard.js';
 
 // Nesting guard: a canvas embed renders note nodes as iframes (?cdepth=N+1);
 // inside those, canvas embeds render as a plain title box, so a canvas that
@@ -317,7 +318,7 @@ async function upgradeCard(el, text) {
 export function broadcastThemeToNested(theme) {
 	for (const frame of document.querySelectorAll('iframe.canvas-embed-note-frame')) {
 		frame.contentWindow?.postMessage(
-			{ source: 'clew-preview-host', type: 'theme', theme }, '*');
+			{ source: 'clew-preview-host', type: 'theme', theme }, PREVIEW_ORIGIN);
 	}
 }
 
@@ -336,8 +337,8 @@ window.addEventListener('message', (event) => {
 			source: 'clew-preview-host',
 			type: 'theme',
 			theme: document.documentElement.dataset.theme ?? 'dark',
-		}, '*');
+		}, event.origin);
 	} else if (msg.type === 'link-click' || msg.type === 'external-link') {
-		window.parent.postMessage(msg, '*');
+		postTo(window.parent, msg, parentOrigin());
 	}
 });

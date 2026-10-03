@@ -26,6 +26,7 @@
 // even a note untouched for a year keeps one fallback version.
 import fs from 'node:fs';
 import path from 'node:path';
+import { historyStamp } from '../shared/conflict-text.js';
 
 const DEFAULTS = { minIntervalMinutes: 5, maxVersions: 40, maxAgeDays: 60 };
 const TRACKED = /\.(md|jmd|canvas)$/i;
@@ -49,12 +50,9 @@ function historyDir(root, rel) {
 	return path.join(root, '.clew', 'history', rel);
 }
 
-function stampFor(timeMs) {
-	const d = new Date(timeMs);
-	const p = (n, w = 2) => String(n).padStart(w, '0');
-	return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ` +
-		`${p(d.getHours())}.${p(d.getMinutes())}.${p(d.getSeconds())}`;
-}
+// The stamp is shared with the conflict code (and Clew-iOS), which keeps
+// versions under the same names.
+const stampFor = historyStamp;
 
 /** Snapshot files in `dir`, newest first (same-second copies by counter). */
 function entriesIn(dir) {
@@ -96,18 +94,7 @@ export function snapshotBeforeWrite(root, rel, rawOptions, { force = false } = {
 			const prev = fs.readFileSync(path.join(dir, newest.name));
 			if (prev.equals(fs.readFileSync(abs))) return null;
 		}
-		const ext = path.extname(rel);
-		const stamp = stampFor(stat.mtimeMs);
-		// A same-second copy takes the counter AFTER the highest in use, never
-		// the lowest free one: pruning frees low counters, and a reused one
-		// sorts the newest copy below its elders (entriesIn orders them by
-		// counter), so `newest` above would name an older version.
-		const sameSecond = existing.filter((e) => {
-			const base = path.basename(e.name, path.extname(e.name));
-			return base === stamp || base.startsWith(stamp + '-');
-		});
-		const name = sameSecond.length === 0 ? stamp + ext
-			: `${stamp}-${Math.max(...sameSecond.map((e) => e.counter)) + 1}${ext}`;
+		const name = snapshotName(existing, stampFor(stat.mtimeMs), path.extname(rel));
 		fs.mkdirSync(dir, { recursive: true });
 		fs.copyFileSync(abs, path.join(dir, name));
 		fs.utimesSync(path.join(dir, name), stat.mtime, stat.mtime);
@@ -115,6 +102,50 @@ export function snapshotBeforeWrite(root, rel, rawOptions, { force = false } = {
 		return name;
 	} catch (err) {
 		console.warn(`[clew] history snapshot failed (${rel}):`, err?.message ?? err);
+		return null;
+	}
+}
+
+/**
+ * A snapshot's file name for `stamp`. A same-second copy takes the counter
+ * AFTER the highest in use, never the lowest free one: pruning frees low
+ * counters, and a reused one sorts the newest copy below its elders
+ * (entriesIn orders them by counter), so `newest` would name an older one.
+ */
+function snapshotName(existing, stamp, ext) {
+	const sameSecond = existing.filter((e) => {
+		const base = path.basename(e.name, path.extname(e.name));
+		return base === stamp || base.startsWith(stamp + '-');
+	});
+	return sameSecond.length === 0 ? stamp + ext
+		: `${stamp}-${Math.max(...sameSecond.map((e) => e.counter)) + 1}${ext}`;
+}
+
+/**
+ * Keep `text` as a version of `rel` NOW — the conflict code's safety net
+ * (renderer/conflicts.js): both sides of a conflict go here before anything
+ * is chosen, whatever the interval, and even with history turned off for
+ * the vault (a conflict's versions are not history's to decline). Skipped
+ * when it equals the newest snapshot. Never throws; returns the snapshot's
+ * name, or null.
+ */
+export function keepVersion(root, rel, text, { now = Date.now() } = {}) {
+	if (!isTracked(rel)) return null;
+	try {
+		const dir = historyDir(root, rel);
+		const existing = entriesIn(dir);
+		const body = Buffer.from(String(text ?? ''));
+		if (existing[0]) {
+			try { if (fs.readFileSync(path.join(dir, existing[0].name)).equals(body)) return existing[0].name; } catch { /* unreadable: keep anew */ }
+		}
+		const name = snapshotName(existing, stampFor(now), path.extname(rel));
+		fs.mkdirSync(dir, { recursive: true });
+		fs.writeFileSync(path.join(dir, name), body);
+		const when = new Date(now);
+		fs.utimesSync(path.join(dir, name), when, when);
+		return name;
+	} catch (err) {
+		console.warn(`[clew] could not keep a version of ${rel}:`, err?.message ?? err);
 		return null;
 	}
 }

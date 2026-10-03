@@ -23,6 +23,8 @@ import path from 'path';
 import { createRequire } from 'module';
 import { configManager } from './config-manager.js';
 import { CITE_RE } from './citations.js';
+import { addWarning, getWarnings } from './warnings.js';
+import { bibliographyFiles, readBibliographies, warnShadowedEntries } from './bibliographies.js';
 
 const require = createRequire(import.meta.url);
 
@@ -82,6 +84,34 @@ function registerTemplates(appDir, customTemplate, baseDir, activeStyle) {
 	}
 }
 
+/**
+ * What kind of citation a CSL style produces — its own
+ * `<category citation-format="…"/>`: 'numeric' (vancouver), 'author-date'
+ * (apa, harvard1, chicago, ajp, bjps, econometrica, ergo), 'note' or 'label' —
+ * or null when the style cannot be read. Asked of the style itself, so a
+ * custom `Bibliography style: foo.csl` answers for itself too. citations.js
+ * uses it to make LaTeX output numeric when the HTML is.
+ */
+export function cslCitationFormat(style) {
+	const name = String(style || '').trim();
+	if (!name) return null;
+	let xml = null;
+	try {
+		const custom = configManager.get('Biblify.template');
+		if (custom && custom.name === name && custom.file) {
+			const baseDir = configManager.get('Markdown file directory') || process.cwd();
+			xml = fs.readFileSync(path.isAbsolute(custom.file) ? custom.file : path.resolve(baseDir, custom.file), 'utf8');
+		} else if (BUNDLED_TEMPLATES[name]) {
+			xml = fs.readFileSync(path.join(configManager.get('Jmarkdown app directory'), 'csl', BUNDLED_TEMPLATES[name]), 'utf8');
+		} else if (Cite) {
+			xml = Cite.plugins.config.get('@csl').templates.get(name) || null;
+		}
+	} catch {
+		return null;
+	}
+	return (xml && /citation-format="([^"]+)"/.exec(xml)?.[1]) || null;
+}
+
 // --- BibTeX indexing (Biblify.processBibfile / get_citations) -----------------
 
 function processBibfile(data) {
@@ -101,12 +131,20 @@ function getEntries(keys, bibfileMap) {
 	for (const key of keys) {
 		const entry = bibfileMap[key];
 		if (entry === undefined) {
-			console.error(`Warning: no bibliography entry found for ${key}`);
+			warnMissingKey(key);
 			continue;
 		}
 		entries.push(entry);
 	}
 	return entries;
+}
+
+// A cited key the .bib does not have — a build warning (the summary, and
+// watch mode's banner), once per key per build. It used to be a bare
+// console line, outside the summary.
+function warnMissingKey(key) {
+	const message = `citation: no bibliography entry for "${key}"`;
+	if (!getWarnings().includes(message)) addWarning(message);
 }
 
 // --- name / year helpers (ported from Biblify) --------------------------------
@@ -282,7 +320,6 @@ export function resolveCitations($, options = {}) {
 
 	const appDir = configManager.get('Jmarkdown app directory');
 	const baseDir = configManager.get('Markdown file directory') || process.cwd();
-	const bibPathRaw = configManager.get('Biblify.bibliography') || '';
 	let style = (configManager.get('Biblify.bibliography style') || 'chicago').trim();
 	if (!style) style = 'chicago';
 	const customTemplate = configManager.get('Biblify.template');
@@ -290,23 +327,24 @@ export function resolveCitations($, options = {}) {
 	const minimal = !!configManager.get('Biblify.minimal');
 	const outBase = options.outBase || null;
 
-	if (!bibPathRaw) {
+	// Every bibliography file — the configured ones, then the note's — read and
+	// indexed, a later file's entry winning a key (bibliographies.js). Paths
+	// resolve relative to the source file.
+	const files = bibliographyFiles();
+	if (files.length === 0) {
 		console.error('Resolve citations is on but no `Bibliography` file was given; leaving citations unresolved.');
 		recoverPlaceholders($);
 		return;
 	}
-
-	// Read + index the .bib file (path resolves relative to the source file).
-	let bibContent;
-	try {
-		const resolved = path.isAbsolute(bibPathRaw) ? bibPathRaw : path.resolve(baseDir, bibPathRaw);
-		bibContent = fs.readFileSync(resolved, 'utf8');
-	} catch (e) {
-		console.error(`Could not read bibliography file "${bibPathRaw}": ${e.message}`);
+	const indexed = readBibliographies(files)
+		.filter((file) => file.content != null)
+		.map((file) => ({ file, entries: processBibfile(file.content) }));
+	if (indexed.length === 0) {
 		recoverPlaceholders($);
 		return;
 	}
-	const bibfileMap = processBibfile(bibContent);
+	warnShadowedEntries(indexed);
+	const bibfileMap = Object.assign({}, ...indexed.map(({ entries }) => entries));
 
 	registerTemplates(appDir, customTemplate, baseDir, style);
 
@@ -602,7 +640,16 @@ function resolveVancouver($, ctx) {
 		if (!m) { $(el).remove(); continue; }
 		const keys = parseKeys(m[9]);
 		const keyString = keys.join(',');
+		for (const k of keys) if (!ctx.bibfileMap[k]) warnMissingKey(k);
 		const indexes = keys.map(k => keyIndexMap[k]).filter(n => n !== undefined);
+		if (indexes.length === 0) {
+			// None of its keys is in the .bib: leave the command as written, as
+			// the author-year styles do (resolveOne) — vancouverString([]) used
+			// to print "[undefined]". A known key cited with an unknown one
+			// keeps its number, as author-year keeps its name.
+			$(el).replaceWith(document_text($(el).attr('data-cite-cmd') || ''));
+			continue;
+		}
 		const sorted = Array.from(new Set(indexes)).sort((a, b) => a - b);
 		const str = vancouverString(sorted);
 		$(el).replaceWith(

@@ -34,6 +34,9 @@ export const CH = {
 	HISTORY_LIST: 'clew:history-list',
 	HISTORY_READ: 'clew:history-read',
 	HISTORY_RESTORE: 'clew:history-restore',
+	HISTORY_KEEP: 'clew:history-keep',
+	PDF_META_GET: 'clew:pdf-meta-get',
+	PDF_META_SET: 'clew:pdf-meta-set',
 
 	// invoke: persistence
 	WORKSPACE_LOAD: 'clew:workspace-load',
@@ -57,6 +60,26 @@ export const CH = {
 	// GET → { trusted, refused: [names] }; SET { trusted } → { trusted }.
 	VAULT_TRUST_GET: 'clew:vault-trust-get',
 	VAULT_TRUST_SET: 'clew:vault-trust-set',
+	// The full vault-trust design (docs/dev/frame-bridge.md §4): what this
+	// window's vault may run on this device, what it contains that would
+	// run (the prompt's counts), and every vault the device has decided on.
+	VAULT_ACCESS_GET: 'clew:vault-access-get',
+	VAULT_ACCESS_SET: 'clew:vault-access-set',
+	VAULT_CODE_SUMMARY: 'clew:vault-code-summary',
+	TRUSTED_VAULTS_LIST: 'clew:trusted-vaults-list',
+	TRUSTED_VAULTS_SET: 'clew:trusted-vaults-set',
+	// Apps in notes (frame-bridge.md §7–§9): the app page's bridge host asks
+	// main what an embedded app may do, records the user's answer, and relays
+	// each port request — main decides every one.
+	APP_STATUS: 'clew:app-status',
+	APP_ANSWER: 'clew:app-answer',
+	APP_CALL: 'clew:app-call',
+	APPS_LIST: 'clew:apps-list',
+	APP_REVOKE: 'clew:app-revoke',
+	// The update check (docs/dev/auto-update.md): Help → Check for Updates…,
+	// and Skip this version.
+	UPDATE_CHECK: 'clew:update-check',
+	UPDATE_SKIP: 'clew:update-skip',
 	// invoke: a web PDF the window's renders registered (main/remote-pdfs.js),
 	// named by its hash — { key } → { path } / { url }.
 	REMOTE_PDF_SAVE_COPY: 'clew:remote-pdf-save-copy',
@@ -122,6 +145,10 @@ export const CH = {
 	EV_NOTE_CODE_REFUSED: 'clew:ev-note-code-refused',
 	// This window's vault was trusted or revoked: { trusted }.
 	EV_VAULT_TRUST_CHANGED: 'clew:ev-vault-trust-changed',
+	EV_VAULT_ACCESS_CHANGED: 'clew:ev-vault-access-changed',
+	EV_TRUST_NOTICE: 'clew:ev-trust-notice',
+	EV_APP_GRANTS_CHANGED: 'clew:ev-app-grants-changed',
+	EV_UPDATE_AVAILABLE: 'clew:ev-update-available',
 	// Custom callout types changed — in Settings, or a hand edit of the
 	// vault's vault-settings.json: re-ask CALLOUTS_RESOLVED. No payload.
 	EV_CALLOUTS_CHANGED: 'clew:ev-callouts-changed',

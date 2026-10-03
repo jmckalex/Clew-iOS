@@ -6,6 +6,7 @@
 // itself lives in pdf-core.js, shared with the standalone viewer page that
 // the file tab and canvas nodes use.
 import { createViewer } from './pdf-core.js';
+import { parentOrigin, postTo } from '../shared/message-guard.js';
 
 const CSS = `
 .clew-pdf-inline { height: 70vh; position: relative; border-radius: 4px; overflow: hidden; }
@@ -68,7 +69,7 @@ window.addEventListener('message', (event) => {
 	if (event.source !== window.parent || msg?.source !== 'clew-preview-host' || msg.type !== 'test-create-annotations') return;
 	const inst = [...viewers].find((v) => v.handle?.createAnnotations);
 	(inst ? inst.handle.createAnnotations(msg.specs ?? []) : Promise.resolve(-1))
-		.then((made) => window.parent.postMessage({ source: 'clew-preview', type: 'test-created', made }, '*'));
+		.then((made) => postTo(window.parent, { source: 'clew-preview', type: 'test-created', made }, parentOrigin()));
 });
 
 function reapDetached() {

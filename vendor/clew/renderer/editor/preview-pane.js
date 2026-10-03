@@ -24,26 +24,34 @@
 // error shows its console exactly as reading mode would. Only the latest
 // text renders (the base's generation counter drops stale results).
 //
-// It is a mirror, not a document: the frame takes no pointer events (the
-// pane's body scrolls it), and it never takes focus.
+// It is a mirror, not a document: it takes NO pointer events and never
+// focus — a click or a wheel over it goes to the note under it (the owner's
+// report, 2026-10-03: a broken figure's pane, the whole TeX log in it, sat
+// over the fence and took the clicks meant for the typo). And it never
+// covers the block being edited: a block's pane goes BELOW it, else BESIDE
+// the text column, else below and shrunk to the room there, else nowhere
+// (reposition). Before, it went above the block's LAST line when there was
+// no room below — over the block itself.
 //
-// And it must not eat the wheel (owner's decision, 2026-09-29): the pane is
-// fixed, outside the editor's scroller, so a wheel over it reached nothing
-// and the note stood still. A wheel the pane's body can use — a diagram
-// taller than the pane — scrolls it, natively; any other wheel scrolls the
-// note. A gesture that began on the pane stays there until it pauses (the
-// browser's own scroll latching), so a trackpad's momentum does not jump to
-// the note halfway through.
+// A failed figure says where (preview-client/figures.js): the pane finds the
+// fence line its error names (shared/figure-errors.js) and marks it in the
+// editor (figure-error-mark.js) until the figure renders or the cursor
+// leaves.
 import { typesetTex, mathReady, mathLoaded } from '../lib/mathjax.js';
 import { FloatingPane } from '../components/chrome/floating-pane.js';
 import { workspaceStore } from '../state/workspace-store.js';
 import { settingsStore } from '../state/settings-store.js';
 import { sameTarget } from './preview-target.js';
+import { locateFigureError } from '../../shared/figure-errors.js';
+import { setFigureError } from './figure-error-mark.js';
 
 const MIN_H = 60;
 const MAX_H = 420;
-/** A wheel gesture is over once its events pause this long. */
-const GESTURE_GAP_MS = 150;
+/** The least room a block's pane is shown in, below its block. */
+const MIN_ROOM = 90;
+/** The least width beside the text column worth placing it in. */
+const MIN_BESIDE = 300;
+const GAP = 6;
 
 const sourceOf = (t) => t.tex ?? t.text;
 
@@ -55,7 +63,9 @@ class ClewPreviewPane extends FloatingPane {
 	#timer = null;
 	#dismissed = null;    // Escape: this target stays hidden until left
 	#renders = 0;         // engine renders applied (scenarios count them)
-	#latched = 0;         // a wheel gesture on the pane's own scroll: until when
+	#figureError = null;  // { message, noteLine } of the figure shown, if it failed
+	#marked = null;       // { view, id }: the line marked, and in which editor
+	#markSeq = 0;
 
 	connectedCallback() {
 		this.innerHTML = '';
@@ -71,8 +81,31 @@ class ClewPreviewPane extends FloatingPane {
 		this.error.hidden = true;
 		this.frame.tabIndex = -1;
 		this.body.append(this.math, this.frame);
-		this.append(this.body, this.error);
-		this.addEventListener('wheel', this.#onWheel, { passive: false });
+		// A failed figure's log, behind the pane's OWN button: the frame is a
+		// mirror (no pointer events, and a click into it would take the
+		// editor's focus, which closes the pane), so the frame's "Show log"
+		// could not be clicked (the owner's report) — the frame hides it here
+		// (`#mirror`, client.js) and hands the log over with its error.
+		this.logRow = document.createElement('div');
+		this.logRow.className = 'preview-pane-log';
+		this.logRow.hidden = true;
+		this.logToggle = document.createElement('button');
+		this.logToggle.type = 'button';
+		this.logToggle.className = 'preview-pane-log-toggle';
+		this.logToggle.textContent = 'Show log';
+		this.logText = document.createElement('pre');
+		this.logText.className = 'preview-pane-log-text';
+		this.logText.hidden = true;
+		this.logRow.append(this.logToggle, this.logText);
+		// pointerdown is prevented by the base (the editor keeps its focus);
+		// the click still arrives.
+		this.logToggle.addEventListener('click', () => {
+			this.logText.hidden = !this.logText.hidden;
+			this.logToggle.textContent = this.logText.hidden ? 'Show log' : 'Hide log';
+			this.reposition();
+		});
+		this.frameUrlSuffix = '#mirror';
+		this.append(this.body, this.error, this.logRow);
 		this.offLayout = workspaceStore.on('layout-changed', () => this.release());
 		this.offSettings = settingsStore.on('settings-changed', (key) => {
 			if (key === 'previewPane' && settingsStore.get('previewPane') === 'off') this.release();
@@ -80,37 +113,10 @@ class ClewPreviewPane extends FloatingPane {
 	}
 
 	disconnectedCallback() {
-		this.removeEventListener('wheel', this.#onWheel);
 		this.destroyPane();
 		this.offLayout?.();
 		this.offSettings?.();
 	}
-
-	/** The pane's own scroll first, as the browser does; the note otherwise. */
-	#onWheel = (e) => {
-		const now = performance.now();
-		const px = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? window.innerHeight : 1;
-		const dx = e.deltaX * px;
-		const dy = e.deltaY * px;
-		const body = this.body;
-		const math = this.math;
-		const canY = (el) => (dy > 0 ? el.scrollTop + el.clientHeight < el.scrollHeight - 1 : dy < 0 && el.scrollTop > 0);
-		const canX = (el) => (dx > 0 ? el.scrollLeft + el.clientWidth < el.scrollWidth - 1 : dx < 0 && el.scrollLeft > 0);
-		const bodyScrolls = getComputedStyle(body).overflowY !== 'hidden';
-		const own = Math.abs(dy) >= Math.abs(dx)
-			? bodyScrolls && canY(body)
-			: canX(math) || canX(body);
-		if (own) {
-			this.#latched = now + GESTURE_GAP_MS;   // native scroll; stay with it
-			return;
-		}
-		e.preventDefault();
-		if (now < this.#latched) {                // the pane's gesture, at its edge
-			this.#latched = now + GESTURE_GAP_MS;
-			return;
-		}
-		this.#view?.scrollDOM.scrollBy({ top: dy, left: dx });
-	};
 
 	/**
 	 * The cursor of `view` is in `target` (or in none: null).
@@ -128,6 +134,7 @@ class ClewPreviewPane extends FloatingPane {
 		if (this.#dismissed && sameTarget(this.#dismissed, target)) return;
 		this.#dismissed = null;
 		const same = this.#view === view && sameTarget(this.#target, target);
+		if (!same) this.#clearError();
 		this.#view = view;
 		this.#target = target;
 		this.#path = path;
@@ -155,6 +162,7 @@ class ClewPreviewPane extends FloatingPane {
 	/** Stop tracking and hide. */
 	release() {
 		clearTimeout(this.#timer);
+		this.#clearError();
 		this.#target = null;
 		this.#shown = null;
 		this.hide();
@@ -211,6 +219,51 @@ class ClewPreviewPane extends FloatingPane {
 		this.reposition();
 	}
 
+	/** A figure in the frame failed, or came out right (preview-client/figures.js). */
+	onFrameMessage(msg) {
+		if (msg.type === 'figure-ok') { this.#clearError(); return; }
+		if (msg.type !== 'figure-error') return;
+		const target = this.#target;
+		const view = this.#view;
+		if (!target?.text || !view) return;
+		const at = locateFigureError(target.text.split('\n'), msg);
+		const first = view.state.doc.lineAt(Math.min(target.from, view.state.doc.length)).number;
+		const noteLine = at >= 0 ? first + at : null;
+		this.#figureError = { message: msg.message, noteLine };
+		this.#showLog(msg.log ?? '');
+		if (noteLine && noteLine <= view.state.doc.lines) {
+			const id = ++this.#markSeq;
+			view.dispatch({ effects: setFigureError.of({ pos: view.state.doc.line(noteLine).from, message: msg.message, id }) });
+			this.#marked = { view, id };
+		}
+	}
+
+	#showLog(log) {
+		this.logText.textContent = log;
+		this.logText.hidden = true;
+		this.logToggle.textContent = 'Show log';
+		this.logRow.hidden = !log;
+	}
+
+	/**
+	 * The error is gone (the figure rendered, the cursor left it, the pane
+	 * closed): its line mark too. Often called from INSIDE the editor's
+	 * update (the plugin tracks the cursor there), where a dispatch is
+	 * refused — so the mark is cleared on the next tick, by its id, which
+	 * leaves a newer mark alone.
+	 */
+	#clearError() {
+		this.#figureError = null;
+		this.#showLog('');
+		const marked = this.#marked;
+		this.#marked = null;
+		if (!marked) return;
+		setTimeout(() => {
+			if (marked.view.isDestroyed) return;
+			try { marked.view.dispatch({ effects: setFigureError.of({ clear: marked.id }) }); } catch { /* the view went */ }
+		}, 0);
+	}
+
 	#sizeFrame() {
 		const h = this.frameHeight ?? MIN_H;
 		this.frame.style.height = `${h}px`;
@@ -220,17 +273,18 @@ class ClewPreviewPane extends FloatingPane {
 		const style = getComputedStyle(this.body);
 		const padding = (parseFloat(style.paddingTop) || 0) + (parseFloat(style.paddingBottom) || 0);
 		this.body.style.height = `${Math.min(MAX_H, Math.max(MIN_H, h + padding))}px`;
-		// Whether the pane scrolls its own content: a touch port lets a drag
-		// over a pane that FITS fall through to the note (Clew-iOS, pointer:
-		// coarse → pointer-events: none unless [data-overflows]).
+		// Whether its content is taller than the pane (scenarios; Clew-iOS
+		// read it to let a drag fall through — which now every pane does).
 		this.toggleAttribute('data-overflows', h + padding > MAX_H);
 	}
 
 	/**
 	 * Against the target: an inline formula ABOVE its line at its own x (it
-	 * never covers what is being typed); a display formula or a block BELOW
-	 * its last line, as wide as the text column. Hidden while the anchor is
-	 * off screen.
+	 * never covers what is being typed). A display formula or a block NEVER
+	 * over its own lines: below its last line, as wide as the text column,
+	 * when it fits there; else BESIDE the column, when the window has room
+	 * to its right; else below, shrunk to the room there; else not at all.
+	 * Hidden while the anchor is off screen.
 	 */
 	reposition() {
 		const view = this.#view;
@@ -260,12 +314,46 @@ class ClewPreviewPane extends FloatingPane {
 					this.style.maxWidth = `${Math.round(column.width)}px`;
 					this.dataset.side = this.placeAgainst(start, { prefer: 'above', left: start.left });
 				} else {
-					this.style.width = `${Math.round(column.width)}px`;
-					this.style.maxWidth = '';
-					this.dataset.side = this.placeAgainst({ ...last, left: column.left }, { prefer: 'below', left: column.left });
+					this.#placeBlock(start, last, column);
 				}
 			},
 		});
+	}
+
+	/** A block's pane, kept off the block (reposition). */
+	#placeBlock(start, last, column) {
+		const winH = window.innerHeight;
+		const winW = window.innerWidth;
+		this.style.maxHeight = '';
+		this.style.width = `${Math.round(column.width)}px`;
+		this.style.maxWidth = '';
+		const natural = this.getBoundingClientRect().height;
+		const below = last.bottom + GAP;
+		const roomBelow = winH - 8 - below;
+		const roomBeside = winW - 8 - (column.right + GAP);
+		let side;
+		if (natural <= roomBelow) {
+			side = 'below';
+			this.style.top = `${Math.round(below)}px`;
+			this.style.left = `${Math.round(column.left)}px`;
+		} else if (roomBeside >= MIN_BESIDE) {
+			side = 'beside';
+			const width = Math.min(column.width, roomBeside);
+			this.style.width = `${Math.round(width)}px`;
+			const h = Math.min(natural, winH - 16);
+			this.style.maxHeight = `${Math.round(h)}px`;
+			this.style.top = `${Math.round(Math.max(8, Math.min(start.top, winH - 8 - h)))}px`;
+			this.style.left = `${Math.round(column.right + GAP)}px`;
+		} else if (roomBelow >= MIN_ROOM) {
+			side = 'below';
+			this.style.maxHeight = `${Math.round(roomBelow)}px`;
+			this.style.top = `${Math.round(below)}px`;
+			this.style.left = `${Math.round(column.left)}px`;
+		} else {
+			side = 'none';
+			this.style.visibility = 'hidden';
+		}
+		this.dataset.side = side;
 	}
 
 	/** For scenarios: what is showing. */
@@ -275,6 +363,7 @@ class ClewPreviewPane extends FloatingPane {
 			side: this.dataset.side ?? null, ready: this.frameReady, src: this.frame.getAttribute('src'),
 			svg: this.math.hidden ? null : this.math.querySelector('svg')?.outerHTML ?? null,
 			error: this.error.hidden ? null : this.error.textContent, renders: this.#renders,
+			figureError: this.#figureError,
 		};
 	}
 }

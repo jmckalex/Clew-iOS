@@ -17,10 +17,15 @@
 //
 // Global plugins exist because a plugin you wrote is rarely about one vault:
 // copying it into every new vault was the tax this removes. Installing is
-// global; ENABLING stays per-vault (vault-settings.json "plugins": [ids]),
-// exactly as before — the trust boundary does not move, and a vault still
-// runs no code until it says so. A vault plugin SHADOWS a global one of the
-// same id (most specific wins), so a vault can pin its own version.
+// global; ENABLING is per vault, and since the full vault-trust design
+// (frame-bridge.md §4.7, 2026-10-02) it is recorded ON THE DEVICE
+// (vault-trust.js), never read as a grant from the vault's own
+// vault-settings.json, whose "plugins" list is only the vault's request. A
+// VAULT plugin runs only in a vault this device trusts; a GLOBAL plugin is
+// the user's own code and runs wherever the user enabled it, trusted or not.
+// A vault plugin SHADOWS a global one of the same id (most specific wins)
+// only in a trusted vault — an untrusted vault cannot replace the user's
+// plugin with its own by naming it.
 //
 // The surfaces:
 //
@@ -35,9 +40,12 @@
 //               workspace, notices.
 //
 // Plugins are ARBITRARY CODE and are therefore off until explicitly enabled
-// per vault (vault-settings.json "plugins": [ids]) — the same opt-in shape
-// as the note API. Enabling is a statement of trust in the code, wherever it
-// was installed from.
+// per vault — the same opt-in shape as the note API. Enabling is a
+// statement of trust in the code, wherever it was installed from.
+//
+// `access` below is `{ plugins: [ids], trusted }` — the session's effective
+// access (vault-trust.js#effectiveAccess). `trusted` missing means
+// untrusted: a caller that forgets it gets fewer plugins, never more.
 //
 // The global directory is passed IN rather than read from paths.js: this
 // module must stay importable by the unit tests, which run under plain node
@@ -91,8 +99,8 @@ function listPluginsIn(dir, scope) {
  * plus the globally installed ones. A vault plugin SHADOWS a global plugin
  * of the same id — one id is one plugin, and the more specific copy wins.
  */
-export function listPlugins(vaultRoot, globalDir = null) {
-	const vault = listPluginsIn(path.join(vaultRoot, '.clew', 'plugins'), 'vault');
+export function listPlugins(vaultRoot, globalDir = null, { vault: withVault = true } = {}) {
+	const vault = withVault ? listPluginsIn(path.join(vaultRoot, '.clew', 'plugins'), 'vault') : [];
 	const seen = new Set(vault.map((p) => p.id));
 	const global = globalDir
 		? listPluginsIn(globalDir, 'global').map((p) => ({ ...p, shadowed: seen.has(p.id) }))
@@ -100,17 +108,18 @@ export function listPlugins(vaultRoot, globalDir = null) {
 	return [...vault, ...global.filter((p) => !p.shadowed)];
 }
 
-/** The enabled subset, per vault-settings. */
-export function enabledPlugins(vaultRoot, vaultSettings, globalDir = null) {
-	const enabled = new Set(Array.isArray(vaultSettings?.plugins) ? vaultSettings.plugins : []);
-	return listPlugins(vaultRoot, globalDir).filter((p) => enabled.has(p.id));
+/** The subset that may run: enabled on this device for this vault, and —
+ *  for a vault plugin — only in a trusted vault. */
+export function enabledPlugins(vaultRoot, access, globalDir = null) {
+	const enabled = new Set(Array.isArray(access?.plugins) ? access.plugins : []);
+	return listPlugins(vaultRoot, globalDir, { vault: access?.trusted === true }).filter((p) => enabled.has(p.id));
 }
 
 /** Engine-config Extensions entries for enabled engine surfaces:
  *  "exportA, exportB from /abs/path/engine.js". */
-export function engineExtensionEntries(vaultRoot, vaultSettings, globalDir = null) {
+export function engineExtensionEntries(vaultRoot, access, globalDir = null) {
 	const entries = [];
-	for (const plugin of enabledPlugins(vaultRoot, vaultSettings, globalDir)) {
+	for (const plugin of enabledPlugins(vaultRoot, access, globalDir)) {
 		const engine = plugin.surfaces.engine;
 		if (!engine) continue;
 		const abs = path.join(plugin.dir, engine.file);
@@ -127,8 +136,8 @@ export function engineExtensionEntries(vaultRoot, vaultSettings, globalDir = nul
  * vault-relative path); a global plugin's lives outside the vault and is
  * served from the __clew_plugin_file__ namespace instead (vaultRel null).
  */
-export function previewPluginScripts(vaultRoot, vaultSettings, globalDir = null) {
-	return enabledPlugins(vaultRoot, vaultSettings, globalDir)
+export function previewPluginScripts(vaultRoot, access, globalDir = null) {
+	return enabledPlugins(vaultRoot, access, globalDir)
 		.filter((p) => p.surfaces.preview)
 		.map((p) => ({
 			id: p.id,

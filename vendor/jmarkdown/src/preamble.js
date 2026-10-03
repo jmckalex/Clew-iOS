@@ -36,6 +36,12 @@ export function requirePackage(name, options = '') {
 	}
 }
 
+// The packages required so far, by name — what the assembled preamble will
+// load (latex-lint.js asks before warning that a package is missing).
+export function requiredPackageNames() {
+	return [...requiredPackages.keys()];
+}
+
 // Register a verbatim preamble line (deduplicated).
 export function addPreamble(line) {
 	if (!rawPreambleLines.includes(line)) rawPreambleLines.push(line);

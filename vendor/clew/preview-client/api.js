@@ -20,6 +20,52 @@
 //   clew.on('kv', ({ key, value }) => …);   // fires in EVERY open preview
 //   await clew.open('Some Note#Heading');
 //   const hits = await clew.search('tag:#project');
+
+// What the document's CSP stopped (main/preview-csp.js — frame-bridge.md
+// §4.4, §4.9), heard from the first script in <head> so nothing in the note
+// runs before the listener exists. Every violation is logged as `clew-csp:`
+// (the smoke sweeps count them: Clew's own features must cause none). In a
+// vault this device has not trusted (`data-clew-restricted`), a refused
+// script is reported to the app page's trust indicator, and every inline
+// script and on…= handler in the body is marked where it stands, as the
+// engine marks the constructs it refused — re-marked after each re-render,
+// since a morph replaces the body's children and in such a document every
+// one of them is the note's own (Clew's inline script is in <head>).
+import { parentOrigin, postTo } from '../shared/message-guard.js';
+(() => {
+	const restricted = () => document.documentElement.hasAttribute('data-clew-restricted');
+	const JS = /^(|text\/javascript|application\/javascript|module)$/i;
+	const mark = (el, name) => {
+		if (el.nextElementSibling?.hasAttribute('data-clew-refused-script')) return;
+		const box = document.createElement(el.tagName === 'SCRIPT' ? 'div' : 'span');
+		box.className = 'jmd-error jmd-refused';
+		box.setAttribute('data-jmd-refused', name);
+		box.setAttribute('data-clew-refused-script', '');
+		box.textContent = `[${name} not run: note code is off]`;
+		el.after(box);
+	};
+	const markAll = () => {
+		if (!restricted() || !document.body) return;
+		for (const el of document.body.querySelectorAll('script:not([src])')) {
+			if (JS.test(el.getAttribute('type') ?? '') && !el.hasAttribute('data-type')) mark(el, 'script');
+		}
+		for (const el of document.body.querySelectorAll('*')) {
+			if (el.hasAttribute('data-clew-refused-script')) continue;
+			for (const attr of el.attributes) {
+				if (/^on/i.test(attr.name)) { mark(el, 'inline handler'); break; }
+			}
+		}
+	};
+	document.addEventListener('securitypolicyviolation', (e) => {
+		console.warn(`clew-csp: ${e.effectiveDirective} ${e.blockedURI || 'inline'}${e.sourceFile ? ` (${e.sourceFile.split('/').pop()}:${e.lineNumber})` : ''}`);
+		if (!restricted() || !/^script-src/.test(e.effectiveDirective)) return;
+		const name = e.effectiveDirective === 'script-src-attr' ? 'inline handler' : 'script';
+		postTo(window.parent, { source: 'clew-preview', type: 'code-refused', name }, parentOrigin());
+	});
+	document.addEventListener('DOMContentLoaded', markAll);
+	document.addEventListener('clew:render', markAll);
+})();
+
 (() => {
 	const pending = new Map(); // id -> {resolve, reject, timer}
 	const listeners = new Map(); // event name -> Set<fn>
@@ -35,7 +81,7 @@
 				reject(new Error(`clew.${method}: no host responded (exported HTML, or Clew is busy)`));
 			}, CALL_TIMEOUT_MS);
 			pending.set(id, { resolve, reject, timer });
-			window.parent.postMessage({ source: 'clew-preview', type: 'api-request', id, method, params }, '*');
+			postTo(window.parent, { source: 'clew-preview', type: 'api-request', id, method, params }, parentOrigin());
 		});
 	}
 

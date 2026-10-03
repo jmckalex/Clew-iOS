@@ -91,6 +91,13 @@ class WorkspaceStore extends Emitter {
 		return tab;
 	}
 
+	/** A PDF followed from a link: never over the linking tab (tree.js). */
+	openFileBeside(path, opts) {
+		const tab = tree.openFileBeside(this.state, path, opts);
+		this.#commit();
+		return tab;
+	}
+
 	openCanvas(path, opts) {
 		const tab = tree.openCanvasFile(this.state, path, opts);
 		this.#commit();

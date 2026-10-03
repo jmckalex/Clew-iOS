@@ -21,17 +21,48 @@ import { initMetaBind } from './meta-bind.js';
 import { initPdfEmbeds, holdIfUnsaved } from './pdf-embed.js';
 import { initExcalidrawEmbeds } from './excalidraw-embed.js';
 import { initOfficeEmbeds } from './office-embed.js';
+import { scanAppEmbeds } from './app-embed.js';
 import { figureMorph, initFigures, figuresPending } from './figures.js';
 import { initTabbing, tabbingMorph } from './tabbing.js';
-import { fromWindow } from '../shared/message-guard.js';
+import { fromWindow, parentOrigin, postTo } from '../shared/message-guard.js';
+import { mermaidErrorLine } from '../shared/figure-errors.js';
 
 const HOST_SOURCE = 'clew-preview-host';
-const post = (msg) => window.parent.postMessage({ source: 'clew-preview', ...msg }, '*');
+// Addressed to the parent's own origin (frame-bridge.md §2.8 step 2).
+const post = (msg) => postTo(window.parent, { source: 'clew-preview', ...msg }, parentOrigin());
 // A live-edit BLOCK document (protocol.js `__clew_block__`): one rendered
 // block in a frame sized to its content, inside the editor. It has no scroll
 // of its own and no source lines worth reporting, so the reading-mode
 // behaviours below stand down; instead it reports its height.
 const BLOCK = document.documentElement.dataset.clewBlock === '1';
+// The live preview pane's mirror (its frame URL ends `#mirror`): nothing in
+// it can be clicked, so what would need a click — a failed figure's "Show
+// log" — is the pane's to show (preview.css hides it here).
+if (location.hash === '#mirror') document.documentElement.dataset.clewMirror = '1';
+
+// A live-edit block says when the pointer is over it: the editor shows the
+// block's "Edit source" icon then (live/frame-layer.js). The frame is
+// another process, and the page around it sees nothing of the pointer
+// inside — no :hover on the iframe, no enter or leave (measured). So the
+// frame says it, on entering and again on its pointer moves (at most every
+// 200 ms: a frame does not always see itself left and re-entered), and `at`
+// (the clock both processes share) lets the page drop an `over` that
+// arrives after the pointer has already left.
+if (BLOCK) {
+	// The EVENT's time, not the handler's: a busy frame handles its last
+	// move late, and stamping then would outdate the page's "left".
+	const when = (e) => Math.round(performance.timeOrigin + e.timeStamp);
+	let said = 0;
+	const over = (e) => {
+		const at = when(e);
+		if (at - said < 200) return;
+		said = at;
+		post({ type: 'pointer', over: true, at });
+	};
+	document.documentElement.addEventListener('pointerenter', (e) => { said = 0; over(e); });
+	document.addEventListener('pointermove', over, { passive: true });
+	document.documentElement.addEventListener('mouseleave', (e) => { said = 0; post({ type: 'pointer', over: false, at: when(e) }); });
+}
 
 // ---- inbound: host → preview ---------------------------------------------
 
@@ -71,7 +102,17 @@ function runMermaid() {
 	for (const div of document.querySelectorAll('.mermaid')) {
 		if (!div.dataset.mermaidSrc) div.dataset.mermaidSrc = div.textContent;
 	}
-	window.mermaid.run({ querySelector: '.mermaid' }).catch?.(() => {});
+	// A diagram that does not parse: the host hears its first line and the
+	// line it names (the live preview pane marks it in the fence, as for a
+	// TikZ error — preview-client/figures.js). Only a page that HAS diagrams
+	// says it rendered, or a TikZ figure's error would be cleared by it.
+	const has = Boolean(document.querySelector('.mermaid'));
+	window.mermaid.run({ querySelector: '.mermaid' })
+		.then?.(() => { if (has) post({ type: 'figure-ok', kind: 'mermaid' }); })
+		.catch?.((err) => {
+			const message = String(err?.message ?? err ?? '');
+			post({ type: 'figure-error', kind: 'mermaid', message: message.split('\n')[0], relLine: mermaidErrorLine(message) });
+		});
 }
 
 function configureMermaid(appTheme) {
@@ -206,6 +247,7 @@ function applyRender(html) {
 		initPdfEmbeds();
 		initExcalidrawEmbeds();
 		initOfficeEmbeds();
+		scanAppEmbeds();
 		retypeset();
 		// Morphs never re-execute scripts; note-API controls re-bind on this.
 		document.dispatchEvent(new CustomEvent('clew:render'));
@@ -357,6 +399,13 @@ function chordOf(e) {
 	if (e.altKey) parts.push('Alt');
 	if (e.shiftKey) parts.push('Shift');
 	let key = e.key;
+	// Option transforms the typed character on mac (⌥Q is œ): the base key
+	// from the physical code, as the registry does — without it no ⌥ chord
+	// was ever forwarded from here.
+	if (isMacLike && e.altKey) {
+		const m = /^(?:Key([A-Z])|Digit([0-9]))$/.exec(e.code);
+		if (m) key = m[1] ?? m[2];
+	}
 	if (key === ' ') key = 'Space';
 	if (key.length === 1) key = key.toLowerCase();
 	if (['Meta', 'Control', 'Alt', 'Shift'].includes(key)) return null;
@@ -598,6 +647,7 @@ initTabbing();
 initPdfEmbeds();
 initExcalidrawEmbeds();
 initOfficeEmbeds();
+scanAppEmbeds();
 initQueryInteract();
 // Previews start dark until the host says otherwise (preview.css defaults).
 document.documentElement.classList.add('wa-dark');

@@ -12,7 +12,7 @@
 // its tree, file operations, chokidar watching, and .clew/ state persistence.
 // All renderer-supplied paths are vault-relative and validated to stay inside
 // the vault root.
-import { shell } from 'electron';
+import { app, shell } from 'electron';
 import chokidar from 'chokidar';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -20,8 +20,11 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { settings } from './settings.js';
 import { direntKind, shouldRecurse, walkGuard, writeFileAtomic, WATCH_BUDGET, WATCH_CEILING, watchFilter, watchPlan, scanShare, knownPaths } from './fs-utils.js';
+import { insideByRealpath } from '../engine/vault-bounds.js';
 import { compileExcludes } from './vault-excludes.js';
-import { snapshotBeforeWrite, renameHistory } from './history.js';
+import { snapshotBeforeWrite, renameHistory, keepVersion } from './history.js';
+import { WriteGuard } from './write-guard.js';
+import { renamePdfMeta } from './pdf-meta.js';
 
 // The walk/watch rules (which directories are never shown, and the
 // descriptor budget the watcher lives inside) are in fs-utils.js, with the
@@ -92,9 +95,14 @@ export class VaultManager {
 		}
 		this.close();
 		this.root = abs;
+		this.guard.clear();
 		fs.mkdirSync(path.join(abs, '.clew'), { recursive: true });
 		settings.rememberVault(abs);
 		this.excludes = compileExcludes(this.loadState('vault-settings.json') ?? {});
+		// Restricted or trusted, decided BEFORE the first walk: a vault this
+		// device has not trusted is not followed out of itself by a link
+		// (engine/vault-bounds.js). Closed until the session says otherwise.
+		this.restricted = this.hooks.isRestricted ? this.hooks.isRestricted(abs) !== false : true;
 		// One walk, two uses: the tree the window opens with, and the set of
 		// symlinked directories it skipped as duplicates — which is exactly
 		// what the watcher must not follow a second time.
@@ -177,6 +185,13 @@ export class VaultManager {
 				// and it is affordable because the explorer is windowed.
 				if (this.excludes.isHidden(childRel)) continue;
 				const kind = direntKind(dir, entry);
+				// A link out of a restricted vault is not part of it: not
+				// listed, not walked, not watched (the watcher ignores what is
+				// in `duplicates`).
+				if (this.restricted && kind && !insideByRealpath(path.join(dir, entry.name), this.root)) {
+					if (kind === 'dir') duplicates?.add(childRel);
+					continue;
+				}
 				if (kind === 'dir') {
 					const abs = path.join(dir, entry.name);
 					if (!shouldRecurse(abs, seen)) { duplicates?.add(childRel); continue; }
@@ -196,30 +211,69 @@ export class VaultManager {
 
 	// ---- file operations --------------------------------------------------
 
-	/** Resolve a vault-relative path, refusing anything that escapes the root. */
+	/**
+	 * Resolve a vault-relative path, refusing anything that escapes the root:
+	 * lexically always, and — in a vault this device has not trusted — by
+	 * REALPATH (a link out of the vault; a path not there yet is judged by
+	 * its nearest existing folder). That refusal carries code ELEAVES, which
+	 * the preview handler answers with a clear 403.
+	 */
 	resolve(rel) {
 		if (!this.root) throw new Error('No vault open');
 		const abs = path.resolve(this.root, rel);
 		if (abs !== this.root && !abs.startsWith(this.root + path.sep)) {
 			throw new Error(`Path escapes vault: ${rel}`);
 		}
+		if (this.restricted && abs !== this.root) {
+			let probe = abs;
+			while (!fs.existsSync(probe) && probe !== this.root) {
+				// A dangling link is not "missing": it names somewhere.
+				try { fs.lstatSync(probe); break; } catch { probe = path.dirname(probe); }
+			}
+			if (probe !== this.root && !insideByRealpath(probe, this.root)) {
+				throw Object.assign(new Error(`This link leaves the vault, and a vault you have not trusted is not followed out of itself: ${rel}`), { code: 'ELEAVES' });
+			}
+		}
 		return abs;
 	}
 
+	/** What each note was when last read or written here (write-guard.js). */
+	guard = new WriteGuard();
+
 	readNote(rel) {
-		return fs.readFileSync(this.resolve(rel), 'utf8');
+		return this.guard.read(rel, this.resolve(rel));
 	}
 
-	writeNote(rel, content) {
+	/**
+	 * Write a note. `guard` (an editor's save — the only writer that can
+	 * answer a refusal): refuse a write over a version this vault has not
+	 * seen, answering `{ conflict: true, disk }` and writing nothing;
+	 * `force` writes regardless (the user chose to keep theirs over it).
+	 * Every write, guarded or not, is remembered as seen.
+	 */
+	writeNote(rel, content, { guard = false, force = false } = {}) {
 		const abs = this.resolve(rel);
+		if (guard && !force) {
+			const refused = this.guard.check(rel, abs, content);
+			if (refused) return refused;
+		}
 		const created = !fs.existsSync(abs);
 		fs.mkdirSync(path.dirname(abs), { recursive: true });
 		this.snapshotHistory(rel);
 		writeFileAtomic(abs, content);
+		this.guard.wrote(rel, abs, content);
 		// A NEW file (an annotations note, a template's output, a save to a
 		// path that did not exist) is a structure change; an autosave of an
 		// existing note is not, and must not pay for a tree walk.
 		if (created) this.refreshTree();
+		return { written: true };
+	}
+
+	/** Keep `text` as a version of `rel` in its history, now (a conflict's
+	 *  two sides, before anything is chosen — history.js#keepVersion). */
+	keepVersion(rel, text) {
+		this.resolve(rel);
+		return keepVersion(this.root, rel, text);
 	}
 
 	/**
@@ -353,11 +407,25 @@ export class VaultManager {
 		fs.mkdirSync(path.dirname(to), { recursive: true });
 		fs.renameSync(from, to);
 		renameHistory(this.root, rel, newRel);
+		// What quote-and-cite remembers about a PDF moves with it (pdf-meta.js).
+		try { renamePdfMeta(this.root, rel, newRel); } catch (err) { console.warn('[clew] pdf-citations rename:', err?.message ?? err); }
+		this.guard.forget(rel);
 		this.refreshTree();
 	}
 
 	async trash(rel) {
-		await shell.trashItem(this.resolve(rel));
+		const abs = this.resolve(rel);
+		if (process.env.CLEW_SMOKE) {
+			// A scenario's file never lands in the user's own Trash: it goes
+			// into the run's userData, and the log says so.
+			const bin = path.join(app.getPath('userData'), 'smoke-trash');
+			fs.mkdirSync(bin, { recursive: true });
+			fs.renameSync(abs, path.join(bin, `${Date.now()}-${path.basename(abs)}`));
+			console.log(`smoke-trash: ${rel}`);
+		} else {
+			await shell.trashItem(abs);
+		}
+		this.guard.forget(rel);
 		this.refreshTree();
 	}
 

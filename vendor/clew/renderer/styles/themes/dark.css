@@ -29,6 +29,7 @@ body[data-theme='dark'] {
 	--clew-active-item: rgba(139, 126, 200, 0.22);
 	--clew-scrollbar: rgba(255, 255, 255, 0.18);
 	--clew-danger: #e06c75;
+	--clew-warning: #e5c07b;   /* a build's warnings (status bar) */
 	--clew-search-match: rgba(230, 190, 80, 0.35);
 	--clew-search-match-selected: rgba(230, 190, 80, 0.65);
 	--clew-shadow: rgba(0, 0, 0, 0.5);

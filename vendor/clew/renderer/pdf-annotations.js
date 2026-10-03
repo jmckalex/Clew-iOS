@@ -18,6 +18,7 @@ import { vaultStore } from './state/vault-store.js';
 import { ipc, CH } from './ipc.js';
 import { notice } from './plugins.js';
 import { annotationsNote, annotationsNotePath } from '../shared/pdf-annotations-note.js';
+import { PREVIEW_ORIGIN } from '../shared/message-guard.js';
 
 // A view lingering while its PDF saves (pdf-frames.js) is not the tab's.
 const frameFor = (path) => [...document.querySelectorAll('clew-file-view:not([data-clew-retiring])')]
@@ -43,12 +44,12 @@ export async function listAnnotations(path) {
 		const answer = await new Promise((resolve) => {
 			const onMessage = (event) => {
 				const msg = event.data;
-				if (event.source !== frame.contentWindow || msg?.source !== 'clew-preview' || msg.type !== 'annotations' || msg.requestId !== requestId) return;
+				if (event.source !== frame.contentWindow || event.origin !== PREVIEW_ORIGIN || msg?.source !== 'clew-preview' || msg.type !== 'annotations' || msg.requestId !== requestId) return;
 				window.removeEventListener('message', onMessage);
 				resolve(msg);
 			};
 			window.addEventListener('message', onMessage);
-			frame.contentWindow?.postMessage({ source: 'clew-preview-host', type: 'list-annotations', requestId }, '*');
+			frame.contentWindow?.postMessage({ source: 'clew-preview-host', type: 'list-annotations', requestId }, PREVIEW_ORIGIN);
 			setTimeout(() => { window.removeEventListener('message', onMessage); resolve(null); }, 8000);
 		});
 		if (answer && !answer.error) return answer.annotations;

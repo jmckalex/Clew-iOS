@@ -16,6 +16,7 @@
 
 // Assets root: the preview protocol in the app, ./assets on exported sites
 // (the exporter sets window.__clewAssetBase before this bundle loads).
+import { parentOrigin, postTo } from '../shared/message-guard.js';
 const ASSETS = () => window.__clewAssetBase ?? '/__clew_assets__';
 
 let leafletLoading = null;
@@ -39,7 +40,7 @@ function loadLeaflet() {
 	return leafletLoading;
 }
 
-const post = (msg) => window.parent.postMessage({ source: 'clew-preview', ...msg }, '*');
+const post = (msg) => postTo(window.parent, { source: 'clew-preview', ...msg }, parentOrigin());
 
 // Named tile styles (all ToS-clean, attribution required). OSM is the
 // default: CARTO's free basemaps began watermarking keyless requests with

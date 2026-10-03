@@ -606,6 +606,13 @@ export const dataviewJsFence = {
 	renderer(token) {
 		if (global.isLatex) return '';
 		if (jsEnabled()) return renderDataviewJs(token.text);
+		// A vault this device has not trusted runs none of its code
+		// (frame-bridge.md §4.4): refused by name with the engine's own
+		// marker, so the window's trust indicator counts it with the rest.
+		if (process.env.CLEW_DATAVIEW_JS === 'restricted') {
+			return '<div class="jmd-error jmd-refused" data-jmd-refused="dataviewjs">[dataviewjs not run: note code is off]</div>\n'
+				+ `<pre class="clew-query-source"><code>${escapeHtml(token.text)}</code></pre>\n`;
+		}
 		return notice('dataviewjs is not run in this vault', [
 			'These blocks are JavaScript, so unlike a query there is no way to '
 			+ 'tell in advance what one will do. Clew can run them — turn on '

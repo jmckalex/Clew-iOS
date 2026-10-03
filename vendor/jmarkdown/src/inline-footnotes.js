@@ -49,6 +49,47 @@
 
 import attributesParser from 'attributes-parser';
 import { addWarning } from './warnings.js';
+import { marked } from './utils.js';
+import { crefName } from './preamble.js';
+
+// ========================================================================
+//  Classic [^label] footnotes in LaTeX
+// ========================================================================
+//
+// marked-footnote (registered in index.js) renders `text[^a]` + `[^a]: note`
+// as HTML only, so its <sup><a …> marks and closing <section> went into the
+// .tex verbatim. In LaTeX each reference now becomes \footnote{the note's
+// content} where it stands — LaTeX numbers it, and a \label inside resolves to
+// that number — and the list at the end renders nothing. Done in walkTokens
+// (after lexing, before rendering), so it needs no place in index.js's
+// registration order: the footnotes token's items carry their references,
+// which are retyped. A note referenced twice gets a \label in its first
+// \footnote and a superscript \ref at the others.
+function latexClassicFootnotes(token) {
+	if (!global.isLatex || token.type !== 'footnotes') return;
+	for (const item of token.items || []) {
+		const refs = item.refs || [];
+		refs.forEach((ref, i) => {
+			ref.type = 'jmdClassicFootnote';
+			ref.content = item.content;
+			ref.first = i === 0;
+			ref.repeated = refs.length > 1;
+		});
+	}
+	token.type = 'space';
+}
+
+const classicFootnoteLatex = {
+	name: 'jmdClassicFootnote',
+	renderer(token) {
+		const body = this.parser.parse(token.content || []).trim();
+		if (!token.repeated) return `\\footnote{${body}}`;
+		const key = `jmdfn:${String(token.label).replace(/[^A-Za-z0-9-]/g, '-')}`;
+		return token.first ? `\\footnote{\\label{${key}}${body}}` : `\\textsuperscript{\\ref{${key}}}`;
+	},
+};
+
+marked.use({ walkTokens: latexClassicFootnotes, extensions: [classicFootnoteLatex] });
 
 // ========================================================================
 //  Context-aware bracket scanner
@@ -596,14 +637,23 @@ function latexSection(groups, byGroup, title) {
 	let out = '\n\\bigskip\n';
 	if (title) out += `\\noindent{\\large\\bfseries ${latexEscapeGroupName(title)}}\\par\\nobreak\\smallskip\n`;
 	out += '\\begingroup\\setlength{\\parindent}{0pt}\n';
+	// Each item steps a counter set to its own number, so a \label inside an
+	// endnote resolves to that number (\ref → 1, \cref → "footnote 1",
+	// matching the HTML) instead of whatever was numbered last. Declared here
+	// if need be, so a fragment stays self-contained; anchors are named per
+	// group (\theH…), since every group's numbering starts again at 1.
+	crefName('jmdendnote', 'footnote', 'footnotes');
+	out += '\\ifcsname c@jmdendnote\\endcsname\\else\\newcounter{jmdendnote}\\fi\n';
 	for (const g of groups) {
 		const entries = byGroup.get(g) || [];
 		if (!entries.length) continue;
 		if (labelGroups && g !== DEFAULT_GROUP) {
 			out += `\\smallskip\\noindent{\\bfseries ${latexEscapeGroupName(g)}}\\par\\nobreak\\smallskip\n`;
 		}
+		const anchor = (g === DEFAULT_GROUP ? 'endnotes' : String(g)).replace(/[^A-Za-z0-9]/g, '') || 'endnotes';
+		out += `\\expandafter\\def\\csname theHjmdendnote\\endcsname{${anchor}.\\arabic{jmdendnote}}\n`;
 		for (const { n, content } of entries) {
-			out += `\\noindent\\textsuperscript{${n}}~${content}\\par\\smallskip\n`;
+			out += `\\noindent\\setcounter{jmdendnote}{${n - 1}}\\refstepcounter{jmdendnote}\\textsuperscript{${n}}~${content}\\par\\smallskip\n`;
 		}
 	}
 	out += '\\endgroup\n';

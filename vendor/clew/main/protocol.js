@@ -31,9 +31,15 @@ import { Readable } from 'node:stream';
 import { NOTE_EXTENSIONS } from '../shared/channels.js';
 import { sessionById } from './session.js';
 import { previewPluginScripts, enabledPlugins } from './plugins.js';
+import { previewCsp, isScriptableDocument } from './preview-csp.js';
 import { settings } from './settings.js';
 import { fontsDir, fallbackConfig } from './pdf-fonts.js';
-import { narrowCors } from './preview-cors.js';
+import { narrowCors, renderOriginAllowed } from './preview-cors.js';
+import { appFileFor, appPageCsp } from './app-files.js';
+import { FRAME_SCHEME, appFile, appCsp, injectBridge } from './app-frames.js';
+import { appByKey, resolveFor, stateOf } from './app-registry.js';
+import { rewriteAppEmbeds } from './app-embeds-rewrite.js';
+import { APP_ORIGIN } from '../shared/caller-token.js';
 import { readRenderBody } from './caller-token.js';
 import { rewritePdfFrames, viewerUrl } from './pdf-frames-rewrite.js';
 import { registerRemotePdf, remotePdfFile } from './remote-pdfs.js';
@@ -54,25 +60,103 @@ const MIME = {
 };
 
 export const PREVIEW_SCHEME = 'clew-preview';
+/** The app page's own scheme (frame-bridge.md §2): `clew-app://app/…`. */
+export const APP_SCHEME = 'clew-app';
 
-/** Must run before app.whenReady(). */
+/**
+ * Must run before app.whenReady(). ONE call for every scheme: Electron allows
+ * registerSchemesAsPrivileged once, and a second call risks the first
+ * scheme's privileges. `standard` (a tuple origin, 'self' in a CSP),
+ * `secure` (a secure context — the clipboard, and its delegation to the
+ * office and Excalidraw frames), fetch, CORS and streaming; never
+ * `bypassCSP`, no service workers, no code cache (yet).
+ */
 export function registerPreviewScheme() {
-	protocol.registerSchemesAsPrivileged([{
-		scheme: PREVIEW_SCHEME,
-		privileges: {
-			standard: true,
-			secure: true,
-			supportFetchAPI: true,
-			corsEnabled: true,
-			stream: true,
-		},
-	}]);
+	const privileges = {
+		standard: true,
+		secure: true,
+		supportFetchAPI: true,
+		corsEnabled: true,
+		stream: true,
+	};
+	protocol.registerSchemesAsPrivileged([
+		{ scheme: PREVIEW_SCHEME, privileges },
+		{ scheme: APP_SCHEME, privileges },
+		// Apps in notes, each on an origin of its own (frame-bridge.md §7).
+		{ scheme: FRAME_SCHEME, privileges },
+	]);
+}
+
+/**
+ * After app.whenReady(), before any window: the app page's files
+ * (app-files.js — dist/renderer/ and nothing else, host `app` only) on the
+ * DEFAULT session (the canvas webview partition never gets it). No caching:
+ * dev hot reload and View → Reload come through here, and the asset stamp
+ * does not follow renderer builds. The page itself carries its CSP as a
+ * header too, with `frame-ancestors 'none'`: no frame may host the app.
+ */
+export function installAppProtocol({ rendererDir }) {
+	protocol.handle(APP_SCHEME, async (request) => {
+		const found = request.method === 'GET' ? appFileFor(rendererDir, request.url) : null;
+		const notFound = () => new Response('Not found', { status: 404, headers: { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' } });
+		if (!found) return notFound();
+		let body;
+		try { body = fs.readFileSync(found.file); } catch { return notFound(); }
+		const headers = { 'Content-Type': found.type, 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': APP_ORIGIN };
+		if (found.isPage) headers['Content-Security-Policy'] = appPageCsp(body.toString('utf8'));
+		return new Response(body, { headers });
+	});
 }
 
 const RENDERED_SUFFIX = new RegExp(`(${NOTE_EXTENSIONS.map((e) => e.replace('.', '\\.')).join('|')})\\.html$`, 'i');
 
+/**
+ * After app.whenReady(), before any window: `clew-frame://<key>/…`, an app's
+ * own folder and nothing else (frame-bridge.md §7). Served only for a key a
+ * window registered (app-registry.js, as it served the note embedding it),
+ * never under `/<sid>/`, never another app's files, every path clamped to
+ * the folder by realpath. Every response carries the app's CSP (R2 + the
+ * owner's choice A: everything 'self' unless `network` is granted), no ACAO
+ * (its origin reads nothing of the vault), no referrer and no DNS
+ * prefetching; HTML documents get the bridge client first in <head>. In a
+ * vault this device has not trusted, an app the user has not allowed to run
+ * is not served at all (R1, choice B).
+ */
+export function installFrameProtocol({ bridgeFile }) {
+	protocol.handle(FRAME_SCHEME, async (request) => {
+		const plain = (status, text) => new Response(text, { status, headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'none'" } });
+		let url;
+		try { url = new URL(request.url); } catch { return plain(400, 'Bad request'); }
+		if (request.method !== 'GET') return plain(405, 'GET only');
+		const registered = appByKey(url.hostname);
+		const session = registered ? sessionById(registered.sessionId) : null;
+		if (!registered || !session?.vaults.isOpen) return plain(404, 'Not found');
+		const state = stateOf(registered, !session.access.trusted);
+		if (!state.mayRun) return plain(403, 'This app has not been allowed to run here.');
+		const network = state.granted.includes('network') ? registered.manifest.network : null;
+		const headers = (type) => ({
+			'Content-Type': type,
+			'Cache-Control': 'no-store',
+			'Content-Security-Policy': appCsp({ network }),
+			'Referrer-Policy': 'no-referrer',
+			'X-DNS-Prefetch-Control': 'off',
+			'X-Content-Type-Options': 'nosniff',
+		});
+		if (url.pathname === '/__clew_bridge__.js') {
+			try { return new Response(fs.readFileSync(bridgeFile), { headers: headers('text/javascript; charset=utf-8') }); } catch { return plain(500, 'Bridge missing'); }
+		}
+		const file = appFile(registered.abs, url.pathname);
+		if (!file) return plain(404, 'Not found');
+		const type = MIME[path.extname(file).toLowerCase()] ?? 'application/octet-stream';
+		if (/^text\/html/.test(type)) {
+			return new Response(injectBridge(fs.readFileSync(file, 'utf8')), { headers: headers('text/html; charset=utf-8') });
+		}
+		return new Response(fs.readFileSync(file), { headers: headers(type) });
+	});
+}
+
 /** After app.whenReady(). */
-export function installPreviewProtocol({ distDir, nodeModulesDir, engineAssetsDir, embedpdfDir, mptikzDir, zetaDir, noteFontsDir = null, globalPluginsDir = null }) {
+export function installPreviewProtocol({ distDir, nodeModulesDir, engineAssetsDir, embedpdfDir, stampsDir = null, mptikzDir, zetaDir, noteFontsDir = null, globalPluginsDir = null }) {
 	const assetRoots = {
 		mathjax: path.join(nodeModulesDir, 'mathjax', 'es5'),
 		mermaid: path.join(nodeModulesDir, 'mermaid', 'dist'),
@@ -83,6 +167,10 @@ export function installPreviewProtocol({ distDir, nodeModulesDir, engineAssetsDi
 		// The EmbedPDF bundle + pdfium.wasm (the PDF viewer) — the vendored
 		// OCG/layers build (vendor/embedpdf), not the npm package.
 		embedpdf: embedpdfDir,
+		// The stamp tool's default library (pdf-core.js points EmbedPDF here
+		// rather than at its CDN): {locale}/manifest.json + stamps.pdf, a
+		// committed copy (vendor/default-stamps, MIT).
+		...(stampsDir ? { stamps: stampsDir } : {}),
 		// mp-tikz-wasm: the MetaPost/TikZ engines and their TeX bundles
 		// (paths.js#mptikzAssets). A first figure reads ~90 of these files
 		// through kpathsea, so the whole tree is servable rather than a
@@ -178,18 +266,23 @@ export function installPreviewProtocol({ distDir, nodeModulesDir, engineAssetsDi
 	 * What every preview document gets on top of the engine's own template:
 	 * the note API in <head> (so inline note scripts can use window.clew
 	 * immediately), the client bridge at the end of <body>, then the vault
-	 * scripts and the enabled preview-surface plugin scripts. One function
-	 * for notes and live edit's block documents, so the two cannot drift;
-	 * a block is marked `data-clew-block` on its <html>.
+	 * scripts and the enabled preview-surface plugin scripts — what the
+	 * DEVICE lets this vault run (session.access, vault-trust.js), never
+	 * what the vault's own settings ask for. One function for notes and live
+	 * edit's block documents, so the two cannot drift; a block is marked
+	 * `data-clew-block` on its <html>, a restricted vault's document
+	 * `data-clew-restricted` (the client marks a refused inline script).
 	 */
-	function wrapPreviewDocument(html, { session, sid, block = false, noteDir = '' }) {
+	function wrapPreviewDocument(html, { session, sid, block = false, noteDir = '', notePath = null }) {
 		// A note's own PDF frames go to Clew's viewer (pdf-frames-rewrite.js,
 		// docs/dev/pdf-unification.md §3) — as the document is SERVED, so a
 		// site export (which never comes through here) keeps the author's.
 		// Web PDFs are REGISTERED for this session as they are met (§4): the
 		// viewer is handed their hash, never the URL to fetch.
 		html = rewritePdfFrames(html, { sid, noteDir, registerRemote: (url) => registerRemotePdf(session, url) }).html;
-		const vaultSettings = session.vaults.loadState('vault-settings.json') ?? {};
+		const access = session.access;
+		// `@app[…]` embeds: resolved and registered for this window (§7).
+		html = rewriteAppEmbeds(html, { resolve: (target) => resolveFor(session, target), restricted: !access.trusted, notePath }).html;
 		// Vault plugins load as ordinary vault files; global ones from
 		// the __clew_plugin_file__ namespace (they are outside every
 		// vault). Either way the script's own URL sits in its plugin
@@ -197,7 +290,7 @@ export function installPreviewProtocol({ distDir, nodeModulesDir, engineAssetsDi
 		// `new URL('x.js', document.currentScript.src)`, what the
 		// Charts plugin does — works in both scopes. (A bare relative
 		// fetch resolves against the NOTE's URL, in both scopes.)
-		const pluginTags = previewPluginScripts(session.vaults.root, vaultSettings, globalPluginsDir)
+		const pluginTags = previewPluginScripts(session.vaults.root, access, globalPluginsDir)
 			.map((p) => (p.vaultRel
 				? `/${sid}/${p.vaultRel.split('/').map(encodeURIComponent).join('/')}`
 				: `/__clew_plugin_file__/${sid}/${encodeURIComponent(p.id)}/${encodeURIComponent(p.file)}`))
@@ -207,9 +300,10 @@ export function installPreviewProtocol({ distDir, nodeModulesDir, engineAssetsDi
 		// rendered note (alphabetical) — shared custom elements and
 		// helpers, the JS twin of the .clew/snippets CSS convention.
 		// Same trust surface as the inline <script>s notes can already
-		// carry; per-note "Script:" metadata still works alongside.
+		// carry; per-note "Script:" metadata still works alongside. Only in
+		// a vault this device trusts, with its scripts on (§4.4).
 		let vaultScriptTags = '';
-		try {
+		if (access.scripts) try {
 			vaultScriptTags = fs.readdirSync(path.join(session.vaults.root, '.clew', 'scripts'))
 				.filter((f) => f.endsWith('.js')).sort()
 				.map((f) => `<script src="/${sid}/.clew/scripts/${encodeURIComponent(f)}"></script>`)
@@ -222,7 +316,20 @@ export function installPreviewProtocol({ distDir, nodeModulesDir, engineAssetsDi
 				`<script src="/__clew_preview__/client.js"></script>${vaultScriptTags}${pluginTags}</body>`,
 			);
 		if (block) out = out.replace(/<html([^>]*)>/i, '<html$1 data-clew-block="1">');
+		if (!access.trusted) out = out.replace(/<html([^>]*)>/i, '<html$1 data-clew-restricted="1">');
 		return out;
+	}
+
+	/**
+	 * The headers a note document goes out with: the usual ones plus its CSP
+	 * (preview-csp.js) — Clew's own scripts only in a vault this device has
+	 * not trusted, the network closed unless the device opened it.
+	 */
+	async function noteHeaders(session) {
+		const { trusted, network } = session.access;
+		const hashes = trusted ? [] : await session.renderService.templateScriptHashes();
+		const csp = previewCsp({ kind: 'note', trusted, network, hashes });
+		return csp ? { ...headers('text/html'), 'Content-Security-Policy': csp } : headers('text/html');
 	}
 
 	const serve = async (request) => {
@@ -285,8 +392,7 @@ export function installPreviewProtocol({ distDir, nodeModulesDir, engineAssetsDi
 				if (!pluginSession?.vaults.isOpen) {
 					return new Response('No session', { status: 503, headers: headers('text/plain') });
 				}
-				const vaultSettings = pluginSession.vaults.loadState('vault-settings.json') ?? {};
-				const plugin = enabledPlugins(pluginSession.vaults.root, vaultSettings, globalPluginsDir)
+				const plugin = enabledPlugins(pluginSession.vaults.root, pluginSession.access, globalPluginsDir)
 					.find((p) => p.id === id && p.surfaces.app);
 				if (!plugin) {
 					return new Response('Not an enabled plugin', { status: 403, headers: headers('text/plain') });
@@ -312,8 +418,7 @@ export function installPreviewProtocol({ distDir, nodeModulesDir, engineAssetsDi
 				if (!pluginSession?.vaults.isOpen || !id || rest.length === 0) {
 					return new Response('No session', { status: 503, headers: headers('text/plain') });
 				}
-				const vaultSettings = pluginSession.vaults.loadState('vault-settings.json') ?? {};
-				const plugin = enabledPlugins(pluginSession.vaults.root, vaultSettings, globalPluginsDir)
+				const plugin = enabledPlugins(pluginSession.vaults.root, pluginSession.access, globalPluginsDir)
 					.find((p) => p.id === id && p.scope === 'global');
 				if (!plugin) {
 					return new Response('Not an enabled global plugin', { status: 403, headers: headers('text/plain') });
@@ -342,8 +447,9 @@ export function installPreviewProtocol({ distDir, nodeModulesDir, engineAssetsDi
 			// sees no Origin on these POSTs, measured). The Origin guard stays
 			// as a second layer. The body is JSON `{token, text, sourcePath?}`.
 			const readRender = async () => {
-				const origin = request.headers.get('origin') ?? '';
-				if (/^https?:/i.test(origin)) return { status: 403, message: 'Forbidden' };
+				// The second layer under the token: an Origin, where one comes,
+				// must be the app page's or a preview document's (§2.6).
+				if (!renderOriginAllowed(request.headers.get('origin') ?? '')) return { status: 403, message: 'Forbidden' };
 				return readRenderBody(await request.text(), session.callerToken);
 			};
 			const refuse = ({ status, message }) =>
@@ -353,9 +459,9 @@ export function installPreviewProtocol({ distDir, nodeModulesDir, engineAssetsDi
 			if (rel === '__clew_fragment__' && request.method === 'POST') {
 				const body = await readRender();
 				if (body.status) return refuse(body);
-				const html = rewritePdfFrames(await renderService.renderFragment(body.text), {
+				const html = rewriteAppEmbeds(rewritePdfFrames(await renderService.renderFragment(body.text), {
 					sid: pathname.slice(0, slash), registerRemote: (url) => registerRemotePdf(session, url),
-				}).html;
+				}).html, { resolve: (target) => resolveFor(session, target), restricted: !session.access.trusted, notePath: null }).html;
 				return new Response(html, { headers: headers('text/html') });
 			}
 
@@ -389,8 +495,9 @@ export function installPreviewProtocol({ distDir, nodeModulesDir, engineAssetsDi
 				const injected = wrapPreviewDocument(html, {
 					session, sid: pathname.slice(0, slash), block: true,
 					noteDir: blockNote ? path.posix.dirname(blockNote).replace(/^\.$/, '') : '',
+					notePath: blockNote,
 				});
-				return new Response(injected, { headers: headers('text/html') });
+				return new Response(injected, { headers: await noteHeaders(session) });
 			}
 
 			// A web PDF a render registered (remote-pdfs.js; pdf-unification.md
@@ -436,8 +543,9 @@ export function installPreviewProtocol({ distDir, nodeModulesDir, engineAssetsDi
 				const injected = wrapPreviewDocument(html, {
 					session, sid: pathname.slice(0, slash),
 					noteDir: path.posix.dirname(relPath).replace(/^\.$/, ''),
+					notePath: relPath,
 				});
-				return new Response(injected, { headers: headers('text/html') });
+				return new Response(injected, { headers: await noteHeaders(session) });
 			}
 
 			// A vault PDF asked for as a DOCUMENT — a frame navigating to it,
@@ -461,14 +569,26 @@ export function installPreviewProtocol({ distDir, nodeModulesDir, engineAssetsDi
 			}
 
 			// Anything else: the real file from the vault (relative images etc.).
-			return fileResponse(vaults.resolve(rel), {}, request.headers.get('range'));
+			// A document that can carry script (HTML, SVG, XML) goes out with
+			// the vault-HTML CSP: in a restricted vault it draws and runs
+			// nothing; anywhere, its network follows the vault's (§4.4, §4.9).
+			// (As an <img>, an SVG runs nothing and the header is ignored.)
+			const vaultCsp = isScriptableDocument(rel)
+				? previewCsp({ kind: 'vault', trusted: session.access.trusted, network: session.access.network })
+				: null;
+			return fileResponse(vaults.resolve(rel), vaultCsp ? { 'Content-Security-Policy': vaultCsp } : {}, request.headers.get('range'));
 		} catch (err) {
+			// A link out of a vault this device has not trusted (vault.js#
+			// resolve): refused by name, never served.
+			if (err?.code === 'ELEAVES') {
+				return new Response(String(err.message), { status: 403, headers: { 'Content-Type': 'text/plain; charset=utf-8', 'X-Clew-Refused': 'leaves-vault' } });
+			}
 			return new Response(`Preview error: ${String(err.message ?? err)}`,
 				{ status: 500, headers: { 'Content-Type': 'text/plain', 'Access-Control-Allow-Origin': '*' } });
 		}
 	};
 	// Every response leaves through the one rule for who may read it across
-	// origins (preview-cors.js): the preview documents and the app page; no
-	// other origin gets an Access-Control-Allow-Origin.
-	protocol.handle(PREVIEW_SCHEME, async (request) => narrowCors(request.headers.get('origin'), await serve(request)));
+	// origins (preview-cors.js): the app page, `clew-app://app`, as a
+	// constant; preview documents are same-origin; nothing else reads.
+	protocol.handle(PREVIEW_SCHEME, async (request) => narrowCors(await serve(request)));
 }

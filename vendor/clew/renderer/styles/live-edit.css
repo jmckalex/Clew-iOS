@@ -303,8 +303,42 @@
 body[data-theme='dark'] .le-frame { color-scheme: dark; }
 body[data-theme='light'] .le-frame { color-scheme: light; }
 .le-frame-slot { padding: 0 24px; }
-.le-frame-edge { height: 6px; cursor: pointer; }
-.le-frame-edge:hover { background: var(--clew-active-item); border-radius: 3px; }
+/* A spacer: nothing to hover, nothing to click (frames.js). */
+.le-frame-edge { height: 6px; }
+/* A rendered block's "Edit source" icon (frame-layer.js): over the block's
+   upper-right corner, faded in on hover. Hidden, it takes no clicks, so it
+   never eats the corner of the block under it. */
+.le-frame-reveal {
+	position: absolute;
+	transform: translateX(-100%);
+	z-index: 2;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 26px;
+	height: 26px;
+	padding: 0;
+	font-size: 13px;
+	border: 1px solid var(--clew-border);
+	border-radius: 6px;
+	background: var(--clew-bg-secondary);
+	color: var(--clew-text-muted);
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+	cursor: pointer;
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity 140ms ease, color 120ms ease, border-color 120ms ease;
+}
+.le-frame-reveal.is-outside { transform: none; }
+.le-frame-reveal.is-shown,
+.le-frame-reveal:focus-visible { opacity: 1; pointer-events: auto; }
+.le-frame-reveal:hover { color: var(--clew-text-normal); border-color: var(--clew-accent); }
+.le-frame-reveal:focus-visible { outline: 2px solid var(--clew-accent); outline-offset: 1px; }
+/* A touch screen has no hover, and a tap inside a frame never reaches this
+   page: the icon stays faintly visible there. */
+@media (hover: none) {
+	.le-frame-reveal { opacity: 0.6; pointer-events: auto; }
+}
 .le-frame-body { position: relative; }
 .le-frame-skeleton {
 	height: 100%;

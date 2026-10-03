@@ -12,6 +12,7 @@
 // Adopts the pool's DOM on connect; never destroys it (the pool owns views).
 import { ClewElement } from '../base/clew-element.js';
 import { editorPool } from '../../editor/pool.js';
+import { conflictExplanation, resolveEditorConflict, reviewEditorConflict } from '../../conflicts.js';
 import { workspaceStore } from '../../state/workspace-store.js';
 import { uiStore } from '../../state/ui-store.js';
 import { debounce } from '../../lib/debounce.js';
@@ -226,17 +227,26 @@ class ClewEditorView extends ClewElement {
 		this.querySelector(':scope > .conflict-banner')?.remove();
 		if (!entry?.conflict) return;
 
+		// Both versions are already in the note's history (pool.js#hold);
+		// whatever is chosen here, neither is lost (renderer/conflicts.js).
 		const banner = document.createElement('div');
 		banner.className = 'conflict-banner';
 		const text = document.createElement('span');
-		text.textContent = 'This file changed on disk while you have unsaved edits. Auto-save is paused.';
-		const keep = document.createElement('button');
-		keep.textContent = 'Keep my version';
-		keep.addEventListener('click', () => editorPool.resolveConflict(this.tabId, 'keep'));
-		const reload = document.createElement('button');
-		reload.textContent = 'Load disk version';
-		reload.addEventListener('click', () => editorPool.resolveConflict(this.tabId, 'reload'));
-		banner.append(text, keep, reload);
+		text.textContent = conflictExplanation(entry.conflictKind);
+		const button = (label, choice, run) => {
+			const b = document.createElement('button');
+			b.textContent = label;
+			b.dataset.choice = choice;
+			b.addEventListener('click', run);
+			return b;
+		};
+		banner.append(
+			text,
+			button('Keep mine', 'mine', () => resolveEditorConflict(this.tabId, 'mine')),
+			button('Keep theirs', 'theirs', () => resolveEditorConflict(this.tabId, 'theirs')),
+			button('Keep both', 'both', () => resolveEditorConflict(this.tabId, 'both')),
+			button('Compare…', 'compare', () => reviewEditorConflict(this.tabId)),
+		);
 		this.prepend(banner);
 	}
 

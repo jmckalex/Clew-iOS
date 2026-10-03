@@ -178,6 +178,34 @@ function openPath(state, path, kind, { newTab = false, defaultMode = null } = {}
 	return openTab(state, group.id, tab);
 }
 
+/**
+ * Follow a link to a PDF (actions.openWikilink) — NEVER by navigating the tab
+ * the link was in: a note's place is what a back-link from a quote would
+ * otherwise throw away (the owner's ask, 2026-10-03). The PDF's tab, if one
+ * is open anywhere, is activated — this pane's first, then a pane showing
+ * it, then a tab in the background of another pane; otherwise a new tab, in
+ * ANOTHER pane when the window is split (one showing a PDF first, else the
+ * first other pane), else beside the note in this one.
+ * `here` (⌘-click, and every caller that asked for a new tab): this pane
+ * only — its tab for the PDF, or a new tab beside the note.
+ */
+export function openFileBeside(state, path, { here = false } = {}) {
+	const active = activeGroup(state);
+	const groups = allGroups(state.root);
+	const isIt = (t) => t?.kind === 'file' && t.path === path;
+	const shown = (g) => g.tabs.find((t) => t.id === g.activeTabId);
+	const others = here ? [] : groups.filter((g) => g !== active);
+	for (const g of [active, ...others.filter((o) => isIt(shown(o))), ...others]) {
+		const tab = g.tabs.find(isIt);
+		if (!tab) continue;
+		g.activeTabId = tab.id;
+		state.activeGroupId = g.id;
+		return tab;
+	}
+	const target = others.find((g) => shown(g)?.kind === 'file' && /\.pdf$/i.test(shown(g).path ?? '')) ?? others[0] ?? active;
+	return openTab(state, target.id, createTab('file', path));
+}
+
 // ---- pinning ---------------------------------------------------------------
 
 /** Keep every group's pinned tabs at the front, in stable order. */

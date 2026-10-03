@@ -19,6 +19,7 @@
 // LuaLaTeX (XeLaTeX for the XeTeX-only ones); otherwise pdfLaTeX, as before.
 // The `latexEngine` setting overrides it for what reading the source cannot
 // see. Electron-free and pure (tests/latex-engine.test.js).
+import { latexEngineSettingPath } from '../shared/latex-engine-setting.js';
 
 export const LATEX_ENGINES = ['pdflatex', 'lualatex', 'xelatex'];
 const NAMES = { pdflatex: 'pdfLaTeX', lualatex: 'LuaLaTeX', xelatex: 'XeLaTeX' };
@@ -53,7 +54,7 @@ function lineOf(tex, index) {
  * @returns {{ engine: 'pdflatex'|'lualatex'|'xelatex', reason: string }}
  */
 export function chooseLatexEngine(tex, setting = 'auto') {
-	if (LATEX_ENGINES.includes(setting)) return { engine: setting, reason: `set in Settings → Export (LaTeX engine: ${engineName(setting)})` };
+	if (LATEX_ENGINES.includes(setting)) return { engine: setting, reason: `set in ${latexEngineSettingPath()}: ${engineName(setting)}` };
 	const source = uncommented(tex);
 	for (const [rules, engine] of [[XETEX_ONLY, 'xelatex'], [UNICODE, 'lualatex']]) {
 		for (const [re] of rules) {

@@ -17,7 +17,7 @@
 import { parseCanvas, canvasBounds, nodeRect } from './canvas-model.js';
 import { shapeSvg, edgeSvg, strokeSvg } from './shape-svg.js';
 import { renderCardHtml } from './card-markdown.js';
-import { vaultFileUrl, previewUrl, fragmentUrl } from '../lib/preview-url.js';
+import { vaultFileUrl, previewUrl, fragmentUrl, previewOrigin } from '../lib/preview-url.js';
 import { renderPost } from '../lib/caller-token.js';
 import { fileKind } from '../lib/file-types.js';
 import { isNotePath } from '../state/vault-store.js';
@@ -166,6 +166,13 @@ async function upgradeCard(el, text) {
 		if (!el.isConnected) return;
 		el.classList.add('is-engine');
 		el.innerHTML = html;
+		// The engine emits root-relative vault URLs (media embeds in cards);
+		// against the app page's own origin they would name the app's files
+		// (clew-app://, which serves none of the vault), so pin them to the
+		// preview origin — as canvas/node-content.js does.
+		for (const media of el.querySelectorAll('[src^="/"]')) {
+			media.setAttribute('src', previewOrigin() + media.getAttribute('src'));
+		}
 	} catch { /* mini-render stands */ }
 }
 

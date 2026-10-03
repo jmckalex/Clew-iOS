@@ -40,6 +40,9 @@ function trustPaths() {
 		// Which vaults this device trusts to run their notes' code
 		// (main/vault-trust.js; docs/dev/frame-bridge.md §4.2).
 		vaultTrust: path.join(app.getPath('userData'), 'vault-trust.json'),
+		// What each app in a note may do, per vault and app id
+		// (main/app-grants.js; frame-bridge.md §9) — never in the vault.
+		appGrants: path.join(app.getPath('userData'), 'app-grants.json'),
 		// A restricted vault's exports run from here, not from the note's
 		// folder: the engine's config cascade then sees the user's global
 		// ~/.jmarkdown and this directory's one key, never a vault's own
@@ -59,6 +62,8 @@ export const paths = app.isPackaged
 		previewAssets: path.join(process.resourcesPath, 'preview-assets'),
 		// The vendored EmbedPDF OCG build (vendor/embedpdf), not an npm package.
 		embedpdfAssets: path.join(process.resourcesPath, 'preview-assets', 'embedpdf'),
+		// The stamp tool's default library (vendor/default-stamps, MIT).
+		stampsAssets: path.join(process.resourcesPath, 'preview-assets', 'default-stamps'),
 		// The staged mp-tikz-wasm build (extraResources), whole: the engines
 		// fetch their TeX bundles file by file through kpathsea, so the tree
 		// must stay unpacked and complete.
@@ -88,6 +93,7 @@ export const paths = app.isPackaged
 		engineAssets: path.join(distDir, 'engine'),
 		previewAssets: path.join(rootDir, 'node_modules'),
 		embedpdfAssets: path.join(rootDir, 'vendor', 'embedpdf', 'dist'),
+		stampsAssets: path.join(rootDir, 'vendor', 'default-stamps'),
 		// mp-tikz-wasm: MetaPost/pdfTeX/LuaTeX/dvisvgm compiled to wasm, so
 		// TikZ and MetaPost figures typeset in the preview with no TeX
 		// installation. 74 MB of engines and TeX bundles, so it is neither

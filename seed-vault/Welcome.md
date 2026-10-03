@@ -31,6 +31,8 @@ rendered; **⌘O** finds any note; **⌘P** lists every command.
 - [[Drawings]] — Excalidraw, for the drawings an Obsidian vault is full of
 - [[Note API]] — notes as programs: [[API Playground]],
   [[Habit Tracker]], and a tiny [[Adventure]]
+- [[Apps in Notes]] — small apps embedded in a note, each running apart
+  and reaching only what you allow (a flashcard drill lives there).
 - [[Plugins]] — extend Clew from inside the vault (this page's banner
   is one)
 - [[Note Headers]] — that banner in detail, including animated HTML

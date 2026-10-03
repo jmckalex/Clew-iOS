@@ -38,6 +38,7 @@ import { previewUrl } from '../../lib/preview-url.js';
 import { handleApiRequest } from '../../note-api.js';
 import { icon } from '../../lib/icons.js';
 import { retire } from '../../pdf-frames.js';
+import { PREVIEW_ORIGIN } from '../../../shared/message-guard.js';
 
 const HOST_SOURCE = 'clew-preview-host';
 const UNDO_LIMIT = 100;
@@ -2360,7 +2361,7 @@ class ClewCanvasView extends ClewElement {
 
 	#onMessage = (event) => {
 		const msg = event.data;
-		if (!msg || msg.source !== 'clew-preview') return;
+		if (!msg || msg.source !== 'clew-preview' || event.origin !== PREVIEW_ORIGIN) return;
 		let embed = null;
 		let embedId = null;
 		for (const [id, candidate] of this.#embeds) {
@@ -2426,7 +2427,7 @@ class ClewCanvasView extends ClewElement {
 			embed.pending.push(msg);
 			return;
 		}
-		embed.iframe.contentWindow?.postMessage({ source: HOST_SOURCE, ...msg }, '*');
+		embed.iframe.contentWindow?.postMessage({ source: HOST_SOURCE, ...msg }, PREVIEW_ORIGIN);
 	}
 
 	async #refreshEmbeds(path) {

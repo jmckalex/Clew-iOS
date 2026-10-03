@@ -19,11 +19,14 @@ export function openListModal({ placeholder, items, emptyText = 'No matches' }) 
 	overlay.className = 'clew-modal';
 	overlay.innerHTML = `
 		<div class="modal-box">
-			<input class="modal-input" type="text" placeholder="${placeholder}" spellcheck="false">
+			<input class="modal-input" type="text" spellcheck="false">
 			<div class="modal-results"></div>
 		</div>
 	`;
 	const input = overlay.querySelector('.modal-input');
+	// A property, never markup: a placeholder may name a file, and a file
+	// name may hold a quote.
+	input.placeholder = placeholder;
 	const results = overlay.querySelector('.modal-results');
 	let filtered = [];
 	let selected = 0;

@@ -35,6 +35,9 @@
 //      stale element is REPLACED by a fresh clone here, after the morph,
 //      whose connectedCallback typesets the new source.
 
+import { parseFigureError } from '../shared/figure-errors.js';
+import { parentOrigin, postTo } from '../shared/message-guard.js';
+
 // Assets root: the preview protocol in the app, ./assets on exported sites
 // (the exporter sets window.__clewAssetBase before this bundle loads).
 const ASSETS = () => window.__clewAssetBase ?? '/__clew_assets__';
@@ -205,8 +208,70 @@ function needsEngines() {
 	return false;
 }
 
+// ---- errors: the first one, and the log behind a disclosure ----
+// mp-tikz-wasm prints a failed figure's diagnostics and then its WHOLE log
+// in one red box — dozens of lines of pdfTeX's banner over the note (the
+// owner's report, 2026-10-03, where the live preview pane put it over the
+// very lines to fix). What helps is the first error and where it is: that
+// heads the box, TeX's own context line under it (the text up to the
+// error), the log behind "Show log". And the host hears of it — the live
+// preview pane marks the fence's line (shared/figure-errors.js) — as it
+// hears when a figure comes out right again.
+
+const tellHost = (msg) => {
+	if (window.parent !== window) postTo(window.parent, { source: 'clew-preview', ...msg }, parentOrigin());
+};
+
+/** A failed figure's console: compacted, once, and reported. */
+function compactError(figure) {
+	const pre = figure.querySelector(':scope > pre.mpw-console');
+	if (!pre || figure.querySelector(':scope > .mpw-error-head')) return;
+	const kind = figure.classList.contains('mpw-metapost') ? 'metapost' : 'tikz';
+	const err = parseFigureError(pre.textContent);
+	if (!err) return;
+	const head = document.createElement('div');
+	head.className = 'mpw-error-head';
+	const message = document.createElement('div');
+	message.className = 'mpw-error-message';
+	message.textContent = err.message;
+	head.append(message);
+	if (err.before !== null) {
+		// The line as TeX read it, the error at the seam.
+		const where = document.createElement('code');
+		where.className = 'mpw-error-where';
+		const upTo = document.createElement('span');
+		upTo.textContent = err.before.replace(/^\.\.\./, '…');
+		const rest = document.createElement('span');
+		rest.className = 'mpw-error-rest';
+		rest.textContent = err.after ?? '';
+		where.append(upTo, rest);
+		head.append(where);
+	}
+	const log = document.createElement('details');
+	log.className = 'mpw-log';
+	const summary = document.createElement('summary');
+	summary.textContent = 'Show log';
+	pre.replaceWith(log);
+	log.append(summary, pre);
+	figure.append(head, log);
+	tellHost({ type: 'figure-error', kind, message: err.message, docLine: err.docLine, before: err.before, after: err.after, log: pre.textContent });
+}
+
+/** Every failed figure on the page not yet compacted (the library's own
+ *  failures arrive as events; a refusal or a thrown error does not). */
+function compactErrors() {
+	for (const figure of document.querySelectorAll('.mpw-figure.mpw-error')) compactError(figure);
+}
+
+document.addEventListener('mp-tikz-wasm:rendered', (e) => {
+	const figure = e.target?.closest?.('.mpw-figure') ?? e.target;
+	if (e.detail?.ok) tellHost({ type: 'figure-ok', kind: e.detail.kind });
+	else if (figure?.classList?.contains('mpw-error')) compactError(figure);
+});
+
 /** After load and after every morph: re-render what changed, load the engines if needed. */
 export function initFigures() {
+	compactErrors();
 	for (const el of stale) {
 		// A fresh node is the whole point: auto.js typesets an element once.
 		if (el.isConnected) el.replaceWith(el.cloneNode(true));

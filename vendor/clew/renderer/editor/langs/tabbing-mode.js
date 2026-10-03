@@ -9,7 +9,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 /**
- * @file Highlighting for ```tabbing fences (src/engine/tabbing.js): the tab
+ * @file Highlighting for ```tabbing fences (the engine's tabbing.js): the tab
  * commands stand out from the text they arrange, so a row reads as its
  * columns. A stream-parser spec, pure like tex-mode.js.
  *

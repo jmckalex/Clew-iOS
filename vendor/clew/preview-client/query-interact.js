@@ -14,7 +14,8 @@
 // after which the live-query re-render brings the view back in sync. The view is just a projection; the truth
 // stays in the files.
 
-const post = (msg) => window.parent.postMessage({ source: 'clew-preview', ...msg }, '*');
+import { parentOrigin, postTo } from '../shared/message-guard.js';
+const post = (msg) => postTo(window.parent, { source: 'clew-preview', ...msg }, parentOrigin());
 
 export function initQueryInteract() {
 	// One document-level wiring; elements are re-created by every morph, so

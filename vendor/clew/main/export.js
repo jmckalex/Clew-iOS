@@ -31,8 +31,10 @@ import { execFile } from 'node:child_process';
 import { fork } from 'node:child_process';
 import { paths } from './paths.js';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { toolchainPath } from './render-service.js';
+import { bibliographyDirs, bibliographyList } from './citation-header.js';
 import { printNoteToPdf } from './print-pdf.js';
 import { settings } from './settings.js';
 import { calloutsEnv } from './callout-types.js';
@@ -65,7 +67,7 @@ function runWorker({ file, options, cwd, callouts = '' }) {
 			if (msg?.type === 'ready') {
 				child.send({ type: 'build', file, options });
 			} else if (msg?.type === 'done') {
-				resolve(msg.output);
+				resolve({ output: msg.output, warnings: Array.isArray(msg.warnings) ? msg.warnings : [] });
 			} else if (msg?.type === 'error') {
 				reject(new Error(msg.message));
 			}
@@ -75,6 +77,23 @@ function runWorker({ file, options, cwd, callouts = '' }) {
 		});
 		child.on('error', reject);
 	});
+}
+
+/**
+ * The bibliography an export's config cascade configures, as the engine
+ * resolves it (bibliographies.js): `Biblify.bibliography` from the global
+ * ~/.jmarkdown/config.json, overridden by the working folder's own
+ * .jmarkdown/config.json, each relative path against the working folder.
+ */
+function configuredBibliographies(cwd) {
+	let value = '';
+	for (const file of [path.join(os.homedir(), '.jmarkdown', 'config.json'), path.join(cwd, '.jmarkdown', 'config.json')]) {
+		try {
+			const named = JSON.parse(fs.readFileSync(file, 'utf8'))?.Biblify?.bibliography;
+			if (named && (!Array.isArray(named) || named.length)) value = named;
+		} catch { /* no such config */ }
+	}
+	return bibliographyList(value).filter((p) => !/^[a-z][a-z0-9+.-]*:\/\//i.test(p)).map((p) => path.resolve(cwd, p));
 }
 
 const TEX_DIRS = ['/Library/TeX/texbin', '/usr/local/bin', '/opt/homebrew/bin'];
@@ -93,7 +112,7 @@ const findTex = (name) => TEX_DIRS.map((dir) => path.join(dir, name)).find((p) =
  *
  * @returns {Promise<{pdf: string, engine: string, reason: string}>}
  */
-function compilePdf(texFile, noteDir) {
+function compilePdf(texFile, noteDir, bibDirs = [noteDir]) {
 	const { engine, reason } = chooseLatexEngine(fs.readFileSync(texFile, 'utf8'), settings.get('latexEngine') ?? 'auto');
 	const latexmk = findTex('latexmk');
 	const tex = latexmk ?? findTex(engine);
@@ -104,9 +123,12 @@ function compilePdf(texFile, noteDir) {
 	const pdf = texFile.replace(/\.tex$/, '.pdf');
 	const started = Date.now();
 	return new Promise((resolve, reject) => {
-		// A trailing separator keeps TeX's own search path after the note's.
-		const searchPath = (name) => `${noteDir}${path.delimiter}${process.env[name] ?? ''}`;
-		const env = { ...process.env, PATH: toolchainPath(), BIBINPUTS: searchPath('BIBINPUTS'), TEXINPUTS: searchPath('TEXINPUTS') };
+		// A trailing separator keeps TeX's own search path after ours. BibTeX
+		// gets every bibliography's folder: `\bibliography{…}` names each
+		// file by its basename (jmarkdown 909af7a: the note's AND the
+		// configured ones).
+		const searchPath = (dirs, name) => `${dirs.join(path.delimiter)}${path.delimiter}${process.env[name] ?? ''}`;
+		const env = { ...process.env, PATH: toolchainPath(), BIBINPUTS: searchPath(bibDirs, 'BIBINPUTS'), TEXINPUTS: searchPath([noteDir], 'TEXINPUTS') };
 		execFile(tex, args, { cwd: path.dirname(texFile), timeout: 180000, env }, (err) => {
 			// A non-zero exit can be warnings only: accept a PDF THIS run wrote —
 			// never one an earlier export left at the same path.
@@ -142,6 +164,14 @@ export async function exportNote({ win, vaults, sessionId, callerToken = null, r
 	const callouts = calloutsEnv(settings.get('callouts'), vaultSettings.callouts, paths.faIcons);
 	const base = path.basename(abs).replace(/\.(md|jmd)$/i, '');
 	const ext = format === 'html' ? 'html' : format === 'latex' ? 'tex' : 'pdf';
+	// The vault's bibliography, for this build only (jmarkdown 455cb61): an
+	// export runs the user's own config cascade, not Clew's generated one, so
+	// without it a note citing only the vault's file exported every such
+	// citation undefined. A configured file in every respect — a note's own
+	// Bibliography adds to it, `Bibliography mode: replace` drops it.
+	const vaultBibName = String(vaultSettings.bibliography ?? '').trim();
+	const vaultBib = vaultBibName ? path.resolve(vaults.root, vaultBibName) : null;
+	const bibliography = vaultBib ? [vaultBib] : [];
 
 	// A relative outFile is vault-relative, not process-relative: the caller
 	// is a scenario inside the vault, and resolving against the working
@@ -169,16 +199,19 @@ export async function exportNote({ win, vaults, sessionId, callerToken = null, r
 	}
 
 	if (format === 'html') {
-		await runWorker({ file: abs, options: { to: 'html', output: filePath, normalSyntax }, cwd, callouts });
-		return { output: filePath };
+		const { warnings } = await runWorker({ file: abs, options: { to: 'html', output: filePath, normalSyntax, bibliography }, cwd, callouts });
+		return { output: filePath, warnings };
 	}
 
 	// LaTeX (and PDF via LaTeX): build the .tex next to the requested output
 	// so relative graphics resolve, then compile if PDF was asked for.
 	const texFile = format === 'latex' ? filePath : filePath.replace(/\.pdf$/i, '.tex');
-	await runWorker({ file: abs, options: { to: 'latex', output: texFile, normalSyntax }, cwd, callouts });
-	if (format === 'latex') return { output: texFile };
-	const { pdf, engine, reason } = await compilePdf(texFile, path.dirname(abs));
+	const { warnings } = await runWorker({ file: abs, options: { to: 'latex', output: texFile, normalSyntax, bibliography }, cwd, callouts });
+	if (format === 'latex') return { output: texFile, warnings };
+	const noteDir = path.dirname(abs);
+	const configured = [...configuredBibliographies(cwd), ...bibliography];
+	const bibDirs = bibliographyDirs(fs.readFileSync(abs, 'utf8'), noteDir, configured);
+	const { pdf, engine, reason } = await compilePdf(texFile, noteDir, bibDirs);
 	if (pdf !== filePath) fs.copyFileSync(pdf, filePath);
-	return { output: filePath, engine, reason };
+	return { output: filePath, engine, reason, warnings };
 }

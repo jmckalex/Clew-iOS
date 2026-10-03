@@ -41,6 +41,7 @@
 // debounced autosave on purpose: a half-edited spreadsheet is not a PDF
 // annotation.
 
+import { topOrigin, postTo } from '../shared/message-guard.js';
 'use strict';
 
 const ASSET_BASE = 'clew-preview://vault/__clew_assets__/zeta/';
@@ -72,7 +73,7 @@ function mark(name) {
 }
 
 function tellParent(msg) {
-	try { window.top.postMessage(msg, '*'); } catch { /* no parent */ }
+	postTo(window.top, msg, topOrigin());
 }
 
 function fail(message) {
@@ -244,8 +245,8 @@ function pushToVault() {
 	window.addEventListener('message', onResult);
 	// window.top: the save bridge lives on the app page, and this page may
 	// be nested one level deeper when running as a live embed in a preview.
-	window.top.postMessage(
-		{ source: 'clew-zeta', type: 'office-save', id, path: vaultPath, bytes }, '*');
+	postTo(window.top,
+		{ source: 'clew-zeta', type: 'office-save', id, path: vaultPath, bytes }, topOrigin());
 }
 
 // The app page can also ask for a save (menu command, close flow) — and

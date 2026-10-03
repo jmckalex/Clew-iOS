@@ -14,6 +14,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { direntKind, shouldRecurse, walkGuard, writeFileAtomic } from './fs-utils.js';
+import { insideByRealpath } from '../engine/vault-bounds.js';
 
 const stripExt = (p) => p.replace(/\.(md|jmd)$/i, '');
 const baseName = (relPath) => stripExt(relPath.split('/').pop());
@@ -104,6 +105,8 @@ function rewriteCanvasRefs({ oldRel, newRel, vaults }) {
 			const childRel = rel ? `${rel}/${entry.name}` : entry.name;
 			if (excludes.isUnindexed(childRel)) continue;
 			const abs = path.join(dir, entry.name);
+			// Never write through a restricted vault's link out of it.
+			if (vaults.restricted && !insideByRealpath(abs, vaults.root)) continue;
 			if (direntKind(dir, entry) === 'dir') {
 				if (shouldRecurse(abs, seen)) walk(abs, childRel);
 				continue;
