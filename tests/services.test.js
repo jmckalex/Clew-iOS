@@ -1597,6 +1597,20 @@ test('apps: the clew-frame handler gets only the app\'s own files, with the app 
 	await settle();
 });
 
+test('apps: the Seminar Picker\'s copy reaches the system pasteboard; its paste reads Clew\'s own copy', async () => {
+	fakeHtml = '<body><clew-app-embed class="clew-app-embed" data-app="Apps/Picker"></clew-app-embed></body>';
+	try { await native.renderNote('Features/App Gallery.md'); } finally { fakeHtml = FAKE_HTML; }
+	const key = createHash('sha256').update('documents:test\0seminar-picker', 'utf8').digest('hex').slice(0, 40);
+	const call = (method, params = {}) => clew.invoke('clew:app-call', { key, notePath: 'Features/App Gallery.md', method, params });
+	assert.equal((await call('clipboard.copy', { text: 'Ada' })).ok, false, 'not before its prompt');
+	assert.equal((await clew.invoke('clew:app-answer', { key, allow: true })).granted.includes('clipboard'), true);
+	const before = fakeBridge.calls.length;
+	assert.equal((await call('clipboard.copy', { text: 'Ada Lovelace' })).ok, true);
+	assert.deepEqual(fakeBridge.calls.slice(before).filter(([m]) => m === 'clipboardWrite'), [['clipboardWrite', { text: 'Ada Lovelace' }]]);
+	assert.equal((await call('clipboard.paste')).result, 'Ada Lovelace');
+	await clew.invoke('clew:app-revoke', { id: 'seminar-picker' });
+});
+
 // ---- PDF save safety (Clew-app 686232b; pdf-unification.md §7b) ------------
 
 test('PDF save safety: a save over a version the viewer did not load is refused, both versions kept; force, create and restore', async () => {

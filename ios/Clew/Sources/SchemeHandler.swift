@@ -492,7 +492,20 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 				DispatchQueue.main.async {
 					guard !self.isStopped(task) else { return }
 					if isHtml {
-						let html = Self.injectBridge(String(decoding: data, as: UTF8.self))
+						var html = Self.injectBridge(String(decoding: data, as: UTF8.self))
+						#if DEBUG
+						// Scenarios (DEBUG builds only): a script run inside every
+						// app frame, as desktop's CLEW_SMOKE_FRAME_SCRIPT — it acts
+						// in the app and reports through /__clew_probe__.
+						if let smoke = UserDefaults.standard.string(forKey: "ClewFrameSmokeJS") {
+							let tag = "<script>\(smoke)</script>"
+							if let body = html.range(of: "</body>", options: [.caseInsensitive, .backwards]) {
+								html.replaceSubrange(body, with: tag + "</body>")
+							} else {
+								html += tag
+							}
+						}
+						#endif
 						self.respond(task, status: 200, data: Data(html.utf8), headers: headers("text/html; charset=utf-8"))
 					} else {
 						self.respond(task, status: 200, data: data, headers: headers(mime))

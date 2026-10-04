@@ -383,6 +383,13 @@ final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 				return try self.vaults.writePdf(rel: to ?? rel, data: bytes, base: nil, force: !create, create: create)
 			}
 
+		// An app's copy (the `clipboard` capability; apps.js): onto the
+		// system pasteboard, so it pastes anywhere.
+		case "clipboardWrite":
+			guard let text = params["text"] as? String, text.utf8.count < 1_000_000 else { throw ClewError.badPayload }
+			UIPasteboard.general.string = text
+			reply(nil, nil)
+
 		case "appGrantsRead":
 			performIO(reply) { (try? String(contentsOf: Self.appGrantsFile, encoding: .utf8)) ?? "" }
 

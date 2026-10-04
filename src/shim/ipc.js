@@ -868,6 +868,9 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 		// desktop build; the iPad's updates are the App Store's.
 		[CH.UPDATE_CHECK]: () => ({ status: 'off', reason: 'the App Store updates Clew on iPad' }),
 		[CH.UPDATE_SKIP]: () => true,
+		// clew:// links and the `clew` command are desktop's (Clew-app
+		// 4ddda35): nothing is ever waiting for this page.
+		[CH.DEEP_LINK_TAKE]: () => [],
 
 		[CH.OFFICE_THUMBNAIL]: async ({ path }) => {
 			const rel = officeRel(path);

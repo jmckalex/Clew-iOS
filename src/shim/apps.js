@@ -53,9 +53,20 @@ export function createApps({ vaults, indexer, searchService, kvStore, refreshTre
 	/** key → { vault, folder, abs, manifest } — the apps this page's notes embed. */
 	const byKey = new Map();
 	// An app's clipboard (the `clipboard` capability): app-calls.js answers
-	// synchronously, which the system pasteboard over the bridge cannot, so
-	// on iOS it is Clew's own (an app can copy and paste within Clew).
-	const clipboard = (() => { let text = ''; return { writeText: (t) => { text = String(t); }, readText: () => text }; })();
+	// synchronously. A copy goes to the system pasteboard too (the bridge,
+	// fire and forget), so it pastes in any app; a paste reads Clew's own
+	// copy of the last one — reading the system pasteboard would show iOS's
+	// "pasted from" notice for something the user did not ask to paste.
+	const clipboard = (() => {
+		let text = '';
+		return {
+			writeText: (t) => {
+				text = String(t);
+				bridgeCall('clipboardWrite', { text }).catch(() => {});
+			},
+			readText: () => text,
+		};
+	})();
 
 	const identity = () => vaults.identity ?? '';
 	const restricted = () => vaults.trusted !== true;
