@@ -8,9 +8,10 @@ body.is-ios .titlebar {
 	-webkit-app-region: initial;
 }
 
-body.is-ios clew-status-bar {
-	padding-bottom: env(safe-area-inset-bottom, 0px);
-}
+/* No safe-area padding on the status bar: the iOS toolbar below clew-app
+   owns the bottom inset. With it, the bar's 24px (border-box) kept 3px for
+   its text, which then rose 6px over the pane above, clipped by the editor
+   or a pinned app (measured 2026-10-04). */
 
 /* Touch targets: tabs and tree rows get comfortable heights; the tab close
    button is always visible (no hover on touch). */
