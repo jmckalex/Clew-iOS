@@ -1,18 +1,36 @@
-# Handover — 2026-10-04 (the sync to Clew-app f3a7d5b + 686232b: trust v2, apps in notes, PDF save safety)
+# Handover — 2026-10-04 (the sync to Clew-app 77b0bea: the sample apps and the App Gallery)
 
 Current state for a fresh session, rewritten whole. Durable architecture
 lives in **README.md** and **PORT-PLAN.md**. Each sync's reasoning and
 measurements are in its record: `UPSTREAM-*-PLAN.md`. The latest records
-are `UPSTREAM-F3A7D5B-PLAN.md` (the sync of 2026-10-03/04),
+are `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-10-04),
+`UPSTREAM-F3A7D5B-PLAN.md` (the sync of 2026-10-03/04),
 `UPSTREAM-03BB33A-PLAN.md` (the overnight sync of 2026-10-02),
 `UPSTREAM-18C5E45-PLAN.md` (sync #3) and `UPSTREAM-0.12.0-PLAN.md`. The coordinator's ledger is `~/Source/Clew/SYNC-LEDGER.md`.
 
 ## 1. Where things stand
 
-- **The sync to Clew-app `f3a7d5b` + `686232b` (2026-10-03/04) is DONE, and
-  every acceptance check was green.** The owner's word, relayed by
-  Clew-boss: "Yes, push if all green". Main is fast-forwarded to
-  `syncf3a7d5b-p4-verify`, and a build commit sits on top. The record is
+- **The sync to Clew-app `77b0bea` (2026-10-04) is DONE, and every
+  acceptance check was green.** The owner, relayed by Clew-boss: "Sync
+  the iPad with the sample apps too", then "Push it when it's all green".
+  Main is fast-forwarded to `sync77b0bea-p4-verify`, and a build commit
+  sits on top. The record is UPSTREAM-77B0BEA-PLAN.md.
+  - **The sample apps and the App Gallery** are in the demo vault, each
+    behind its prompt. The ticker is pinned at the bottom of its note, in
+    reading view and in Live edit, without reloading its frame.
+  - **An app's copy reaches the system pasteboard** (`clipboardWrite`). A
+    paste reads Clew's own last copy.
+  - **Prompts focus the card,** so a typed key never answers one.
+  - **Fewer build patches:** admonitions.js and device-name.js are
+    upstream's, and so is the shared callout-types.js.
+  - **The status bar's text sits inside the bar.** The safe-area padding
+    the toolbar already takes is gone; it was clipped from M4 until now.
+  - **Vendor** is at Clew-app `77b0bea`.
+  - **Smoke runs:** DEBUG `ClewFrameSmokeJS` runs a script inside each
+    app frame. `simctl uninstall` keeps cfprefsd's cached defaults, so
+    delete the smoke keys around a reinstall.
+- **The sync to Clew-app `f3a7d5b` + `686232b` (2026-10-03/04) is DONE and
+  PUSHED** (0433870; the Xcode Cloud archive succeeded). The record is
   UPSTREAM-F3A7D5B-PLAN.md.
   - **Vault trust v2:** enablements live on the device; a CSP header goes
     on previews.
@@ -22,7 +40,7 @@ are `UPSTREAM-F3A7D5B-PLAN.md` (the sync of 2026-10-03/04),
   - **PDF save safety:** SHA-1 `base`, as one binary POST with the token
     in a header.
   - **Quote-and-cite** with printed pages; the stamps served locally.
-  - **Vendor** is at Clew-app `686232b`.
+  - **Vendor** was at Clew-app `686232b`.
 - **Before that:** the overnight features of 2026-10-03 (the symlink fix,
   the vault switcher, conflict safety, scan and quick actions) were
   integrated and PUSHED as cedb81e. `share-extension` (788d4ea) still
