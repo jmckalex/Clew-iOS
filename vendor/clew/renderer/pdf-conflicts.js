@@ -34,6 +34,7 @@ import { workspaceStore } from './state/workspace-store.js';
 import { createTab } from './workspace/tree.js';
 import { ipc, CH } from './ipc.js';
 import { notice } from './plugins.js';
+import { noticeLift } from './lib/notice-lift.js';
 
 const RESOLVE_TIMEOUT_MS = 8000;
 /** path → { source, origin, mine, theirs } — the viewer that was refused. */
@@ -125,7 +126,45 @@ export async function resolvePdfConflict(path) {
 /** True while `path` has a conflict waiting (scenarios; the command). */
 export const pdfConflictOpen = (path) => open.has(path);
 
+// The window's notices never cover a PDF viewer's status chip — not least
+// this file's own "not saved" notice over the chip saying the same
+// (lib/notice-lift.js). The column is placed again whenever a notice comes
+// or goes, the window resizes, or the layout or the active tab changes; the
+// viewers are the app page's own frames (tabs, canvas cards — a viewer
+// inside a note's document draws its chip in the embed's title bar instead).
+function keepViewerStatusClear() {
+	let pending = 0;
+	const place = () => {
+		pending = 0;
+		const host = document.querySelector('.clew-notices');
+		if (!host) return;
+		host.style.bottom = '';
+		if (!host.children.length) return;
+		const viewers = [...document.querySelectorAll('iframe[src*="/clewpdf/pdf-page.html"]')]
+			.filter((f) => f.offsetParent && !f.closest('[data-clew-retiring]'))
+			.map((f) => f.getBoundingClientRect());
+		if (!viewers.length) return;
+		const resting = parseFloat(getComputedStyle(host).bottom) || 0;
+		const bottom = noticeLift(host.getBoundingClientRect(), viewers, window.innerHeight, resting);
+		if (bottom !== resting) host.style.bottom = `${bottom}px`;
+	};
+	const schedule = () => { pending ||= requestAnimationFrame(place); };
+	const watched = new WeakSet();
+	new MutationObserver(() => {
+		const host = document.querySelector('.clew-notices');
+		if (host && !watched.has(host)) {
+			watched.add(host);
+			new MutationObserver(schedule).observe(host, { childList: true });
+			schedule();
+		}
+	}).observe(document.body, { childList: true });
+	window.addEventListener('resize', schedule);
+	workspaceStore.on('layout-changed', schedule);
+	workspaceStore.on('active-changed', schedule);
+}
+
 export function installPdfConflicts() {
+	keepViewerStatusClear();
 	window.addEventListener('message', (event) => {
 		if (!fromPreviewOrigin(event)) return;
 		const msg = event.data;

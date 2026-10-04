@@ -31,6 +31,7 @@ import { installAppHost } from './app-host.js';
 import { installUpdateNotice } from './update-notice.js';
 import { installPdfQuote } from './pdf-quote.js';
 import { installPdfConflicts } from './pdf-conflicts.js';
+import { installDeepLinks, vaultShownForLinks } from './deep-link.js';
 import { installBuildWarnings } from './build-warnings.js';
 import { installConflictScans } from './conflicts.js';
 import { installCalloutSync } from './callouts.js';
@@ -73,6 +74,8 @@ async function showVault(vault, tree, index = null) {
 	editorPool.reap(workspaceStore.openTabIds());
 	bookmarkStore.load();
 	applySnippets();
+	// A clew:// link or `clew` command waiting for this vault (deep-link.js).
+	vaultShownForLinks();
 }
 
 ipc.on(CH.EV_VAULT_OPENED, async ({ vault, tree }) => {
@@ -132,6 +135,7 @@ installHotkeys();
 installPdfSaveBridge();
 installPdfQuote();
 installPdfConflicts();
+installDeepLinks();
 installBuildWarnings();
 installConflictScans();
 installOfficeSaveBridge();

@@ -24,6 +24,7 @@ import { fragmentKey } from '../../../engine/tex-fragments.js';
 import { TOOLBAR_GROUPS } from '../../editor/toolbar/toolbar-spec.js';
 import { calloutsSection } from './settings-callouts.js';
 import { LATEX_ENGINE_SETTING } from '../../../shared/latex-engine-setting.js';
+import { DEVICE } from '../../lib/device-name.js';
 
 const isMac = navigator.platform.startsWith('Mac');
 
@@ -637,7 +638,7 @@ class ClewSettingsView extends ClewElement {
 		const subhead = document.createElement('h3');
 		subhead.className = 'settings-subhead';
 		subhead.textContent = scope === 'global'
-			? 'Global — every vault on this machine'
+			? `Global — every vault on ${DEVICE}`
 			: `This vault (${vaultStore.vault?.name ?? '…'}) — travels with the vault`;
 		const list = document.createElement('div');
 		list.className = 'tex-fragment-list';

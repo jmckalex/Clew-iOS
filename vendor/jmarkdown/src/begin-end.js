@@ -27,7 +27,7 @@
 	    mirror renderTeXEnv / renderHTMLEnv in additional-directives.js.
 */
 
-import { createBeginEnd, createAtInline, createAtBlock, registerBlockEnvironment } from './begin-end-core.js';
+import { createBeginEnd, createAtInline, createAtBlock, registerBlockEnvironment, attributesHTML } from './begin-end-core.js';
 import { renderAbstract, renderFeedback } from './additional-directives.js';
 import { configManager } from './config-manager.js';
 import { addPreamble, requirePackage } from './preamble.js';
@@ -107,7 +107,7 @@ registerBlockEnvironment('Cref', {
 // `@foo+[…]` → <div class>).
 registerBlockEnvironment('span', {
 	mode: 'markdown',
-	html: (ctx) => `<span${ctx.attrs ? ' ' + String(ctx.attrs).trim() : ''}>${ctx.inner}</span>`,
+	html: (ctx) => `<span${ctx.attrs ? ' ' + attributesHTML(ctx.attrs) : ''}>${ctx.inner}</span>`,
 	latex: (ctx) => ctx.inner
 });
 

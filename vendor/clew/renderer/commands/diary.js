@@ -74,22 +74,23 @@ function revealLine(tab, path, line) {
 	}
 }
 
-/** Open (creating as needed) the diary entry for a date. */
-export async function openDiaryDay(date) {
+/** Open (creating as needed) the diary entry for a date — in a tab of its
+ *  own with `newTab` (a clew:// link: renderer/deep-link.js). */
+export async function openDiaryDay(date, { newTab = false } = {}) {
 	const cfg = diaryConfig();
 	const title = formatDiaryDate(date, cfg.format);
 
 	if (cfg.mode === 'files') {
 		const rel = fileForDay(date, cfg);
 		if (vaultStore.pathExists(rel)) {
-			workspaceStore.openNote(rel);
+			workspaceStore.openNote(rel, { newTab });
 			return;
 		}
 		try {
 			const created = await ipc.invoke(CH.NOTE_CREATE, { path: rel });
 			const seed = await templateSeed(cfg, title);
 			if (seed) await ipc.invoke(CH.NOTE_WRITE, { path: created, content: seed });
-			workspaceStore.openNote(created);
+			workspaceStore.openNote(created, { newTab });
 		} catch (err) {
 			console.error('Diary day failed:', err);
 		}
@@ -118,7 +119,7 @@ export async function openDiaryDay(date) {
 			await ipc.invoke(CH.NOTE_WRITE, { path: rel, content: next });
 		}
 	}
-	const tab = workspaceStore.openNote(rel);
+	const tab = workspaceStore.openNote(rel, { newTab });
 	revealLine(tab, rel, line);
 }
 

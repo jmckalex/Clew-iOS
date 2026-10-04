@@ -33,11 +33,33 @@ import { noteCodeAllowed, refuseNoteCode, noteCodeError } from './note-code.js';
 */
 
 const script_regexp = /<script(?:\s+(?:src="[^"]*"|type="[^"]*"|defer|async|integrity="[^"]*"|crossorigin(?:="[^"]*")?))*\s*>[\s\S]*?<\/script>/i;
+
+/*
+	Where a script BLOCK may start: at the start of a line, and only where the
+	extension's own tokenizer (`rule`, anchored with ^) would then claim it.
+	A block extension's start() is where marked may cut the paragraph it is
+	building; these used to search for `<script` ANYWHERE, so a paragraph or
+	blockquote holding `<script>…</script>` in inline code was cut at the tag
+	and the script emitted live — it ran in a trusted vault (Clew-app,
+	2026-10-04). The rule in CLAUDE.md ("Block extension start() must only
+	report positions its tokenizer can match"), applied here.
+*/
+function scriptBlockStart(src, rule) {
+	const lineStarts = /(^|\n)(?=<script\b)/gi;
+	let m;
+	while ((m = lineStarts.exec(src))) {
+		const at = m.index + m[1].length;
+		if (rule.test(src.slice(at))) return at;
+		lineStarts.lastIndex = at + 1;
+	}
+	return undefined;
+}
+
 const javascript_script = {
 				name: 'javascript',
 				level: 'block',
 				start(src) {
-					return src.match(script_regexp)?.index; 
+					return scriptBlockStart(src, new RegExp('^' + script_regexp.source, 'i'));
 				},
 				tokenizer(src) {
 					const rule = new RegExp( "^" + script_regexp.source);
@@ -58,7 +80,9 @@ const javascript_script = {
 					}
 				},
 				renderer(token) {
-					return `${token.raw}`;
+					// A page's script has no place in print: in LaTeX it was written
+					// into the .tex as text, and its code printed in the PDF.
+					return global.isLatex ? '' : `${token.raw}`;
 				}
 			};
 
@@ -74,7 +98,7 @@ const jmarkdown_script = {
 				name: 'jmarkdownScript',
 				level: 'block',
 				start(src) {
-					return src.match(/<script\s+data-type=(['"])jmarkdown\1/i)?.index; 
+					return scriptBlockStart(src, /^<script\s+data-type=(['"])(?:jmarkdown|jmarkdown-postprocess)\1[^>]*>\s+[\s\S]*?<\/script>/i);
 				},
 				tokenizer(src) {
 					const rule = /^<script[^>]*>(\s+[\s\S]*?)<\/script>/;

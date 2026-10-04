@@ -45,7 +45,11 @@ export const app = {
 		const target = String(ctx?.rawText ?? ctx?.text ?? '').trim();
 		const attrs = attrsOf(ctx);
 		const classes = ['clew-app-embed', ...(attrs.class ? [attrs.class] : [])];
+		// `pin=top|bottom`: held at that edge of the pane while its place is
+		// out of view there (shared/app-pin.js); the preview does the holding.
+		const pin = ['top', 'bottom'].includes(String(attrs.pin ?? '').toLowerCase()) ? String(attrs.pin).toLowerCase() : null;
 		return `<clew-app-embed class="${escapeAttr(classes.join(' '))}" data-app="${escapeAttr(target)}"`
+			+ (pin ? ` data-app-pin="${pin}"` : '')
 			+ ` style="${escapeAttr(appBoxStyle(attrs))}">`
 			+ `<span class="clew-app-label">App: ${escapeAttr(target || '(no target)')}</span></clew-app-embed>`;
 	},

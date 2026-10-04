@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Writing Progress</title>
+<style>
+	:root { color-scheme: light dark; --fg: #1d1d1f; --muted: #6e6e73; --bg: #fbfbfd; --card: #ffffff; --line: #d8d8de; --accent: #6c5ce7; --goal: #1a7f37; }
+	body[data-theme="dark"] { --fg: #e6e6ea; --muted: #9a9aa3; --bg: #1e1e22; --card: #26262b; --line: #3a3a42; --accent: #9d8cff; --goal: #3fb950; }
+	html, body { margin: 0; }
+	body { font: 15px/1.4 -apple-system, "Segoe UI", system-ui, sans-serif; color: var(--fg); background: var(--bg);
+		padding: 10px; box-sizing: border-box; display: flex; flex-direction: column; gap: 8px; }
+	.row { display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap; }
+	#words { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; }
+	#today { color: var(--muted); }
+	.meter { height: 10px; background: var(--line); border-radius: 5px; overflow: hidden; }
+	#fill { height: 100%; width: 0; background: var(--accent); transition: width 0.3s; }
+	body.met #fill { background: var(--goal); }
+	svg { width: 100%; height: 70px; display: block; }
+	#spark { fill: none; stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; }
+	#target { stroke: var(--goal); stroke-dasharray: 4 4; stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+	.bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+	button { font: inherit; min-height: 44px; min-width: 44px; border: 1px solid var(--line); background: var(--card);
+		color: var(--fg); border-radius: 8px; padding: 0 12px; cursor: pointer; }
+	#status { color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+	<div class="row"><span id="words">—</span><span>words in this note</span><span id="today"></span></div>
+	<div class="meter" aria-hidden="true"><div id="fill"></div></div>
+	<svg viewBox="0 0 100 40" preserveAspectRatio="none" aria-label="Word count over time"><line id="target" x1="0" x2="100" y1="0" y2="0"></line><polyline id="spark" points=""></polyline></svg>
+	<div class="bar">
+		<span>Daily goal</span>
+		<button id="less" type="button" aria-label="Lower the goal">−</button>
+		<span id="goal">250</span>
+		<button id="more" type="button" aria-label="Raise the goal">+</button>
+		<span id="status" role="status">Waiting for permission…</span>
+	</div>
+	<script src="app.js"></script>
+</body>
+</html>

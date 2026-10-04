@@ -29,6 +29,9 @@
 // its place among that key's embeds, so a re-created placeholder finds its
 // running app again; one that is gone takes its app with it.
 import { topOrigin, postTo } from '../shared/message-guard.js';
+import { pinnedTop } from '../shared/app-pin.js';
+
+const BLOCK_DOC = document.documentElement.dataset.clewBlock === '1';
 
 const asked = new Set();          // embed ids announced to the host
 const running = new Set();        // keys the host said may run
@@ -62,12 +65,30 @@ function position() {
 		const el = live.get(id);
 		if (!el) continue;
 		const rect = el.getBoundingClientRect();
-		holder.style.top = `${rect.top + window.scrollY}px`;
-		holder.style.left = `${rect.left + window.scrollX}px`;
+		// A pinned app (`pin=top|bottom`, shared/app-pin.js) is held at that
+		// edge while its place is out of view there: the holder goes FIXED —
+		// a style change, so the frame inside never moves or reloads.
+		// Not in a live-edit block document: there the FRAME is held at the
+		// pane's edge (frame-layer.js), and this document is only the block.
+		const pin = BLOCK_DOC ? null : el.dataset.appPin ?? null;
+		const at = pinnedTop({ top: rect.top, height: rect.height, viewTop: 0, viewBottom: window.innerHeight, pin });
+		holder.classList.toggle('is-pinned', at.stuck);
+		holder.dataset.pin = at.stuck ? pin : '';
+		holder.style.position = at.stuck ? 'fixed' : '';
+		holder.style.top = at.stuck ? `${at.top}px` : `${rect.top + window.scrollY}px`;
+		holder.style.left = at.stuck ? `${rect.left}px` : `${rect.left + window.scrollX}px`;
 		holder.style.width = `${rect.width}px`;
 		holder.style.height = `${rect.height}px`;
 	}
 }
+
+// A pinned app follows every scroll; one frame's work at most.
+let scrollPending = false;
+window.addEventListener('scroll', () => {
+	if (scrollPending || !document.querySelector('clew-app-embed[data-app-pin]')) return;
+	scrollPending = true;
+	requestAnimationFrame(() => { scrollPending = false; position(); });
+}, { passive: true });
 
 function start({ el, id }) {
 	label(el, '');

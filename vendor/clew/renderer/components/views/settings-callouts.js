@@ -9,7 +9,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 // Settings → Callouts: custom callout types, in the two scopes the TeX
-// fragments have — GLOBAL (clew-settings.json `callouts`, this Mac) and THIS
+// fragments have — GLOBAL (clew-settings.json `callouts`, this device) and THIS
 // VAULT (.clew/vault-settings.json `callouts`, travels with it, wins where
 // names meet). One row per type: name, title, icon (a searchable picker over
 // Font Awesome Free), colour (a swatch, or any hex/rgb()/hsl()/CSS name
@@ -28,6 +28,7 @@ import { debounce } from '../../lib/debounce.js';
 import { NAME_RE, validColor, defaultTitle } from '#jmarkdown/callout-definitions.js';
 import { BUILTIN_CALLOUT_TYPES, builtinCalloutIcon } from '#jmarkdown/callout-table.js';
 import { calloutProblems, onCalloutsSynced } from '../../callouts.js';
+import { DEVICE } from '../../lib/device-name.js';
 
 const PICKER_LIMIT = 240;
 let fullTable = null; // { version, icons } once the picker has asked
@@ -139,7 +140,7 @@ function makeGroup(scope) {
 	const subhead = document.createElement('h3');
 	subhead.className = 'settings-subhead';
 	subhead.textContent = scope === 'global'
-		? 'Global — every vault on this Mac'
+		? `Global — every vault on ${DEVICE}`
 		: `This vault (${vaultStore.vault?.name ?? '…'}) — travels with the vault, wins over global`;
 	const list = document.createElement('div');
 	list.className = 'tex-fragment-list';

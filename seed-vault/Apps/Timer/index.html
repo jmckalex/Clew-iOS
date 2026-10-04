@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Lecture Timer</title>
+<style>
+	:root { color-scheme: light dark; --fg: #1d1d1f; --muted: #6e6e73; --bg: #fbfbfd; --card: #ffffff; --line: #d8d8de; --accent: #6c5ce7; --done: #1a7f37; }
+	body[data-theme="dark"] { --fg: #e6e6ea; --muted: #9a9aa3; --bg: #1e1e22; --card: #26262b; --line: #3a3a42; --accent: #9d8cff; --done: #3fb950; }
+	html, body { margin: 0; }
+	body { font: 15px/1.4 -apple-system, "Segoe UI", system-ui, sans-serif; color: var(--fg); background: var(--bg);
+		padding: 10px; box-sizing: border-box; display: flex; gap: 18px; align-items: center; justify-content: center; flex-wrap: wrap; }
+	.ring { position: relative; width: 220px; height: 220px; flex: none; }
+	.ring svg { width: 220px; height: 220px; transform: rotate(-90deg); }
+	.ring circle { fill: none; stroke-width: 12; }
+	#track { stroke: var(--line); }
+	#arc { stroke: var(--accent); stroke-linecap: round; transition: stroke-dashoffset 0.2s linear; }
+	body.finished #arc { stroke: var(--done); }
+	#time { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+		font: 700 48px/1 ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-variant-numeric: tabular-nums; }
+	.side { display: flex; flex-direction: column; gap: 10px; }
+	.bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+	button, input { font: inherit; min-height: 44px; min-width: 44px; border: 1px solid var(--line); background: var(--card);
+		color: var(--fg); border-radius: 8px; padding: 0 14px; box-sizing: border-box; }
+	button { cursor: pointer; }
+	button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+	button[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+	input { width: 6.5em; }
+	#status { color: var(--muted); font-size: 13px; margin: 0; max-width: 22em; }
+</style>
+</head>
+<body>
+	<div class="ring">
+		<svg viewBox="0 0 220 220" aria-hidden="true"><circle id="track" cx="110" cy="110" r="96"></circle><circle id="arc" cx="110" cy="110" r="96"></circle></svg>
+		<div id="time" role="timer" aria-live="off">15:00</div>
+	</div>
+	<div class="side">
+		<div class="bar" id="presets" aria-label="Presets"></div>
+		<div class="bar">
+			<label for="minutes">Minutes</label>
+			<input id="minutes" type="number" min="0.05" max="600" step="any" inputmode="decimal" aria-label="Minutes">
+			<button id="set" type="button">Set</button>
+		</div>
+		<div class="bar">
+			<button id="start" class="primary" type="button">Start</button>
+			<button id="reset" type="button">Reset</button>
+		</div>
+		<p id="status" role="status">Waiting for permission…</p>
+	</div>
+	<script src="app.js"></script>
+</body>
+</html>

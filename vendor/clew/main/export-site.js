@@ -30,6 +30,7 @@ import { settings } from './settings.js';
 import { compileExcludes } from './vault-excludes.js';
 import { readNoteFonts } from './note-fonts.js';
 import { calloutsEnv } from './callout-types.js';
+import { iconTable } from './callout-files.js';
 import { toolchainPath } from './render-service.js';
 import { enabledPlugins, previewPluginScripts } from './plugins.js';
 import { bakeFigures, figureEngineAvailable, hasFigures } from './figure-bake.js';
@@ -86,7 +87,7 @@ export async function exportSite({ vaultRoot, engineDir, outDir, distDir, vaultO
 				// Custom callout types, as the live render service passes them:
 				// the page carries each one's colour on the element, so the
 				// exported site needs no stylesheet of its own for them.
-				CLEW_CALLOUTS: calloutsEnv(settings.get('callouts'), vaultOptions.callouts, paths.faIcons),
+				CLEW_CALLOUTS: calloutsEnv(settings.get('callouts'), vaultOptions.callouts, () => iconTable(paths.faIcons)),
 			},
 		});
 		child.stdout.on('data', () => {});

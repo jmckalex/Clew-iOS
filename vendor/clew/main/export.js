@@ -38,6 +38,7 @@ import { bibliographyDirs, bibliographyList } from './citation-header.js';
 import { printNoteToPdf } from './print-pdf.js';
 import { settings } from './settings.js';
 import { calloutsEnv } from './callout-types.js';
+import { iconTable } from './callout-files.js';
 import { chooseLatexEngine, engineName, latexmkFlag, firstLatexError } from './latex-engine.js';
 
 const WORKER_PATH = paths.engineWorker;
@@ -155,13 +156,13 @@ function compilePdf(texFile, noteDir, bibDirs = [noteDir]) {
  *
  * Prompts for a destination; returns { output } or { canceled: true }.
  */
-export async function exportNote({ win, vaults, sessionId, callerToken = null, relPath, format, outFile, trusted = false }) {
+export async function exportNote({ win, vaults, sessionId, callerToken = null, relPath, format, outFile, trusted = false, buildApart = false }) {
 	const abs = vaults.resolve(relPath);
 	const cwd = trusted ? path.dirname(abs) : restrictedExportDir();
 	// Exports honor the vault's standard-syntax choice, like previews do.
 	const vaultSettings = vaults.loadState('vault-settings.json') ?? {};
 	const normalSyntax = vaultSettings.normalSyntax === true;
-	const callouts = calloutsEnv(settings.get('callouts'), vaultSettings.callouts, paths.faIcons);
+	const callouts = calloutsEnv(settings.get('callouts'), vaultSettings.callouts, () => iconTable(paths.faIcons));
 	const base = path.basename(abs).replace(/\.(md|jmd)$/i, '');
 	const ext = format === 'html' ? 'html' : format === 'latex' ? 'tex' : 'pdf';
 	// The vault's bibliography, for this build only (jmarkdown 455cb61): an
@@ -203,15 +204,25 @@ export async function exportNote({ win, vaults, sessionId, callerToken = null, r
 		return { output: filePath, warnings };
 	}
 
-	// LaTeX (and PDF via LaTeX): build the .tex next to the requested output
-	// so relative graphics resolve, then compile if PDF was asked for.
-	const texFile = format === 'latex' ? filePath : filePath.replace(/\.pdf$/i, '.tex');
-	const { warnings } = await runWorker({ file: abs, options: { to: 'latex', output: texFile, normalSyntax, bibliography }, cwd, callouts });
-	if (format === 'latex') return { output: texFile, warnings };
-	const noteDir = path.dirname(abs);
-	const configured = [...configuredBibliographies(cwd), ...bibliography];
-	const bibDirs = bibliographyDirs(fs.readFileSync(abs, 'utf8'), noteDir, configured);
-	const { pdf, engine, reason } = await compilePdf(texFile, noteDir, bibDirs);
-	if (pdf !== filePath) fs.copyFileSync(pdf, filePath);
-	return { output: filePath, engine, reason, warnings };
+	// LaTeX (and PDF via LaTeX): build the .tex next to the requested output,
+	// then compile if PDF was asked for; the note's folder is on TEXINPUTS
+	// (compilePdf), so its relative graphics resolve wherever the build runs.
+	// `buildApart` (the clew command, 2026-10-04): a PDF is built in a
+	// temporary folder, removed afterwards, and ONLY the PDF delivered — the
+	// build's .tex/.aux/.log/.fls/.out/.fdb_latexmk never land beside the
+	// note. The menu's export still builds beside its output and leaves them.
+	const build = format === 'pdf' && buildApart ? fs.mkdtempSync(path.join(os.tmpdir(), 'clew-export-')) : null;
+	try {
+		const texFile = format === 'latex' ? filePath : build ? path.join(build, `${base}.tex`) : filePath.replace(/\.pdf$/i, '.tex');
+		const { warnings } = await runWorker({ file: abs, options: { to: 'latex', output: texFile, normalSyntax, bibliography }, cwd, callouts });
+		if (format === 'latex') return { output: texFile, warnings };
+		const noteDir = path.dirname(abs);
+		const configured = [...configuredBibliographies(cwd), ...bibliography];
+		const bibDirs = bibliographyDirs(fs.readFileSync(abs, 'utf8'), noteDir, configured);
+		const { pdf, engine, reason } = await compilePdf(texFile, noteDir, bibDirs);
+		if (pdf !== filePath) fs.copyFileSync(pdf, filePath);
+		return { output: filePath, engine, reason, warnings };
+	} finally {
+		if (build) fs.rmSync(build, { recursive: true, force: true });
+	}
 }

@@ -45,7 +45,8 @@ import { callApp } from './app-calls.js';
 import { checkForUpdate } from './updater.js';
 import { registeredRemoteUrl, saveRemoteCopy } from './remote-pdfs.js';
 import { planOpen, pathFromFileUrl } from './open-file.js';
-import { iconTable, resolvedCallouts } from './callout-types.js';
+import { resolvedCallouts } from './callout-types.js';
+import { iconTable } from './callout-files.js';
 import { iconKey } from '#jmarkdown/callout-definitions.js';
 import fs from 'node:fs';
 import nodePath from 'node:path';
@@ -223,6 +224,13 @@ export function registerIpc() {
 	handle(CH.RENDER_HTML, (s, { path }) => s.renderService.renderedHtml(path));
 	// Guarded by the version the viewer loaded (`base`); `force` is "Keep
 	// mine", `create` the conflict copy (main/pdf-guard.js, vault.writePdf).
+	// What a clew:// link or the `clew` command left for this window to show
+	// (main/deep-link-host.js) — handed over ONCE.
+	handle(CH.DEEP_LINK_TAKE, (s) => {
+		const links = s.pendingLinks ?? [];
+		s.pendingLinks = [];
+		return links;
+	});
 	handle(CH.PDF_WRITE, (s, { path, bytes, base, force, create }) => s.vaults.writePdf(path, bytes, { base, force: Boolean(force), create: Boolean(create) }));
 	// A conflict's version from the PDF's history — the conflict sheet's way
 	// to "Keep mine" / "Keep both" when the viewer that held mine is gone.
@@ -329,7 +337,7 @@ export function registerIpc() {
 	// list is read from disk, so a hand edit is what this answers with.
 	handle(CH.CALLOUTS_RESOLVED, (s) => {
 		const vaultList = s.vaults.root ? s.vaults.loadState('vault-settings.json')?.callouts : undefined;
-		const { custom, problems } = resolvedCallouts(settings.get('callouts'), vaultList, paths.faIcons);
+		const { custom, problems } = resolvedCallouts(settings.get('callouts'), vaultList, () => iconTable(paths.faIcons));
 		return { custom, problems };
 	});
 	// The icon table, for Settings only (never a render): whole for the

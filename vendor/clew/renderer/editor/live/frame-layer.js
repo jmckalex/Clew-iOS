@@ -27,7 +27,7 @@
 // the drawn range. Heights come back from the frame (`size`, reported by the
 // client in block mode) and flow into the placeholder through a state effect
 // — one round trip, and CodeMirror re-measures.
-import { ViewPlugin } from '@codemirror/view';
+import { ViewPlugin, EditorView } from '@codemirror/view';
 import { liveStateField } from './reveal-field.js';
 import { liveConfigFacet } from './config.js';
 import {
@@ -45,6 +45,10 @@ import { retire } from '../../pdf-frames.js';
 import { citationLines } from '../../../shared/citation-keys.js';
 import { PREVIEW_ORIGIN } from '../../../shared/message-guard.js';
 import { icon } from '../../lib/icons.js';
+import { pinOf, pinnedTop } from '../../../shared/app-pin.js';
+
+/** The spacer above a frame's body (frames.js, `.le-frame-edge`). */
+const EDGE = 6;
 
 const HOST_SOURCE = 'clew-preview-host';
 const RESTALE_MS = 300;
@@ -107,6 +111,11 @@ class FrameLayer {
 		this.offCallouts = ipc.on(CH.EV_CALLOUTS_CHANGED, () => this.#restaleAll(RESTALE_MS));
 		this.restaleTimer = null;
 		this.allTimer = null;
+		// A pinned app (`pin=top|bottom`, shared/app-pin.js) follows every
+		// scroll, not only CodeMirror's viewport changes.
+		this.hasPins = false;
+		this.onScroll = () => { if (this.hasPins) this.#schedule(); };
+		view.scrollDOM.addEventListener('scroll', this.onScroll, { passive: true });
 		this.#sync();
 	}
 
@@ -122,6 +131,7 @@ class FrameLayer {
 	destroy() {
 		window.removeEventListener('message', this.onMessage);
 		window.removeEventListener('pointermove', this.onPointerMove);
+		this.view.scrollDOM.removeEventListener('scroll', this.onScroll);
 		this.offFile?.();
 		this.offKv?.();
 		this.offTheme?.();
@@ -163,7 +173,9 @@ class FrameLayer {
 			record.ordinal = n;
 			record.from = c.from;
 			record.line = state.doc.lineAt(c.from).number;
+			record.pin = kind === 'app' ? pinOf(frameText(c, state.doc)) : null;
 		}
+		this.hasPins = [...this.records.values()].some((r) => r.pin);
 		for (const [id, record] of this.records) {
 			if (!seen.has(id)) {
 				if (record.iframe) retire(record.iframe);   // a PDF edit still saving keeps it, hidden
@@ -196,6 +208,23 @@ class FrameLayer {
 				onScreen: r.bottom > screen.top - 200 && r.top < screen.bottom + 200,
 			});
 		}
+		// The visible span, in the layer's coordinates — where a pinned app
+		// is held — and, for a pinned app whose block CodeMirror has not
+		// drawn (far below a bottom pin, far above a top one), its place from
+		// the height map, sized as it was last seen.
+		out.view = { top: screen.top - base.top, bottom: screen.bottom - base.top };
+		out.estimates = new Map();
+		const sample = [...out.values()][0];
+		const content = this.view.contentDOM.getBoundingClientRect();
+		for (const record of this.records.values()) {
+			if (!record.pin || out.has(record.id) || record.from === undefined || record.from > this.view.state.doc.length) continue;
+			const block = this.view.lineBlockAt(record.from);
+			const like = record.lastPlace ?? sample ?? { left: content.left - base.left + 24, width: content.width - 48 };
+			out.estimates.set(record.id, {
+				top: this.view.documentTop + block.top + EDGE - base.top, left: like.left, width: like.width,
+				height: record.lastPlace?.height ?? record.height ?? defaultHeight(record.kind), onScreen: false,
+			});
+		}
 		// How far every record is from the viewport, in screens — the height
 		// map knows where undrawn blocks are, which the DOM cannot say.
 		const { scrollTop, clientHeight } = this.view.scrollDOM;
@@ -213,18 +242,28 @@ class FrameLayer {
 	#write(measured) {
 		const now = performance.now();
 		for (const [id, record] of this.records) {
-			const place = measured.get(id);
-			if (!place) {
+			const drawn = measured.get(id);
+			const place = drawn ?? measured.estimates?.get(id);
+			// Held at an edge (pin=top|bottom) while its place is out of view
+			// there: only `top` changes — the frame never moves in the DOM.
+			const at = record.pin && place && measured.view
+				? pinnedTop({ top: place.top, height: place.height, viewTop: measured.view.top, viewBottom: measured.view.bottom, pin: record.pin })
+				: { top: place?.top, stuck: false };
+			record.stuck = at.stuck;
+			if (!place || (!drawn && !at.stuck)) {
 				if (record.iframe) record.iframe.style.visibility = 'hidden';
 				if (record.reveal) record.reveal.style.visibility = 'hidden';
 				continue;
 			}
-			if (place.onScreen) record.lastVisible = now;
+			if (drawn) record.lastPlace = drawn;
+			if (place.onScreen || at.stuck) record.lastVisible = now;
 			if (!record.iframe && record.state === 'idle' && this.#room(measured)) this.#create(record);
 			if (record.iframe) {
+				record.iframe.classList.toggle('is-pinned', at.stuck);
+				record.iframe.dataset.pin = at.stuck ? record.pin : '';
 				Object.assign(record.iframe.style, {
 					visibility: 'visible',
-					top: `${place.top}px`,
+					top: `${at.top}px`,
 					left: `${place.left}px`,
 					width: `${place.width}px`,
 					height: `${place.height}px`,
@@ -236,7 +275,7 @@ class FrameLayer {
 				const outside = record.reveal.classList.contains('is-outside');
 				Object.assign(record.reveal.style, {
 					visibility: 'visible',
-					top: `${place.top + (outside ? 0 : 6)}px`,
+					top: `${at.top + (outside ? 0 : 6)}px`,
 					left: `${place.left + place.width + (outside ? 6 : -6)}px`,
 				});
 			}
@@ -256,7 +295,7 @@ class FrameLayer {
 		const cap = this.config.frameCap ?? 16;
 		const alive = [...this.records.values()].filter((r) => r.iframe || r.state === 'posting');
 		if (alive.length < cap) return true;
-		const rank = (r) => (!measured.has(r.id) ? 0 : measured.get(r.id).onScreen ? 2 : 1);
+		const rank = (r) => (r.stuck ? 2 : !measured.has(r.id) ? 0 : measured.get(r.id).onScreen ? 2 : 1);
 		// A pinned frame within three screens is kept (plan §7.1): coming
 		// back to a map must not find it reset.
 		const protectedPin = (r) => r.pinned && (this.screens?.get(r.id) ?? 0) <= 3;
@@ -473,6 +512,16 @@ class FrameLayer {
 		this.restaleTimer = setTimeout(() => this.#restale(), RESTALE_MS);
 	}
 
+	/** Room kept clear at each edge for the pinned apps (scrollMargins). */
+	margins() {
+		const out = { top: 0, bottom: 0 };
+		for (const r of this.records.values()) {
+			if (!r.pin || !r.iframe) continue;
+			out[r.pin] += (r.lastPlace?.height ?? r.height ?? 0) + 8;
+		}
+		return out.top || out.bottom ? out : null;
+	}
+
 	/** The note's citation keys, from its header (the top of the note). */
 	#citationKeys() {
 		const doc = this.view.state.doc;
@@ -507,4 +556,8 @@ class FrameLayer {
 	}
 }
 
-export const frameLayer = ViewPlugin.fromClass(FrameLayer);
+export const frameLayer = ViewPlugin.fromClass(FrameLayer, {
+	// A pinned app takes a band at its edge: the cursor is scrolled clear of
+	// it, never left under it.
+	provide: (plugin) => EditorView.scrollMargins.of((view) => view.plugin(plugin)?.margins() ?? null),
+});

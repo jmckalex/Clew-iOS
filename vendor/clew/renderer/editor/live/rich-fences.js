@@ -34,9 +34,10 @@ export const RICH_DIRECTIVES = new Set([
 	'TiKZ', 'tikz', 'mermaid', 'game', 'Mathematica', 'markdown-demo',
 ]);
 
-/** `@begin(name)` environments the engine renders richly. */
+/** `@begin(name)` environments the engine renders richly — `app` the block
+ *  form of `@app+[…]` (the inline `@app[…]` mid-sentence stays a chip). */
 export const RICH_ENVIRONMENTS = new Set([
-	'TiKZ', 'tikz', 'tikzpicture', 'metapost', 'mermaid', 'reveal', 'tabbing',
+	'TiKZ', 'tikz', 'tikzpicture', 'metapost', 'mermaid', 'reveal', 'tabbing', 'app',
 ]);
 
 /**

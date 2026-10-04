@@ -32,7 +32,7 @@ Every style of the dialect: *strong*, **intense**, /italic/,
 __underline__, ==highlighted==, ~struck~, H_2O and x^{10}, `code`, and
 maths $e^{i\pi} + 1 = 0$ typeset in place. Links follow on a click —
 [[Welcome]], [[Callouts|an aliased link]], [a web link](https://jmckalex.org)
-— and *⌥-click* puts the cursor in one instead; hover one to peek at it. Put the cursor in a formula and its source shows, with the rendering beside it as you type. A cross-reference like @cref[thm-main] in [[Math and Theorems]] shows the number it will print, jumps on a click and previews on a hover. Tags like #guide open a
+— and *⌥-click* puts the cursor in one instead; hover one to peek at it. Put the cursor in a formula and its source shows, with the rendering beside it as you type. A cross-reference like @cref[eq-pythagoras] — the numbered equation under *Blocks* below — shows the number it will print, jumps on a click and previews on a hover ([[Math and Theorems]] has more). Tags like #guide open a
 search. A footnote becomes its number,[fn: Hover the number to read it.] however long it is.[^long: A note can run to several paragraphs.
 
 - It can hold a list,
@@ -67,7 +67,7 @@ Term:: a description-list term is set in bold.
 | :--- | :---: | ---: |
 | *table* | a real table | click a cell and type |
 | `$$…$$` | typeset | click it |
-| mermaid | drawn by the engine | click the strip above it |
+| mermaid | drawn by the engine | hover it, click *Edit source* |
 
 A table stays a table while you edit it: click a cell and type, *Tab* and
 *Enter* walk the cells (and add a row at the end), right-click for rows,
@@ -85,9 +85,13 @@ every row is an ordinary one.
 | Venus | 0.72 AU |
 
 $$
-\newcommand{\half}{\tfrac{1}{2}}
+\newcommand{\half}{\frac{1}{2}}
 \int_0^1 x \, dx = \half
 $$
+
+@begin(equation){#eq-pythagoras}
+a^2 + b^2 = c^2
+@end(equation)
 
 ***
 
@@ -118,8 +122,10 @@ body is ordinary markdown, so typing in it keeps the frame.
 
 Engine-rendered blocks — the mermaid diagram above, the embed just there,
 queries, maps, PDFs — are the engine's own rendering in a small frame,
-exactly what reading mode shows, refusals included. Click the thin strip
-above one to edit its source.
+exactly what reading mode shows, refusals included. Hover one and its
+*Edit source* icon appears at the upper-right corner: click it, or move
+into the block with the arrow keys, to edit its source. A click on the
+drawing itself is the drawing's — a map pans, a board drags.
 
 ## The toolbar
 

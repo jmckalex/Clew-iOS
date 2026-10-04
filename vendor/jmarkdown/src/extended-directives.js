@@ -109,7 +109,8 @@ function directiveRenderer(token) {
     let elem = `<${tagname}`;
     
     if (attrs) {
-        elem += ' ' + attrs.toString();
+        // Escaped: a quote in a value must not end its attribute.
+        elem += ' ' + attributesHTML(attrs);
     }
     
     if (isVoidElement(tagname)) {
@@ -138,6 +139,7 @@ function directiveRenderer(token) {
 }
 
 import attributesParser from 'attributes-parser';
+import { attributesHTML } from './begin-end-core.js';
 import moo from 'moo';
 
 // Lexer for parsing directive content

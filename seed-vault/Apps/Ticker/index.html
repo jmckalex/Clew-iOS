@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Stock Ticker</title>
+<style>
+	:root { color-scheme: light dark; --fg: #1d1d1f; --muted: #6e6e73; --bg: #fbfbfd; --card: #ffffff; --line: #d8d8de;
+		--accent: #6c5ce7; --up: #1a7f37; --down: #cf222e; --tape: #101418; --tape-fg: #f2f2f2; }
+	body[data-theme="dark"] { --fg: #e6e6ea; --muted: #9a9aa3; --bg: #1e1e22; --card: #26262b; --line: #3a3a42;
+		--accent: #9d8cff; --up: #3fb950; --down: #ff6b61; --tape: #0b0d10; --tape-fg: #f2f2f2; }
+	/* The tape is dark in both themes, as on a trading floor; its colours stay readable on it. */
+	.tape { --up: #3fb950; --down: #ff6b61; }
+	html, body { margin: 0; }
+	body { font: 15px/1.4 -apple-system, "Segoe UI", system-ui, sans-serif; color: var(--fg); background: var(--bg);
+		padding: 10px; box-sizing: border-box; display: flex; flex-direction: column; gap: 8px; }
+	.tape { position: relative; overflow: hidden; background: var(--tape); color: var(--tape-fg); border-radius: 8px;
+		height: 52px; display: flex; align-items: center;
+		font: 600 20px/1 ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+	.tape::before, .tape::after { content: ""; position: absolute; top: 0; bottom: 0; width: 28px; z-index: 1; pointer-events: none; }
+	.tape::before { left: 0; background: linear-gradient(to right, var(--tape), transparent); }
+	.tape::after { right: 0; background: linear-gradient(to left, var(--tape), transparent); }
+	.track { display: flex; white-space: nowrap; will-change: transform; }
+	.item { padding: 0 22px; display: inline-flex; gap: 10px; align-items: baseline; }
+	.sym { color: #ffd166; letter-spacing: 0.04em; }
+	.chg { font-size: 16px; }
+	.up { color: var(--up); } .down { color: var(--down); } .flat { color: #b0b0b8; }
+	.tape.static .track { flex-wrap: wrap; white-space: normal; transform: none !important; padding: 4px 0; }
+	.tape.static { height: auto; min-height: 52px; }
+	.bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+	button, .switch { font: inherit; min-height: 44px; min-width: 44px; border: 1px solid var(--line); background: var(--card);
+		color: var(--fg); border-radius: 8px; padding: 0 14px; cursor: pointer; }
+	.switch { display: inline-flex; align-items: center; gap: 8px; }
+	.switch input { width: 20px; height: 20px; margin: 0; accent-color: var(--accent); }
+	#status { color: var(--muted); font-size: 13px; flex: 1 1 12em; }
+	#watch { display: none; flex-wrap: wrap; gap: 6px; }
+	#watch.open { display: flex; }
+	#watch label { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 10px;
+		border: 1px solid var(--line); border-radius: 22px; background: var(--card); cursor: pointer; }
+	#watch input { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); }
+</style>
+</head>
+<body>
+	<div class="tape" id="tape" aria-label="Ticker"><div class="track" id="track"></div></div>
+	<div class="bar">
+		<button id="pause" type="button" aria-pressed="false">Pause</button>
+		<button id="watchBtn" type="button" aria-expanded="false">Watchlist</button>
+		<label class="switch"><input id="live" type="checkbox"> Live ECB rates</label>
+		<span id="status" role="status">Waiting for permission…</span>
+	</div>
+	<div id="watch" aria-label="Watchlist"></div>
+	<script src="app.js"></script>
+</body>
+</html>

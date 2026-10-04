@@ -1,0 +1,7 @@
+{
+	"id": "replicator-lab",
+	"name": "Replicator Dynamics Lab",
+	"version": "1.0.0",
+	"entry": "index.html",
+	"capabilities": ["editor.insert"]
+}

@@ -28,7 +28,7 @@ import { effectiveAccess } from './vault-trust.js';
 import { readVaultRequests } from './vault-requests.js';
 import { dropSession as dropAppsOf } from './app-registry.js';
 import { CH } from '../shared/channels.js';
-import { watchVaultCallouts } from './callout-types.js';
+import { watchVaultCallouts } from './callout-files.js';
 
 const byWebContents = new Map(); // webContents.id -> session
 const byId = new Map(); // session id -> session

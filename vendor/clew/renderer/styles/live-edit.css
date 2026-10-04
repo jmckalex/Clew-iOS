@@ -302,6 +302,11 @@
    showed a dark slab over the editor). */
 body[data-theme='dark'] .le-frame { color-scheme: dark; }
 body[data-theme='light'] .le-frame { color-scheme: light; }
+/* A pinned app held at an edge (pin=top|bottom, shared/app-pin.js): over the
+   text, so the editor's own ground behind it and a soft edge towards the text. */
+.le-frame.is-pinned { z-index: 2; background: var(--clew-bg-primary); border-radius: 6px; }
+.le-frame.is-pinned[data-pin='bottom'] { box-shadow: 0 -10px 18px -10px rgba(0, 0, 0, 0.45); }
+.le-frame.is-pinned[data-pin='top'] { box-shadow: 0 10px 18px -10px rgba(0, 0, 0, 0.45); }
 .le-frame-slot { padding: 0 24px; }
 /* A spacer: nothing to hover, nothing to click (frames.js). */
 .le-frame-edge { height: 6px; }

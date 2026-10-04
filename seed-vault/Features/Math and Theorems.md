@@ -1,5 +1,6 @@
 ---
 Headings: numeric
+Packages: amssymb
 ---
 # Math and Theorems
 

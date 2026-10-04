@@ -13,8 +13,9 @@
 //   - THE PROMPT, on the first open of a vault on this device that contains
 //     something that would run (main/vault-code.js — its scripts, its own
 //     plugins, notes with code, what its settings ask for): "This vault
-//     contains code: … Trust this vault on this Mac?" with a Details
-//     disclosure naming the files, and — only when the vault asks for it —
+//     contains code: … Trust this vault on this Mac?" (or this iPad, … —
+//     lib/device-name.js) with a Details disclosure naming the files,
+//     and — only when the vault asks for it —
 //     "Let its scripts reach the internet", off. A vault with nothing to run
 //     never asks (the owner's decision 10). Trust reloads the window
 //     (ipc.js VAULT_TRUST_SET); Keep restricted records the answer.
@@ -31,9 +32,7 @@
 import { ipc, CH } from './ipc.js';
 import { fromPreviewOrigin } from '../shared/message-guard.js';
 import { openSettings } from './commands/actions.js';
-
-const MAC = navigator.platform.startsWith('Mac');
-const DEVICE = MAC ? 'this Mac' : 'this computer';
+import { DEVICE } from './lib/device-name.js';
 
 let trusted = true;
 let decided = true;
@@ -200,7 +199,10 @@ function drawPrompt(s) {
 		}
 	});
 	document.body.append(sheet);
-	yes.focus();
+	// The question has focus, not "Trust": a key typed as it appears must
+	// not answer it (app-host.js#drawPrompt, measured 2026-10-04).
+	card.tabIndex = -1;
+	card.focus();
 }
 
 async function openPrompt() {

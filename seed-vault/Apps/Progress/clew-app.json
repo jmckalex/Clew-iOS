@@ -1,0 +1,7 @@
+{
+	"id": "writing-progress",
+	"name": "Writing Progress",
+	"version": "1.0.0",
+	"entry": "index.html",
+	"capabilities": ["note.read", "app.kv"]
+}

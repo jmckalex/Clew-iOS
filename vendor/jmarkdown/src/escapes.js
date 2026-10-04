@@ -19,6 +19,7 @@
 */
 
 import { escapeTexText } from './latex-escape.js';
+import { registerExtension } from './utils.js';
 
 export const escapedCharacters = {
 	name: 'escape',
@@ -28,3 +29,28 @@ export const escapedCharacters = {
 		return false;
 	},
 };
+
+/*
+	An image's alt text is written into an attribute, and marked (v16) writes
+	it UNESCAPED: `![a "quoted" word](x.png)` gave alt="a "quoted" word" —
+	the attribute ended at the second quote and the rest became attributes of
+	their own (`![a" onerror="…](x.png)` an event handler). The alt is escaped
+	here, once, and marked's own renderer does the rest (src cleaning, title,
+	which it already escapes). HTML only: in LaTeX this declines, and the LaTeX
+	renderer's image() runs as before. Registered here, on both instances,
+	since index.js imports this module.
+*/
+const escapeAttribute = (s) => String(s)
+	.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+	.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+export const imageAltText = {
+	name: 'image',
+	renderer(token) {
+		if (global.isLatex) return false;
+		const alt = token.tokens ? this.parser.parseInline(token.tokens, this.parser.textRenderer) : token.text;
+		return this.parser.renderer.image({ ...token, tokens: null, text: escapeAttribute(alt) });
+	},
+};
+
+registerExtension(imageAltText);

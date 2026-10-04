@@ -295,6 +295,14 @@ clew-app-embed[data-static] > .clew-app-label { position: static; }
 	border-radius: 6px;
 	overflow: hidden;
 }
+.clew-app-holder.is-pinned {
+	/* Pinned at an edge (pin=top|bottom): over the note's text, so the page's
+	   own ground behind it and a soft edge towards the text. */
+	z-index: 3;
+	background: var(--preview-bg);
+}
+.clew-app-holder.is-pinned[data-pin='bottom'] { box-shadow: 0 -10px 18px -10px rgba(0, 0, 0, 0.45); }
+.clew-app-holder.is-pinned[data-pin='top'] { box-shadow: 0 10px 18px -10px rgba(0, 0, 0, 0.45); }
 .clew-app-holder > iframe.clew-app-frame {
 	display: block;
 	width: 100%;

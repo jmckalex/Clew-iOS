@@ -83,7 +83,7 @@ export const paths = app.isPackaged
 		// enabling stays per-vault (main/plugins.js).
 		globalPlugins: path.join(app.getPath('userData'), 'plugins'),
 		// Font Awesome's icons as one table, for custom callout types
-		// (main/callout-types.js; written by scripts/build.js) — inside the
+		// (main/callout-files.js; written by scripts/build.js) — inside the
 		// asar, which main's fs reads like a folder.
 		faIcons: path.join(distDir, 'main', 'fa-icons.json'),
 		...trustPaths(),

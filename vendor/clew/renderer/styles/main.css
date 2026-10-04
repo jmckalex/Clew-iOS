@@ -207,6 +207,7 @@ button {
 	font-size: 13.5px;
 	line-height: 1.45;
 }
+.clew-trust-card:focus { outline: none; }   /* focused so no button is */
 .clew-trust-card h2 { margin: 0 0 8px; font-size: 16px; }
 .clew-trust-card p { margin: 0 0 8px; }
 .clew-trust-why { color: var(--clew-text-muted); }

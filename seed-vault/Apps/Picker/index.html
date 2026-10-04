@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Seminar Picker</title>
+<style>
+	:root { color-scheme: light dark; --fg: #1d1d1f; --muted: #6e6e73; --bg: #fbfbfd; --card: #ffffff; --line: #d8d8de; --accent: #6c5ce7; }
+	body[data-theme="dark"] { --fg: #e6e6ea; --muted: #9a9aa3; --bg: #1e1e22; --card: #26262b; --line: #3a3a42; --accent: #9d8cff; }
+	html, body { margin: 0; }
+	body { font: 15px/1.4 -apple-system, "Segoe UI", system-ui, sans-serif; color: var(--fg); background: var(--bg);
+		padding: 10px; box-sizing: border-box; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; justify-content: center; }
+	.wheel { position: relative; width: 260px; height: 260px; flex: none; }
+	canvas { width: 260px; height: 260px; display: block; }
+	.pointer { position: absolute; left: 50%; top: -4px; transform: translateX(-50%); width: 0; height: 0;
+		border-left: 12px solid transparent; border-right: 12px solid transparent; border-top: 22px solid var(--fg); }
+	.side { display: flex; flex-direction: column; gap: 10px; min-width: 12em; align-items: flex-start; }
+	#name { font-size: 28px; font-weight: 700; min-height: 1.3em; margin: 0; }
+	#status { color: var(--muted); font-size: 13px; margin: 0; max-width: 18em; }
+	.bar { display: flex; gap: 8px; flex-wrap: wrap; }
+	button { font: inherit; min-height: 44px; min-width: 44px; border: 1px solid var(--line); background: var(--card);
+		color: var(--fg); border-radius: 8px; padding: 0 16px; cursor: pointer; }
+	button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+	button:disabled { opacity: 0.4; cursor: default; }
+</style>
+</head>
+<body>
+	<div class="wheel"><canvas id="wheel" width="520" height="520" aria-label="Wheel of names"></canvas><div class="pointer"></div></div>
+	<div class="side">
+		<p id="name" aria-live="polite"></p>
+		<div class="bar">
+			<button id="spin" class="primary" type="button" disabled>Spin</button>
+			<button id="copy" type="button" disabled>Copy name</button>
+			<button id="reset" type="button" disabled>Reset turns</button>
+		</div>
+		<p id="status" role="status">Waiting for permission…</p>
+	</div>
+	<script src="app.js"></script>
+</body>
+</html>

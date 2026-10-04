@@ -10,14 +10,22 @@ embedded with one line:
 @app+[Apps/Flashcards]{height=300}
 
 That is a real app: it reads the questions and answers at the bottom of
-this note, and keeps its best score.
+this note, and keeps its best score. Six more — a stock ticker, a
+replicator-dynamics lab, a seminar picker, a lecture timer, a word count and
+a reading list — are in the [[App Gallery]], each with what it asks for.
 
 ## The embed
 
 `@app[Apps/Flashcards]` inline, `@app+[Apps/Flashcards]` as a block, or
 `@begin(app)` … `@end(app)`. Options: `width`, `height` (a bare number is
 pixels; the default box is the note's width and 320px tall), `aspect`
-(quote it: `aspect="16/9"`), `style` and `class`. Clew says so in the note,
+(quote it: `aspect="16/9"`), `style`, `class`, and `pin=top` or
+`pin=bottom`: the app stays at that edge of the pane while its place is out
+of view there — a bottom pin while you read above it, a top pin once you
+have scrolled past — like the ticker along the bottom of the [[App
+Gallery]]. In Live edit the two block forms run in place (the cursor on
+their line shows the source); an inline `@app[…]` inside a sentence shows
+as a chip. Clew says so in the note,
 by name, when the target is not a folder, has no `clew-app.json`, has a
 manifest it cannot read, climbs out of the vault, or is a URL (remote apps
 are not supported yet).

@@ -160,12 +160,37 @@ function resolveTag(name, override, policy, isBlock = true) {
 	return name.includes('-') ? name : 'div';
 }
 
+// An attributes-parser result as HTML attributes. Its own toString() writes a
+// string value exactly as it stands, so a value holding a double quote —
+// {title='say "hi"'} — ended its attribute early and spilled the rest into the
+// tag as attributes of their own. This is that serializer with `&` and `"`
+// escaped (an object value, written as JSON, is double-quoted the same way);
+// for every ordinary value the HTML is what it was. A plain string (an
+// already-built attribute string) passes through.
+export function attributesHTML(attrs) {
+	if (!attrs) return '';
+	if (typeof attrs === 'string') return attrs.trim();
+	const escape = (v) => String(v).replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+	const out = [];
+	for (const key in attrs) {
+		const value = attrs[key];
+		switch (typeof value) {
+		case 'object': out.push(`${key}="${escape(JSON.stringify(value))}"`); break;
+		case 'string': out.push(`${key}="${escape(value)}"`); break;
+		case 'number':
+		case 'boolean': out.push(`${key}=${value}`); break;
+		default: break;
+		}
+	}
+	return out.join(' ');
+}
+
 // Render a generic environment to HTML as either <div class="name"> or a custom
 // element <name>. The optional [text] is exposed as a data-label attribute.
 function renderGenericHTML(name, attrs, text, inner, override, policy) {
 	const tag = resolveTag(name, override, policy);
 	const label = text ? ` data-label="${String(text).replace(/"/g, '&quot;')}"` : '';
-	let attrStr = attrs ? String(attrs).trim() : '';
+	let attrStr = attributesHTML(attrs);
 
 	if (tag === 'div') {
 		// The name becomes a class; merge into any author-supplied class rather
@@ -412,7 +437,7 @@ const RE_AT_BLOCK_ARG   = /^[ \t]*@(\.|<)?([A-Za-z][\w-]*)>?\+(?:\(([^)\n]*)\))?
 // twin of renderGenericHTML's div/element rule.
 function renderGenericInlineHTML(name, attrs, inner, override, policy) {
 	const tag = resolveTag(name, override, policy, false);   // 'div' marks the class case; inline skips the block-element list
-	const attrStr = attrs ? String(attrs).trim() : '';
+	const attrStr = attributesHTML(attrs);
 	const a = attrStr ? ' ' + attrStr : '';
 	if (tag === 'div') return `<span class="${name}"${a}>${inner}</span>`;
 	return `<${tag}${a}>${inner}</${tag}>`;

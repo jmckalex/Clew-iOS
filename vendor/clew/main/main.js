@@ -30,6 +30,7 @@ import { paths } from './paths.js';
 import { prepareNoteFonts } from './note-fonts.js';
 import { assetStamp, stampChanged } from './asset-stamp.js';
 import { staleSources } from './build-stamp.js';
+import { listenForLinks, onSecondInstance, startDeepLinks } from './deep-link-host.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.dirname(__dirname); // dist/
@@ -46,6 +47,19 @@ registerPreviewScheme();
 // runs only in canvas-web-node <webview> guests (separate processes), and
 // SAB matters for cross-origin data mainly as a Spectre timer amplifier.
 app.commandLine.appendSwitch('enable-features', 'SharedArrayBuffer');
+
+// One process per profile (keyed by the userData folder, which paths.js has
+// set by now — so smoke runs, each with its own, never collide): a second
+// launch — a clew:// link on Windows and Linux, the app started twice —
+// hands its command line to this one and goes (deep-link-host.js).
+if (!app.requestSingleInstanceLock()) app.exit(0);
+app.on('second-instance', (_event, argv) => {
+	onSecondInstance(argv);
+	const s = focusedSession();
+	if (s?.win && !s.win.isDestroyed() && !process.env.CLEW_SMOKE) { s.win.show(); s.win.focus(); }
+});
+// A link that opened the app arrives before ready (macOS `open-url`).
+listenForLinks();
 
 let quitting = false;
 const windowOrder = []; // creation order, for the smoke hook
@@ -426,6 +440,9 @@ app.whenReady().then(async () => {
 		createWindow(process.env.CLEW_SMOKE_VAULT);
 		// Only ever against a LOOPBACK feed here (updater.js#checkAllowed).
 		startUpdateChecks();
+		// Links given on the command line; the `clew` command only with a
+		// socket the scenario names (CLEW_CLI_SOCKET).
+		startDeepLinks({ openVaultAnywhere, root: rootDir });
 		return;
 	}
 
@@ -441,6 +458,8 @@ app.whenReady().then(async () => {
 	else for (const vaultPath of toOpen) createWindow(vaultPath);
 	// The daily update check: packaged builds only (updater.js).
 	startUpdateChecks();
+	// clew:// links and the `clew` command, once the restored windows exist.
+	startDeepLinks({ openVaultAnywhere, root: rootDir });
 
 	app.on('activate', () => {
 		if (BrowserWindow.getAllWindows().length === 0) createWindow(null);
@@ -674,16 +693,32 @@ if (process.env.CLEW_SMOKE) {
 							// The selector also reaches into open shadow roots: the
 							// PDF viewer draws its UI in one.
 							const { match, selector } = ev.frameClick;
-							const frame = primary.webContents.mainFrame.framesInSubtree.find((f) =>
-								f.url.startsWith('clew-preview:') && f.url.includes(match) && f.parent === primary.webContents.mainFrame);
+							// A preview frame on the page, or — when none matches — a
+							// frame at ANY depth (an app's clew-frame:// inside a note's
+							// frame), placed by adding each ancestor iframe's box.
+							const top = primary.webContents.mainFrame;
+							const frame = top.framesInSubtree.find((f) =>
+								f.url.startsWith('clew-preview:') && f.url.includes(match) && f.parent === top)
+								?? top.framesInSubtree.find((f) => f !== top && /^clew-(preview|frame):/.test(f.url) && f.url.includes(match));
 							const inner = frame && await frame.executeJavaScript(`(() => {
 								const deep = (root) => root.querySelector(${JSON.stringify(selector)})
 									?? [...root.querySelectorAll('*')].reduce((hit, el) => hit ?? (el.shadowRoot ? deep(el.shadowRoot) : null), null);
 								const r = deep(document)?.getBoundingClientRect();
 								return r ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null; })()`);
-							const outer = inner && await primary.webContents.executeJavaScript(`(() => {
-								const f = [...document.querySelectorAll('iframe')].find((el) => el.offsetParent && (el.src || '').includes(${JSON.stringify(match)}));
-								const r = f?.getBoundingClientRect(); return r ? { x: r.left, y: r.top } : null; })()`);
+							let outer = inner ? { x: 0, y: 0 } : null;
+							for (let child = frame; outer && child && child !== top; child = child.parent) {
+								// The iframe holding `child` in its parent: by its URL (sans
+								// hash), else — the page's own preview frames — by `match`.
+								const box = await child.parent.executeJavaScript(`(() => {
+									const want = ${JSON.stringify(child.url.split('#')[0])};
+									const frames = [...document.querySelectorAll('iframe')].filter((el) => el.offsetParent);
+									const f = frames.find((el) => (el.src || '').split('#')[0] === want)
+										?? frames.find((el) => (el.src || '').includes(${JSON.stringify(match)}));
+									if (!f) return null;
+									const r = f.getBoundingClientRect();
+									return { x: r.left + f.clientLeft, y: r.top + f.clientTop }; })()`);
+								outer = box ? { x: outer.x + box.x, y: outer.y + box.y } : null;
+							}
 							if (!inner || !outer) {
 								console.log(`smoke: frameClick found no ${selector} in a frame matching ${match}`);
 								continue;

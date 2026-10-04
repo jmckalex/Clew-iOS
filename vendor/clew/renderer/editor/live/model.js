@@ -546,6 +546,13 @@ function build(doc, tree, config) {
 					add('richBlock', 'C', 'block', s.start, s.end, { source: 'directiveAt', name });
 					break;
 				}
+				// An app embed on a line of its own (`@app+[Apps/X]{…}`) is the
+				// app, in a frame: until 2026-10-04 it was drawn as a chip and
+				// the app never ran in live edit.
+				if (s.kind === 'directiveAt' && name === 'app' && alone(s.start, s.end)) {
+					add('richBlock', 'C', 'block', s.start, s.end, { source: 'directiveAt', name });
+					break;
+				}
 				add(s.kind, 'A', 'inline', s.start, s.end, {
 					name, content: r(s.content), attrs: r(s.attrs), block: s.block,
 					hidden: directiveHidden(s),

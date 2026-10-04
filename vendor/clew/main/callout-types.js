@@ -17,94 +17,50 @@
 // (CALLOUTS_RESOLVED) each get only finished entries — label, colour, icon
 // PATH — and neither ever loads the table.
 //
-// The table (paths.faIcons, ~1.9 MB) is read the first time a definition
-// exists, and never when none does: a vault with no custom types costs
-// nothing at render time. Electron-free; the caller passes the file.
-import fs from 'node:fs';
+// SHAREABLE (Clew-iOS runs it in a page with no Node): no Node built-in, no
+// `process`, nothing read from disk. The caller hands in the icon table, or
+// a function returning it that is called the first time a definition exists
+// and never when none does — a vault with no custom types costs nothing at
+// render time. The desktop's disk side (the table read from paths.faIcons,
+// the watch on a vault's own file) is callout-files.js; a host that fetches
+// the table asks hasCustomCallouts first and fetches only then.
 import { resolveCallouts } from '#jmarkdown/callout-definitions.js';
 import { BUILTIN_CALLOUT_TYPES } from '#jmarkdown/callout-table.js';
 
-let table = null;
-
-/** The icon table, `{ version, icons: { 'solid:pencil': [w, h, d], … } }`. */
-export function iconTable(file) {
-	if (table) return table;
-	try {
-		table = JSON.parse(fs.readFileSync(file, 'utf8'));
-	} catch (err) {
-		// A build without it (scripts/build.js writes it): every icon a
-		// definition names is then reported missing, by name, in Settings.
-		console.warn(`[clew] no icon table at ${file}: ${err.message}`);
-		table = { version: null, icons: {} };
-	}
-	if (process.env.CLEW_SMOKE) console.log(`smoke-callouts: icon table loaded (${Object.keys(table.icons).length} icons)`);
-	return table;
-}
-
 const isEmpty = (list) => list == null || (Array.isArray(list) && list.length === 0);
+
+/** Whether either list defines anything: if not, nothing needs the table. */
+export const hasCustomCallouts = (globalList, vaultList) => !(isEmpty(globalList) && isEmpty(vaultList));
+
 let last = { key: null, result: null };
 
 /**
  * Both scopes merged: `{ custom, problems }` (resolveCallouts). Memoised on
- * the two lists, because every worker spawn asks.
+ * the two lists, because every worker spawn asks — so a process passes ONE
+ * table.
+ *
+ * @param {unknown} globalList - clew-settings.json's `callouts`
+ * @param {unknown} vaultList - the vault's `callouts`
+ * @param {{ icons?: object } | (() => { icons?: object }) | null} icons - the
+ *   icon table `{ version, icons }`, or a function returning it
  */
-export function resolvedCallouts(globalList, vaultList, file) {
-	if (isEmpty(globalList) && isEmpty(vaultList)) return { custom: {}, problems: [] };
+export function resolvedCallouts(globalList, vaultList, icons) {
+	if (!hasCustomCallouts(globalList, vaultList)) return { custom: {}, problems: [] };
 	const key = JSON.stringify([globalList ?? null, vaultList ?? null]);
 	if (key === last.key) return last.result;
+	const table = typeof icons === 'function' ? icons() : icons;
 	const result = resolveCallouts({
 		builtins: BUILTIN_CALLOUT_TYPES,
 		global: globalList ?? [],
 		vault: vaultList ?? [],
-		iconTable: iconTable(file).icons,
+		iconTable: table?.icons ?? {},
 	});
 	last = { key, result };
 	return result;
 }
 
 /** The worker's CLEW_CALLOUTS: the resolved entries, or '' for none. */
-export function calloutsEnv(globalList, vaultList, file) {
-	const { custom } = resolvedCallouts(globalList, vaultList, file);
+export function calloutsEnv(globalList, vaultList, icons) {
+	const { custom } = resolvedCallouts(globalList, vaultList, icons);
 	return Object.keys(custom).length ? JSON.stringify(custom) : '';
-}
-
-/**
- * Follow a HAND edit of `<vault>/.clew/vault-settings.json`'s `callouts`
- * (the watcher never sees `.clew/`): `onChange(list)` when the list read
- * from disk differs from `current()`. Clew's own writes go through
- * VAULT_SETTINGS_SET, which updates what `current()` answers first, so they
- * come back here as no change. The folder is watched, not the file — an
- * editor that saves by rename would leave a file watch on the old inode.
- *
- * @returns {() => void} stop watching
- */
-export function watchVaultCallouts(root, current, onChange) {
-	const dir = `${root}/.clew`;
-	let timer = null;
-	let watcher = null;
-	const check = () => {
-		let list;
-		try {
-			list = JSON.parse(fs.readFileSync(`${dir}/vault-settings.json`, 'utf8'))?.callouts;
-		} catch {
-			return; // mid-write, or not JSON yet: the next event reads it again
-		}
-		if (JSON.stringify(list ?? null) === JSON.stringify(current() ?? null)) return;
-		if (process.env.CLEW_SMOKE) console.log('smoke-callouts: vault file changed');
-		onChange(list);
-	};
-	try {
-		watcher = fs.watch(dir, (event, name) => {
-			if (name !== 'vault-settings.json') return;
-			clearTimeout(timer);
-			timer = setTimeout(check, 150);
-		});
-		watcher.on('error', () => {});
-	} catch {
-		// No .clew yet, or no watching here: Settings and a reopen still work.
-	}
-	return () => {
-		clearTimeout(timer);
-		watcher?.close();
-	};
 }

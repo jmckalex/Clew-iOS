@@ -1,0 +1,7 @@
+{
+	"id": "lecture-timer",
+	"name": "Lecture Timer",
+	"version": "1.0.0",
+	"entry": "index.html",
+	"capabilities": ["note.write"]
+}

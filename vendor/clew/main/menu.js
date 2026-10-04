@@ -25,6 +25,7 @@ import { CH } from '../shared/channels.js';
 import { FORMAT_MENU } from '../shared/format-spec.js';
 import { settings } from './settings.js';
 import { allSessions, focusedSession, sessionForVault } from './session.js';
+import { installCliCommand } from './deep-link-host.js';
 import { createWindow, openVaultAnywhere, openVaultDialog, createVaultDialog, openDemoVault, focusWindow } from './main.js';
 
 const isMac = process.platform === 'darwin';
@@ -415,6 +416,11 @@ class AppMenu {
 				},
 				// Asks the feed now and always answers (main/updater.js).
 				c('app:check-updates', 'Check for Updates…'),
+				// A shell shim for the `clew` command (main/deep-link-host.js).
+				{
+					label: 'Install the clew Command…',
+					click: () => installCliCommand(focusedSession()?.win ?? null),
+				},
 				{
 					// Licences have to REACH the reader to mean anything. The
 					// file ships in Resources/ (extraResources) and sits at the

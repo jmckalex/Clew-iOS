@@ -138,6 +138,10 @@ export const CH = {
 
 	// events: main → renderer
 	EV_VAULT_OPENED: 'clew:ev-vault-opened',
+	// clew:// links and the `clew` command (main/deep-link-host.js): main has
+	// something for this window to show (or a refusal to say, `notice`).
+	EV_DEEP_LINK: 'clew:ev-deep-link',
+	DEEP_LINK_TAKE: 'clew:deep-link-take',
 	// The watcher hit its descriptor budget: part of the vault is not being
 	// watched, so the explorer and previews can go stale there (vault.js).
 	EV_WATCH_CAPPED: 'clew:ev-watch-capped',

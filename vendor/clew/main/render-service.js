@@ -32,6 +32,7 @@ import { isDependentFragment } from '../shared/fragment-deps.js';
 import { citationHeader, noteBibFiles } from './citation-header.js';
 import { refusedNames } from '../shared/refused-names.js';
 import { calloutsEnv } from './callout-types.js';
+import { iconTable } from './callout-files.js';
 
 const WORKER_PATH = paths.engineWorker;
 
@@ -396,7 +397,7 @@ export class RenderService {
 				// Custom callout types, both scopes RESOLVED (callout-types.js):
 				// names, titles, colours and only the icon paths they use. Empty
 				// when none are defined — and then the icon table is never read.
-				CLEW_CALLOUTS: calloutsEnv(settings.get('callouts'), this.#vaultOptions.callouts, paths.faIcons),
+				CLEW_CALLOUTS: calloutsEnv(settings.get('callouts'), this.#vaultOptions.callouts, () => iconTable(paths.faIcons)),
 				// Engine console chatter goes to the pipes; keep them from filling.
 			},
 		});

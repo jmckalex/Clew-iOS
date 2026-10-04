@@ -25,7 +25,11 @@
 // `icon:` and `color:` are the plugin's cosmetic overrides and the
 // callout's own type styling applies instead. An `ad-` type Clew's callout
 // table does not know renders as a note titled with the raw type, which is
-// how the plugin treated user-defined types too.
+// how the plugin treated user-defined types too. An untitled fence of a
+// known type is headed by its type AS WRITTEN (`ad-hint` → Hint), as an
+// untitled `> [!type]` is: the token carries `written`, which the engine's
+// renderer hands to untitledCalloutTitle — without it the heading was empty.
+import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -33,12 +37,29 @@ import { pathToFileURL } from 'node:url';
 // instance its callout extension renders with — so an alias resolves, and a
 // custom type (CLEW_CALLOUTS) is known, exactly as for `> [!type]`. Found
 // beside the worker script (process.argv[1] is the engine's watch-worker.js,
-// in dev and packaged alike — figures.js finds highlight.js the same way);
-// the package import is the fallback for a process that is not the worker
-// (the unit tests) — `#jmarkdown/…`, as every other Clew file names the
-// engine, so Clew-iOS's own vendor layout resolves it too.
-const { resolveType } = await import(pathToFileURL(path.join(path.dirname(process.argv[1] ?? ''), 'callout-table.js')).href)
-	.catch(() => import('#jmarkdown/callout-table.js'));
+// in dev and packaged alike — figures.js finds highlight.js the same way;
+// a packaged build's engine-assets/ has no package.json, so `#jmarkdown/…`
+// names nothing there). Only when that file IS there: a worker with no
+// script on disk — Clew-iOS's WebKit module worker, argv ['node'] — asked
+// for a file: URL beside nothing, and there that import NEVER SETTLES (no
+// reject, so no fallback): the worker's module graph never finished and
+// nothing rendered at all (measured by Clew-iOS on the simulator). Every
+// other process (that worker, the unit tests) takes the package import —
+// `#jmarkdown/…`, as every other Clew file names the engine, a literal a
+// bundler resolves, and in Clew-iOS's bundle the engine's own instance.
+const besideWorker = (() => {
+	const script = globalThis.process?.argv?.[1];
+	if (!script) return null;
+	const file = path.join(path.dirname(script), 'callout-table.js');
+	try {
+		return fs.statSync(file).isFile() ? pathToFileURL(file).href : null;
+	} catch {
+		return null;
+	}
+})();
+const { resolveType } = besideWorker
+	? await import(besideWorker).catch(() => import('#jmarkdown/callout-table.js'))
+	: await import('#jmarkdown/callout-table.js');
 
 export const admonitionFence = {
 	name: 'admonitionFence',
@@ -69,6 +90,7 @@ export const admonitionFence = {
 			type: 'calloutBlock',   // callouts.js owns the rendering
 			raw: match[0],
 			calloutType: type ?? 'note',
+			written: rawType,   // the type as written, for an untitled heading
 			fold,
 			title: title || (type ? '' : rawType.charAt(0).toUpperCase() + rawType.slice(1)),
 			tokens: [],
