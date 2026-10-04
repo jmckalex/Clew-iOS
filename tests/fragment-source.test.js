@@ -12,14 +12,19 @@
 // `<key>.source` sidecar render-service leaves beside it names the note it
 // belongs to, and engine/vault-model.js#currentFilePath answers with that
 // note — so Dataview `this` in a block is the note, as in reading mode.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { currentFilePath } from '../vendor/clew/engine/vault-model.js';
 
-const root = fs.mkdtempSync(path.join(os.tmpdir(), 'clew-frag-'));
+// One temp root for this file, removed when it is done: fixtures used to
+// be left in the system's temp folder, thousands of them over the runs.
+const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'clew-frag-'));
+after(() => fs.rmSync(tmpRoot, { recursive: true, force: true }));
+
+const root = fs.mkdtempSync(path.join(tmpRoot, 'clew-frag-'));
 const dir = path.join(root, '.clew', 'cache', 'fragments');
 fs.mkdirSync(dir, { recursive: true });
 process.env.CLEW_VAULT_ROOT = root;

@@ -23,7 +23,8 @@ import { createApps } from './apps.js';
 // The ENGINE's callout modules (jmarkdown a7de8c6), the pure ones only:
 // callouts.js would pull config-manager (fs) into the app page, and
 // desktop's main/callout-types.js reads its icon table from disk.
-import { resolveCallouts, iconKey } from '../../vendor/jmarkdown/src/callout-definitions.js';
+import { iconKey } from '../../vendor/jmarkdown/src/callout-definitions.js';
+import { resolvedCallouts, hasCustomCallouts } from '../../vendor/clew/main/callout-types.js';
 import { BUILTIN_CALLOUT_TYPES } from '../../vendor/jmarkdown/src/callout-table.js';
 import fs from 'node:fs';
 import nodePath from 'node:path';
@@ -113,27 +114,17 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 		});
 		return iconTablePromise;
 	};
-	const isEmpty = (list) => list == null || (Array.isArray(list) && list.length === 0);
-	let callouts = { key: null, custom: {}, problems: [] };
-	/** Re-resolve both lists (memoised on them); the vault's is read now,
-	 *  so a hand edit of vault-settings.json is what this answers with. */
+	let callouts = { custom: {}, problems: [] };
+	/** Re-resolve both lists with desktop's own shareable merge
+	 *  (main/callout-types.js, Clew-app 17a06c5; memoised on the lists);
+	 *  the vault's is read now, so a hand edit of vault-settings.json is
+	 *  what this answers with. The icon table only when a list exists. */
 	const refreshCallouts = async () => {
 		const globalList = settings.get('callouts');
 		const vaultList = vaults.isOpen ? vaults.loadState('vault-settings.json')?.callouts : undefined;
-		const key = JSON.stringify([globalList ?? null, vaultList ?? null]);
-		if (key === callouts.key) return callouts;
-		if (isEmpty(globalList) && isEmpty(vaultList)) {
-			callouts = { key, custom: {}, problems: [] };
-			return callouts;
-		}
-		const table = await iconTable();
-		const { custom, problems } = resolveCallouts({
-			builtins: BUILTIN_CALLOUT_TYPES,
-			global: globalList ?? [],
-			vault: vaultList ?? [],
-			iconTable: table.icons ?? {},
-		});
-		callouts = { key, custom, problems };
+		const { custom, problems } = resolvedCallouts(globalList, vaultList,
+			hasCustomCallouts(globalList, vaultList) ? await iconTable() : null);
+		callouts = { custom, problems };
 		return callouts;
 	};
 	renderService.calloutsReady = () => refreshCallouts();

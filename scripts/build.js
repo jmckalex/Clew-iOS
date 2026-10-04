@@ -75,22 +75,6 @@ const enginePatches = {
 				+ '};\n';
 			return { contents: helper + source, loader: 'js' };
 		});
-		// admonitions.js finds the engine's callout table at runtime — a
-		// top-level `await import(<file: URL beside process.argv[1]>)`, the
-		// vendored mirror as the fallback (Clew-app 2f0ad5c). In a WebKit
-		// module worker that file: import NEVER SETTLES (no reject, so no
-		// fallback), the worker's module graph never finishes evaluating, and
-		// nothing renders at all — measured on the simulator; Node rejects at
-		// once, so the tests could not see it. In this bundle the engine and
-		// admonitions share one callout-table.js instance anyway: import it
-		// directly.
-		builder.onLoad({ filter: /vendor\/clew\/engine\/admonitions\.js$/ }, (args) => ({
-			contents: patched('admonitions.js', fs.readFileSync(args.path, 'utf8'),
-				"const { resolveType } = await import(pathToFileURL(path.join(path.dirname(process.argv[1] ?? ''), 'callout-table.js')).href)\n"
-				+ "\t.catch(() => import('#jmarkdown/callout-table.js'));\n",
-				"const { resolveType } = await import('#jmarkdown/callout-table.js');\n"),
-			loader: 'js',
-		}));
 		// algebra.js's expressions.js assigns `Term = function …` without a
 		// declaration — a sloppy-mode global under real Node CJS, a
 		// ReferenceError inside the (strict) bundle. Declare it.
@@ -279,15 +263,6 @@ const rendererPatches = {
 		// registry. The panel element stays in the DOM, closed (ipc.js forces
 		// `shell.open = false` on WORKSPACE_LOAD), and its xterm imports
 		// resolve to src/shim/xterm-stub.js.
-		// The trust prompt says where the decision lives: "Trust on this
-		// Mac?". iPadOS's WebKit reports itself as a Mac (navigator.platform
-		// is MacIntel, measured), so on iOS it is named for what it is.
-		builder.onLoad({ filter: /vendor\/clew\/renderer\/trust-banner\.js$/ }, (args) => ({
-			contents: patched('trust-banner.js', fs.readFileSync(args.path, 'utf8'),
-				"const DEVICE = MAC ? 'this Mac' : 'this computer';",
-				"const DEVICE = /iPhone/.test(navigator.userAgent) ? 'this iPhone' : 'this iPad';"),
-			loader: 'js',
-		}));
 		builder.onLoad({ filter: /vendor\/clew\/renderer\/commands\/builtin\.js$/ }, (args) => ({
 			contents: patched('builtin.js', fs.readFileSync(args.path, 'utf8'),
 				"\t\t{ id: 'shell:toggle', name: 'Toggle shell panel', hotkeys: ['Ctrl-`'], when: needsVault,\n"

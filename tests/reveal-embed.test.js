@@ -15,15 +15,20 @@
 // HTML file or a folder holding index.html. Everything else is refused BY
 // NAME rather than embedded blindly.
 
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { reveal, resolveTarget, frameStyle, attrsOf } from '../vendor/clew/engine/reveal-embed.js';
 
+// One temp root for this file, removed when it is done: fixtures used to
+// be left in the system's temp folder, thousands of them over the runs.
+const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'clew-reveal-'));
+after(() => fs.rmSync(tmpRoot, { recursive: true, force: true }));
+
 /** A vault with a couple of decks in it. */
-const root = fs.mkdtempSync(path.join(os.tmpdir(), 'clew-reveal-'));
+const root = fs.mkdtempSync(path.join(tmpRoot, 'clew-reveal-'));
 fs.mkdirSync(path.join(root, 'Talks/intro'), { recursive: true });
 fs.writeFileSync(path.join(root, 'Talks/intro/index.html'), '<html>deck</html>');
 fs.mkdirSync(path.join(root, 'Talks/generated'), { recursive: true });

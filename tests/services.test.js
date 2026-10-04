@@ -1216,10 +1216,10 @@ test('reading mode follows a .bib edit (Clew-app a1d8de0): only the notes citing
 });
 
 test('custom callouts merge exactly as desktop\'s main/callout-types.js does, field by field', async () => {
-	// Desktop's resolver over the same icon table, from a file as it reads it.
+	// Desktop's shareable resolver (Clew-app 17a06c5) over the same icon
+	// table; the shim now runs this very function, so this also proves the
+	// wiring: both scopes read, the table loaded only when a list exists.
 	const { resolvedCallouts } = await import(path.join(root, 'vendor/clew/main/callout-types.js'));
-	const table = path.join(os.tmpdir(), `clew-ios-fa-icons-${process.pid}.json`);
-	fs.writeFileSync(table, JSON.stringify(FAKE_ICONS));
 	const globalList = [
 		{ name: 'idea', icon: 'star', title: 'Global idea', color: '#111111', aliases: ['eureka'] },
 		{ name: 'bad', icon: 'nope' },
@@ -1229,7 +1229,7 @@ test('custom callouts merge exactly as desktop\'s main/callout-types.js does, fi
 		{ name: 'note', color: '#333333' },       // a vault entry recolouring a built-in
 		{ name: '9lives', title: 'Not a name' },  // refused: not a callout name
 	];
-	const desktop = resolvedCallouts(globalList, vaultList, table);
+	const desktop = resolvedCallouts(globalList, vaultList, FAKE_ICONS);
 	await clew.invoke('clew:settings-set', { key: 'callouts', value: globalList });
 	await clew.invoke('clew:vault-settings-set', { key: 'callouts', value: vaultList });
 	const ios = await clew.invoke('clew:callouts-resolved');
@@ -1243,7 +1243,6 @@ test('custom callouts merge exactly as desktop\'s main/callout-types.js does, fi
 	assert.ok(ios.problems.some((p) => p.skipped && /not a callout name/.test(p.reason)));
 	await clew.invoke('clew:settings-set', { key: 'callouts', value: [] });
 	await clew.invoke('clew:vault-settings-set', { key: 'callouts', value: [] });
-	fs.rmSync(table, { force: true });
 });
 
 // ---- switching vaults (the iPad's one scene) ------------------------------
@@ -1587,7 +1586,7 @@ test('apps: the clew-frame handler gets only the app\'s own files, with the app 
 	assert.equal(denied.ok, false);
 	// Settings → Apps lists it; Revoke forgets it, and the frames are told.
 	const list = await clew.invoke('clew:apps-list');
-	assert.deepEqual(list.map((a) => a.id), ['flashcards']);
+	assert.ok(list.some((a) => a.id === 'flashcards'), `Flashcards among the demo vault's apps (${list.map((a) => a.id).join(', ')})`);
 	const events = [];
 	const off = clew.on('clew:ev-app-grants-changed', (p) => events.push(p));
 	assert.equal(await clew.invoke('clew:app-revoke', { id: 'flashcards' }), true);

@@ -7,6 +7,10 @@ const shim = createClewShim();
 window.clew = shim.clew;
 window.__clewNative = shim.native;
 window.__clewShim = shim; // dev/debug access to the services
+// What the UI calls this machine — "Trust on this iPad", "every vault on
+// this iPad" (renderer lib/device-name.js reads it at load): named, not
+// guessed from a user agent that says Mac.
+window.__clewDeviceName = /iPhone|iPod/.test(navigator.userAgent) ? 'iPhone' : 'iPad';
 
 // Desktop flushes editors on window blur/beforeunload; neither fires
 // reliably in WKWebView. visibilitychange covers app backgrounding, and the

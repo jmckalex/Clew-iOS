@@ -8,12 +8,17 @@
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { listPlugins, enabledPlugins, engineExtensionEntries, previewPluginScripts } from '../vendor/clew/main/plugins.js';
+
+// One temp root for this file, removed when it is done: fixtures used to
+// be left in the system's temp folder, thousands of them over the runs.
+const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'clew-plug-'));
+after(() => fs.rmSync(tmpRoot, { recursive: true, force: true }));
 
 function writePlugins(base, plugins) {
 	for (const [id, files] of Object.entries(plugins)) {
@@ -26,14 +31,14 @@ function writePlugins(base, plugins) {
 }
 
 function vaultWith(plugins) {
-	const root = fs.mkdtempSync(path.join(os.tmpdir(), 'clew-plug-'));
+	const root = fs.mkdtempSync(path.join(tmpRoot, 'clew-plug-'));
 	writePlugins(path.join(root, '.clew', 'plugins'), plugins);
 	return root;
 }
 
 /** A stand-in for <userData>/plugins/. */
 function globalWith(plugins) {
-	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clew-gplug-'));
+	const dir = fs.mkdtempSync(path.join(tmpRoot, 'clew-gplug-'));
 	writePlugins(dir, plugins);
 	return dir;
 }

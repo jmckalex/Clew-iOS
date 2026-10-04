@@ -11,12 +11,17 @@
 // The guards on handing a file to the OS: pathFromFileUrl's parsing, and
 // planOpen's refusals. planOpen decides; ipc.js performs the shell.openPath,
 // so every security-relevant choice is pure and testable under plain node.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathFromFileUrl, planOpen } from '../vendor/clew/main/open-file.js';
+
+// One temp root for this file, removed when it is done: fixtures used to
+// be left in the system's temp folder, thousands of them over the runs.
+const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'clew-open-'));
+after(() => fs.rmSync(tmpRoot, { recursive: true, force: true }));
 
 test('file:// URLs become local paths; anything else is refused', () => {
 	assert.equal(pathFromFileUrl('file:///Users/x/paper.pdf'), '/Users/x/paper.pdf');
@@ -32,7 +37,7 @@ test('file:// URLs become local paths; anything else is refused', () => {
 
 test('refusals: missing files, escapes, and executables', () => {
 	const open = planOpen;
-	const root = fs.mkdtempSync(path.join(os.tmpdir(), 'clew-open-'));
+	const root = fs.mkdtempSync(path.join(tmpRoot, 'clew-open-'));
 	fs.writeFileSync(path.join(root, 'paper.pdf'), '%PDF-1.4\n');
 	fs.writeFileSync(path.join(root, 'macro.exe'), 'MZ');
 	fs.mkdirSync(path.join(root, 'Thing.app'));
