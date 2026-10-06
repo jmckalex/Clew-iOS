@@ -1,17 +1,40 @@
-# Handover — 2026-10-04 (the sync to Clew-app 77b0bea: the sample apps and the App Gallery)
+# Handover — 2026-10-06 (the sync to Clew-app cbfa692: book mode, origin-bound app grants, the demo vault's update)
 
 Current state for a fresh session, rewritten whole. Durable architecture
 lives in **README.md** and **PORT-PLAN.md**. Each sync's reasoning and
 measurements are in its record: `UPSTREAM-*-PLAN.md`. The latest records
-are `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-10-04),
+are `UPSTREAM-CBFA692-PLAN.md` (book mode and the demo vault's update,
+2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-10-04),
 `UPSTREAM-F3A7D5B-PLAN.md` (the sync of 2026-10-03/04),
 `UPSTREAM-03BB33A-PLAN.md` (the overnight sync of 2026-10-02),
 `UPSTREAM-18C5E45-PLAN.md` (sync #3) and `UPSTREAM-0.12.0-PLAN.md`. The coordinator's ledger is `~/Source/Clew/SYNC-LEDGER.md`.
 
 ## 1. Where things stand
 
-- **The sync to Clew-app `77b0bea` (2026-10-04) is DONE, and every
-  acceptance check was green.** The owner, relayed by Clew-boss: "Sync
+- **The sync to Clew-app `cbfa692` (2026-10-06) is DONE, and every
+  acceptance check was green.** The owner, relayed by Clew-boss: "Push
+  and sync the iOS build tonight, for sure." The chain is
+  `synccbfa692-p1-vendor` → `-p2-build` → `-p3-contract` →
+  `-p3b-demo-sync` → `-p4-verify`. The record is UPSTREAM-CBFA692-PLAN.md.
+  - **Book mode:** the Book panel, "Ch. 2 of Book", and next/previous
+    chapter port as they are. **Build is desktop only:** EXPORT_BOOK
+    refuses with a sentence.
+  - **The engine's `util`:** a worker shim (isDeepStrictEqual) for
+    book.js.
+  - **Origin-bound app network grants** (917303b, a security fix) in
+    src/shim/apps.js.
+  - **The demo vault is brought up to date on each opening**
+    (DemoSync.swift, desktop's demo-sync.js rule for rule). New demo notes
+    are added and untouched ones updated. Edits, deletions and dot paths
+    are never touched, and nothing happens outside Documents/Demo Vault.
+  - **mp-tikz-wasm v0.3.1,** staged from Clew-app's release tree.
+  - **Findings** (record §Findings): app-frame localStorage lasts one
+    launch, so the Ticker's Finnhub key is asked for once per launch. A
+    numbered equation's number is drawn twice in live edit, which
+    predates this sync.
+  - **Vendor** is at Clew-app `cbfa692`.
+- **The sync to Clew-app `77b0bea` (2026-10-04) is DONE and PUSHED
+  (210008f), and every acceptance check was green.** The owner, relayed by Clew-boss: "Sync
   the iPad with the sample apps too", then "Push it when it's all green".
   Main is fast-forwarded to `sync77b0bea-p4-verify`, and a build commit
   sits on top. The record is UPSTREAM-77B0BEA-PLAN.md.
@@ -140,7 +163,9 @@ are `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-10-04),
 
 ## 3. Next
 
-- **The next sync's range starts at Clew-app `03bb33a`.**
+- **The next sync's range starts at Clew-app `cbfa692`.**
+- **iPad checks from the cbfa692 sync:** its record's checklist (the demo
+  vault's notice, the Book grip under a finger, the Ticker asked once).
 - **iPad checks from this sync:**
   - the 44 px tab strip;
   - the mode switch under a finger;
@@ -266,6 +291,16 @@ are `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-10-04),
   - Report with `window.clew.kv.set('smoke/…')`. Results land in the
     vault's `clewdata.json`, readable from the host.
   - Remove the plugin afterwards, or uninstall the app.
+  - Since trust v2, the `plugins` list in vault-settings.json is only a
+    request. Switch the plugin on with `clew:vault-access-set {key:
+    'plugins', value: [...]}`. The note's document must be served after
+    that, so relaunch if its tab was restored at boot.
+- **App prompts come one at a time** (app-host.js's queue): click Allow
+  on whichever `.clew-app-sheet` is showing until the one you want
+  appears. The Ticker's is last in the App Gallery.
+- **An old demo copy:** install, plant the copy in
+  `Documents/Demo Vault` BEFORE the first launch, then launch
+  (UPSTREAM-CBFA692-PLAN.md).
 - **Fixtures**:
   - The app container moves on every `simctl install`: re-read
     `simctl get_app_container <sim> org.jmckalex.clew.ios data` before
