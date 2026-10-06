@@ -21,7 +21,7 @@ for (const [mod, file] of Object.entries({
 	fs: 'fs.js', path: 'path.js', url: 'url.js', crypto: 'crypto.js',
 	child_process: 'child_process.js', module: 'module.js', vm: 'vm.js',
 	os: 'os.js', stream: 'stream.js', events: 'events.js', http: 'http.js',
-	'fs/promises': 'fs-promises.js', process: 'process.js',
+	'fs/promises': 'fs-promises.js', process: 'process.js', util: 'util.js',
 })) {
 	builtinAlias[mod] = path.join(shims, file);
 	builtinAlias[`node:${mod}`] = path.join(shims, file);
