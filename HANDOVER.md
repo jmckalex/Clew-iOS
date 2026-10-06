@@ -15,7 +15,10 @@ are `UPSTREAM-CBFA692-PLAN.md` (book mode and the demo vault's update,
   acceptance check was green.** The owner, relayed by Clew-boss: "Push
   and sync the iOS build tonight, for sure." The chain is
   `synccbfa692-p1-vendor` → `-p2-build` → `-p3-contract` →
-  `-p3b-demo-sync` → `-p4-verify`. The record is UPSTREAM-CBFA692-PLAN.md.
+  `-p3b-demo-sync` → `-p4-verify`. Clew-boss verified the chain. Main is
+  fast-forwarded to `synccbfa692-p4-verify`, and a build commit sits on
+  top. The main checkout's mptikz-assets is staged from Clew-app's v0.3.1
+  release tree. The record is UPSTREAM-CBFA692-PLAN.md.
   - **Book mode:** the Book panel, "Ch. 2 of Book", and next/previous
     chapter port as they are. **Build is desktop only:** EXPORT_BOOK
     refuses with a sentence.
