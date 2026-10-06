@@ -14,11 +14,16 @@
 // sent to someone arrives with no grants), and the clew-frame scheme
 // (SchemeHandler.swift), which asks `serve()` here which vault file to send
 // and with which CSP — and serves only that.
+//
+// A `network` grant is bound to its ORIGINS (Clew-app 917303b): the CSP is
+// built from the hosts the grant covers that the manifest still names
+// (grantState's `network`), never from the manifest alone, and a manifest
+// edited to name a new host asks again, for that host only.
 import { vfs } from '../worker/shims/vfs.js';
 import { VAULT_ROOT } from './vault-manager.js';
 import { bridgeCall } from './native-bridge.js';
-import { appKey, appsById, resolveApp, appFile, appCsp, codeHash, describeCapabilities } from '../../vendor/clew/main/app-frames.js';
-import { createGrantStore, grantState } from '../../vendor/clew/main/app-grants.js';
+import { appKey, appsById, resolveApp, appFile, appCsp, codeHash, describeCapabilities, parseManifest, MANIFEST } from '../../vendor/clew/main/app-frames.js';
+import { createGrantStore, grantState, mergeOrigins } from '../../vendor/clew/main/app-grants.js';
 import { callApp } from '../../vendor/clew/main/app-calls.js';
 import { rewriteAppEmbeds } from '../../vendor/clew/main/app-embeds-rewrite.js';
 
@@ -50,8 +55,21 @@ export function createApps({ vaults, indexer, searchService, kvStore, refreshTre
 		revoke(vault, id) { const out = store.revoke(vault, id); persist(); return out; },
 	};
 
-	/** key → { vault, folder, abs, manifest } — the apps this page's notes embed. */
+	/** key → { vault, folder, abs, manifest, manifestMtime, served } — the
+	 *  apps this page's notes embed (app-registry.js). */
 	const byKey = new Map();
+	const mtimeOf = (abs) => { try { return vfs.stat(`${abs}/${MANIFEST}`).mtimeMs; } catch { return null; } };
+	/** Re-read an app's manifest when its file changed: what it asks for —
+	 *  above all which hosts — is the file's NOW, not the note's last render. */
+	const freshManifest = (app) => {
+		const mtime = mtimeOf(app.abs);
+		if (mtime === null || mtime === app.manifestMtime) return;
+		app.manifestMtime = mtime;
+		try {
+			const { manifest } = parseManifest(String(vfs.read(`${app.abs}/${MANIFEST}`)));
+			if (manifest && manifest.id === app.manifest.id) app.manifest = manifest;
+		} catch { /* mid-write: read again next time */ }
+	};
 	// An app's clipboard (the `clipboard` capability): app-calls.js answers
 	// synchronously. A copy goes to the system pasteboard too (the bridge,
 	// fire and forget), so it pastes in any app; a paste reads Clew's own
@@ -78,11 +96,14 @@ export function createApps({ vaults, indexer, searchService, kvStore, refreshTre
 		const found = resolveApp(VAULT_ROOT, target, indexer.appFolders ?? []);
 		if (found.refusal) return found;
 		const key = appKey(identity(), found.manifest.id);
-		byKey.set(key, { vault: identity(), folder: found.folder, abs: found.abs, manifest: found.manifest });
+		const known = byKey.get(key);
+		byKey.set(key, { vault: identity(), folder: found.folder, abs: found.abs, manifest: found.manifest,
+			manifestMtime: mtimeOf(found.abs), served: known?.served ?? null });
 		return { key, ...found };
 	};
 
 	const stateOf = (app) => {
+		freshManifest(app);
 		const record = grants.get(app.vault, app.manifest.id);
 		let hash = null;
 		const code = () => (hash ??= codeHash(app.abs));
@@ -91,11 +112,15 @@ export function createApps({ vaults, indexer, searchService, kvStore, refreshTre
 
 	const status = (key, app) => {
 		const st = stateOf(app);
-		const words = describeCapabilities(app.manifest.capabilities, app.manifest.network);
+		// The prompt's words for `network` name only the hosts it ASKS for.
+		const words = describeCapabilities(app.manifest.capabilities, st.askNetwork ?? app.manifest.network);
 		return {
 			key, id: app.manifest.id, name: app.manifest.name, folder: app.folder,
 			capabilities: app.manifest.capabilities, network: app.manifest.network,
 			ask: st.ask, askRun: st.askRun, changed: st.changed, mayRun: st.mayRun, granted: st.granted,
+			// The hosts it may reach NOW (granted ∩ the manifest); app-host.js
+			// reloads its frames when an answer changes them.
+			networkNow: st.network, askNetwork: st.askNetwork,
 			restricted: restricted(),
 			describe: Object.fromEntries(app.manifest.capabilities.map((c, i) => [c, words[i]])),
 		};
@@ -127,11 +152,31 @@ export function createApps({ vaults, indexer, searchService, kvStore, refreshTre
 			if (!app || !vaults.isOpen) return { status: 404 };
 			const st = stateOf(app);
 			if (!st.mayRun) return { status: 403, message: 'This app has not been allowed to run here.' };
-			const csp = appCsp({ network: st.granted.includes('network') ? app.manifest.network : null });
+			// The hosts its GRANT covers that the manifest still names — never
+			// the manifest alone, or editing it would widen what was allowed.
+			const network = st.network;
+			app.served = JSON.stringify(network ?? null);
+			const csp = appCsp({ network });
 			if (urlPath === '/__clew_bridge__.js') return { bridge: true, csp };
 			const file = appFile(app.abs, urlPath);
 			if (!file || !file.startsWith(`${VAULT_ROOT}/`)) return { status: 404 };
 			return { rel: file.slice(VAULT_ROOT.length + 1), html: /\.html?$/i.test(file), csp };
+		},
+
+		/**
+		 * A vault file changed: the keys of the apps whose manifest it is and
+		 * whose running frames now differ from the grant — hosts narrowed or
+		 * widened, or something new to ask (app-registry.js#manifestTouched).
+		 * Their frames must reload.
+		 */
+		manifestTouched(rel) {
+			const out = [];
+			for (const [key, app] of byKey) {
+				if (`${app.folder}/${MANIFEST}` !== rel) continue;
+				const st = stateOf(app);
+				if (st.ask.length || (app.served !== null && JSON.stringify(st.network ?? null) !== app.served)) out.push(key);
+			}
+			return out;
 		},
 
 		// ---- the channels (main/ipc.js) ------------------------------------
@@ -147,9 +192,15 @@ export function createApps({ vaults, indexer, searchService, kvStore, refreshTre
 			const st = stateOf(app);
 			const asked = st.ask;
 			const pin = restricted() && allow === true && (asked.includes('network') || st.granted.includes('network'));
+			// A network ask for NEW hosts of a grant that already reaches
+			// others: Don't allow refuses those hosts only (app-grants.js).
+			const widening = asked.includes('network') && st.granted.includes('network');
 			grants.answer(app.vault, app.manifest.id, {
 				granted: allow === true ? asked : [],
-				denied: allow === true ? [] : asked,
+				denied: allow === true ? [] : asked.filter((c) => !(widening && c === 'network')),
+				...(allow === true && asked.includes('network')
+					? { networkOrigins: mergeOrigins(st.changed ? undefined : st.record?.networkOrigins, st.askNetwork) } : {}),
+				...(allow !== true && widening ? { declineOrigins: [].concat(st.askNetwork) } : {}),
 				...(st.askRun || st.changed ? { run: allow === true } : {}),
 				...(pin ? { code: st.code() } : (allow === true && st.changed ? { code: null } : {})),
 				folder: app.folder,

@@ -169,6 +169,12 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 			renderService.onFileChanged(rel);
 			indexer.onFileChanged(rel);
 			if (rel === KV_FILE) kvStore.externalChange();
+			// An app's manifest edited: if its running frames no longer match
+			// its grant (a host added or dropped), they reload — narrowed at
+			// once, or asked about the new host first (desktop session.js).
+			if (rel.endsWith('clew-app.json')) {
+				for (const key of apps.manifestTouched(rel)) send(CH.EV_APP_GRANTS_CHANGED, { key });
+			}
 		},
 		onStructureChanged: () => {
 			indexer.onStructureChanged();
@@ -1060,6 +1066,12 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 			const name = `${base}.html`;
 			await bridgeCall('shareText', { name, text: html });
 			return { shared: true };
+		},
+		// Book Build (Clew-app main/export-book.js) runs TeX, latexmk and the
+		// engine in a Node fork and writes build/ beside the master: desktop
+		// only. The Book panel's notice and "Last build failed" read this.
+		[CH.EXPORT_BOOK]: () => {
+			throw new Error('building a book needs Clew on a Mac');
 		},
 		[CH.CANVAS_EXPORT_PNG]: async ({ data, name }) => {
 			await bridgeCall('shareBase64', { name: name ?? 'drawing.png', base64: data });

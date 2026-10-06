@@ -1611,6 +1611,52 @@ test('apps: the Seminar Picker\'s copy reaches the system pasteboard; its paste 
 	await clew.invoke('clew:app-revoke', { id: 'seminar-picker' });
 });
 
+test('apps: a network grant is bound to its origins — asked once, reached after Allow, and a host the manifest adds is asked for alone (Clew-app 917303b)', async () => {
+	fakeHtml = '<body><clew-app-embed class="clew-app-embed" data-app="Apps/Ticker"></clew-app-embed></body>';
+	// A note not rendered before: a render is cached.
+	try { await native.renderNote('Guide/Books.md'); } finally { fakeHtml = FAKE_HTML; }
+	const key = createHash('sha256').update('documents:test\0stock-ticker', 'utf8').digest('hex').slice(0, 40);
+	const hosts = ['https://finnhub.io', 'https://api.frankfurter.dev'];
+	const before = await clew.invoke('clew:app-status', { key });
+	assert.ok(before.ask.includes('network'));
+	assert.deepEqual([before.askNetwork, before.networkNow], [hosts, null]);
+	assert.match(before.describe.network, /finnhub\.io/);
+	assert.ok(!/https:/.test(native.appServe(key, '/index.html').csp), 'no network before its prompt');
+	const after = await clew.invoke('clew:app-answer', { key, allow: true });
+	assert.deepEqual(after.networkNow, hosts, 'what app-host.js compares to reload its frames');
+	assert.deepEqual(after.ask, [], 'not asked again');
+	assert.deepEqual(JSON.parse(fakeAppGrants).apps['documents:test']['stock-ticker'].networkOrigins, hosts, 'the origins are on the DEVICE');
+	const csp = native.appServe(key, '/index.html').csp;
+	for (const h of hosts) assert.ok(csp.includes(h), `${h} in the CSP`);
+	// Its manifest names a new host (an edit from another device): the frames
+	// are told to reload, and only that host is asked for.
+	const manifest = 'Apps/Ticker/clew-app.json';
+	const original = await clew.invoke(CH.NOTE_READ, { path: manifest });
+	const wider = JSON.stringify({ ...JSON.parse(original), network: [...hosts, 'https://example.org'] });
+	const events = [];
+	const off = clew.on('clew:ev-app-grants-changed', (p) => events.push(p));
+	native.externalDiff({ changed: { [manifest]: { text: wider, size: wider.length, mtimeMs: Date.now() + 1000 } }, removed: [] });
+	await settle();
+	off();
+	assert.deepEqual(events, [{ key }]);
+	const widened = await clew.invoke('clew:app-status', { key });
+	assert.deepEqual([widened.ask, widened.askNetwork, widened.networkNow], [['network'], ['https://example.org'], hosts]);
+	assert.ok(!native.appServe(key, '/index.html').csp.includes('example.org'), 'never the manifest alone');
+	// Don't allow refuses that host only: the hosts granted before keep working.
+	const declined = await clew.invoke('clew:app-answer', { key, allow: false });
+	assert.deepEqual([declined.ask, declined.networkNow], [[], hosts]);
+	assert.ok(declined.granted.includes('network'));
+	const csp2 = native.appServe(key, '/index.html').csp;
+	assert.ok(csp2.includes('https://finnhub.io') && !csp2.includes('example.org'));
+	native.externalDiff({ changed: { [manifest]: { text: original, size: original.length, mtimeMs: Date.now() + 2000 } }, removed: [] });
+	await clew.invoke('clew:app-revoke', { id: 'stock-ticker' });
+});
+
+test('books: Build refuses on the iPad with a sentence, not an unknown channel', async () => {
+	await assert.rejects(() => clew.invoke('clew:export-book', { master: 'Books/Signals/Signals.md', format: 'pdf' }),
+		/building a book needs Clew on a Mac/);
+});
+
 // ---- PDF save safety (Clew-app 686232b; pdf-unification.md §7b) ------------
 
 test('PDF save safety: a save over a version the viewer did not load is refused, both versions kept; force, create and restore', async () => {
