@@ -16,28 +16,34 @@ you read above its place and settles into that place when you reach it.
 past it. Either works in reading view and in Live edit, and only within
 its note.)
 
-Its symbols and opening prices are the table just below — invented, all of
-them — and the prices drift by a seeded random walk, so it needs no network.
-Which symbols show is your watchlist.
+It has three modes. /Simulated/, the default, needs no network: the
+symbols are the table just below and the prices drift by a seeded random
+walk from its numbers — invented starting points, not the market, and the
+band says SIMULATED. /Live stocks/ shows real US quotes for the same
+symbols from Finnhub, each refreshed about once a minute, with the time of
+the last update in the band (and "Closed · as of …" when the market is
+shut). It needs your own key — free at finnhub.io: choose /Key…/ in the
+app, paste it, and it is kept on this device only, in the app's own
+storage, never in the vault (so it does not travel with a copy you share);
+/Forget key/ removes it. /ECB rates/ shows the euro's reference rates from
+the European Central Bank. Which symbols show is your watchlist.
 
 It asks to *read this note* (the table), to *keep a little data of its
-own* (the watchlist) and to *send data to the internet — to
-api.frankfurter.dev and nowhere else*. That last one is for
-/Live ECB rates/: switched on, the band shows the euro's reference rates
-from the European Central Bank, through that one free service. Its manifest names the
-host, and Clew's rules for the app's page let it reach that host and no
-other; with the switch off it asks nothing of it at all.
+own* (the watchlist and the mode) and to *send data to the internet — to
+finnhub.io and api.frankfurter.dev, and nowhere else*. Its manifest names
+those two hosts and Clew's rules for the app's page let it reach them and
+no other; in Simulated mode it asks nothing of either.
 
 | Symbol | Price |
 | --- | ---: |
-| CLEW | 128.40 |
-| JMKD | 64.10 |
-| TIKZ | 212.75 |
-| BIBX | 18.20 |
-| VAULT | 301.00 |
-| HAWK | 42.00 |
-| DOVE | 21.00 |
-| STAG | 77.50 |
+| AAPL | 220.00 |
+| MSFT | 410.00 |
+| GOOGL | 165.00 |
+| AMZN | 185.00 |
+| NVDA | 120.00 |
+| META | 560.00 |
+| TSLA | 250.00 |
+| IBM | 215.00 |
 
 ## Replicator Dynamics Lab
 
@@ -109,7 +115,7 @@ own editor: ⌘Z takes it back like your own typing.
 
 It asks for one thing: to *edit this note*. It reads nothing of it.
 
-@app+[Apps/Ticker]{height=150 pin=bottom}
+@app+[Apps/Ticker]{height=180 pin=bottom}
 
 ## Lecture log
 

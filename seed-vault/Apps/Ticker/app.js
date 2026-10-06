@@ -1,25 +1,51 @@
-// Stock Ticker — a ticker-tape band in a note (Features/App Gallery). The
-// symbols and opening prices are a table in the note it sits in
-// (`note.read`); prices then drift by a SEEDED random walk, so it runs with
-// no network at all. Which symbols show is kept in its own corner of
-// clewdata.json (`app.kv`). "Live ECB rates" swaps in the euro's real
-// reference rates from api.frankfurter.dev — the one host its manifest names
-// under `network`, so its CSP lets it reach that host and no other, and it
-// asks nothing of it until the switch is on.
+// Stock Ticker — a ticker-tape band in a note (Features/App Gallery), in
+// three modes, Simulated the default:
+//   - Simulated: the symbols and opening prices of a table in the note it
+//     sits in (`note.read`), drifting by a SEEDED random walk — no network.
+//   - Live stocks: US quotes for those symbols from Finnhub's
+//     /api/v1/quote (live.js has the rules: each symbol about once a minute,
+//     within the free limit; a 429 backs off and says so; the market shows
+//     as closed once every quote is old). It needs your own free key, kept
+//     in THIS APP'S OWN STORAGE on this device (localStorage on its
+//     clew-frame:// origin) — never in app.kv, which is clewdata.json in the
+//     vault and travels with it — and never logged.
+//   - ECB rates: the euro's reference rates from api.frankfurter.dev.
+// Its manifest names exactly those two hosts under `network`, so its CSP
+// lets it reach them and no other; it asks nothing of either until you
+// choose that mode. Which symbols show, and the mode, are kept in `app.kv`.
 const $ = (id) => document.getElementById(id);
-const LIVE_URL = 'https://api.frankfurter.dev/v1';
+const FINNHUB_API = 'https://finnhub.io/api/v1';
+const ECB_API = 'https://api.frankfurter.dev/v1';
 const CURRENCIES = ['USD', 'GBP', 'JPY', 'CHF', 'CAD', 'AUD', 'CNY', 'SEK'];
+const KEY_NAME = 'finnhub-key';
 const SPEED = 70;            // px per second, right to left
-const STEP_MS = 1500;        // a price tick
-const LIVE_EVERY_MS = 30 * 60 * 1000;   // the ECB fixes once a working day
+const STEP_MS = 1500;        // a simulated price tick
+const ECB_EVERY_MS = 30 * 60 * 1000;   // the ECB fixes once a working day
 
 let tableRows = [];          // [{ symbol, open }] from the note
 let hidden = new Set();      // symbols switched off in the watchlist
 let quotes = [];             // [{ symbol, open, price }] being shown
 let mode = 'simulated';
 let paused = false;
-let liveTimer = null;
+let ecbTimer = null;
+const poll = { timer: null, i: 0, firstRound: true, backoff: 0, quotes: new Map(), lastUpdate: null, requests: 0 };
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
+const { nextDelay, backoffAfter429, quoteFrom, marketState, quoteUrl } = globalThis.TickerLive;
+
+// ---- the key: this device only --------------------------------------------
+
+function readKey() {
+	try { return localStorage.getItem(KEY_NAME) || null; } catch { return null; }
+}
+function writeKey(value) {
+	try {
+		if (value) localStorage.setItem(KEY_NAME, value);
+		else localStorage.removeItem(KEY_NAME);
+		return true;
+	} catch {
+		return false;
+	}
+}
 
 // ---- the note's table -----------------------------------------------------
 
@@ -44,8 +70,9 @@ function tableIn(text) {
 	return [];
 }
 const cells = (line) => line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
+const watched = () => tableRows.filter((r) => !hidden.has(r.symbol));
 
-// ---- a seeded random walk -------------------------------------------------
+// ---- simulated: a seeded random walk ----------------------------------------
 
 function seedOf(text) {
 	let h = 2166136261;
@@ -63,21 +90,116 @@ function mulberry32(seed) {
 let random = mulberry32(1);
 const gaussian = () => Math.sqrt(-2 * Math.log(1 - random())) * Math.cos(2 * Math.PI * random());
 
-function simulate() {
-	random = mulberry32(seedOf(tableRows.map((r) => r.symbol).join(',')));
-	quotes = tableRows.map((r) => ({ symbol: r.symbol, open: r.open, price: r.open }));
-}
 function tick() {
 	if (mode !== 'simulated' || paused || document.hidden) return;
 	for (const q of quotes) q.price = Math.max(0.01, q.price * Math.exp(0.004 * gaussian()));
 	update();
 }
 
-// ---- live rates -----------------------------------------------------------
+// ---- live stocks: Finnhub ---------------------------------------------------
 
-async function fetchLive() {
+function stopPolling() {
+	clearTimeout(poll.timer);
+	poll.timer = null;
+}
+function schedule(ms) {
+	clearTimeout(poll.timer);
+	poll.timer = setTimeout(pump, ms);
+}
+
+function startStocks() {
+	stopPolling();
+	if (!readKey()) {
+		quotes = [];
+		build();
+		badge('none', 'Live stocks');
+		status('Live stocks needs a free Finnhub key (finnhub.io) — add yours under Key….');
+		openPanel();
+		return;
+	}
+	Object.assign(poll, { i: 0, firstRound: true, backoff: 0, quotes: new Map(), lastUpdate: null });
+	showStocks();
+	badge('none', 'Live …');
+	status('Fetching US quotes from Finnhub…');
+	pump();
+}
+
+async function pump() {
+	poll.timer = null;
+	if (mode !== 'stocks') return;
+	// No requests while the app is out of sight; look again shortly.
+	if (document.hidden) { schedule(2000); return; }
+	const symbols = watched().map((r) => r.symbol);
+	if (!symbols.length) { status('Every symbol is switched off in the watchlist.'); return; }
+	const key = readKey();
+	if (!key) { startStocks(); return; }
+	const symbol = symbols[poll.i % symbols.length];
+	let res;
+	try {
+		poll.requests++;
+		document.body.dataset.requests = String(poll.requests);
+		res = await fetch(quoteUrl(FINNHUB_API, symbol, key), { cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer' });
+	} catch {
+		if (mode === 'stocks') { status('Cannot reach finnhub.io — trying again in 30 s.'); schedule(30000); }
+		return;
+	}
+	if (mode !== 'stocks') return;
+	if (res.status === 429) {
+		poll.backoff = backoffAfter429(poll.backoff, res.headers.get('Retry-After'));
+		document.body.dataset.backoff = String(poll.backoff);
+		status(`Finnhub says too many requests — waiting ${Math.round(poll.backoff / 1000)} s before asking again.`);
+		schedule(poll.backoff);
+		return;
+	}
+	if (res.status === 401 || res.status === 403) {
+		badge('none', 'Live stocks');
+		status(`Finnhub refused the key (${res.status}) — check it under Key….`);
+		document.body.dataset.refused = String(res.status);
+		openPanel();
+		return;
+	}
+	if (!res.ok) {
+		status(`Finnhub answered ${res.status} — trying again in 30 s.`);
+		schedule(30000);
+		return;
+	}
+	const json = await res.json().catch(() => null);
+	poll.backoff = 0;
+	poll.quotes.set(symbol, quoteFrom(json));
+	poll.lastUpdate = Date.now();
+	poll.i++;
+	if (poll.i >= symbols.length) poll.firstRound = false;
+	showStocks();
+	schedule(nextDelay({ symbols: symbols.length, firstRound: poll.firstRound }));
+}
+
+const clock = (ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const day = (ms) => new Date(ms).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
+
+function showStocks() {
+	const next = watched().map((r) => {
+		const q = poll.quotes.get(r.symbol);
+		if (!q || q.unknown) return { symbol: r.symbol, open: NaN, price: NaN, unknown: Boolean(q?.unknown) };
+		return { symbol: r.symbol, open: q.prevClose, price: q.price };
+	});
+	const same = next.length === quotes.length && next.every((q, i) => q.symbol === quotes[i]?.symbol);
+	quotes = next;
+	if (same) update(); else build();
+	const market = marketState([...poll.quotes.values()], Date.now() / 1000);
+	if (market.state === 'closed') badge('closed', `Closed · as of ${day(market.asOf * 1000)} ${clock(market.asOf * 1000)}`);
+	else if (market.state === 'open') badge('open', `Live ${clock(poll.lastUpdate)}`);
+	const unknown = quotes.filter((q) => q.unknown).map((q) => q.symbol);
+	if (poll.lastUpdate) {
+		status(`US quotes from Finnhub, each about once a minute; last at ${clock(poll.lastUpdate)}.`
+			+ (unknown.length ? ` No quote for ${unknown.join(', ')}.` : ''));
+	}
+}
+
+// ---- ECB rates: Frankfurter -------------------------------------------------
+
+async function fetchEcb() {
 	const start = new Date(Date.now() - 10 * 86400000).toISOString().slice(0, 10);
-	const res = await fetch(`${LIVE_URL}/${start}..?from=EUR&to=${CURRENCIES.join(',')}`);
+	const res = await fetch(`${ECB_API}/${start}..?from=EUR&to=${CURRENCIES.join(',')}`, { credentials: 'omit', referrerPolicy: 'no-referrer' });
 	if (!res.ok) throw new Error(`the rates service answered ${res.status}`);
 	const data = await res.json();
 	const dates = Object.keys(data.rates ?? {}).sort();
@@ -90,33 +212,58 @@ async function fetchLive() {
 	};
 }
 
-async function goLive() {
-	clearInterval(liveTimer);
+async function startEcb() {
 	status('Fetching the ECB reference rates…');
 	try {
-		const live = await fetchLive();
-		mode = 'live';
+		const live = await fetchEcb();
+		if (mode !== 'ecb') return;
 		quotes = live.quotes;
 		build();
-		status(`ECB reference rates of ${live.date}, against the previous fixing — from api.frankfurter.dev`);
-		liveTimer = setInterval(() => fetchLive().then((l) => { quotes = l.quotes; build(); }).catch(() => {}), LIVE_EVERY_MS);
+		badge('open', `ECB ${live.date}`);
+		status(`ECB reference rates of ${live.date}, against the previous fixing — from api.frankfurter.dev.`);
+		ecbTimer = setInterval(() => fetchEcb().then((l) => { if (mode === 'ecb') { quotes = l.quotes; build(); } }).catch(() => {}), ECB_EVERY_MS);
 	} catch (err) {
-		$('live').checked = false;
-		goSimulated(`Live rates unavailable (${err.message}) — showing the simulated prices.`);
+		if (mode === 'ecb') status(`ECB rates unavailable (${err.message}).`);
 	}
-	document.body.dataset.mode = mode;
 }
 
-function goSimulated(message) {
-	clearInterval(liveTimer);
-	mode = 'simulated';
-	simulate();
+// ---- simulated ----------------------------------------------------------------
+
+function startSimulated() {
+	random = mulberry32(seedOf(tableRows.map((r) => r.symbol).join(',')));
+	quotes = watched().map((r) => ({ symbol: r.symbol, open: r.open, price: r.open }));
 	build();
-	status(message ?? `${quotes.length} symbols from this note, drifting by a seeded random walk — no network.`);
-	document.body.dataset.mode = mode;
+	badge('sim', 'Simulated');
+	status(tableRows.length
+		? `${watched().length} symbols from this note, drifting by a seeded random walk — not the market, and no network.`
+		: 'Add a table with Symbol and Price columns to this note.');
 }
 
-// ---- drawing --------------------------------------------------------------
+// ---- modes ---------------------------------------------------------------------
+
+async function setMode(next, { save = true } = {}) {
+	if ((next === 'stocks' || next === 'ecb') && !clew.can('network')) next = 'simulated';
+	mode = next;
+	stopPolling();
+	clearInterval(ecbTimer);
+	for (const b of document.querySelectorAll('.modes button')) b.setAttribute('aria-checked', String(b.dataset.mode === mode));
+	document.body.dataset.mode = mode;
+	if (save && clew.can('app.kv')) await clew.kv.set('mode', mode);
+	if (mode === 'stocks') startStocks();
+	else if (mode === 'ecb') await startEcb();
+	else startSimulated();
+}
+
+function badge(state, text) {
+	$('badge').dataset.state = state;
+	$('badge').textContent = text;
+	document.body.dataset.badge = text;
+	// The states shown, in order (smoke/ticker-live-scenario.js reads it).
+	const shown = (document.body.dataset.badgeLog ?? '').split(',').filter(Boolean);
+	if (shown.at(-1) !== state) document.body.dataset.badgeLog = [...shown, state].join(',');
+}
+
+// ---- drawing ------------------------------------------------------------------
 
 const decimals = (q) => (q.price >= 1000 ? 0 : q.price >= 10 ? 2 : 4);
 let rows = new Map();        // symbol → [{ price, chg } elements], one per copy
@@ -136,29 +283,31 @@ function itemFor(q) {
 	return el;
 }
 
-/** The track: the visible quotes twice over, so the loop has no seam. */
+/** The track: the quotes twice over, so the loop has no seam. */
 function build() {
 	rows = new Map();
-	const shown = quotes.filter((q) => mode === 'live' || !hidden.has(q.symbol));
 	const track = $('track');
 	track.replaceChildren();
 	const copies = reduceMotion.matches ? 1 : 2;
-	for (let c = 0; c < copies; c++) for (const q of shown) track.append(itemFor(q));
-	if (!shown.length) track.textContent = mode === 'live' ? '' : '  Every symbol is switched off in the watchlist.';
-	document.body.dataset.items = String(shown.length);
+	for (let c = 0; c < copies; c++) for (const q of quotes) track.append(itemFor(q));
+	if (!quotes.length) track.textContent = mode === 'simulated' ? '  Every symbol is switched off in the watchlist.' : '';
+	document.body.dataset.items = String(quotes.length);
 	offset = 0;
 	update();
 }
 
 function update() {
 	for (const q of quotes) {
-		const delta = q.price - q.open;
-		const pct = q.open ? (delta / q.open) * 100 : 0;
-		const dir = Math.abs(pct) < 0.005 ? 'flat' : delta > 0 ? 'up' : 'down';
+		const known = Number.isFinite(q.price);
+		const delta = known ? q.price - q.open : 0;
+		const pct = known && q.open ? (delta / q.open) * 100 : 0;
+		const dir = !known || Math.abs(pct) < 0.005 ? 'flat' : delta > 0 ? 'up' : 'down';
 		for (const { price, chg } of rows.get(q.symbol) ?? []) {
-			price.textContent = q.price.toFixed(decimals(q));
+			price.textContent = known ? q.price.toFixed(decimals(q)) : '—';
 			chg.className = `chg ${dir}`;
-			chg.textContent = `${dir === 'up' ? '▲' : dir === 'down' ? '▼' : '■'}${Math.abs(delta).toFixed(decimals(q))} (${pct >= 0 ? '+' : '−'}${Math.abs(pct).toFixed(2)}%)`;
+			chg.textContent = known
+				? `${dir === 'up' ? '▲' : dir === 'down' ? '▼' : '■'}${Math.abs(delta).toFixed(decimals(q))} (${pct >= 0 ? '+' : '−'}${Math.abs(pct).toFixed(2)}%)`
+				: (q.unknown ? 'no quote' : '');
 		}
 	}
 }
@@ -185,7 +334,22 @@ function applyMotion() {
 
 function status(text) { $('status').textContent = text; }
 
-// ---- the watchlist (app.kv) -------------------------------------------------
+// ---- the key panel -------------------------------------------------------------
+
+function openPanel() {
+	const has = Boolean(readKey());
+	$('keyState').textContent = has ? 'A key is saved on this device.' : 'No key saved.';
+	$('keyForget').disabled = !has;
+	document.body.dataset.hasKey = has ? '1' : '0';
+	$('keyPanel').classList.add('open');
+	$('keyInput').focus();
+}
+function closePanel() {
+	$('keyInput').value = '';
+	$('keyPanel').classList.remove('open');
+}
+
+// ---- the watchlist (app.kv) ----------------------------------------------------
 
 function drawWatchlist() {
 	const box = $('watch');
@@ -198,19 +362,21 @@ function drawWatchlist() {
 		input.addEventListener('change', async () => {
 			if (input.checked) hidden.delete(r.symbol); else hidden.add(r.symbol);
 			if (clew.can('app.kv')) await clew.kv.set('hidden', [...hidden]);
-			build();
+			if (mode === 'simulated') startSimulated();
+			else if (mode === 'stocks') showStocks();
 		});
 		label.append(input, document.createTextNode(r.symbol));
 		box.append(label);
 	}
 }
 
-// ---- start ------------------------------------------------------------------
+// ---- start ------------------------------------------------------------------------
 
 async function readTable() {
 	tableRows = tableIn(await clew.notes.read());
 	drawWatchlist();
-	if (mode === 'simulated') goSimulated(tableRows.length ? null : 'Add a table with Symbol and Price columns to this note.');
+	if (mode === 'simulated') startSimulated();
+	else if (mode === 'stocks') showStocks();
 }
 
 async function main() {
@@ -219,20 +385,39 @@ async function main() {
 	document.body.dataset.theme = theme;
 	clew.on('theme', ({ theme: t }) => { document.body.dataset.theme = t; });
 	if (!clew.can('note.read')) { status('Allow “read this note” to see the ticker.'); return; }
+	let saved = 'simulated';
 	if (clew.can('app.kv')) {
 		hidden = new Set((await clew.kv.get('hidden')) ?? []);
-		$('live').checked = Boolean(await clew.kv.get('live'));
+		saved = (await clew.kv.get('mode')) ?? ((await clew.kv.get('live')) ? 'ecb' : 'simulated');
 	}
 	if (!clew.can('network')) {
-		$('live').disabled = true;
-		$('live').parentElement.title = 'Needs “send data to the internet”, for api.frankfurter.dev only';
+		for (const id of ['modeStocks', 'modeEcb', 'keyBtn']) $(id).disabled = true;
+		$('modeStocks').parentElement.title = 'Needs “send data to the internet”, for finnhub.io and api.frankfurter.dev only';
 	}
-	await readTable();
+	tableRows = tableIn(await clew.notes.read());
+	drawWatchlist();
 	clew.on('note-changed', () => readTable().catch(() => {}));
-	if ($('live').checked && clew.can('network')) await goLive();
-	$('live').addEventListener('change', async () => {
-		if (clew.can('app.kv')) await clew.kv.set('live', $('live').checked);
-		if ($('live').checked) await goLive(); else goSimulated();
+	for (const b of document.querySelectorAll('.modes button')) b.addEventListener('click', () => setMode(b.dataset.mode));
+	$('keyBtn').addEventListener('click', openPanel);
+	$('keyClose').addEventListener('click', closePanel);
+	$('keySave').addEventListener('click', async () => {
+		const value = $('keyInput').value.trim();
+		if (!value) return;
+		if (!writeKey(value)) { $('keyState').textContent = 'This app cannot keep a key here (its storage is unavailable).'; return; }
+		closePanel();
+		document.body.dataset.hasKey = '1';
+		await setMode('stocks');
+	});
+	$('keyInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('keySave').click(); });
+	$('keyForget').addEventListener('click', async () => {
+		writeKey(null);
+		closePanel();
+		document.body.dataset.hasKey = '0';
+		if (mode === 'stocks') {
+			stopPolling();
+			status('Key forgotten: it is gone from this device. Live stocks waits for a new one (Key…).');
+			badge('none', 'Live stocks');
+		}
 	});
 	$('pause').addEventListener('click', () => {
 		paused = !paused;
@@ -245,7 +430,8 @@ async function main() {
 	});
 	reduceMotion.addEventListener('change', applyMotion);
 	document.addEventListener('visibilitychange', () => { last = 0; });
-	applyMotion();
+	$('tape').classList.toggle('static', reduceMotion.matches);
+	await setMode(saved, { save: false });
 	setInterval(tick, STEP_MS);
 	requestAnimationFrame(frame);
 }

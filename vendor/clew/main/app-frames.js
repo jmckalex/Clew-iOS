@@ -240,6 +240,7 @@ export function codeHash(folderAbs) {
 export function describeCapabilities(caps, network = null) {
 	return caps.map((c) => {
 		if (c === 'network' && Array.isArray(network)) return `send data to ${network.map((o) => new URL(o).host).join(', ')}`;
+		if (c === 'network') return 'send data to any host on the internet';
 		return CAPABILITIES[c] ?? c;
 	});
 }

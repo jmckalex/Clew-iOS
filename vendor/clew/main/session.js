@@ -26,7 +26,7 @@ import { shells } from './ipc.js';
 import { trust } from './trust.js';
 import { effectiveAccess } from './vault-trust.js';
 import { readVaultRequests } from './vault-requests.js';
-import { dropSession as dropAppsOf } from './app-registry.js';
+import { dropSession as dropAppsOf, manifestTouched } from './app-registry.js';
 import { CH } from '../shared/channels.js';
 import { watchVaultCallouts } from './callout-files.js';
 
@@ -119,6 +119,12 @@ export class VaultSession {
 				this.renderService.onFileChanged(rel);
 				this.indexer.onFileChanged(rel);
 				if (rel === KV_FILE) this.kvStore.externalChange();
+				// An app's manifest edited: if its running frames no longer match
+				// its grant (a host added or dropped), they reload — narrowed at
+				// once, or asked about the new host first (app-grants.js).
+				if (rel.endsWith('clew-app.json')) {
+					for (const key of manifestTouched(this.id, rel, !this.trusted)) this.send(CH.EV_APP_GRANTS_CHANGED, { key });
+				}
 			},
 			onStructureChanged: () => this.indexer.onStructureChanged(),
 		};

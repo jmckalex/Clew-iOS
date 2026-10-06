@@ -1,8 +1,8 @@
 {
 	"id": "stock-ticker",
 	"name": "Stock Ticker",
-	"version": "1.0.0",
+	"version": "1.1.0",
 	"entry": "index.html",
 	"capabilities": ["note.read", "app.kv", "network"],
-	"network": ["https://api.frankfurter.dev"]
+	"network": ["https://finnhub.io", "https://api.frankfurter.dev"]
 }

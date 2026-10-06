@@ -9,6 +9,7 @@ import { configManager } from './config-manager.js';
 import { replaceTargetsBySources } from './sources-and-targets.js';
 import { resolveCitations } from './biblify-compile.js';
 import { checkMathPackages } from './latex-lint.js';
+import { getBook, scopeChapterFootnotes, scopeChapterStyles, placeWarningsAt } from './book.js';
 import { resetCrossrefs, recordLabel, lookupLabel, typedRefText } from './crossref.js';
 import { addWarning } from './warnings.js';
 import { buildIndexes } from './indexing.js';
@@ -83,6 +84,12 @@ export function postProcessHTML(html, options = {}) {
 		resolveCitations($, { fragment: !!options.fragment, outBase: options.outBase });
 	}
 
+	// A book's footnote ids, unique per chapter — last, since the passes above
+	// find a note's heading and list items by their ids (book.js).
+	if (getBook()) scopeChapterFootnotes($);
+	// Each chapter's <style>, confined to its section before the hoisting below.
+	if (getBook()) scopeChapterStyles($);
+
 	// Only hoist styles to <head> in full-document mode; in fragment mode there's no <head>.
 	if (!options.fragment) {
 		moveBodyStylesToHead($);
@@ -101,6 +108,39 @@ export function postProcessHTML(html, options = {}) {
 // headings are inserted after this pass runs, but are listed so they do not
 // depend on it.
 const GENERATED_HEADINGS = '.endnotes-heading, .endnote-group-heading, .bibliography-title, .index-title, #footnote-label';
+
+// A counter for one numbering pass. Outside a book — and in a book built with
+// `Numbering: continuous` — the plain sequence 1, 2, 3, exactly as before. In a
+// book (book.js) numbering per chapter, the default, it counts per chapter and
+// writes "2.3", as LaTeX's book class does: an element's chapter is how many
+// numbered level-1 headings come before it (a `{-}` or generated heading is no
+// chapter, as \chapter* is none). `next(element, key)` keeps a separate count
+// per key (numbered environments' counter groups).
+function numberer($) {
+	const b = getBook();
+	if (!b || b.numbering !== 'per chapter') {
+		const counts = {};
+		return (elem, key = '') => `${(counts[key] = (counts[key] || 0) + 1)}`;
+	}
+	const order = new Map();
+	$('*').each((i, el) => { order.set(el, i); });
+	const starts = $('h1').toArray()
+		.filter((el) => !$(el).is(`.unnumbered, ${GENERATED_HEADINGS}`))
+		.map((el) => order.get(el));
+	const chapterOf = (el) => {
+		const at = order.get(el);
+		let n = 0;
+		while (n < starts.length && starts[n] < at) n++;
+		return n;
+	};
+	const counts = {};
+	return (elem, key = '') => {
+		const chapter = chapterOf(elem);
+		const k = `${key}\u0000${chapter}`;
+		counts[k] = (counts[k] || 0) + 1;
+		return `${chapter}.${counts[k]}`;
+	};
+}
 
 // Add numeric headings, if requested.  (Right now, this is only supported if the
 // metadata header has 'Headings: numeric')
@@ -201,10 +241,10 @@ function strip_matter_markers($) {
 // HTML-only (the post-processor never runs for LaTeX). Always on — a float is
 // numbered by definition, independent of the Headings: numeric heading option.
 function number_figures($) {
-	let n = 0;
+	const next = numberer($);
 	$('figure.figure').each((i, elem) => {
 		const $fig = $(elem);
-		n++;
+		const n = next(elem);
 		const id = $fig.attr('id');
 
 		// Sub-number any subfigures: (a), (b), … with combined refs like "1a".
@@ -218,6 +258,7 @@ function number_figures($) {
 			$sub.children('figcaption').first()
 				.prepend(`<span class="subfigure-label">(${letter})</span> `);
 			if (subId) {
+				placeWarningsAt($, subelem);
 				recordLabel(subId, { number: `${n}${letter}`, type: 'figure', anchor: subId });
 			}
 		});
@@ -230,6 +271,7 @@ function number_figures($) {
 		$cap.prepend(`<span class="figure-label xref">Figure ${n}:</span> `);
 		figureList.push({ text: $cap.text(), anchor: id });
 		if (id) {
+			placeWarningsAt($, elem);
 			recordLabel(id, { number: `${n}`, type: 'figure', anchor: id });
 		}
 	});
@@ -239,16 +281,17 @@ function number_figures($) {
 // counter independent of figures: prefix each caption with "Table N:" and record
 // the id for :ref/:cref. HTML-only (LaTeX numbers tables natively).
 function number_tables($) {
-	let n = 0;
+	const next = numberer($);
 	$('figure.table-float').each((i, elem) => {
 		const $tab = $(elem);
-		n++;
+		const n = next(elem);
 		const id = $tab.attr('id');
 		$tab.attr('data-xref-number', `${n}`).attr('data-xref-type', 'table');
 		const $cap = $tab.children('figcaption').first();
 		$cap.prepend(`<span class="table-label xref">Table ${n}:</span> `);
 		tableList.push({ text: $cap.text(), anchor: id });
 		if (id) {
+			placeWarningsAt($, elem);
 			recordLabel(id, { number: `${n}`, type: 'table', anchor: id });
 		}
 	});
@@ -258,16 +301,17 @@ function number_tables($) {
 // with their own counter: prefix each caption with "Listing N:" and record the
 // id for :ref/:cref. HTML-only (LaTeX numbers listings natively via minted).
 function number_listings($) {
-	let n = 0;
+	const next = numberer($);
 	$('figure.listing').each((i, elem) => {
 		const $lst = $(elem);
-		n++;
+		const n = next(elem);
 		const id = $lst.attr('id');
 		$lst.attr('data-xref-number', `${n}`).attr('data-xref-type', 'listing');
 		const $cap = $lst.children('figcaption').first();
 		$cap.prepend(`<span class="listing-label xref">Listing ${n}:</span> `);
 		listingList.push({ text: $cap.text(), anchor: id });
 		if (id) {
+			placeWarningsAt($, elem);
 			recordLabel(id, { number: `${n}`, type: 'listing', anchor: id });
 		}
 	});
@@ -284,10 +328,10 @@ function number_theorems($) {
 	const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 	const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
 
-	let n = 0;
+	const next = numberer($);
 	$('.theorem-env').each((i, elem) => {
 		const $env = $(elem);
-		n++;
+		const n = next(elem);
 		const kind = $env.attr('data-kind') || 'theorem';
 		const name = $env.attr('data-name');
 		const id = $env.attr('id');
@@ -300,6 +344,7 @@ function number_theorems($) {
 		if ($firstP.length) $firstP.prepend(labelHtml);
 		else $env.prepend(labelHtml);
 		if (id) {
+			placeWarningsAt($, elem);
 			recordLabel(id, { number: `${n}`, type: kind, anchor: id });
 		}
 	});
@@ -327,15 +372,14 @@ function number_environments($) {
 	const specs = getNumberedSpecs();
 	if (!specs.size) return;
 	const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;');
-	const counters = {};
+	const next = numberer($);
 	$('.jmd-env').each((i, elem) => {
 		const $env = $(elem);
 		const kind = $env.attr('data-jmd-kind');
 		const spec = specs.get(kind);
 		if (!spec) return;                          // marker without a live spec — skip
 		const group = $env.attr('data-jmd-counter') || spec.counter;
-		counters[group] = (counters[group] || 0) + 1;
-		const n = counters[group];
+		const n = next(elem, group);
 		const name = $env.attr('data-jmd-name');
 		const id = $env.attr('id');
 		$env.attr('data-xref-number', `${n}`).attr('data-xref-type', spec.type);
@@ -349,6 +393,7 @@ function number_environments($) {
 		if ($firstP.length) $firstP.prepend(labelHtml);
 		else $env.prepend(labelHtml);
 		if (id) {
+			placeWarningsAt($, elem);
 			recordLabel(id, { number: `${n}`, type: spec.type, anchor: id });
 		}
 	});
@@ -359,14 +404,15 @@ function number_environments($) {
 // HTML-only — LaTeX numbers equations natively. Numbers stay in step with LaTeX
 // because both count the equations in order.
 function number_equations($) {
-	let n = 0;
+	const next = numberer($);
 	$('div.equation').each((i, elem) => {
 		const $eq = $(elem);
-		n++;
+		const n = next(elem);
 		const id = $eq.attr('id');
 		$eq.attr('data-xref-number', `${n}`).attr('data-xref-type', 'equation');
 		$eq.append(`<span class="eqn-number">(${n})</span>`);
 		if (id) {
+			placeWarningsAt($, elem);
 			recordLabel(id, { number: `${n}`, type: 'equation', anchor: id });
 		}
 	});
@@ -421,6 +467,8 @@ function process_crossrefs($) {
 		if (number != undefined && number.endsWith('.')) {
 			number = number.slice(0, -1);
 		}
+		// In a book, a duplicate is reported at its chapter and line.
+		placeWarningsAt($, elem);
 		recordLabel(key, { number, anchor, type });
 	});
 
@@ -435,6 +483,7 @@ function process_crossrefs($) {
 		}
 		else {
 			$elem.text('??');
+			placeWarningsAt($, elem);
 			warnUnresolvedRef(key, info);
 		}
 	});
@@ -450,9 +499,11 @@ function process_crossrefs($) {
 		}
 		else {
 			$elem.text('??');
+			placeWarningsAt($, elem);
 			warnUnresolvedRef(key, info);
 		}
 	});
+	placeWarningsAt($, null);
 }
 
 // When writing markdown, it's common to put <style> tags in the body.

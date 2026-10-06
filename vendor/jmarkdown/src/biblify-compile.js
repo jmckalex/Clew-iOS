@@ -25,6 +25,7 @@ import { configManager } from './config-manager.js';
 import { CITE_RE } from './citations.js';
 import { addWarning, getWarnings } from './warnings.js';
 import { bibliographyFiles, readBibliographies, warnShadowedEntries } from './bibliographies.js';
+import { placeWarningsAt } from './book.js';
 
 const require = createRequire(import.meta.url);
 
@@ -363,6 +364,7 @@ export function resolveCitations($, options = {}) {
 		resolveInline($, ctx);
 		buildBibliographies($, ctx);
 	}
+	placeWarningsAt($, null);
 
 	if (tooltips) addTooltips($, ctx);
 	if (minimal) exportMinimalBib($, ctx);
@@ -437,6 +439,8 @@ function retagAsSpans(el) {
 
 function resolveOne($, el, ctx, style) {
 	const $el = $(el);
+	// In a book, a missing key is reported at its chapter and line.
+	placeWarningsAt($, el);
 	const cmd = $el.attr('data-cite-cmd') || '';
 	const m = CITE_RE.exec(cmd);
 	if (!m) { $el.replaceWith(document_text(cmd)); return; }
@@ -640,6 +644,7 @@ function resolveVancouver($, ctx) {
 		if (!m) { $(el).remove(); continue; }
 		const keys = parseKeys(m[9]);
 		const keyString = keys.join(',');
+		placeWarningsAt($, el);
 		for (const k of keys) if (!ctx.bibfileMap[k]) warnMissingKey(k);
 		const indexes = keys.map(k => keyIndexMap[k]).filter(n => n !== undefined);
 		if (indexes.length === 0) {

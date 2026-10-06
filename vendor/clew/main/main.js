@@ -31,6 +31,8 @@ import { prepareNoteFonts } from './note-fonts.js';
 import { assetStamp, stampChanged } from './asset-stamp.js';
 import { staleSources } from './build-stamp.js';
 import { listenForLinks, onSecondInstance, startDeepLinks } from './deep-link-host.js';
+import { syncDemoVault, demoSyncNotice } from './demo-sync.js';
+import demoHistory from './demo-history.json';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const distDir = path.dirname(__dirname); // dist/
@@ -322,19 +324,41 @@ export async function createVaultDialog(fromSession = null) {
 export function openDemoVault(fromSession = null) {
 	let target = paths.demoVault;
 	let fresh = false;
-	if (app.isPackaged) {
-		target = path.join(app.getPath('documents'), 'Clew Demo Vault');
+	// A scenario's own copy takes the packaged path from a dev build
+	// (smoke/demo-sync-scenario.js); never outside the harness.
+	const smokeTarget = process.env.CLEW_SMOKE ? process.env.CLEW_SMOKE_DEMO_TARGET || null : null;
+	const copying = app.isPackaged || Boolean(smokeTarget);
+	if (copying) {
+		target = smokeTarget ?? path.join(app.getPath('documents'), 'Clew Demo Vault');
 		if (!fs.existsSync(target)) {
 			fs.cpSync(paths.demoVault, target, { recursive: true });
 			fresh = true;
 		}
 	}
 	if (!fs.existsSync(target)) return null;
+	// The demo brought up to date in this copy (demo-sync.js): new files
+	// added, untouched old ones updated (by the hash given, or a version Clew
+	// ever shipped — demo-history.json), the user's own changes and
+	// deletions left alone, never into .clew. A fresh copy only records.
+	let synced = { added: [], updated: [] };
+	if (copying) {
+		try { synced = syncDemoVault(paths.demoVault, target, { history: demoHistory }); } catch (err) { console.warn(`[clew] demo vault update: ${err.message}`); }
+		if (process.env.CLEW_SMOKE) console.log(`smoke-demo-sync: fresh=${fresh} added=${synced.added.length} updated=${synced.updated.length} ${JSON.stringify(synced.updated.slice(0, 12))}`);
+	}
 	// Clew's own vault (§4.8) is trusted by construction: a copy made just
 	// now from the bundle, or one this device has never decided about. A
 	// decision already recorded — a revoke — stands.
 	if (fresh || !trust.entries()[fs.realpathSync(target)]) trust.trust(target, 'demo', readVaultRequests(target)?.enable ?? null);
-	return openVaultAnywhere(target, { preferSession: fromSession }).vaults.info;
+	const session = openVaultAnywhere(target, { preferSession: fromSession });
+	const text = demoSyncNotice(synced);
+	if (text) {
+		if (session.vaults.root) session.vaults.refreshTree?.();
+		Promise.resolve(session.opened).then(() => setTimeout(() => {
+			if (process.env.CLEW_SMOKE) console.log(`smoke-demo-sync: notice ${JSON.stringify(text)}`);
+			session.send(CH.EV_NOTICE, { text, ms: 12000 });
+		}, 1500));
+	}
+	return session.vaults.info;
 }
 
 // Dev mode: reload every window whenever esbuild rewrites the renderer
@@ -658,6 +682,39 @@ if (process.env.CLEW_SMOKE) {
 							const { x, y, deltaY = 0, deltaX = 0 } = ev.wheel;
 							await dbg.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', button: 'none', x, y });
 							await dbg.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', x, y, deltaX, deltaY });
+							continue;
+						}
+						if (ev.drag) {
+							// {drag:{from, to, steps?}}: press at `from`, move to `to`
+							// with the button held (in `steps`, default 8), release —
+							// a pointer drag (the Book panel's grip). Each end is
+							// {x,y} or {selector, dx?, dy?}: the centre of that app-page
+							// element, offset, found when its turn comes.
+							const end = async (point) => {
+								if (!point?.selector) return point;
+								const found = await primary.webContents.executeJavaScript(`(() => {
+									const r = document.querySelector(${JSON.stringify(point.selector)})?.getBoundingClientRect();
+									return r && r.width ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null; })()`);
+								return found && { x: Math.round(found.x + (point.dx ?? 0)), y: Math.round(found.y + (point.dy ?? 0)) };
+							};
+							const from = await end(ev.drag.from);
+							const to = await end(ev.drag.to);
+							if (!from || !to) {
+								console.log(`smoke: drag found no ${!from ? ev.drag.from?.selector : ev.drag.to?.selector}`);
+								continue;
+							}
+							const steps = ev.drag.steps ?? 8;
+							const base = { pointerType: 'mouse', modifiers: ev.modifiers ?? 0 };
+							await dbg.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', button: 'none', ...from, ...base });
+							await dbg.sendCommand('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', buttons: 1, clickCount: 1, ...from, ...base });
+							for (let i = 1; i <= steps; i++) {
+								const x = Math.round(from.x + ((to.x - from.x) * i) / steps);
+								const y = Math.round(from.y + ((to.y - from.y) * i) / steps);
+								await dbg.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', button: 'left', buttons: 1, x, y, ...base });
+								await sleep(16);
+							}
+							await dbg.sendCommand('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', buttons: 0, clickCount: 1, ...to, ...base });
+							await sleep(ev.delay ?? 30);
 							continue;
 						}
 						if (ev.move) {

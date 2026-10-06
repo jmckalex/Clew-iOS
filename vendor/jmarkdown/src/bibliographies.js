@@ -33,6 +33,12 @@
 	file for every note in a subfolder — which mattered little while a note's
 	own `Bibliography` switched it off, and for every such note once it adds).
 
+	In a BOOK (book.js), each chapter's own `Bibliography:` adds its files
+	after the master's, in book order (resolved against the chapter's folder):
+	one set, for the book's one References list. A chapter citing a key that
+	only another chapter's files hold is warned (warnCrossChapterCitations),
+	and two files that disagree on a key name their chapters.
+
 	Consumers: biblify-compile.js (compile-time HTML reads every file),
 	citations.js (@bibliography in LaTeX), bib-attachments.js (\citefile looks a
 	key up note-first) and html-template.js (the runtime Biblify client).
@@ -48,6 +54,7 @@ import fs from 'fs';
 import path from 'path';
 import { configManager } from './config-manager.js';
 import { addWarning, getWarnings } from './warnings.js';
+import { getBook, currentRenderChapter } from './book.js';
 
 const isUrl = (name) => /^[a-z][a-z0-9+.-]*:\/\//i.test(name);
 
@@ -73,10 +80,17 @@ export function parseBibliographyList(value) {
 /**
  * The files, in order — lowest precedence first, so a later file wins a key.
  * Each is `{ name, path, origin }`: `name` as written, `path` absolute (null
- * for a URL), `origin` 'config' or 'note'. A file named twice keeps its later
- * place.
+ * for a URL), `origin` 'config', 'note' or, in a book, 'chapter' (with its
+ * `chapter`). A file named twice keeps its later place.
  */
 export function bibliographyFiles() {
+	const files = namedFiles();
+	// A file named twice keeps its later (stronger) place.
+	return files.filter((file, i) => !files.slice(i + 1).some((later) => (later.path ?? later.name) === (file.path ?? file.name)));
+}
+
+// Every file as named, in order, before a file named twice is reduced to one.
+function namedFiles() {
 	const configured = [
 		...parseBibliographyList(configManager.get('Biblify.bibliography')),
 		...parseBibliographyList(configManager.get('Biblify.host bibliography')),
@@ -92,15 +106,64 @@ export function bibliographyFiles() {
 	const named = mode === 'replace' && note.length
 		? note.map((name) => ({ name, origin: 'note' }))
 		: [...configured.map((name) => ({ name, origin: 'config' })), ...note.map((name) => ({ name, origin: 'note' }))];
+	// A book's chapters add theirs after the master's, in book order.
+	for (const chapter of getBook()?.chapters || []) {
+		for (const name of parseBibliographyList(chapter.settings.bibliography)) named.push({ name, origin: 'chapter', chapter });
+	}
 
 	const noteDir = configManager.get('Markdown file directory') || process.cwd();
-	const files = named.map(({ name, origin }) => ({
-		name,
-		origin,
-		path: isUrl(name) ? null : path.resolve(origin === 'note' ? noteDir : process.cwd(), name),
-	}));
-	// A file named twice keeps its later (stronger) place.
-	return files.filter((file, i) => !files.slice(i + 1).some((later) => (later.path ?? later.name) === (file.path ?? file.name)));
+	const dirOf = ({ origin, chapter }) => (origin === 'note' ? noteDir : origin === 'chapter' ? chapter.dir : process.cwd());
+	return named.map((file) => ({ ...file, path: isUrl(file.name) ? null : path.resolve(dirOf(file), file.name) }));
+}
+
+/** Whether a book's chapters add files of their own (book.js). */
+export function chaptersAddBibliographies() {
+	return (getBook()?.chapters || []).some((chapter) => parseBibliographyList(chapter.settings.bibliography).length > 0);
+}
+
+/* --- a book: which chapter's files hold a key -------------------------------------- */
+
+// Per build: the keys the book's own files hold (configured and the master's),
+// and those each chapter's add — compared as bibtex compares them.
+let scopes = null;
+function keyScopes() {
+	const book = getBook();
+	if (scopes && scopes.book === book) return scopes;
+	const keysOf = (files) => {
+		const keys = new Set();
+		for (const file of readBibliographies(files)) {
+			if (file.content != null) for (const { key } of bibEntries(file.content)) keys.add(key.toLowerCase());
+		}
+		return keys;
+	};
+	const named = namedFiles();
+	scopes = { book, own: keysOf(named.filter((file) => file.origin !== 'chapter')), chapters: new Map() };
+	for (const chapter of book.chapters) {
+		scopes.chapters.set(chapter, keysOf(named.filter((file) => file.chapter === chapter)));
+	}
+	return scopes;
+}
+
+/**
+ * In a book, warn where the chapter being rendered cites a key that neither
+ * the book's own files nor the chapter's hold, but another chapter's do: it
+ * resolves, since the book has one set, but only through that chapter. Called
+ * as each \cite-family command renders (citations.js), where the warning takes
+ * the citation's chapter and line.
+ */
+export function warnCrossChapterCitations(keys) {
+	const book = getBook();
+	const chapter = currentRenderChapter();
+	if (!book || !chapter) return;
+	const { own, chapters } = keyScopes();
+	for (const key of keys) {
+		const k = key.trim().toLowerCase();
+		if (!k || k === '*' || own.has(k) || chapters.get(chapter)?.has(k)) continue;
+		const holders = book.chapters.filter((other) => other !== chapter && chapters.get(other)?.has(k));
+		if (holders.length) {
+			addWarning(`book: this chapter cites \`${key.trim()}\`, which only ${holders.map((other) => `${other.name}'s`).join(' and ')} bibliography holds`);
+		}
+	}
 }
 
 /* --- reading -------------------------------------------------------------------- */
@@ -169,7 +232,10 @@ export function bibEntries(source) {
 // A file as a warning names it: as written, or by its own name when written as
 // an absolute path (a host's config, say), which would fill a banner.
 const shown = (file) => (path.isAbsolute(file.name) ? path.basename(file.name) : file.name);
-const where = (file) => `${shown(file)} (${file.origin === 'note' ? "this note's" : 'configured'})`;
+const where = (file) => `${shown(file)} (${
+	file.origin === 'chapter' ? `${file.chapter.name}'s`
+		: file.origin === 'note' ? (getBook() ? "the master's" : "this note's")
+			: 'configured'})`;
 const sameEntry = (a, b) => a.replace(/\s+/g, ' ').trim() === b.replace(/\s+/g, ' ').trim();
 
 /**

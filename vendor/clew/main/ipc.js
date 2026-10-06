@@ -25,6 +25,7 @@ import { appMenu } from './menu.js';
 import { allSessions, sessionFor } from './session.js';
 import { openVaultAnywhere, openVaultDialog, createVaultDialog, openDemoVault } from './main.js';
 import { propagateRename } from './rename-links.js';
+import { exportBook } from './export-book.js';
 import { exportNote } from './export.js';
 import { exportSite } from './export-site.js';
 import { parseBib, bibFilePath } from '../shared/bib.js';
@@ -40,6 +41,7 @@ import { readVaultRequests } from './vault-requests.js';
 import { codeSummary } from './vault-code.js';
 import { insideByRealpath } from '../engine/vault-bounds.js';
 import { appByKey, stateOf, grants } from './app-registry.js';
+import { mergeOrigins } from './app-grants.js';
 import { appKey, appsById, describeCapabilities } from './app-frames.js';
 import { callApp } from './app-calls.js';
 import { checkForUpdate } from './updater.js';
@@ -493,7 +495,10 @@ export function registerIpc() {
 			key, id: registered.manifest.id, name: registered.manifest.name, folder: registered.folder,
 			capabilities: registered.manifest.capabilities, network: registered.manifest.network,
 			ask: st.ask, askRun: st.askRun, changed: st.changed, mayRun: st.mayRun, granted: st.granted,
-			restricted, describe: Object.fromEntries(registered.manifest.capabilities.map((c, i) => [c, describeCapabilities(registered.manifest.capabilities, registered.manifest.network)[i]])),
+			// The hosts it may reach NOW (granted ∩ the manifest), and the
+			// prompt's words for `network` naming only the hosts it ASKS for.
+			networkNow: st.network, askNetwork: st.askNetwork,
+			restricted, describe: Object.fromEntries(registered.manifest.capabilities.map((c, i) => [c, describeCapabilities(registered.manifest.capabilities, st.askNetwork ?? registered.manifest.network)[i]])),
 		};
 	};
 	handle(CH.APP_STATUS, (s, { key }) => {
@@ -511,9 +516,15 @@ export function registerIpc() {
 		const st = stateOf(registered, restricted);
 		const asked = st.ask;
 		const pin = restricted && allow === true && (asked.includes('network') || st.granted.includes('network'));
+		// A network ask for NEW hosts of a grant that already reaches others:
+		// Don't allow refuses those hosts only (app-grants.js).
+		const widening = asked.includes('network') && st.granted.includes('network');
 		grants.answer(registered.vault, registered.manifest.id, {
 			granted: allow === true ? asked : [],
-			denied: allow === true ? [] : asked,
+			denied: allow === true ? [] : asked.filter((c) => !(widening && c === 'network')),
+			...(allow === true && asked.includes('network')
+				? { networkOrigins: mergeOrigins(st.changed ? undefined : st.record?.networkOrigins, st.askNetwork) } : {}),
+			...(allow !== true && widening ? { declineOrigins: [].concat(st.askNetwork) } : {}),
 			...(st.askRun || st.changed ? { run: allow === true } : {}),
 			...(pin ? { code: st.code() } : (allow === true && st.changed ? { code: null } : {})),
 			folder: registered.folder,
@@ -666,6 +677,17 @@ export function registerIpc() {
 		const result = await exportNote({ win: s.win, vaults: s.vaults, sessionId: s.id, callerToken: s.callerToken, relPath: path, format, outFile, trusted: s.trusted });
 		if (result?.output) s.vaults.refreshIfInside(result.output);
 		return result;
+	});
+
+	// A book (book-mode.md §5): its master and chapters as one document, into
+	// build/ beside the master.
+	handle(CH.EXPORT_BOOK, async (s, { master, format }) => {
+		const result = await exportBook({ vaults: s.vaults, indexer: s.indexer, masterRel: master, format, trusted: s.trusted });
+		if (result?.output) s.vaults.refreshIfInside(result.output);
+		// The renderer opens built pages in the browser only for a vault this
+		// device trusts: they carry the notes' own <script>s, which a browser
+		// runs outside Clew's CSP.
+		return { ...result, restricted: !s.trusted };
 	});
 
 	// The whole vault as a static website. `outDir` (smoke tests) skips the

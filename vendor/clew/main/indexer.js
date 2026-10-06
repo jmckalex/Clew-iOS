@@ -15,6 +15,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { extractNoteMetadata, extractDrawingMetadata } from '../shared/note-metadata.js';
+import { masterIndexEntry } from '../shared/book.js';
 import { isExcalidrawPath } from '../shared/excalidraw-file.js';
 import { CH, NOTE_EXTENSIONS } from '../shared/channels.js';
 import { direntKind, shouldRecurse, walkGuard, writeFileAtomic } from './fs-utils.js';
@@ -24,7 +25,7 @@ import { compileExcludes } from './vault-excludes.js';
 // The ignore rules live in vault-excludes.js now — one list, consulted by
 // every walk, and overridable per vault. This file used to keep a second
 // copy of it, which is exactly how two walks come to disagree.
-const CACHE_VERSION = 3; // 2: labels (cross-references); 3: citations
+const CACHE_VERSION = 5; // 2: labels (cross-references); 3: citations; 4: book masters; 5: a master needs `chapters:`
 
 // Drawings are indexed alongside notes. A .excalidraw.md already qualified by
 // extension (and was being scanned as raw markdown, so its base64 blob was
@@ -119,7 +120,10 @@ export class Indexer {
 		const extracted = isExcalidrawPath(relPath)
 			? (extractDrawingMetadata(text, relPath) ?? extractNoteMetadata(text))
 			: extractNoteMetadata(text);
-		const meta = { mtimeMs: stat.mtimeMs, ...extracted };
+		// A book's master note (shared/book.js) carries its chapter list;
+		// every other note's entry is exactly what it was.
+		const book = isExcalidrawPath(relPath) ? null : masterIndexEntry(text);
+		const meta = { mtimeMs: stat.mtimeMs, ...extracted, ...(book ? { book } : {}) };
 		this.notes.set(relPath, meta);
 		return meta;
 	}
@@ -191,10 +195,16 @@ export class Indexer {
 	}
 
 	#resolveAll() {
-		for (const meta of this.notes.values()) {
-			for (const link of meta.links) {
-				link.resolved = link.target ? this.resolveName(link.target) : null;
-			}
+		for (const meta of this.notes.values()) this.#resolveLinks(meta);
+	}
+
+	/** A note's links, and a master's chapters, resolved to vault paths. */
+	#resolveLinks(meta) {
+		for (const link of meta.links) {
+			link.resolved = link.target ? this.resolveName(link.target) : null;
+		}
+		for (const chapter of meta.book?.chapters ?? []) {
+			chapter.resolved = this.resolveName(chapter.target);
 		}
 	}
 
@@ -205,9 +215,7 @@ export class Indexer {
 		if (this.restricted && !insideByRealpath(path.join(this.root, relPath), this.root)) return;
 		const meta = this.#scanOne(relPath);
 		if (!meta) return;
-		for (const link of meta.links) {
-			link.resolved = link.target ? this.resolveName(link.target) : null;
-		}
+		this.#resolveLinks(meta);
 		this.#persistSoon();
 		this.send(CH.EV_INDEX_PATCH, { path: relPath, entry: meta });
 	}

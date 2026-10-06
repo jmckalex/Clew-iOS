@@ -28,6 +28,7 @@
 import { registerBlockEnvironment } from './begin-end-core.js';
 import { requirePackage, addPreamble } from './preamble.js';
 import { escapeLatexText } from './latex-escape.js';
+import { numberWithinChapter } from './book.js';
 
 // kind → presentation style (amsthm/thmtools): 'plain' italicises the body
 // (theorems), 'definition'/'remark' keep it upright. The display name is the
@@ -48,7 +49,9 @@ function htmlEscapeAttr(s) {
 function registerTheorem(kind, style) {
 	requirePackage('amsthm');    // proof environment + base theorem styling
 	requirePackage('thmtools');  // \declaretheorem with sibling counters + cleveref names
-	addPreamble('\\declaretheorem{theorem}');
+	// In a book numbering per chapter, the shared counter runs within the
+	// chapter (Theorem 2.1), as the HTML does; otherwise the plain declaration.
+	addPreamble(numberWithinChapter() ? '\\declaretheorem[numberwithin=chapter]{theorem}' : '\\declaretheorem{theorem}');
 	if (kind !== 'theorem') {
 		const styleOpt = style === 'plain' ? '' : `style=${style}, `;
 		addPreamble(`\\declaretheorem[${styleOpt}sibling=theorem]{${kind}}`);

@@ -21,6 +21,15 @@
 //                                   holds `network` is pinned to the code
 //                                   approved; new code asks again
 //   folder   where it was granted (shown in Settings, never part of the key)
+//   networkOrigins  '*' | [origin…]  what a `network` grant COVERS (2026-10-04):
+//                   the CSP is built from these ∩ the current manifest, never
+//                   from the manifest alone — so a manifest that later names a
+//                   new host asks again, for that host only. Absent on a grant
+//                   made before origins were recorded: such a grant is asked
+//                   ONCE more (it cannot say what it covered, and adopting the
+//                   manifest of the day would bless a host added meanwhile)
+//   networkDeclined [origin…]  hosts a later ask was refused for (not asked
+//                   again; the hosts granted before keep working)
 //
 // Electron-free (main/app-registry.js holds the one instance);
 // tests/app-grants.test.js.
@@ -69,11 +78,14 @@ export function createGrantStore({ file, persist = true, now = () => new Date().
 		 * restricted vault's run approval (undefined: not asked), `code` the
 		 * hash to pin (or null to unpin).
 		 */
-		answer(vault, id, { granted = [], denied = [], run, code, folder } = {}) {
+		answer(vault, id, { granted = [], denied = [], run, code, folder, networkOrigins, declineOrigins } = {}) {
 			const e = entry(vault, id, true);
 			const at = now();
 			for (const c of granted) { e.granted[c] = at; delete e.denied[c]; }
 			for (const c of denied) { e.denied[c] = at; delete e.granted[c]; }
+			if (networkOrigins !== undefined) e.networkOrigins = networkOrigins;
+			if (denied.includes('network')) delete e.networkOrigins;
+			if (declineOrigins) e.networkDeclined = [...new Set([...(e.networkDeclined ?? []), ...[].concat(declineOrigins)])];
 			if (run === true) { e.run = at; e.runDenied = null; }
 			if (run === false) { e.run = null; e.runDenied = at; }
 			if (code !== undefined) e.code = code;
@@ -100,20 +112,57 @@ export function createGrantStore({ file, persist = true, now = () => new Date().
 	};
 }
 
+/** The origins a grant covers after adding `add` ('*' covers every host). */
+export function mergeOrigins(had, add) {
+	if (had === '*' || add === '*') return '*';
+	return [...new Set([...(had ?? []), ...(add ?? [])])];
+}
+
 /**
  * What the prompt still has to ask, and whether the app may run and hold a
  * port now. Pure: the registry calls it with the record and the manifest.
+ *
+ * `network` is bound to its ORIGINS: `network` is the hosts the app may
+ * reach NOW — the granted ones the manifest still names ('*' any host), or
+ * null — and `askNetwork` the ones the prompt asks for (new hosts only, or
+ * '*'). A grant from before origins were recorded is asked once more and
+ * reaches nothing meanwhile.
  *
  * @param {object|null} record   the grant record (createGrantStore#get)
  * @param {object} manifest      parseManifest's manifest
  * @param {{ restricted: boolean, code: () => string }} vault
  * @returns {{ ask: string[], askRun: boolean, changed: boolean,
- *   mayRun: boolean, granted: string[] }}
+ *   mayRun: boolean, granted: string[], network: null|'*'|string[],
+ *   askNetwork: null|'*'|string[] }}
  */
 export function grantState(record, manifest, { restricted, code }) {
-	const granted = manifest.capabilities.filter((c) => record?.granted?.[c]);
+	let granted = manifest.capabilities.filter((c) => record?.granted?.[c]);
 	const answered = (c) => Boolean(record?.granted?.[c] || record?.denied?.[c]);
-	const ask = manifest.capabilities.filter((c) => !answered(c));
+	let ask = manifest.capabilities.filter((c) => !answered(c));
+	let network = null;
+	let askNetwork = null;
+	if (manifest.capabilities.includes('network')) {
+		const want = manifest.network ?? '*';
+		const has = record?.networkOrigins;
+		if (granted.includes('network')) {
+			if (has === undefined) {
+				// Granted before origins were recorded: asked once more.
+				granted = granted.filter((c) => c !== 'network');
+				ask = [...ask, 'network'];
+				askNetwork = want;
+			} else {
+				const covers = (o) => has === '*' || has.includes(o);
+				const declined = new Set(record?.networkDeclined ?? []);
+				const fresh = want === '*' ? (has === '*' || declined.has('*') ? [] : ['*']) : want.filter((o) => !covers(o) && !declined.has(o));
+				if (fresh.length) { ask = [...ask, 'network']; askNetwork = fresh[0] === '*' ? '*' : fresh; }
+				network = want === '*' ? has : (has === '*' ? want : want.filter(covers));
+				if (Array.isArray(network) && network.length === 0) {
+					network = null;
+					granted = granted.filter((c) => c !== 'network');
+				}
+			}
+		} else if (ask.includes('network')) askNetwork = want;
+	}
 	// Choice C: pinned code that no longer matches is a new app to the user.
 	const changed = Boolean(restricted && record?.code && record.code !== code());
 	let askRun = false;
@@ -122,5 +171,9 @@ export function grantState(record, manifest, { restricted, code }) {
 		if (record?.runDenied && !changed) { mayRun = false; }
 		else if (!record?.run || changed) { askRun = true; mayRun = false; }
 	}
-	return { ask: changed ? [...manifest.capabilities] : ask, askRun, changed, mayRun, granted: changed ? [] : granted };
+	if (changed) {
+		return { ask: [...manifest.capabilities], askRun, changed, mayRun, granted: [], network: null,
+			askNetwork: manifest.capabilities.includes('network') ? (manifest.network ?? '*') : null };
+	}
+	return { ask, askRun, changed, mayRun, granted, network, askNetwork };
 }

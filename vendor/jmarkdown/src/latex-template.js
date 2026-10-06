@@ -18,6 +18,7 @@ import path from 'path';
 import { configManager } from './config-manager.js';
 import { assemblePreamble, requirePackage, addPreamble, addLatePreamble, requiredPackageNames } from './preamble.js';
 import { checkMathPackages } from './latex-lint.js';
+import { getBook, bookPreamble, warnPreambleClashes } from './book.js';
 import { escapeLatexText } from './latex-escape.js';
 
 // Metadata values arrive as single-element arrays (from the metadata-header
@@ -41,8 +42,12 @@ export function processLatexTemplate(content) {
 	const docClass = asString(meta('Document class')) || 'article';
 	const classOptions = asString(meta('Class options'));
 	const engine = (asString(meta('LaTeX engine')) || 'pdflatex').toLowerCase();
-	const userPackages = asList(meta('Packages'));
-	const userPreamble = asList(meta('LaTeX preamble'));
+	// A book's chapters add their Packages and LaTeX preamble after the
+	// master's, each once; a definition that clashes is warned and left out.
+	const chapters = bookPreamble();
+	warnPreambleClashes();
+	const userPackages = [...asList(meta('Packages')), ...chapters.packages];
+	const userPreamble = [...asList(meta('LaTeX preamble')), ...chapters.preamble];
 
 	const documentclass = classOptions
 		? `\\documentclass[${classOptions}]{${docClass}}`
@@ -100,7 +105,21 @@ export function processLatexTemplate(content) {
 	const pdf = [];
 	if (title) pdf.push(`pdftitle={${title}}`);
 	if (author) pdf.push(`pdfauthor={${author}}`);
-	if (pdf.length) addLatePreamble(`\\hypersetup{${pdf.join(', ')}}`);
+	if (pdf.length) addLatePreamble(`\\hypersetup{${pdf.join(', ')}}`, 'hyperref');
+
+	// A book numbered `continuous`: the book class numbers figures, tables and
+	// equations per chapter, so take them out of it (listings too, when minted
+	// defined their counter). Footnotes stay per chapter, as the HTML lists them.
+	// Numbering per chapter, the default: the class already does so for those,
+	// but minted's listing counter runs on — put it within the chapter, as the
+	// HTML numbers it (Listing 2.1).
+	const book = getBook();
+	if (book && book.numbering === 'continuous') {
+		addPreamble('\\counterwithout{figure}{chapter}\\counterwithout{table}{chapter}\\counterwithout{equation}{chapter}');
+		addPreamble('\\AtBeginDocument{\\ifcsname c@listing\\endcsname\\counterwithout{listing}{chapter}\\fi}');
+	} else if (book) {
+		addPreamble('\\AtBeginDocument{\\ifcsname c@listing\\endcsname\\counterwithin{listing}{chapter}\\fi}');
+	}
 
 	// Every package the document will load is known now: warn for maths that
 	// needs one it won't (latex-lint.js).

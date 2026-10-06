@@ -259,3 +259,7 @@ button {
 	cursor: pointer;
 }
 .clew-build-warnings:hover { text-decoration: underline; }
+/* The active note is a chapter of a book (renderer/books.js, book-mode.md §2). */
+.clew-book-indicator { color: var(--clew-text-muted); cursor: pointer; }
+.clew-book-indicator:hover { text-decoration: underline; }
+.clew-book-also { color: var(--clew-text-faint); }

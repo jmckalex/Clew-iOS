@@ -52,6 +52,8 @@ rendered; **⌘O** finds any note; **⌘P** lists every command.
   single-log mode, composed interval views
 - [[Settings and Hotkeys]] — including the hotkey editor
 - [[Export]] — HTML, LaTeX, and PDF from the same source
+- [[Books]] — chapters in order as one book: the Book panel, word counts
+  and each chapter's status
 - [[Publishing]] — the whole vault as a static website
 - [[Theming]] — dark/light and CSS snippets
 

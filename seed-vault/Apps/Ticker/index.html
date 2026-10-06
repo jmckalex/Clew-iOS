@@ -19,35 +19,68 @@
 	.tape::before, .tape::after { content: ""; position: absolute; top: 0; bottom: 0; width: 28px; z-index: 1; pointer-events: none; }
 	.tape::before { left: 0; background: linear-gradient(to right, var(--tape), transparent); }
 	.tape::after { right: 0; background: linear-gradient(to left, var(--tape), transparent); }
-	.track { display: flex; white-space: nowrap; will-change: transform; }
+	/* What the band shows, and how fresh: SIMULATED, LIVE 14:32, CLOSED · as of …, ECB 2026-10-02. */
+	.badge { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); z-index: 2;
+		font: 600 11px/1 -apple-system, system-ui, sans-serif; letter-spacing: 0.06em; text-transform: uppercase;
+		padding: 5px 7px; border-radius: 5px; background: #2a2f36; color: #c9d1d9; white-space: nowrap; }
+	.badge[data-state="open"] { background: #123d20; color: #7ee2a0; }
+	.badge[data-state="closed"] { background: #3d2a12; color: #f0c27a; }
+	.track { display: flex; white-space: nowrap; will-change: transform; padding-left: 4px; }
 	.item { padding: 0 22px; display: inline-flex; gap: 10px; align-items: baseline; }
 	.sym { color: #ffd166; letter-spacing: 0.04em; }
 	.chg { font-size: 16px; }
 	.up { color: var(--up); } .down { color: var(--down); } .flat { color: #b0b0b8; }
-	.tape.static .track { flex-wrap: wrap; white-space: normal; transform: none !important; padding: 4px 0; }
+	.tape.static .track { flex-wrap: wrap; white-space: normal; transform: none !important; padding: 4px 0 4px 120px; }
 	.tape.static { height: auto; min-height: 52px; }
 	.bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 	button, .switch { font: inherit; min-height: 44px; min-width: 44px; border: 1px solid var(--line); background: var(--card);
-		color: var(--fg); border-radius: 8px; padding: 0 14px; cursor: pointer; }
-	.switch { display: inline-flex; align-items: center; gap: 8px; }
-	.switch input { width: 20px; height: 20px; margin: 0; accent-color: var(--accent); }
+		color: var(--fg); border-radius: 8px; padding: 0 12px; cursor: pointer; }
+	.modes { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+	.modes button { border: 0; border-radius: 0; }
+	.modes button + button { border-left: 1px solid var(--line); }
+	.modes button[aria-checked="true"] { background: var(--accent); color: #fff; }
 	#status { color: var(--muted); font-size: 13px; flex: 1 1 12em; }
 	#watch { display: none; flex-wrap: wrap; gap: 6px; }
 	#watch.open { display: flex; }
 	#watch label { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 10px;
 		border: 1px solid var(--line); border-radius: 22px; background: var(--card); cursor: pointer; }
 	#watch input { width: 18px; height: 18px; margin: 0; accent-color: var(--accent); }
+	/* The key panel covers the app while it is open: the box is small. */
+	#keyPanel { position: fixed; inset: 0; z-index: 5; background: var(--bg); padding: 10px; box-sizing: border-box;
+		display: none; flex-direction: column; gap: 8px; }
+	#keyPanel.open { display: flex; }
+	#keyPanel p { margin: 0; font-size: 13px; color: var(--muted); }
+	#keyPanel .url { font-family: ui-monospace, Menlo, monospace; color: var(--fg); user-select: all; }
+	#keyPanel .row { display: flex; gap: 8px; flex-wrap: wrap; }
+	#keyInput { font: inherit; min-height: 44px; flex: 1 1 14em; border: 1px solid var(--line); border-radius: 8px;
+		padding: 0 10px; background: var(--card); color: var(--fg); }
 </style>
 </head>
 <body>
-	<div class="tape" id="tape" aria-label="Ticker"><div class="track" id="track"></div></div>
+	<div class="tape" id="tape" aria-label="Ticker"><span class="badge" id="badge" data-state="sim">Simulated</span><div class="track" id="track"></div></div>
 	<div class="bar">
+		<div class="modes" role="radiogroup" aria-label="What the band shows">
+			<button id="modeSim" type="button" role="radio" aria-checked="true" data-mode="simulated">Simulated</button>
+			<button id="modeStocks" type="button" role="radio" aria-checked="false" data-mode="stocks">Live stocks</button>
+			<button id="modeEcb" type="button" role="radio" aria-checked="false" data-mode="ecb">ECB rates</button>
+		</div>
+		<button id="keyBtn" type="button" aria-haspopup="dialog">Key…</button>
 		<button id="pause" type="button" aria-pressed="false">Pause</button>
 		<button id="watchBtn" type="button" aria-expanded="false">Watchlist</button>
-		<label class="switch"><input id="live" type="checkbox"> Live ECB rates</label>
 		<span id="status" role="status">Waiting for permission…</span>
 	</div>
 	<div id="watch" aria-label="Watchlist"></div>
+	<div id="keyPanel" role="dialog" aria-label="Finnhub key">
+		<p id="keyHelp">Live stocks needs a free key from Finnhub: sign up at <span class="url">https://finnhub.io/register</span> and copy the key from your dashboard. It stays on this device, in this app's own storage — never in the vault, so it does not travel with it.</p>
+		<p id="keyState"></p>
+		<div class="row">
+			<input id="keyInput" type="password" autocomplete="off" spellcheck="false" placeholder="Finnhub API key" aria-label="Finnhub API key">
+			<button id="keySave" type="button">Save</button>
+			<button id="keyForget" type="button">Forget key</button>
+			<button id="keyClose" type="button">Close</button>
+		</div>
+	</div>
+	<script src="live.js"></script>
 	<script src="app.js"></script>
 </body>
 </html>

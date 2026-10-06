@@ -13,6 +13,7 @@
 import { Emitter } from '../lib/emitter.js';
 import { isExcalidrawPath } from '../../shared/excalidraw-file.js';
 import { NOTE_EXTENSIONS } from '../../shared/channels.js';
+import { booksOf, mastersOf } from '../../shared/book.js';
 
 class VaultStore extends Emitter {
 	/** @type {{path: string, name: string} | null} */
@@ -191,6 +192,16 @@ class VaultStore extends Emitter {
 		const matches = paths.filter((p) => p.split('/').pop().toLowerCase() === clean);
 		if (matches.length === 0) return null;
 		return matches.sort((a, b) => a.length - b.length || a.localeCompare(b))[0];
+	}
+
+	/** Book mode (shared/book.js): every book this note is a chapter of. */
+	booksOf(path) {
+		return booksOf(this.index, path);
+	}
+
+	/** Every book master in the vault, by path. */
+	masters() {
+		return mastersOf(this.index);
 	}
 
 	pathExists(path) {

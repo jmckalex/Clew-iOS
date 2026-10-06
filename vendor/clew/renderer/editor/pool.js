@@ -428,12 +428,15 @@ class EditorPool extends Emitter {
 	/** Destroy editors whose tabs no longer exist. */
 	reap(openTabIds) {
 		for (const tabId of [...this.#entries.keys()]) {
-			// An app's headless write (app-host.js) is in no tab, and closes
-			// itself once saved.
-			if (String(tabId).startsWith('app-write:')) continue;
+			// A headless write (editor/note-edit.js: an app's, the Book
+			// panel's) is in no tab, and closes itself once saved.
+			if (String(tabId).startsWith(HEADLESS_PREFIX)) continue;
 			if (!openTabIds.has(tabId)) this.close(tabId);
 		}
 	}
 }
+
+/** The tab id prefix of a headless pool entry (editor/note-edit.js). */
+export const HEADLESS_PREFIX = 'headless-write:';
 
 export const editorPool = new EditorPool();

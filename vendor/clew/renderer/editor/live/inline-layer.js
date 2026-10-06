@@ -22,7 +22,7 @@
 // What a revealed construct looks like is not this file's business: it is
 // source mode — the overlay's jmd-* faces and the theme's cmt-* classes.
 import { ViewPlugin, Decoration } from '@codemirror/view';
-import { StateEffect } from '@codemirror/state';
+import { StateEffect, countColumn } from '@codemirror/state';
 import { liveStateField } from './reveal-field.js';
 import { MathWidget } from './widgets/math.js';
 import {
@@ -274,6 +274,14 @@ function build(view) {
 		const lineClass = (pos, cls, attributes) =>
 			out.push(Decoration.line(attributes ? { class: cls, attributes } : { class: cls }).range(doc.lineAt(pos).from));
 		const lineRange = (from, to) => ({ from, to });
+		// A list line's --le-indent: the COLUMN of its item's marker (a tab to
+		// its stop, as drawn), counted from the end of a quote's `>`s — a list
+		// in a callout indents from the callout's text, not from the margin.
+		const listIndent = (c) => {
+			const line = doc.lineAt(c.listMark.from);
+			const quoted = /^(?:[ \t]*>)+[ \t]?/.exec(line.text)?.[0].length ?? 0;
+			return countColumn(line.text.slice(quoted, c.listMark.from - line.from), state.tabSize);
+		};
 		for (const c of model) {
 			if (c.tier !== 'A' || !inView(c.lineFrom, c.lineTo)) continue;
 			if (inNote(c.from, c.to)) continue; // inside a concealed note
@@ -322,13 +330,9 @@ function build(view) {
 				case 'bullet':
 				case 'numbered':
 				case 'task': {
-					// Counted from the end of a quote's `>`s: a list in a callout
-					// indents from the callout's text, not from the margin.
-					const listLine = doc.lineAt(c.listMark.from);
-					const quoted = /^(?:[ \t]*>)+[ \t]?/.exec(listLine.text)?.[0].length ?? 0;
-					const indent = c.listMark.from - listLine.from - quoted;
 					lineClass(c.from, `le-li le-li-${Math.min(c.depth, 4)}${c.kind === 'task' && c.checked ? ' le-done' : ''}`,
-						{ style: `--le-indent: ${indent}` });
+						{ style: `--le-indent: ${listIndent(c)}` });
+					if (c.kind === 'numbered') mark(c.numberMark.from, c.numberMark.to, 'le-num');
 					if (!hidden) break;
 					if (c.kind === 'bullet') widget(c.hidden[0].from, c.hidden[0].to, new BulletWidget(c.depth));
 					if (c.kind === 'task') {
@@ -337,6 +341,13 @@ function build(view) {
 					}
 					break;
 				}
+				case 'listText':
+					// The item's text past its first line (model.js#listText):
+					// under the item's text, its indentation concealed whatever
+					// the reveal — the line stays put when the caret enters it.
+					lineClass(c.from, 'le-li-cont', { style: `--le-indent: ${listIndent(c)}` });
+					hide(c.indent);
+					break;
 				case 'codeFence': {
 					const last = c.closeLine ?? lineRange(doc.lineAt(c.to).from, c.to);
 					for (let n = doc.lineAt(c.openLine.from).number; n <= doc.lineAt(last.from).number; n += 1) {

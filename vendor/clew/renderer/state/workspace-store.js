@@ -256,8 +256,27 @@ class WorkspaceStore extends Emitter {
 		this.#commit('sidebar-changed', side);
 	}
 
+	/**
+	 * The book a chapter's numbers come from when it is in two (book-mode.md
+	 * §2, D10): the master built or opened most recently. Kept per vault in
+	 * the workspace, never in the notes; absent until a book is opened.
+	 */
+	get recentBook() {
+		return this.state.recentBook ?? null;
+	}
+
+	setRecentBook(master) {
+		if (!master || this.state.recentBook === master) return;
+		this.state.recentBook = master;
+		this.#persist();
+		this.emit('book-changed', master);
+	}
+
 	/** Rewrite tab paths after a file rename/move. */
 	remapPaths(fromPath, toPath) {
+		const book = this.state.recentBook;
+		if (book === fromPath) this.state.recentBook = toPath;
+		else if (book?.startsWith(fromPath + '/')) this.state.recentBook = toPath + book.slice(fromPath.length);
 		let touched = false;
 		for (const group of this.allGroups()) {
 			for (const tab of group.tabs) {

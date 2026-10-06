@@ -31,6 +31,7 @@ import { configManager } from './config-manager.js';
 import { requirePackage } from './preamble.js';
 import { registerBlockEnvironment } from './begin-end-core.js';
 import { addWarning } from './warnings.js';
+import { texCachePath, escapeLatexPath } from './latex-graphics.js';
 
 const MP_DIR_NAME = 'MetaPost';
 
@@ -234,9 +235,9 @@ function renderMetapostLatex(source, attrs) {
 		addWarning('MetaPost (LaTeX) produced no PDF — skipped');
 		return '';
 	}
-	requirePackage('adjustbox'); // for `max width` (also loads graphicx)
+	requirePackage('adjustbox', 'export'); // `max width` for \includegraphics (see mermaid.js)
 	const includes = pdfs
-		.map(pdf => `\\includegraphics[max width=\\linewidth]{${path.join(dir, pdf)}}`)
+		.map(pdf => `\\includegraphics[max width=\\linewidth]{${escapeLatexPath(texCachePath(path.join(dir, pdf)))}}`)
 		.join('\\\\\n');
 	return `\\begin{center}\n${includes}\n\\end{center}\n\n`;
 }

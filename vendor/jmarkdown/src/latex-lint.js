@@ -44,6 +44,7 @@
 import { configManager } from './config-manager.js';
 import { addWarning, getWarnings } from './warnings.js';
 import { MATH_PACKAGE_COMMANDS } from './math-packages.js';
+import { bookPreamble, bookMathMacros } from './book.js';
 
 /* --- silencing ------------------------------------------------------------------ */
 
@@ -250,8 +251,10 @@ function packagesIn(lines) {
 export function checkMathPackages(loaded = []) {
 	const meta = (key) => configManager.getMeta(key);
 	const have = new Set([...loaded, ...loadedByUse]);
-	for (const p of listOf(meta('Packages'))) have.add(p);
-	for (const p of packagesIn(meta('LaTeX preamble'))) have.add(p);
+	// In a book, what its chapters add to the one preamble counts too (book.js).
+	const chapters = bookPreamble();
+	for (const p of [...listOf(meta('Packages')), ...listOf(chapters.packages)]) have.add(p);
+	for (const p of [...packagesIn(meta('LaTeX preamble')), ...packagesIn(chapters.preamble)]) have.add(p);
 	for (const p of CLASS_LOADS[String(meta('Document class') ?? '').trim()] ?? []) have.add(p);
 	const macros = meta('Math macros') || [];
 	if ((Array.isArray(macros) ? macros : [macros]).some((line) => String(line).trim())) {
@@ -260,6 +263,14 @@ export function checkMathPackages(loaded = []) {
 		for (const line of Array.isArray(macros) ? macros : [macros]) definitions(line);
 	}
 	for (const line of Array.isArray(meta('LaTeX preamble')) ? meta('LaTeX preamble') : [meta('LaTeX preamble') ?? '']) definitions(line);
+	for (const line of chapters.preamble) definitions(line);
+	// A book's chapters define their own macros at their starts (book.js).
+	const chapterMacros = bookMathMacros();
+	if (chapterMacros.length) {
+		have.add('amsmath');
+		have.add('amssymb');
+		for (const line of chapterMacros) definitions(line);
+	}
 
 	const missing = new Map();   // package to suggest → [examples]
 	for (const [name, example] of used) {

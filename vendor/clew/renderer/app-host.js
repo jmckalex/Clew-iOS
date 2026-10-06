@@ -37,10 +37,9 @@
 import { ipc, CH } from './ipc.js';
 import { fromPreviewOrigin, PREVIEW_ORIGIN } from '../shared/message-guard.js';
 import { settingsStore } from './state/settings-store.js';
-import { workspaceStore } from './state/workspace-store.js';
 import { vaultStore } from './state/vault-store.js';
 import { editorPool } from './editor/pool.js';
-import { minimalChange } from './editor/minimal-change.js';
+import { editNote, editorFor } from './editor/note-edit.js';
 import { parseProperties, applyProperties } from '../shared/frontmatter.js';
 import { openSearchPanel, setSearchQuery, SearchQuery } from '@codemirror/search';
 import { openWikilink } from './commands/actions.js';
@@ -157,7 +156,9 @@ function ensurePrompt(status) {
 			// A frame already running (a trusted vault's starts before the
 			// answer) has its CSP from before it: a `network` grant reaches it
 			// only through a reload.
-			if (after?.granted?.includes('network') && !status.granted.includes('network')) tellEmbedders(status.key, 'app-reload');
+			// A frame's hosts are its CSP, fixed when it loaded: an answer that
+			// changes them (a new host allowed) reloads it.
+			if (JSON.stringify(after?.networkNow ?? null) !== JSON.stringify(status.networkNow ?? null)) tellEmbedders(status.key, 'app-reload');
 			// Frames already holding a port (an app asking for more later):
 			// what was granted reaches them live.
 			else refreshGrants(status.key);
@@ -292,54 +293,8 @@ async function openTarget(record, target) {
 // ---- the write side, through the editor pool (§10) ---------------------------
 
 const fail = (code, message) => ({ ok: false, error: { code, message } });
-let headless = 0;
 
-/** Apply `edit(text) → text` to a note: as a transaction on the editor the
- *  user has it open in, or through a headless pool entry that saves at once.
- *  A note whose editor has an unresolved conflict answers `conflict`. */
-async function editNote(path, edit) {
-	const editing = editorFor(path);
-	if (editing) {
-		const entry = editing;
-		if (entry.conflict) return fail('conflict', `${path} changed on disk while it had unsaved edits; the user must resolve it first`);
-		const before = entry.view.state.doc.toString();
-		const change = minimalChange(before, edit(before));
-		if (change) entry.view.dispatch({ changes: change, userEvent: 'input.app' });
-		return { ok: true, result: true };
-	}
-	const tabId = `app-write:${++headless}`;
-	try {
-		const entry = await editorPool.open(tabId, path);
-		if (entry.conflict) return fail('conflict', `${path} cannot be written now`);
-		const before = entry.view.state.doc.toString();
-		const change = minimalChange(before, edit(before));
-		if (change) {
-			entry.view.dispatch({ changes: change, userEvent: 'input.app' });
-			await editorPool.saveNow(tabId);
-		}
-		return { ok: true, result: true };
-	} finally {
-		editorPool.close(tabId);
-	}
-}
-
-/**
- * The editor the user is EDITING a note in, or null. A note can have
- * several pool entries — a split, a reading-mode tab whose editor stays
- * pooled — each its own state, kept in step through the disk: an app's edit
- * goes to ONE, the one in an editing mode (the active tab first), and
- * reaches the rest the way the user's own edits do. Only reading-mode
- * entries means "not open in an editor": the write goes headless.
- */
-function editorFor(path) {
-	const editing = editorPool.tabsFor(path).filter((id) => {
-		const mode = workspaceStore.findTab(id)?.tab?.view?.mode;
-		return mode === 'source' || mode === 'live';
-	});
-	const active = workspaceStore.activeTab()?.id;
-	const id = editing.includes(active) ? active : editing[0];
-	return id ? editorPool.get(id) : null;
-}
+// editNote / editorFor: editor/note-edit.js (the Book panel writes the same way).
 
 async function perform(order, params) {
 	try {

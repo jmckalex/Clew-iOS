@@ -35,6 +35,10 @@
 	          grouping or @endnotes placement is used, notes become endnotes:
 	          a \textsuperscript{n} mark inline + built endnote lists at the
 	          placement markers.
+	  In a BOOK (book.js) that uses no grouping or placement, each chapter's
+	          notes instead close that chapter in HTML, numbered from 1 (LaTeX's
+	          \footnote is numbered per chapter by the class); an ambient group
+	          ends with its chapter.
 
 	Exports:
 	  - preprocessFootnotes(src)    — call before marked.parse() (resolves ambient
@@ -51,6 +55,7 @@ import attributesParser from 'attributes-parser';
 import { addWarning } from './warnings.js';
 import { marked } from './utils.js';
 import { crefName } from './preamble.js';
+import { getBook, currentWalkChapter, currentRenderChapter, hasChapterMarker, CHAPTER_NOTES } from './book.js';
 
 // ========================================================================
 //  Classic [^label] footnotes in LaTeX
@@ -67,6 +72,9 @@ import { crefName } from './preamble.js';
 // \footnote and a superscript \ref at the others.
 function latexClassicFootnotes(token) {
 	if (!global.isLatex || token.type !== 'footnotes') return;
+	// In a book each chapter keys its notes from [^1] again, so a repeated
+	// note's \label carries its chapter (book.js); null outside a book.
+	const chapter = currentWalkChapter();
 	for (const item of token.items || []) {
 		const refs = item.refs || [];
 		refs.forEach((ref, i) => {
@@ -74,6 +82,7 @@ function latexClassicFootnotes(token) {
 			ref.content = item.content;
 			ref.first = i === 0;
 			ref.repeated = refs.length > 1;
+			ref.chapter = chapter ? chapter.index : null;
 		});
 	}
 	token.type = 'space';
@@ -84,7 +93,8 @@ const classicFootnoteLatex = {
 	renderer(token) {
 		const body = this.parser.parse(token.content || []).trim();
 		if (!token.repeated) return `\\footnote{${body}}`;
-		const key = `jmdfn:${String(token.label).replace(/[^A-Za-z0-9-]/g, '-')}`;
+		const scope = token.chapter ? `ch${token.chapter}-` : '';
+		const key = `jmdfn:${scope}${String(token.label).replace(/[^A-Za-z0-9-]/g, '-')}`;
 		return token.first ? `\\footnote{\\label{${key}}${body}}` : `\\textsuperscript{\\ref{${key}}}`;
 	},
 };
@@ -180,6 +190,10 @@ let placementIdCounter = 0;
 // True once the document uses ANY grouping or placement — this is the switch that
 // turns LaTeX from inline \footnote into built endnote lists.
 let endnotesMode = false;
+// In a book that uses no grouping or placement, each chapter's notes close
+// that chapter, numbered from 1 (book.js): { chapter, n, label, content }.
+const chapterEntries = [];
+const chapterCounters = new Map();       // chapter index → running number
 
 // Marker used to replace extracted multi-paragraph footnotes.
 // Uses Unicode noncharacters that will never appear in real content.
@@ -208,6 +222,8 @@ export function resetFootnotes() {
 	placements.length = 0;
 	placementIdCounter = 0;
 	endnotesMode = false;
+	chapterEntries.length = 0;
+	chapterCounters.clear();
 }
 
 // Resolve a raw group capture into a group key: trimmed, or DEFAULT_GROUP if empty.
@@ -251,9 +267,19 @@ function resolveAmbientGroups(src) {
 	let ambient = DEFAULT_GROUP;
 	let inFence = false;
 	let fenceMarker = '';
+	const inBook = getBook() !== null;
 
 	for (let li = 0; li < lines.length; li++) {
 		const line = lines[li];
+
+		// In a book (book.js) a chapter is a file of its own: an ambient group,
+		// or a fence left open, ends with it.
+		if (inBook && hasChapterMarker(line)) {
+			ambient = DEFAULT_GROUP;
+			inFence = false;
+			fenceMarker = '';
+			continue;
+		}
 
 		// Fence tracking (``` or ~~~). The delimiter line itself is left as-is.
 		const fence = /^(\s*)(`{3,}|~{3,})/.exec(line);
@@ -358,6 +384,16 @@ export function preprocessFootnotes(src) {
 
 		// Check for blank lines within the footnote
 		const footnoteSlice = src.slice(idx, closingPos);
+
+		// A note never runs from one chapter into the next (book.js): an
+		// unclosed `[fn:` stays literal, as it does within one document,
+		// rather than carrying the chapter boundary off into the note.
+		if (getBook() && hasChapterMarker(footnoteSlice)) {
+			const skip = match[0].length;
+			result.push(src.slice(i, idx + skip));
+			i = idx + skip;
+			continue;
+		}
 		const hasBlankLines = /\n[ \t]*\n/.test(footnoteSlice);
 
 		if (!hasBlankLines) {
@@ -514,8 +550,16 @@ export const inlineFootnote = {
 		}
 
 		// HTML: always a superscript ref + collected entry (placement decided later).
-		const n = nextNumber(group);
 		const stored = token.isBlock ? content : `<p>${content}</p>`;
+		// In a book with no grouping or placement, the note is its chapter's.
+		const chapter = endnotesMode ? null : currentRenderChapter();
+		if (chapter) {
+			const n = (chapterCounters.get(chapter.index) || 0) + 1;
+			chapterCounters.set(chapter.index, n);
+			chapterEntries.push({ chapter: chapter.index, n, label: token.label, content: stored });
+			return `<sup class="footnote-ref"><a href="#fn-${token.label}" id="fnref-${token.label}">${n}</a></sup>`;
+		}
+		const n = nextNumber(group);
 		footnoteEntries.push({ group, n, label: token.label, content: stored });
 		return `<sup class="footnote-ref"><a href="#fn-${token.label}" id="fnref-${token.label}">${n}</a></sup>`;
 	}
@@ -592,6 +636,13 @@ function htmlList(entries) {
 function classicSectionHTML(entries) {
 	if (!entries.length) return '';
 	return '\n<section class="footnotes">\n<h1 class="endnotes-heading">Endnotes</h1>\n' + htmlList(entries) + '</section>\n';
+}
+
+// A chapter's notes, closing the chapter (book.js): the historical section, a
+// level down, since in a book `#` is the chapter's own heading.
+function chapterSectionHTML(entries) {
+	if (!entries.length) return '';
+	return '\n<section class="footnotes">\n<h2 class="endnotes-heading">Endnotes</h2>\n' + htmlList(entries) + '</section>\n';
 }
 
 // A placed / grouped HTML section: optional {title} heading, then one <ol> per
@@ -690,6 +741,11 @@ function entriesByGroup() {
  * @param {'html'|'latex'} format
  */
 export function fillEndnotes(content, format) {
+	// A book's chapters each close with their own notes (or nothing).
+	if (format === 'html' && getBook()) {
+		content = content.replace(CHAPTER_NOTES, (m, n) =>
+			chapterSectionHTML(chapterEntries.filter((e) => e.chapter === Number(n))));
+	}
 	if (!footnoteEntries.length && !placements.length) return content;
 
 	const byGroup = entriesByGroup();

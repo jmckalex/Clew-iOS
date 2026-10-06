@@ -14,6 +14,20 @@
 	    does);
 	each with a build warning. Graphics the engine makes itself (TikZ,
 	MetaPost, Mermaid) are PDFs and never come here.
+
+	Where a relative path is printed from (texPath): LaTeX looks for it where
+	LaTeX runs, beside the .tex. A single file writes its paths as given, as it
+	always has. A BOOK's paths are the master's (book.js rebases each
+	chapter's onto it), and its .tex may be written elsewhere — a host builds
+	into build/ — so they are rebased onto the .tex's own folder, as a split
+	book's pages are onto theirs (book-pages.js). kpathsea never searches
+	TEXINPUTS for a `./` or `../` name, so nothing else would find them.
+
+	A file the ENGINE made — a cached diagram PDF (mermaid.js, metapost.js),
+	known by its absolute path — is printed relative to the .tex's folder too,
+	in a single file as in a book (texCachePath): as an absolute path it put the
+	user's folders into the .tex, and under pdfLaTeX into the PDF as well
+	(/PTEX.FileName).
 */
 
 import fs from 'fs';
@@ -22,6 +36,7 @@ import { configManager } from './config-manager.js';
 import { addWarning } from './warnings.js';
 import { requirePackage } from './preamble.js';
 import { escapeLatexText, escapeTexText } from './latex-escape.js';
+import { getBook } from './book.js';
 
 // \href and \includegraphics take their argument almost verbatim, but a `%` or
 // `#` in a path still has to be escaped for TeX.
@@ -36,6 +51,54 @@ export function markdownDir() {
 
 export function isRemote(src) {
 	return /^[a-z][a-z0-9+.-]*:\/\//i.test(src) || src.startsWith('//');
+}
+
+// A path as found from the folder of the .tex at `out`. Both ends are REAL
+// paths: TeX climbs `..` physically, from where the .tex really is, so a
+// relative path worked out lexically missed whenever a symlink stood on
+// either side — an output under os.tmpdir() (/var/folders/… is really
+// /private/var/…), or a vault reached through a link — and LaTeX could not
+// find the file. A path that does not exist (yet) keeps its missing tail on
+// the real path of the part that does.
+function realPath(p) {
+	try { return fs.realpathSync(p); } catch { /* not there yet */ }
+	const parent = path.dirname(p);
+	return parent === p ? p : path.join(realPath(parent), path.basename(p));
+}
+
+function fromTexFolder(out, target) {
+	const rel = path.relative(realPath(path.dirname(out)), realPath(target));
+	return rel.split(path.sep).join('/') || '.';
+}
+
+/**
+ * A local path as the .tex prints it (see above): in a book with an output
+ * file, a relative path (relative to the master, markdownDir()) made relative
+ * to the output's folder; anything else as given. A book on stdout has no
+ * folder to rebase onto, so it keeps the master's, and says so.
+ */
+export function texPath(src) {
+	if (!getBook() || !src || path.isAbsolute(src) || /^[a-z][a-z0-9+.-]*:/i.test(src) || src.startsWith('//')) return src;
+	const out = configManager.get('Output file');
+	if (!out) {
+		addWarning('book: the LaTeX goes to stdout, so its image and media paths are relative to the master\'s folder — compile it there, or give an output file');
+		return src;
+	}
+	return fromTexFolder(out, path.resolve(markdownDir(), src));
+}
+
+/**
+ * A file the engine made, by its absolute path, as the .tex prints it (see
+ * above): relative to the output's folder. On stdout there is no folder, so
+ * the absolute path stays, with a warning.
+ */
+export function texCachePath(abs) {
+	const out = configManager.get('Output file');
+	if (!out) {
+		addWarning('the LaTeX goes to stdout, so its cached diagrams are included by absolute path (which names your folders) — give an output file to make them relative');
+		return abs;
+	}
+	return fromTexFolder(out, abs);
 }
 
 /**
@@ -74,8 +137,8 @@ export function latexGraphic({ src, alt, options = () => '', what }) {
 		// would otherwise break it).
 		requirePackage('hyperref');
 		addWarning(`${what}: ${src} is an SVG, which \\includegraphics cannot read — LaTeX output links to it instead; put a .pdf or .png beside it to include it`);
-		return `\\href{${escapeLatexPath(`run:${src}`)}}{${escapeTexText(alt || src)}}`;
+		return `\\href{${escapeLatexPath(`run:${texPath(src)}`)}}{${escapeTexText(alt || src)}}`;
 	}
 	requirePackage('graphicx');
-	return `\\includegraphics${options()}{${escapeLatexPath(graphic)}}`;
+	return `\\includegraphics${options()}{${escapeLatexPath(texPath(graphic))}}`;
 }

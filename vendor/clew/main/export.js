@@ -42,24 +42,39 @@ import { iconTable } from './callout-files.js';
 import { chooseLatexEngine, engineName, latexmkFlag, firstLatexError } from './latex-engine.js';
 
 const WORKER_PATH = paths.engineWorker;
+// Clew's own export worker (engine/export-worker.mjs): the engine's worker
+// with its Obsidian links ON — resolvers the IPC to the engine's own worker
+// cannot carry.
+const EXPORT_WORKER = path.join(paths.engineAssets, 'export-worker.mjs');
 
 /** Where a restricted vault's export runs from (see the header). */
-function restrictedExportDir() {
+export function restrictedExportDir() {
 	const dir = paths.restrictedExport;
 	fs.mkdirSync(path.join(dir, '.jmarkdown'), { recursive: true });
 	fs.writeFileSync(path.join(dir, '.jmarkdown', 'config.json'), JSON.stringify({ 'Run note code': false }, null, '\t') + '\n');
 	return dir;
 }
 
-function runWorker({ file, options, cwd, callouts = '' }) {
+/**
+ * One engine build in a one-shot worker. With `vault` ({ root, restricted }),
+ * the engine's Obsidian links are ON (jmarkdown obsidian-links.js; the owner,
+ * 2026-10-05): [[links]] print as their text and ![[image]] embeds resolve
+ * across the vault as the preview resolves them — through Clew's export
+ * worker, which gives the engine those resolvers. Without it, the engine's
+ * own worker, exactly as before.
+ */
+export function runWorker({ file, options, cwd, callouts = '', vault = null }) {
 	return new Promise((resolve, reject) => {
-		const child = fork(WORKER_PATH, [], {
+		const child = fork(vault ? EXPORT_WORKER : WORKER_PATH, vault ? [WORKER_PATH] : [], {
 			cwd,
 			stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
 			// The engine renders callouts itself (jmarkdown a7de8c6), HTML and
 			// LaTeX; CLEW_CALLOUTS hands it this vault's custom types, as the
 			// preview does — a `Callouts` key in the user's own config wins.
-			env: { ...process.env, PATH: toolchainPath(), CLEW_CALLOUTS: callouts },
+			env: {
+				...process.env, PATH: toolchainPath(), CLEW_CALLOUTS: callouts,
+				...(vault ? { CLEW_VAULT_ROOT: vault.root, CLEW_VAULT_RESTRICTED: vault.restricted ? '1' : '0' } : {}),
+			},
 		});
 		let stderr = '';
 		child.stdout.on('data', () => {});
@@ -86,7 +101,7 @@ function runWorker({ file, options, cwd, callouts = '' }) {
  * ~/.jmarkdown/config.json, overridden by the working folder's own
  * .jmarkdown/config.json, each relative path against the working folder.
  */
-function configuredBibliographies(cwd) {
+export function configuredBibliographies(cwd) {
 	let value = '';
 	for (const file of [path.join(os.homedir(), '.jmarkdown', 'config.json'), path.join(cwd, '.jmarkdown', 'config.json')]) {
 		try {
@@ -113,13 +128,18 @@ const findTex = (name) => TEX_DIRS.map((dir) => path.join(dir, name)).find((p) =
  *
  * @returns {Promise<{pdf: string, engine: string, reason: string}>}
  */
-function compilePdf(texFile, noteDir, bibDirs = [noteDir]) {
+export function compilePdf(texFile, noteDir, bibDirs = [noteDir]) {
 	const { engine, reason } = chooseLatexEngine(fs.readFileSync(texFile, 'utf8'), settings.get('latexEngine') ?? 'auto');
 	const latexmk = findTex('latexmk');
 	const tex = latexmk ?? findTex(engine);
 	if (!tex) throw new Error(`No TeX toolchain found (latexmk or ${engine}). Install MacTeX for PDF export.`);
+	// `-g`: latexmk always runs. An unchanged note re-exported to the same
+	// place otherwise found its rewritten .tex up to date, ran nothing, and
+	// left the last PDF — which the freshness check below rightly refused
+	// ("no PDF was produced", measured 2026-10-05). One extra pass, no
+	// parsing of latexmk's messages.
 	const args = latexmk
-		? [latexmkFlag(engine), '-interaction=nonstopmode', '-quiet', path.basename(texFile)]
+		? [latexmkFlag(engine), '-g', '-interaction=nonstopmode', '-quiet', path.basename(texFile)]
 		: ['-interaction=nonstopmode', path.basename(texFile)];
 	const pdf = texFile.replace(/\.tex$/, '.pdf');
 	const started = Date.now();
@@ -173,6 +193,10 @@ export async function exportNote({ win, vaults, sessionId, callerToken = null, r
 	const vaultBibName = String(vaultSettings.bibliography ?? '').trim();
 	const vaultBib = vaultBibName ? path.resolve(vaults.root, vaultBibName) : null;
 	const bibliography = vaultBib ? [vaultBib] : [];
+	// The engine's Obsidian links, on for every note export (runWorker): Clew's
+	// own wikilink handling is the preview's and the site's, never an export's,
+	// which runs the user's own config cascade.
+	const vault = { root: vaults.root, restricted: !trusted };
 
 	// A relative outFile is vault-relative, not process-relative: the caller
 	// is a scenario inside the vault, and resolving against the working
@@ -200,7 +224,7 @@ export async function exportNote({ win, vaults, sessionId, callerToken = null, r
 	}
 
 	if (format === 'html') {
-		const { warnings } = await runWorker({ file: abs, options: { to: 'html', output: filePath, normalSyntax, bibliography }, cwd, callouts });
+		const { warnings } = await runWorker({ file: abs, options: { to: 'html', output: filePath, normalSyntax, bibliography }, cwd, callouts, vault });
 		return { output: filePath, warnings };
 	}
 
@@ -214,7 +238,7 @@ export async function exportNote({ win, vaults, sessionId, callerToken = null, r
 	const build = format === 'pdf' && buildApart ? fs.mkdtempSync(path.join(os.tmpdir(), 'clew-export-')) : null;
 	try {
 		const texFile = format === 'latex' ? filePath : build ? path.join(build, `${base}.tex`) : filePath.replace(/\.pdf$/i, '.tex');
-		const { warnings } = await runWorker({ file: abs, options: { to: 'latex', output: texFile, normalSyntax, bibliography }, cwd, callouts });
+		const { warnings } = await runWorker({ file: abs, options: { to: 'latex', output: texFile, normalSyntax, bibliography }, cwd, callouts, vault });
 		if (format === 'latex') return { output: texFile, warnings };
 		const noteDir = path.dirname(abs);
 		const configured = [...configuredBibliographies(cwd), ...bibliography];

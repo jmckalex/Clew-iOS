@@ -16,9 +16,10 @@
 const requiredPackages = new Map();
 // Arbitrary preamble snippets registered by features (e.g. \newenvironment).
 const rawPreambleLines = [];
-// Snippets that must follow the load-order-sensitive packages — specifically
-// cleveref configuration (\crefname overrides). Emitted only when cleveref is
-// actually loaded, right after it (and before the user preamble).
+// Snippets that must follow the load-order-sensitive packages: cleveref's
+// configuration (\crefname overrides), hyperref's (\hypersetup). Emitted right
+// after them (and before the user preamble), each only when the package it
+// configures is loaded: { line, needs }.
 const latePreambleLines = [];
 
 // A few packages are load-order sensitive and conventionally come near the end
@@ -47,11 +48,15 @@ export function addPreamble(line) {
 	if (!rawPreambleLines.includes(line)) rawPreambleLines.push(line);
 }
 
-// Register a preamble line that must come AFTER the late packages (cleveref).
-// Emitted only when cleveref is loaded — e.g. \crefname overrides, which are
-// cleveref commands. Deduplicated.
-export function addLatePreamble(line) {
-	if (!latePreambleLines.includes(line)) latePreambleLines.push(line);
+// Register a preamble line that must come AFTER the late packages (hyperref,
+// cleveref). `needs` names the package the line configures, and the line is
+// emitted only when that package is loaded: a \crefname is a cleveref command,
+// and every full document loads hyperref, so a \crefname gated on either
+// printed its arguments as text whenever a document numbered something but
+// \cref'd nothing. Without `needs` (a handler's own line), either package will
+// do, as before. Deduplicated.
+export function addLatePreamble(line, needs = null) {
+	if (!latePreambleLines.some((l) => l.line === line)) latePreambleLines.push({ line, needs });
 }
 
 // Force cleveref to spell a reference type out in full ("figure 1"/"table 1"/
@@ -59,8 +64,8 @@ export function addLatePreamble(line) {
 // cross-ref wording. Only takes effect when cleveref is loaded.
 export function crefName(type, singular, plural) {
 	const cap = (s) => s.charAt(0).toUpperCase() + s.slice(1);
-	addLatePreamble(`\\crefname{${type}}{${singular}}{${plural}}`);
-	addLatePreamble(`\\Crefname{${type}}{${cap(singular)}}{${cap(plural)}}`);
+	addLatePreamble(`\\crefname{${type}}{${singular}}{${plural}}`, 'cleveref');
+	addLatePreamble(`\\Crefname{${type}}{${cap(singular)}}{${cap(plural)}}`, 'cleveref');
 }
 
 // Clear all registrations. Not needed for a normal single-document CLI run, but
@@ -133,11 +138,10 @@ export function assemblePreamble({ engine = 'pdflatex', userPackages = [], userP
 	}
 
 	// Post-package configuration (\crefname for cleveref, \hypersetup for
-	// hyperref) — emitted after the load-order-sensitive packages, and only when
-	// one of them is actually present (each line is registered only alongside its
-	// package, so this gate just avoids a stray block when neither is loaded).
-	if (emitted.has('cleveref') || emitted.has('hyperref')) {
-		for (const line of latePreambleLines) lines.push(line);
+	// hyperref) — emitted after the load-order-sensitive packages, each line only
+	// when the package it configures is present.
+	for (const { line, needs } of latePreambleLines) {
+		if (needs ? emitted.has(needs) : (emitted.has('cleveref') || emitted.has('hyperref'))) lines.push(line);
 	}
 
 	// User verbatim preamble, last of all so it can override anything above.

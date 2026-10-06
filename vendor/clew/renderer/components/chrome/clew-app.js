@@ -29,6 +29,7 @@ import '../panels/clew-tag-pane.js';
 import '../panels/clew-outline.js';
 import '../panels/clew-properties.js';
 import '../panels/clew-bibliography.js';
+import '../panels/clew-book.js';
 import '../views/clew-graph-view.js';
 import './clew-status-bar.js';
 
@@ -44,6 +45,9 @@ const TOOLS = {
 		{ id: 'outgoing', label: 'Out', element: 'clew-outgoing-links' },
 		{ id: 'tags', label: 'Tags', element: 'clew-tag-pane' },
 		{ id: 'outline', label: 'Outline', element: 'clew-outline' },
+		// Only in a vault that has a book (book-mode.md §2): every other
+		// vault's sidebar is exactly as it was.
+		{ id: 'book', label: 'Book', element: 'clew-book', withBooks: true },
 		// Always there (§5.14): its Library needs no render; its "This note"
 		// mode stays behind the vault's bibliographyPanel setting.
 		{ id: 'bibliography', label: 'Refs', element: 'clew-bibliography' },
@@ -57,6 +61,7 @@ const TOOLS = {
 
 class ClewApp extends ClewElement {
 	#vaultSettings = null;
+	#hasBooks = false;
 
 	subscribe() {
 		this.listen(vaultStore, 'vault-changed', () => { this.render(); this.#refreshVaultTools(); });
@@ -68,6 +73,13 @@ class ClewApp extends ClewElement {
 		this.listen(workspaceStore, 'shell-changed', () => this.#applyShell());
 		this.listen(workspaceStore, 'active-changed', () => this.#updateTitle());
 		this.listen(workspaceStore, 'layout-changed', () => this.#updateTitle());
+		// The Book tab comes and goes with the vault's first and last book.
+		this.listen(vaultStore, 'index-changed', () => {
+			const hasBooks = vaultStore.masters().length > 0;
+			if (hasBooks === this.#hasBooks) return;
+			this.#hasBooks = hasBooks;
+			if (this.querySelector('.tool-tabs[data-side="right"]')) this.#renderTools('right');
+		});
 	}
 
 	render() {
@@ -152,7 +164,7 @@ class ClewApp extends ClewElement {
 	}
 
 	#renderTools(side) {
-		const tools = TOOLS[side].filter((t) => !t.when || t.when(this.#vaultSettings));
+		const tools = TOOLS[side].filter((t) => (!t.when || t.when(this.#vaultSettings)) && (!t.withBooks || this.#hasBooks));
 		const tabs = this.querySelector(`.tool-tabs[data-side="${side}"]`);
 		if (!tabs) return;
 		const active = workspaceStore.state.sidebars[side].activeTool ?? tools[0].id;

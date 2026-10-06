@@ -125,6 +125,7 @@ class AppMenu {
 			: needs === 'note' ? state.noteActive
 			: needs === 'editor' ? state.noteActive && !state.readingMode
 			: needs === 'tab' ? state.tabOpen
+			: needs === 'book' ? !!state.bookActive
 			: true;
 		const item = { label, enabled, click: () => this.#send(CH.EV_MENU_COMMAND, { id }) };
 		// The renderer's map wins even when it says "unbound" (null).
@@ -268,6 +269,10 @@ class AppMenu {
 						c('export:latex', 'As LaTeX…', { needs: 'note' }),
 						c('export:pdf', 'As PDF (via LaTeX)…', { needs: 'note' }),
 						c('export:print-pdf', 'As PDF (reading view)…', { needs: 'note' }),
+						{ type: 'separator' },
+						c('export:book-pdf', 'Book as PDF (via LaTeX)', { needs: 'book' }),
+						c('export:book-latex', 'Book as LaTeX', { needs: 'book' }),
+						c('export:book-html', 'Book as HTML', { needs: 'book' }),
 						{ type: 'separator' },
 						c('export:site', 'Vault as Website…', { needs: 'vault' }),
 					],

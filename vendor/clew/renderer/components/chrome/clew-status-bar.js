@@ -14,6 +14,8 @@ import { workspaceStore } from '../../state/workspace-store.js';
 import { editorPool } from '../../editor/pool.js';
 import { debounce } from '../../lib/debounce.js';
 import { buildWarnings, warningsItem } from '../../build-warnings.js';
+import { vaultStore } from '../../state/vault-store.js';
+import { bookStatusItem } from '../../books.js';
 
 class ClewStatusBar extends ClewElement {
 	#update = debounce(() => this.render(), 200);
@@ -28,6 +30,10 @@ class ClewStatusBar extends ClewElement {
 		this.listen(buildWarnings, 'changed', ({ path }) => {
 			if (!path || workspaceStore.activeTab()?.path === path) this.#update();
 		});
+		// "Ch. 2 of Book" (books.js): a master's chapter list, or which book
+		// is the recent one, changed.
+		this.listen(vaultStore, 'index-changed', () => this.#update());
+		this.listen(workspaceStore, 'book-changed', () => this.#update());
 	}
 
 	// Items another module owns (the vault-trust indicator, trust-banner.js)
@@ -41,9 +47,11 @@ class ClewStatusBar extends ClewElement {
 		const isNote = tab?.kind === 'note';
 		// Shown in reading mode too, where the warnings come from.
 		const warnings = isNote ? warningsItem(tab.path) : null;
+		const book = isNote ? bookStatusItem(tab.path) : null;
+		const items = [warnings, book].filter(Boolean);
 		const entry = isNote ? editorPool.get(tab.id) : null;
 		if (!entry?.view) {
-			this.replaceChildren(...this.#kept(), ...(warnings ? [warnings] : []));
+			this.replaceChildren(...this.#kept(), ...items);
 			return;
 		}
 		const text = entry.view.state.doc.toString();
@@ -56,7 +64,7 @@ class ClewStatusBar extends ClewElement {
 		const charsEl = document.createElement('span');
 		charsEl.className = 'status-item';
 		charsEl.textContent = `${chars} character${chars === 1 ? '' : 's'}`;
-		this.replaceChildren(...this.#kept(), ...(warnings ? [warnings] : []), wordsEl, charsEl);
+		this.replaceChildren(...this.#kept(), ...items, wordsEl, charsEl);
 	}
 }
 

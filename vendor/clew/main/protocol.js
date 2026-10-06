@@ -37,7 +37,7 @@ import { fontsDir, fallbackConfig } from './pdf-fonts.js';
 import { narrowCors, renderOriginAllowed } from './preview-cors.js';
 import { appFileFor, appPageCsp } from './app-files.js';
 import { FRAME_SCHEME, appFile, appCsp, injectBridge } from './app-frames.js';
-import { appByKey, resolveFor, stateOf } from './app-registry.js';
+import { appByKey, resolveFor, stateOf, noteServed } from './app-registry.js';
 import { rewriteAppEmbeds } from './app-embeds-rewrite.js';
 import { APP_ORIGIN } from '../shared/caller-token.js';
 import { readRenderBody } from './caller-token.js';
@@ -133,7 +133,10 @@ export function installFrameProtocol({ bridgeFile }) {
 		if (!registered || !session?.vaults.isOpen) return plain(404, 'Not found');
 		const state = stateOf(registered, !session.access.trusted);
 		if (!state.mayRun) return plain(403, 'This app has not been allowed to run here.');
-		const network = state.granted.includes('network') ? registered.manifest.network : null;
+		// The hosts its GRANT covers that the manifest still names — never the
+		// manifest alone, or editing it would widen what was allowed.
+		const network = state.network;
+		noteServed(registered, network);
 		const headers = (type) => ({
 			'Content-Type': type,
 			'Cache-Control': 'no-store',

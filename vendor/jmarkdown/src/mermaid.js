@@ -11,6 +11,8 @@ import { execFileSync, execSync } from 'child_process';
 import { configManager } from './config-manager.js';
 import { requirePackage } from './preamble.js';
 import { registerBlockEnvironment } from './begin-end-core.js';
+import { addWarning } from './warnings.js';
+import { texCachePath, escapeLatexPath } from './latex-graphics.js';
 
 // Run mmdc without a shell where a shell is the danger: the paths are under the
 // document's own folder, whose name is the document's to choose, and a POSIX
@@ -18,13 +20,33 @@ import { registerBlockEnvironment } from './begin-end-core.js';
 // is an npm .cmd shim that only a shell can start, and there cmd.exe's double
 // quotes make & | < > literal and no file name can hold a `"` — so a quoted
 // string, as before.
+// stderr is kept (on the error) so a failure can say why.
 function runMmdc(file, args) {
+	const stdio = ['ignore', 'ignore', 'pipe'];
 	if (process.platform === 'win32') {
-		execSync([file, ...args].map(a => `"${a}"`).join(' '), { stdio: 'ignore' });
+		execSync([file, ...args].map(a => `"${a}"`).join(' '), { stdio });
 	}
 	else {
-		execFileSync(file, args, { stdio: 'ignore' });
+		execFileSync(file, args, { stdio });
 	}
+}
+
+// A diagram named in a warning by its first line, so it can be found in a
+// single file, where warnings carry no line (a book's carry chapter:line).
+function diagramName(source) {
+	const first = source.split('\n').map(s => s.trim()).find(Boolean) || '';
+	return `"${first.length > 40 ? first.slice(0, 39) + '…' : first}"`;
+}
+
+// Why mmdc failed: the first line of its own complaint, else the error's, cut
+// back to its last whole sentence when it breaks off mid-sentence (puppeteer's
+// "Could not find Chrome" does).
+function mmdcReason(error) {
+	const lines = `${error.stderr || ''}\n${error.message || error}`.split('\n').map(s => s.trim());
+	let line = (lines.find(l => l && !/^Command failed/.test(l)) || 'unknown error').replace(/^Error:\s*/, '');
+	const cut = line.lastIndexOf('. ');
+	if (!/[.!?)]$/.test(line) && cut > 0) line = line.slice(0, cut + 1);
+	return line;
 }
 
 // Locate mmdc once: a locally-installed mermaid-cli first, then one on PATH.
@@ -47,11 +69,13 @@ function getMmdc() {
 }
 
 // Render a mermaid diagram for LaTeX: a cached PDF via mmdc, embedded with
-// \includegraphics. Returns '' (with a hint) when mmdc is unavailable or fails.
+// \includegraphics. Returns '' when mmdc is unavailable or fails, with a build
+// warning naming the diagram (it was a console line, easily missed, and the
+// diagram simply vanished from the PDF).
 function renderMermaidLatex(source) {
 	const mmdc = getMmdc();
 	if (!mmdc) {
-		console.warn('jmarkdown: mermaid diagram skipped in LaTeX — mermaid-cli (mmdc) not found. Install @mermaid-js/mermaid-cli to render mermaid for print.');
+		addWarning(`mermaid: ${diagramName(source)} left out of the LaTeX — mermaid-cli (mmdc) was not found; install @mermaid-js/mermaid-cli to render mermaid for print`);
 		return '';
 	}
 	const dir = path.join(configManager.get('Markdown file directory'), 'mermaid');
@@ -64,14 +88,19 @@ function renderMermaidLatex(source) {
 			fs.writeFileSync(mmd, source);
 			runMmdc(mmdc, ['-i', mmd, '-o', pdf]);
 		} catch (e) {
-			console.warn(`jmarkdown: mermaid render failed (${e.message}); skipping in LaTeX.`);
+			// Don't cache a partial figure from a failed run.
+			try { fs.unlinkSync(pdf); } catch { /* none was written */ }
+			addWarning(`mermaid: ${diagramName(source)} left out of the LaTeX — mmdc failed: ${mmdcReason(e)}`);
 			return '';
 		} finally {
 			try { fs.unlinkSync(mmd); } catch { /* ignore */ }
 		}
 	}
-	requirePackage('adjustbox'); // for max width (also loads graphicx)
-	return `\\begin{center}\n\\includegraphics[max width=\\linewidth]{${pdf}}\n\\end{center}\n\n`;
+	// `export` makes adjustbox's keys (max width) \includegraphics keys; without
+	// it the key is undefined and the document stops ("`max width' undefined in
+	// families `Gin'").
+	requirePackage('adjustbox', 'export'); // also loads graphicx
+	return `\\begin{center}\n\\includegraphics[max width=\\linewidth]{${escapeLatexPath(texCachePath(pdf))}}\n\\end{center}\n\n`;
 }
 
 /*

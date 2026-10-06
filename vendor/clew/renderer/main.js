@@ -35,6 +35,7 @@ import { installDeepLinks, vaultShownForLinks } from './deep-link.js';
 import { installBuildWarnings } from './build-warnings.js';
 import { installConflictScans } from './conflicts.js';
 import { installCalloutSync } from './callouts.js';
+import { installBooks } from './books.js';
 import './components/chrome/clew-app.js';
 import './editor/toolbar/clew-selection-bubble.js';
 import { linkPreview } from './editor/link-preview.js';
@@ -106,6 +107,10 @@ function watchCapNotice({ watched, skipped, first }) {
 		+ (first ? ` (from ${first})` : '') + '. Changes there will not refresh on their own.', 9000));
 }
 ipc.on(CH.EV_WATCH_CAPPED, watchCapNotice);
+// Something main has to say here, quietly (the demo vault's new notes, …).
+ipc.on(CH.EV_NOTICE, ({ text, ms } = {}) => {
+	if (text) import('./plugins.js').then(({ notice }) => notice(String(text), ms ?? 8000));
+});
 ipc.on(CH.EV_FILE_CHANGED, ({ path }) => editorPool.externalChange(path));
 ipc.on(CH.EV_INDEX_SNAPSHOT, (snapshot) => vaultStore.setIndex(snapshot));
 ipc.on(CH.EV_INDEX_PATCH, ({ path, entry }) => vaultStore.patchIndex(path, entry));
@@ -148,6 +153,7 @@ installTrustBanner();
 installAppHost();
 installUpdateNotice();
 installCalloutSync();
+installBooks();
 officeDock.init();
 
 // ---- dev hook -------------------------------------------------------------

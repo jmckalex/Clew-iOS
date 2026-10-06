@@ -399,6 +399,9 @@ function build(doc, tree, config) {
 		} else if (list?.name === 'OrderedList') {
 			add('numbered', 'A', 'line', mark.from, node.to, {
 				depth, listMark: rangeOf(mark), number: text(mark.from, mark.to), extents: [first],
+				// The number and the space after it: drawn one width (live-edit.css
+				// .le-num), so the item's text starts where its hang does.
+				numberMark: { from: mark.from, to: skipSpace(doc, mark.to, first.to) },
 			});
 		} else {
 			add('bullet', 'A', 'line', mark.from, node.to, {
@@ -406,6 +409,31 @@ function build(doc, tree, config) {
 				hidden: [{ from: mark.from, to: skipSpace(doc, mark.to, first.to) }],
 				extents: [first],
 			});
+		}
+		listText(node, first, depth, mark);
+	}
+
+	// An item's text past its first line — after a hard break, a lazy line, a
+	// second and third paragraph: every line of the item's own paragraphs
+	// (a task's first is its Task node). Each is the item's text, drawn as
+	// such (inline-layer.js, live-edit.css .le-li-cont): prose, not the list
+	// face, started where the item's text starts, its indentation concealed
+	// in both states, so the caret entering the line never moves it. Its
+	// `indent` is that indentation, after a quote's `>`s and the one space
+	// the quote construct conceals with them.
+	function listText(node, first, depth, mark) {
+		const quoted = ancestors(node, 'Blockquote') > 0;
+		const paragraphs = [...childrenNamed(node, 'Paragraph'), ...childrenNamed(node, 'Task')];
+		for (const para of paragraphs) {
+			for (let n = lineOf(para.from).number; n <= lineOf(para.to).number; n += 1) {
+				const line = doc.line(n);
+				if (line.from <= first.from || inOpaque(line.from)) continue;
+				const marks = quoted ? (/^(?:[ \t]*>)+[ \t]?/.exec(line.text)?.[0].length ?? 0) : 0;
+				const lead = marks + /^[ \t]*/.exec(line.text.slice(marks))[0].length;
+				add('listText', 'A', 'line', line.from, line.to, {
+					depth, listMark: rangeOf(mark), indent: { from: line.from + marks, to: line.from + lead },
+				});
+			}
 		}
 	}
 

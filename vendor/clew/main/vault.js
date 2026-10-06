@@ -465,6 +465,11 @@ export class VaultManager {
 	}
 
 	reveal(rel) {
+		// A scenario never opens a Finder window: it reads this line instead.
+		if (process.env.CLEW_SMOKE) {
+			console.log(`smoke-reveal: ${rel}`);
+			return;
+		}
 		shell.showItemInFolder(this.resolve(rel));
 	}
 

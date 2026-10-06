@@ -17,6 +17,7 @@ import { PYGMENTS_LEXERS } from './pygments-lexers.js';
 import { addWarning, getWarnings } from './warnings.js';
 import { escapeLatexText as escapeLatex, escapeTexText } from './latex-escape.js';
 import { commandForDepth } from './sectioning.js';
+import { marked } from './utils.js';
 
 // Candidate \mintinline delimiters, tried in order. \mintinline takes its code
 // verbatim between a delimiter pair (like \verb), so the delimiter just has to
@@ -65,7 +66,45 @@ function headingCode(lang, code) {
 	return `\\texttt{${escapeTexText(code)}}`;
 }
 
+// A <style> element is the page's CSS, with nothing to print.
+const STYLE_ELEMENT = /<style\b[^>]*>[\s\S]*?<\/style>[ \t]*\n?/gi;
+
+// Block-level text, rendered as the paragraph marked would wrap it in — ONCE.
+// Text inside a list item is lexed as `text` tokens, not paragraphs (marked's
+// lexer is not at the top level there), and so is the body of any block
+// nested in one: a callout, an @begin environment. marked's parser renders
+// such a token and then wraps the RESULT in a paragraph, as one text token
+// flagged `escaped` (Parser.parse, `top`), which text() escaped a second time:
+// every `&` and `#` became `\\&` / `\\#` (a line break, then an alignment tab,
+// which stops pdfLaTeX), and a `#` in inline code printed as `\#`. The
+// `escaped` flag can't mark that wrap: marked flags ordinary text `escaped`
+// too, inside an inline <code>, <kbd>, <pre> or <script> and in every
+// paragraph after one left open, and that text is not yet LaTeX.
+// An extension renderer is consulted before marked's own handling, so the
+// token becomes a paragraph here, unrendered, and is escaped once. Block-level
+// text is the kind that carries inline `tokens` (as smart-typography.js and
+// latex-lint.js also tell it apart). Everything else — HTML, inline text —
+// returns false and goes on to the renderer, unchanged.
+const blockText = {
+	name: 'text',
+	renderer(token) {
+		if (!global.isLatex || !Array.isArray(token.tokens)) return false;
+		return this.parser.renderer.paragraph({ type: 'paragraph', raw: token.raw, text: token.text, tokens: token.tokens });
+	},
+};
+marked.use({ extensions: [blockText] });
+
 const latexRenderer = {
+
+	// Raw HTML reaches the .tex as written (marked's own rule), but for its
+	// <style> elements: a document's CSS printed as text in the PDF (and a book
+	// chapter's, before it). A block that held nothing else renders nothing.
+	html(token) {
+		const text = String(token.text ?? '');
+		if (!/<style\b/i.test(text)) return text;
+		const left = text.replace(STYLE_ELEMENT, '');
+		return left.trim() ? left : '';
+	},
 
 	paragraph(token) {
 		return `${this.parser.parseInline(token.tokens)}\n\n`;

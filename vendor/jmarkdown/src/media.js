@@ -77,7 +77,7 @@ import { configManager } from './config-manager.js';
 import { registerBlockEnvironment } from './begin-end-core.js';
 import { requirePackage } from './preamble.js';
 import { escapeLatexText } from './latex-escape.js';
-import { latexGraphic, resolveGraphic, isRemote, markdownDir, escapeLatexPath } from './latex-graphics.js';
+import { latexGraphic, resolveGraphic, isRemote, markdownDir, escapeLatexPath, texPath } from './latex-graphics.js';
 import { addWarning } from './warnings.js';
 
 const VIDEO_DIR_NAME = 'Video';
@@ -444,9 +444,11 @@ function videoLatex(ctx) {
 		poster = resolveGraphic(poster);
 	}
 
+	// Paths as the .tex prints them: in a book, from the .tex's own folder
+	// (latex-graphics.js texPath). The checks above read the master's.
 	const opts = latexOptions(dims, own, 'video');
 	const posterBox = poster
-		? `\\includegraphics${opts.length ? `[${opts.join(',')}]` : ''}{${escapeLatexPath(poster)}}`
+		? `\\includegraphics${opts.length ? `[${opts.join(',')}]` : ''}{${escapeLatexPath(texPath(poster))}}`
 		: null;
 	if (posterBox) requirePackage('graphicx');
 	const caption = escapeLatexText(alt || src);
@@ -460,7 +462,7 @@ function videoLatex(ctx) {
 
 	if (mode === 'attach') {
 		requirePackage('attachfile2');
-		return wrap(`\\textattachfile{${escapeLatexPath(src)}}{${posterBox || caption}}`);
+		return wrap(`\\textattachfile{${escapeLatexPath(texPath(src))}}{${posterBox || caption}}`);
 	}
 
 	if (mode === 'embed') {
@@ -480,7 +482,7 @@ function videoLatex(ctx) {
 			heightDim = latexDim(heightVal, 'height');
 		}
 		const widthDim = latexDim(widthVal, 'width') || '\\linewidth';
-		const escaped = escapeLatexPath(src);
+		const escaped = escapeLatexPath(texPath(src));
 		return wrap(
 			`\\includemedia[\n` +
 			`  width=${widthDim}, height=${heightDim || '0.5625\\linewidth'},\n` +
@@ -494,7 +496,7 @@ function videoLatex(ctx) {
 	// link (the default): the poster, hyperlinked. A local file opens in the
 	// reader's own player via a launch action; a URL opens in the browser.
 	requirePackage('hyperref');
-	const target = remote ? src : `run:${src}`;
+	const target = remote ? src : `run:${texPath(src)}`;
 	return wrap(`\\href{${escapeLatexPath(target)}}{${posterBox || caption}}`);
 }
 

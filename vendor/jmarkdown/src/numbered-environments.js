@@ -46,6 +46,7 @@
 import { registerBlockEnvironment, getBlockEnvironment } from './begin-end-core.js';
 import { requirePackage, addPreamble } from './preamble.js';
 import { escapeLatexText } from './latex-escape.js';
+import { numberWithinChapter } from './book.js';
 
 // name → { counter, type, title } for the post-processor's HTML numbering pass.
 // Module-level, like the begin-end registry itself: a definition, not per-run
@@ -104,12 +105,14 @@ export function defineEnvironment(name, handler) {
 			const refOpt = `refname={${singular},${plural}}, Refname={${cap(singular)},${cap(plural)}}`;
 			if (counter === name) {
 				// Standalone (the default): own counter, own name.
-				addPreamble(`\\declaretheorem[name=${title}, ${refOpt}]{${name}}`);
+				// In a book numbering per chapter, within the chapter (book.js).
+				const within = numberWithinChapter() ? ', numberwithin=chapter' : '';
+				addPreamble(`\\declaretheorem[name=${title}, ${refOpt}${within}]{${name}}`);
 			} else {
 				// Shared counter group. Declare a synthetic base ONCE unless the
 				// group name is itself a numbered env (then it's already declared
 				// standalone, and we just sibling onto it — no double \declaretheorem).
-				if (!specs.has(counter)) addPreamble(`\\declaretheorem[name=${cap(counter)}]{${counter}}`);
+				if (!specs.has(counter)) addPreamble(`\\declaretheorem[name=${cap(counter)}${numberWithinChapter() ? ', numberwithin=chapter' : ''}]{${counter}}`);
 				addPreamble(`\\declaretheorem[name=${title}, ${refOpt}, sibling=${counter}]{${name}}`);
 			}
 			const note = ctx.text ? `[${escapeLatexText(ctx.text)}]` : '';

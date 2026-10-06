@@ -93,11 +93,17 @@
 .le-align-right { text-align: right; }
 
 /* ---- lists: a hanging indent, so wrapped lines sit under the text ---- */
-.le-li {
+.le-li, .le-li-cont {
 	--le-hang: calc(var(--le-indent, 0) * 0.3em + 1.4em);
 	padding-left: calc(24px + var(--le-hang)) !important;
-	text-indent: calc(-1 * var(--le-hang));
 }
+.le-li { text-indent: calc(-1 * var(--le-hang)); }
+/* An item's number and its space, one width as the bullet is, so the text
+   starts where the hang does (a longer number pushes past it). */
+.le-num { display: inline-block; min-width: 1.4em; text-indent: 0; }
+/* `.le-li-cont`: the item's text past its first line — after a hard break,
+   a lazy line, a second paragraph (model.js#listText). The same hang with no
+   bullet: it starts where the item's text does. */
 .le-bullet {
 	display: inline-block;
 	width: 1.4em;
@@ -179,8 +185,8 @@
 /* A list inside a quote keeps its hang (the quote's own padding used to win,
    and the numbers hung over the border); inside a callout it indents as
    reading view's list does, 2.5em from the callout's text. */
-.le-quote.le-li { padding-left: calc(20px + var(--le-hang)) !important; }
-.le-quote.le-callout.le-li { padding-left: calc(16px + 2.5em + var(--le-indent, 0) * 0.3em) !important; }
+.le-quote.le-li, .le-quote.le-li-cont { padding-left: calc(20px + var(--le-hang)) !important; }
+.le-quote.le-callout.le-li, .le-quote.le-callout.le-li-cont { padding-left: calc(16px + 2.5em + var(--le-indent, 0) * 0.3em) !important; }
 /* A bare `>` between a callout's paragraphs is reading view's paragraph gap. */
 .le-quote.le-callout.le-quote-blank { line-height: 1em; }
 .le-callout-note          { --callout: #5b8def; }
@@ -264,8 +270,8 @@
 	justify-content: space-between;
 }
 /* Source mode tints a whole list item with the list face; in live edit the
-   bullet carries the colour and the item reads as prose. */
-.cm-live .le-li .cmt-list { color: inherit; }
+   bullet carries the colour and the item reads as prose — every line of it. */
+.cm-live .le-li .cmt-list, .cm-live .le-li-cont .cmt-list { color: inherit; }
 
 /* CodeMirror puts a 1em, `vertical-align: text-top` image either side of a
    replaced range (a caret anchor). On a large-font line that image pokes

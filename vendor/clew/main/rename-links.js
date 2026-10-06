@@ -44,7 +44,10 @@ export function propagateRename({ oldRel, newRel, indexer, vaults }) {
 	let rewrittenLinks = 0;
 
 	for (const [notePath, meta] of indexer.notes) {
-		const links = meta.links.filter((l) => l.resolved && renamed.has(l.resolved));
+		// A book's chapter list is wikilinks in its master's front matter, which
+		// the link scan skips: they are rewritten like any other link.
+		const links = [...meta.links, ...(meta.book?.chapters ?? [])]
+			.filter((l) => l.resolved && renamed.has(l.resolved));
 		if (links.length === 0) continue;
 
 		// The linking file may itself have moved.
