@@ -116,7 +116,7 @@ export class VaultManager {
 
 	async open(vaultPath) {
 		this.close();
-		const { name, path: realPath, files, globalPlugins, sessionId, callerToken, trusted, access, identity, refusedLinks, cloudConflicts } = await bridgeCall('vaultOpen', { path: vaultPath });
+		const { name, path: realPath, files, globalPlugins, sessionId, callerToken, trusted, access, identity, refusedLinks, cloudConflicts, demoSync } = await bridgeCall('vaultOpen', { path: vaultPath });
 		// This device's identity for the vault (VaultTrust.swift): what an
 		// app's origin key derives from (apps.js), never a path.
 		this.identity = typeof identity === 'string' ? identity : null;
@@ -134,6 +134,9 @@ export class VaultManager {
 		this.refusedLinks = Array.isArray(refusedLinks) ? refusedLinks : [];
 		// Opened with iCloud conflicts outstanding: said once the vault is up.
 		this.openCloudConflicts = Array.isArray(cloudConflicts) ? cloudConflicts : [];
+		// The demo vault brought up to date as it opened (DemoSync.swift):
+		// { added, updated }, said in a notice once the vault is up.
+		this.demoSync = demoSync && typeof demoSync === 'object' ? demoSync : null;
 		this.hooks.onSession?.(this.sessionId);
 		vfs.mkdir(VAULT_ROOT);
 		for (const [rel, entry] of Object.entries(files)) {

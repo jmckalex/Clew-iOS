@@ -20,6 +20,7 @@ import { getPdfMeta, setPdfMeta } from '../../vendor/clew/main/pdf-meta.js';
 import { rewritePdfFrames } from '../../vendor/clew/main/pdf-frames-rewrite.js';
 import { ConflictCenter } from './conflicts.js';
 import { createApps } from './apps.js';
+import { demoSyncNotice } from '../../vendor/clew/main/demo-sync.js';
 // The ENGINE's callout modules (jmarkdown a7de8c6), the pure ones only:
 // callouts.js would pull config-manager (fs) into the app page, and
 // desktop's main/callout-types.js reads its icon table from disk.
@@ -144,6 +145,10 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 		onOpen: (root) => {
 			conflicts.reset();
 			setTimeout(announceConflicts, 0); // once the open has finished
+			// The demo vault brought up to date as it opened (DemoSync.swift),
+			// said as desktop's main.js says it, once the window is up.
+			const demoText = vaults.demoSync ? demoSyncNotice(vaults.demoSync) : null;
+			if (demoText) setTimeout(() => send(CH.EV_NOTICE, { text: demoText, ms: 12000 }), 1500);
 			// Apps in notes: none of the old vault's is servable; the device's
 			// grants into the vfs before the first embed is resolved.
 			apps.reset();

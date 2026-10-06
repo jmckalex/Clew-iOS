@@ -16,6 +16,7 @@
 		C1E0000000000000000000A8 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = C1F0000000000000000000A8 /* Assets.xcassets */; };
 		C1E0000000000000000000A9 /* QuickLookPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F0000000000000000000A9 /* QuickLookPresenter.swift */; };
 		C1E0000000000000000000AA /* AtomicFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F0000000000000000000AA /* AtomicFile.swift */; };
+		C1E0000000000000000000D7 /* DemoSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F0000000000000000000D7 /* DemoSync.swift */; };
 		C1E0000000000000000000AB /* OfficeThumbs.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F0000000000000000000AB /* OfficeThumbs.swift */; };
 		C1E0000000000000000000AC /* PrintPDF.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F0000000000000000000AC /* PrintPDF.swift */; };
 		C1E0000000000000000000AD /* NoteFonts.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F0000000000000000000AD /* NoteFonts.swift */; };
@@ -40,6 +41,7 @@
 		C1F0000000000000000000A8 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		C1F0000000000000000000A9 /* QuickLookPresenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickLookPresenter.swift; sourceTree = "<group>"; };
 		C1F0000000000000000000AA /* AtomicFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AtomicFile.swift; sourceTree = "<group>"; };
+		C1F0000000000000000000D7 /* DemoSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoSync.swift; sourceTree = "<group>"; };
 		C1F0000000000000000000AB /* OfficeThumbs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfficeThumbs.swift; sourceTree = "<group>"; };
 		C1F0000000000000000000AC /* PrintPDF.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrintPDF.swift; sourceTree = "<group>"; };
 		C1F0000000000000000000AD /* NoteFonts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteFonts.swift; sourceTree = "<group>"; };
@@ -100,6 +102,7 @@
 				C1F0000000000000000000A6 /* HEICConverter.swift */,
 				C1F0000000000000000000A9 /* QuickLookPresenter.swift */,
 				C1F0000000000000000000AA /* AtomicFile.swift */,
+				C1F0000000000000000000D7 /* DemoSync.swift */,
 				C1F0000000000000000000AB /* OfficeThumbs.swift */,
 				C1F0000000000000000000AC /* PrintPDF.swift */,
 				C1F0000000000000000000AD /* NoteFonts.swift */,
@@ -193,7 +196,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -e\nAPP=\"$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH\"\nif [ ! -d \"$SRCROOT/../dist/webroot\" ]; then\n  echo \"error: dist/webroot missing — run 'npm run build' in the repo root first\" >&2\n  exit 1\nfi\nrsync -a --delete \"$SRCROOT/../dist/webroot/\" \"$APP/WebRoot/\"\nrsync -a --delete --exclude .DS_Store \"$SRCROOT/../seed-vault/\" \"$APP/SeedVault/\"\n";
+			shellScript = "set -e\nAPP=\"$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH\"\nif [ ! -d \"$SRCROOT/../dist/webroot\" ]; then\n  echo \"error: dist/webroot missing — run 'npm run build' in the repo root first\" >&2\n  exit 1\nfi\nrsync -a --delete \"$SRCROOT/../dist/webroot/\" \"$APP/WebRoot/\"\nrsync -a --delete --exclude .DS_Store \"$SRCROOT/../seed-vault/\" \"$APP/SeedVault/\"\ncp \"$SRCROOT/../vendor/clew/main/demo-history.json\" \"$APP/DemoHistory.json\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -210,6 +213,7 @@
 				C1E0000000000000000000A6 /* HEICConverter.swift in Sources */,
 				C1E0000000000000000000A9 /* QuickLookPresenter.swift in Sources */,
 				C1E0000000000000000000AA /* AtomicFile.swift in Sources */,
+				C1E0000000000000000000D7 /* DemoSync.swift in Sources */,
 				C1E0000000000000000000AB /* OfficeThumbs.swift in Sources */,
 				C1E0000000000000000000AC /* PrintPDF.swift in Sources */,
 				C1E0000000000000000000AD /* NoteFonts.swift in Sources */,

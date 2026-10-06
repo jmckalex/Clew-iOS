@@ -340,6 +340,26 @@ final class VaultStore {
 		return demo.path
 	}
 
+	/// Bring the demo vault's copy up to date with the bundle (DemoSync.swift:
+	/// Clew-app's demo-sync.js). Only for THE demo vault — Documents/Demo
+	/// Vault, by real path, never a vault elsewhere that shares its name —
+	/// and only when it looks like a demo copy (DemoSync's own rule). Returns
+	/// what it added and updated when it did anything.
+	private func syncDemoVault(_ root: URL) -> [String: Any]? {
+		guard let seed = Bundle.main.url(forResource: "SeedVault", withExtension: nil),
+			let demo = VaultPaths.realPath(documentsURL.appendingPathComponent("Demo Vault", isDirectory: true).path),
+			VaultPaths.realPath(root.path) == demo else { return nil }
+		let history = DemoSync.loadHistory(Bundle.main.url(forResource: "DemoHistory", withExtension: "json"))
+		do {
+			let done = try DemoSync.sync(source: seed, target: URL(fileURLWithPath: demo, isDirectory: true), history: history)
+			if done.added.isEmpty && done.updated.isEmpty { return nil }
+			return ["added": done.added, "updated": done.updated]
+		} catch {
+			NSLog("clew: demo vault update: \(error.localizedDescription)")
+			return nil
+		}
+	}
+
 	/// A new, empty vault in Documents (visible in the Files app), its name
 	/// deduped like a new note's. Returns the path.
 	func createVault(named raw: String) throws -> String {
@@ -373,6 +393,9 @@ final class VaultStore {
 		cloudConflicts = []
 		var files: [String: Any] = [:]
 		let root = URL(fileURLWithPath: real, isDirectory: true)
+		// The demo vault brought up to date with this build (DemoSync.swift),
+		// before the walk, so the mirror sees what it added or updated.
+		let demoSync = syncDemoVault(root)
 		// Evicted iCloud text files must land before the mirror snapshot;
 		// spend at most this long waiting across the whole walk (whatever
 		// misses the deadline arrives via a later rescan).
@@ -398,6 +421,8 @@ final class VaultStore {
 		if !refusedLinks.isEmpty { result["refusedLinks"] = refusedLinks.keys.sorted() }
 		// iCloud's own conflicts: the shim offers each its keep/compare sheet.
 		if !cloudConflicts.isEmpty { result["cloudConflicts"] = cloudConflicts.sorted() }
+		// What the demo's update did: the shim says so in a notice.
+		if let demoSync { result["demoSync"] = demoSync }
 		// Decided here, before the first engine config: a vault new to this
 		// device runs none of its own code until its owner trusts it, and
 		// what a trusted one may run is this device's record (§4.2).

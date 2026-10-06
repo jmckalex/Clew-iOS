@@ -78,6 +78,8 @@ const fakeCloud = new Map();
 // The document camera's outcome ('cancel' or a scan), and a waiting quick action.
 let fakeScan = 'scan';
 let fakeQuickAction = null;
+// What DemoSync.swift did as the vault opened, when it did anything.
+let fakeDemoSync = null;
 const fakeBridge = {
 	calls: [],
 	async call(method, params) {
@@ -94,6 +96,7 @@ const fakeBridge = {
 					access: fakeAccess(),
 					identity: 'documents:test',
 					name: path.basename(params.path), path: params.path, files: listFiles(params.path),
+					...(fakeDemoSync ? { demoSync: fakeDemoSync } : {}),
 					...(globalDir && fs.existsSync(globalDir)
 						? { globalPlugins: { path: globalDir, files: listFiles(globalDir) } } : {}),
 				};
@@ -744,6 +747,26 @@ test('first-run: create-vault and open-demo go through the bridge and open the r
 	const demo = await clew.invoke(CH.VAULT_OPEN_DEMO);
 	assert.equal(demo.path, vaultDir);
 	assert.equal(demo.name, path.basename(vaultDir));
+});
+
+test('demo vault: what its update did as it opened is said once, in desktop\'s words; an opening that did nothing says nothing', async () => {
+	const notices = [];
+	const off = clew.on('clew:ev-notice', (p) => notices.push(p));
+	// Away to another vault and back: each return is an opening.
+	const away = fs.mkdtempSync(path.join(os.tmpdir(), 'clew-away-'));
+	await clew.invoke('clew:vault-open-path', { path: away });
+	fakeDemoSync = { added: ['Books/Signals/Signals.md', 'Books/Signals/Deception.md', 'Apps/Ticker/live.js'], updated: ['Apps/Ticker/app.js'] };
+	try { await clew.invoke('clew:vault-open-path', { path: vaultDir }); } finally { fakeDemoSync = null; }
+	await new Promise((resolve) => setTimeout(resolve, 1700));
+	await clew.invoke('clew:vault-open-path', { path: away });
+	await clew.invoke('clew:vault-open-path', { path: vaultDir });
+	await new Promise((resolve) => setTimeout(resolve, 1700));
+	fs.rmSync(away, { recursive: true, force: true });
+	off();
+	assert.deepEqual(notices, [{
+		text: 'The demo vault is up to date with this version of Clew: added Books/Signals/Signals, Books/Signals/Deception, Apps/Ticker; updated Apps/Ticker. Notes you changed were left as they are.',
+		ms: 12000,
+	}]);
 });
 
 // ---- 0.11: global plugins, open externally ----------------------------------

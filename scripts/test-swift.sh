@@ -16,3 +16,5 @@ run remote-pdf-policy "$root/ios/Clew/Sources/RemotePdfPolicy.swift" "$root/ios/
 run vault-trust "$root/ios/Clew/Sources/VaultTrust.swift" "$root/ios/Tests/VaultTrust/main.swift"
 run vault-paths "$root/ios/Clew/Sources/VaultPaths.swift" "$root/ios/Tests/VaultPaths/main.swift"
 run atomic-file "$root/ios/Clew/Sources/AtomicFile.swift" "$root/ios/Tests/AtomicFile/main.swift"
+DEMO_BUNDLE="$root/seed-vault" DEMO_HISTORY="$root/vendor/clew/main/demo-history.json" \
+	run demo-sync "$root/ios/Clew/Sources/DemoSync.swift" "$root/ios/Clew/Sources/VaultPaths.swift" "$root/ios/Clew/Sources/AtomicFile.swift" "$root/ios/Tests/DemoSync/main.swift"
