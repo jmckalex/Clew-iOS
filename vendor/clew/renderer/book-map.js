@@ -134,6 +134,38 @@ function describe(path) {
 }
 
 const contexts = new Map();   // notePath → { sig, context }
+const heads = new Map();      // path → { mtimeMs, lines }: its citation header ON DISK
+let headsReading = null;
+
+/**
+ * Each piece's citation header as it is ON DISK — what main renders a
+ * chapter's pills under (render-service.js#bookCitationHeaderOf reads the
+ * files) — re-read when the index says the file changed. Keyed on an
+ * editor's unsaved text instead, the re-ask raced the save: it rendered the
+ * old header, and when the save landed the key had already moved, so
+ * nothing asked again (Clew-iOS's finding, 2026-10-10: the master's style
+ * edited in its own editor, the pills never followed). A batch that learns
+ * or changes a header redraws the book's editors once; a save that leaves
+ * the headers as they were redraws nothing. null: not read yet.
+ */
+function diskHeaders(master, pieces) {
+	const mtime = (p) => vaultStore.index[p]?.mtimeMs ?? null;
+	const stale = pieces.filter((p) => heads.get(p)?.mtimeMs !== mtime(p));
+	if (stale.length && !headsReading) {
+		headsReading = Promise.all(stale.map(async (p) => {
+			const mtimeMs = mtime(p);
+			const text = await ipc.invoke(CH.NOTE_READ, { path: p }).then((t) => String(t ?? ''), () => '');
+			const lines = JSON.stringify(citationLines(text.slice(0, 4096)));
+			const before = heads.get(p)?.lines;
+			heads.set(p, { mtimeMs, lines });
+			return before !== lines;
+		})).then((moved) => {
+			headsReading = null;
+			if (moved.some(Boolean)) changed(master);
+		});
+	}
+	return pieces.map((p) => heads.get(p)?.lines ?? null);
+}
 
 /**
  * What a chapter's citation pills render among (cite-text.js; book-mode.md
@@ -145,7 +177,9 @@ const contexts = new Map();   // notePath → { sig, context }
  * turns them on); `book`: the
  * master then its chapters, whose header main renders them under. `key`
  * changes whenever any of that does — a piece's citations, the master's
- * citation settings, a chapter's own Bibliography.
+ * citation settings, a chapter's own Bibliography — as SAVED (diskHeaders);
+ * `ready` is false until every piece's header has been read, and nothing is
+ * asked before.
  */
 function citeContext(notePath) {
 	const master = bookFor(notePath);
@@ -168,8 +202,8 @@ function citeContext(notePath) {
 	const citationsOf = (p) => vaultStore.index[p]?.citations ?? [];
 	const before = cites(pieces.slice(0, at).flatMap(citationsOf));
 	const after = cites(pieces.slice(at + 1).flatMap(citationsOf));
-	const headers = pieces.map((p) => citationLines((pieceText(p) ?? '').slice(0, 4096)));
-	const context = { book: pieces, before, after, key: JSON.stringify([pieces, before, after, headers]) };
+	const headers = diskHeaders(master, pieces);
+	const context = { book: pieces, before, after, ready: headers.every((h) => h !== null), key: JSON.stringify([pieces, before, after, headers]) };
 	contexts.set(notePath, { sig, context });
 	return context;
 }
@@ -202,5 +236,5 @@ export function installBookMap() {
 		}
 	});
 	workspaceStore.on('book-changed', () => editorPool.rebuildLive());
-	vaultStore.on('vault-changed', () => { books.clear(); contexts.clear(); });
+	vaultStore.on('vault-changed', () => { books.clear(); contexts.clear(); heads.clear(); });
 }

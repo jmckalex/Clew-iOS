@@ -52,6 +52,9 @@ const DEBOUNCE_MS = 250;
  *  list); the render service needs a beat to do it before a re-ask. */
 const ENGINE_VAULT_KEYS = new Set(['texFragments', 'normalSyntax', 'jmarkdownProject', 'pandocCitations', 'plugins', 'bibliography', 'bibliographyStyle']);
 const RECONFIGURE_MS = 400;
+/** How long an ask waits for the note's header edit to be saved (headerSaved). */
+const SAVED_WAIT_MS = 5000;
+const SAVED_POLL_MS = 250;
 // A plain word: the dialect reads ⟦…⟧ as Mathematica and refused (or, in a
 // trusted vault, would have RUN) the first marker tried here.
 const MARK = (i) => `clewcite${i}`;
@@ -88,7 +91,26 @@ vaultStore.on('index-changed', () => {
 
 /** What a note's citations render under: its header's citation keys. */
 export function citeSignature(doc) {
-	return JSON.stringify(citationLines(doc.sliceString(0, Math.min(doc.length, 4096))));
+	return signatureOf(doc.sliceString(0, Math.min(doc.length, 4096)));
+}
+
+const signatureOf = (text) => JSON.stringify(citationLines(text.slice(0, 4096)));
+
+/**
+ * Main renders under the note's header as SAVED (render-service.js reads the
+ * file), and the signature moves the moment the header is typed: an ask
+ * made between that edit and its auto-save got the OLD header, and was never
+ * made again — the signature had already moved — so the pills kept the old
+ * style (2026-10-10, measured: chicago still showing 8 s after vancouver was
+ * saved). So an ask waits, up to SAVED_WAIT_MS, until the saved header is
+ * the one it is for. One read per ask, and an ask is made only when the
+ * citations or the header change.
+ */
+async function headerSaved(notePath, sig) {
+	for (const t0 = Date.now(); ; await new Promise((r) => setTimeout(r, SAVED_POLL_MS))) {
+		const text = await ipc.invoke(CH.NOTE_READ, { path: notePath }).then((t) => String(t ?? ''), () => null);
+		if (text === null || signatureOf(text) === sig || Date.now() - t0 > SAVED_WAIT_MS) return;
+	}
 }
 
 /** Call `listener(notePath | null)` when engine texts arrive or are dropped
@@ -144,6 +166,8 @@ export function wantCiteTexts(notePath, sig, sources) {
 		notes.set(notePath, slot);
 	}
 	const context = bookCiteContext(notePath);
+	// A book's saved headers not read yet: asked once they are (book-map.js).
+	if (context && !context.ready) return;
 	const list = (context ? `${context.key}\u0001` : '') + sources.join('\n');
 	if (list === slot.asked || list === slot.wanted) return;
 	slot.wanted = list;
@@ -164,6 +188,7 @@ async function run(notePath, slot) {
 	const startEpoch = epoch;
 	let texts;
 	try {
+		await headerSaved(notePath, slot.sig);
 		texts = await renderCites(notePath, sources, context);
 	} catch {
 		// No engine to ask (a vault closing, a render error): the local label

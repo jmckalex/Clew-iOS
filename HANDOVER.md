@@ -30,9 +30,10 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
     builds still refuse. The Book panel and the reading-view line offer
     Print PDF.
   - The live-edit equation number is shown once.
-  - **Vendor** is at Clew-app `5abf52d`.
-  - **Next sync:** Clew-app c115418 (book pills follow a master edited in
-    its editor) and its sibling for notes in no book.
+  - **Re-pinned in p5 to Clew-app `fb3635a`** (`sync5abf52d-p5-repin-fb3635a`):
+    citation pills follow a style edited in an editor, the master's for a
+    chapter (c115418) and a note's own (fb3635a).
+  - **Vendor** is at Clew-app `fb3635a`.
 - **The sync to Clew-app `cbfa692` (2026-10-06) is DONE and PUSHED**
   (3947dd7; the Xcode Cloud archive succeeded).
 - **The sync to Clew-app `cbfa692` (2026-10-06) is DONE, and every
@@ -190,7 +191,7 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
 
 ## 3. Next
 
-- **The next sync's range starts at Clew-app `5abf52d`.**
+- **The next sync's range starts at Clew-app `fb3635a`.**
 - **iPad checks from the 5abf52d sync:** its record's checklist (the
   Ticker's key across a relaunch, the book print, a real finger on the
   grip and a chip).

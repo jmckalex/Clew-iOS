@@ -1,4 +1,4 @@
-# Upstream sync to Clew-app 5abf52d — plan and record
+# Upstream sync to Clew-app 5abf52d (re-pinned to fb3635a) — plan and record
 
 **STATUS: EXECUTED 2026-10-10.** The owner, relayed by Clew-boss: "Please
 drive the iOS port through to completion. All the way to a push and a
@@ -9,13 +9,18 @@ The chain, off main 3947dd7:
 - `sync5abf52d-p1-vendor`: bc75a13.
 - `sync5abf52d-p2-build`: c20a067.
 - `sync5abf52d-p3-contract`: a663069.
-- `sync5abf52d-p4-verify`: this record, and the print tooltip's wording.
+- `sync5abf52d-p4-verify`: 7c65f85, this record, and the print tooltip's
+  wording. Every check below was green at 5abf52d.
+- `sync5abf52d-p5-repin-fb3635a`: **the pin moved to Clew-app `fb3635a`**,
+  on Clew-boss's word, for the citation-pill fixes (§p5).
 
 **PIN: Clew-app `5abf52d`.** It was copied from `git archive 5abf52d`.
 `diff -rq` against the archive shows no difference in vendor/clew,
 vendor/jmarkdown, vendor/embedpdf, vendor/default-stamps or seed-vault.
 The range cbfa692..5abf52d has 14 commits. jmarkdown, EmbedPDF and
 mp-tikz-wasm (v0.3.1) are unchanged.
+
+**Vendor after p5: Clew-app `fb3635a`.**
 
 **Version:** 0.12.0, unchanged. The build number is Xcode Cloud's.
 
@@ -139,14 +144,30 @@ all.
 **Tests:** npm test 770; Swift 154 + 44 + 18 + 9 + 47 + 36 (AppSecrets);
 xcodebuild OK.
 
+## p5: re-pinned to Clew-app fb3635a (the citation pills follow an edit)
+
+- **Range:** 5abf52d..fb3635a, two commits, two shared renderer files:
+  - c115418: book-map.js#diskHeaders keys a chapter's citation context on
+    each piece's SAVED header;
+  - fb3635a: cite-text.js waits for the auto-save before asking.
+- **Vendor:** copied from `git archive fb3635a`, and `diff -rq` identical
+  across every mirrored directory. No host change: NOTE_READ already
+  returns the file as saved.
+- **Tests:** npm test 770; Swift 154 + 44 + 18 + 9 + 47 + 36; xcodebuild OK.
+- **Simulator (fresh install):**
+  - **The master's style edited in its own editor, a chapter open:**
+    Conventions' pills went "Lewis (1969)", "(Skyrms 1996)" → **[1]**,
+    **[2]** in 0.7 s.
+  - **A note in no book, its own style edited in its own (live) editor:**
+    Features/Citations' pills went "Lewis (1969)", … → **[1] [2] [3]** in
+    1.4 s.
+
 ## Findings
 
-1. **A chapter's pills do not follow a master style change made in the
-   master's own editor.** It is a shared gap, not the iPad's: desktop had
-   it too, and Clew-app fixed it in **c115418** (book-map.js#diskHeaders,
-   cite-text.js waits for `context.ready`). It is not in this range, so it
-   comes with the next sync. A note's OWN style edited in its editor has
-   an older, similar staleness. Clew-app has raised it with Clew-boss.
+1. **Fixed by p5:** a chapter's pills did not follow a master style change
+   made in the master's own editor, and a note's pills did not follow its
+   own. Both were shared with desktop, fixed upstream (c115418, fb3635a)
+   and carried by the re-pin.
 2. The Book grip (11×18 px) and the chip's jump were driven by synthetic
    touch-type events. A real finger is for the iPad checklist.
 
