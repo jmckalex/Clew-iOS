@@ -362,7 +362,7 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 		// fragments; an evicted hash is a 404 and the frame layer POSTs again.
 		if vaultRel == "__clew_block__", task.request.httpMethod == "POST" {
 			guard let body = readRenderBody(task) else { return }
-			return renderBlock(task, text: body.text, sourcePath: body.sourcePath)
+			return renderBlock(task, text: body.text, sourcePath: body.sourcePath, book: body.book)
 		}
 		if vaultRel.hasPrefix("__clew_block__/"), task.request.httpMethod == "GET" {
 			let hash = String(vaultRel.dropFirst("__clew_block__/".count))
@@ -371,7 +371,11 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 
 		if vaultRel.range(of: #"\.(md|jmd)\.html$"#, options: [.regularExpression, .caseInsensitive]) != nil {
 			let noteRel = String(vaultRel.dropLast(5)) // strip ".html"
-			return renderNote(task, noteRel: noteRel, sid: String(rel[..<slash]))
+			// `?book=1` on a master's: its whole book as one document, as the
+			// book print last built it (the shim's renderBook).
+			let book = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
+				.contains { $0.name == "book" && $0.value == "1" } ?? false
+			return renderNote(task, noteRel: noteRel, sid: String(rel[..<slash]), book: book)
 		}
 
 		// A raw vault file (images, media, canvas JSON, PDFs …). Evicted
@@ -406,11 +410,11 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 
 	// MARK: - Rendering through the JS engine worker
 
-	private func renderNote(_ task: WKURLSchemeTask, noteRel: String, sid: String) {
+	private func renderNote(_ task: WKURLSchemeTask, noteRel: String, sid: String, book: Bool = false) {
 		// The note and its Content-Security-Policy (the shim's
 		// preview-csp.js: in a restricted vault only Clew's own scripts and
 		// the template's, by hash; no network unless a trusted vault has it).
-		let script = "const html = await window.__clewNative.renderNote(rel); "
+		let script = "const html = await window.__clewNative.\(book ? "bookDocument" : "renderNote")(rel); "
 			+ "const csp = await window.__clewNative.noteCsp(); return [html, csp ?? ''];"
 		callNative(script, args: ["rel": noteRel]) { [weak self] result in
 			guard let self, !self.isStopped(task) else { return }
@@ -589,11 +593,13 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 	/// over 100,000 characters (UTF-16, as JavaScript counts) → 413; not JSON,
 	/// or not an object → 400; the token does not match → 403, compared in
 	/// constant time; `text` not a string, or `sourcePath` neither null nor
-	/// a string → 400. The body is JSON whatever its Content-Type (callers
+	/// a string → 400; `book` neither null nor an array of at most 2,000
+	/// strings → 400 (a chapter's citations render under its book's header,
+	/// Clew-app 886e2e5). The body is JSON whatever its Content-Type (callers
 	/// send none: a JSON type would make the request non-simple, and a
 	/// preflight is an OPTIONS request this handler does not answer).
 	/// Fails the task and returns nil when refused.
-	private func readRenderBody(_ task: WKURLSchemeTask) -> (text: String, sourcePath: String?)? {
+	private func readRenderBody(_ task: WKURLSchemeTask) -> (text: String, sourcePath: String?, book: [String]?)? {
 		// Decoded as desktop reads it: text, invalid bytes replaced.
 		let body = String(decoding: task.request.httpBody ?? Data(), as: UTF8.self)
 		guard body.utf16.count <= 100_000 else { fail(task, "Too large", status: 413); return nil }
@@ -607,9 +613,16 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 			return nil
 		}
 		guard let text = object["text"] as? String else { fail(task, "Bad request", status: 400); return nil }
+		let sourcePath: String?
 		switch object["sourcePath"] {
-		case nil, is NSNull: return (text, nil)
-		case let path as String: return (text, path)
+		case nil, is NSNull: sourcePath = nil
+		case let path as String: sourcePath = path
+		default: fail(task, "Bad request", status: 400); return nil
+		}
+		switch object["book"] {
+		case nil, is NSNull: return (text, sourcePath, nil)
+		case let list as [Any] where list.count <= 2000 && list.allSatisfy({ $0 is String }):
+			return (text, sourcePath, list.compactMap { $0 as? String })
 		default: fail(task, "Bad request", status: 400); return nil
 		}
 	}
@@ -636,12 +649,12 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 		}
 	}
 
-	private func renderBlock(_ task: WKURLSchemeTask, text: String, sourcePath: String?) {
+	private func renderBlock(_ task: WKURLSchemeTask, text: String, sourcePath: String?, book: [String]?) {
 		// Every key becomes a parameter of the async function callNative
 		// builds, so the argument must be present even when there is no
-		// source note: an empty string, which the script reads as null.
-		let args: [String: Any] = ["text": text, "sourcePath": sourcePath ?? ""]
-		callNative("return await window.__clewNative.renderBlock(text, sourcePath || null);", args: args) { [weak self] result in
+		// source note: an empty string (an empty list), read as null.
+		let args: [String: Any] = ["text": text, "sourcePath": sourcePath ?? "", "book": book ?? []]
+		callNative("return await window.__clewNative.renderBlock(text, sourcePath || null, book.length ? book : null);", args: args) { [weak self] result in
 			guard let self, !self.isStopped(task) else { return }
 			switch result {
 			case .success(let value):

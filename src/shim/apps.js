@@ -15,6 +15,11 @@
 // (SchemeHandler.swift), which asks `serve()` here which vault file to send
 // and with which CSP — and serves only that.
 //
+// Secrets an app keeps on this device (`app.secrets`, Clew-app 0cc8547) are
+// the Keychain's (AppSecrets.swift), reached over the bridge and scoped HERE
+// from the app behind the port — the device's vault identity × its manifest
+// id — never from anything the app sends. A value travels in replies only.
+//
 // A `network` grant is bound to its ORIGINS (Clew-app 917303b): the CSP is
 // built from the hosts the grant covers that the manifest still names
 // (grantState's `network`), never from the manifest alone, and a manifest
@@ -23,7 +28,7 @@ import { vfs } from '../worker/shims/vfs.js';
 import { VAULT_ROOT } from './vault-manager.js';
 import { bridgeCall } from './native-bridge.js';
 import { appKey, appsById, resolveApp, appFile, appCsp, codeHash, describeCapabilities, parseManifest, MANIFEST } from '../../vendor/clew/main/app-frames.js';
-import { createGrantStore, grantState, mergeOrigins } from '../../vendor/clew/main/app-grants.js';
+import { createGrantStore, grantState, mergeOrigins, manifestNeed } from '../../vendor/clew/main/app-grants.js';
 import { callApp } from '../../vendor/clew/main/app-calls.js';
 import { rewriteAppEmbeds } from '../../vendor/clew/main/app-embeds-rewrite.js';
 
@@ -85,6 +90,20 @@ export function createApps({ vaults, indexer, searchService, kvStore, refreshTre
 			readText: () => text,
 		};
 	})();
+
+	/** ctx.secrets for one app (app-calls.js §9c), over the Keychain. A get
+	 *  this device cannot answer is null; a set it cannot keep is
+	 *  'unavailable'. The bridge's own words never reach the app. */
+	const secretsFor = (app) => {
+		const scope = { vault: app.vault, app: app.manifest.id };
+		const unavailable = () => Object.assign(new Error('secrets are not kept on this device'), { code: 'unavailable' });
+		return {
+			get: (name) => bridgeCall('appSecretGet', { ...scope, name }).then((v) => (typeof v === 'string' ? v : null), () => null),
+			set: (name, value) => bridgeCall('appSecretSet', { ...scope, name, value }).then(() => true, () => { throw unavailable(); }),
+			delete: (name) => bridgeCall('appSecretDelete', { ...scope, name }).then((v) => v === true, () => { throw unavailable(); }),
+			names: () => bridgeCall('appSecretNames', scope).then((v) => (Array.isArray(v) ? v : []), () => { throw unavailable(); }),
+		};
+	};
 
 	const identity = () => vaults.identity ?? '';
 	const restricted = () => vaults.trusted !== true;
@@ -164,17 +183,17 @@ export function createApps({ vaults, indexer, searchService, kvStore, refreshTre
 		},
 
 		/**
-		 * A vault file changed: the keys of the apps whose manifest it is and
-		 * whose running frames now differ from the grant — hosts narrowed or
-		 * widened, or something new to ask (app-registry.js#manifestTouched).
-		 * Their frames must reload.
+		 * A vault file changed: what each app whose manifest it is needs now,
+		 * as `{ key, reload }` (app-registry.js#manifestTouched) —
+		 * app-grants.js#manifestNeed decides: a reload (hosts narrowed or
+		 * widened, a new host or a run to approve), or an ask without one.
 		 */
 		manifestTouched(rel) {
 			const out = [];
 			for (const [key, app] of byKey) {
 				if (`${app.folder}/${MANIFEST}` !== rel) continue;
-				const st = stateOf(app);
-				if (st.ask.length || (app.served !== null && JSON.stringify(st.network ?? null) !== app.served)) out.push(key);
+				const need = manifestNeed(stateOf(app), app.served);
+				if (need) out.push({ key, reload: need === 'reload' });
 			}
 			return out;
 		},
@@ -207,31 +226,34 @@ export function createApps({ vaults, indexer, searchService, kvStore, refreshTre
 			});
 			return status(key, app);
 		},
-		call(key, notePath, method, params) {
+		async call(key, notePath, method, params) {
 			const app = own(key);
 			if (!app) return { ok: false, error: { code: 'denied', message: 'no such app in this window' } };
 			const st = stateOf(app);
 			if (!st.mayRun) return { ok: false, error: { code: 'denied', message: 'this app has not been allowed to run here' } };
-			const out = callApp({
+			const out = await callApp({
 				root: VAULT_ROOT, restricted: restricted(), excludes: vaults.excludes,
 				notePath: typeof notePath === 'string' ? notePath : null,
 				app, granted: new Set(st.granted),
 				indexer, search: searchService, kv: kvStore, clipboard,
+				secrets: secretsFor(app),
 			}, String(method), params);
 			// A note an app created is a new file Clew wrote: in the tree now.
 			if (out.ok && out.result?.created) refreshTree();
 			return out;
 		},
-		list() {
+		async list() {
 			if (!vaults.isOpen) return [];
 			const vault = identity();
 			const records = grants.list(vault);
+			// How many secrets each keeps here (Settings → Apps).
+			const counts = await bridgeCall('appSecretCounts', { vault }).catch(() => null) ?? {};
 			const ids = appsById(VAULT_ROOT, indexer.appFolders ?? []);
 			const out = [];
 			const row = (id, folders, r, extra = {}) => ({
 				id, key: appKey(vault, id), folders,
 				granted: Object.keys(r?.granted ?? {}), denied: Object.keys(r?.denied ?? {}),
-				run: Boolean(r?.run), runDenied: Boolean(r?.runDenied), pinned: Boolean(r?.code), ...extra,
+				run: Boolean(r?.run), runDenied: Boolean(r?.runDenied), pinned: Boolean(r?.code), secrets: counts[id] ?? 0, ...extra,
 			});
 			for (const [id, folders] of ids) out.push(row(id, folders, records[id] ?? null, { duplicate: folders.length > 1 }));
 			for (const [id, r] of Object.entries(records)) {
@@ -239,10 +261,13 @@ export function createApps({ vaults, indexer, searchService, kvStore, refreshTre
 			}
 			return out.sort((a, b) => a.id.localeCompare(b.id));
 		},
-		revoke(id) {
+		async revoke(id) {
 			if (!vaults.isOpen) return { done: false, key: null };
 			const vault = identity();
-			return { done: grants.revoke(vault, String(id)), key: appKey(vault, String(id)) };
+			const done = grants.revoke(vault, String(id));
+			// Its secrets go with its grants: asked again, it starts with none.
+			await bridgeCall('appSecretsClearApp', { vault, app: String(id) }).catch(() => {});
+			return { done, key: appKey(vault, String(id)) };
 		},
 	};
 }

@@ -258,6 +258,27 @@ const rendererPatches = {
 				'');
 			return { contents: src, loader: 'js' };
 		});
+		// Books (Clew-app 5abf52d): the iPad builds a book only as its reading
+		// view's print (EXPORT_BOOK `print`); PDF, LaTeX and HTML need TeX and
+		// a Node fork. So the Book panel offers Print PDF alone, and the line
+		// above a chapter's reading view offers the print that numbers it as
+		// the book does, where desktop offers the HTML build. Upstream
+		// candidate: a platform's build formats, asked of the host.
+		builder.onLoad({ filter: /vendor\/clew\/renderer\/components\/panels\/clew-book\.js$/ }, (args) => ({
+			contents: patched('clew-book.js', fs.readFileSync(args.path, 'utf8'),
+				"for (const [format, label] of [['pdf', 'PDF'], ['latex', 'LaTeX'], ['html', 'HTML'], ['print', 'Print PDF']]) {",
+				"for (const [format, label] of [['print', 'Print PDF']]) {"),
+			loader: 'js',
+		}));
+		builder.onLoad({ filter: /vendor\/clew\/renderer\/books\.js$/ }, (args) => {
+			let src = fs.readFileSync(args.path, 'utf8');
+			src = patched('books.js', src, "\tbuild.textContent = 'Build';\n", "\tbuild.textContent = 'Print PDF';\n");
+			src = patched('books.js', src, "\tbuild.title = `Build “${book.title}” as HTML pages`;\n",
+				"\tbuild.title = `Print “${book.title}” as one PDF, each chapter numbered as the book numbers it`;\n");
+			src = patched('books.js', src, "\tbuild.addEventListener('click', () => buildBook(book.master, 'html'));\n",
+				"\tbuild.addEventListener('click', () => buildBook(book.master, 'print'));\n");
+			return { contents: src, loader: 'js' };
+		});
 		// The shell panel cannot exist on iOS (no PTY), so its command — and
 		// with it the Ctrl-` chord and the palette entry — is dropped from the
 		// registry. The panel element stays in the DOM, closed (ipc.js forces

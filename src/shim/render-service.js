@@ -13,7 +13,7 @@ import { engineConfig, engineEnv, isTextPath, ENGINE_CSL_FILES } from './engine-
 import { engineExtensionEntries } from '../../vendor/clew/main/plugins.js';
 import { inlineScriptHashes, previewCsp } from '../../vendor/clew/main/preview-csp.js';
 import { isDependentFragment } from '../../vendor/clew/shared/fragment-deps.js';
-import { citationHeader, noteBibFiles } from '../../vendor/clew/main/citation-header.js';
+import { citationHeader, bookCitationHeader, noteBibFiles } from '../../vendor/clew/main/citation-header.js';
 import nodePath from 'node:path';
 import { refusedNames } from '../../vendor/clew/shared/refused-names.js';
 import { settings } from './settings.js';
@@ -68,6 +68,7 @@ export class RenderService {
 	/** Set by the session: () => string — CLEW_CALLOUTS for the next spawn. */
 	calloutsEnv = () => '';
 	#notes = new Map(); // rel -> {mtimeMs, html, hasQueries, inflight, dirty}
+	#books = new Map(); // master -> its whole-book document (renderBook)
 	/** fragment cache: key → html string (canvas cards, live-edit blocks; bounded) */
 	#fragments = new Map();
 	#fragmentInflight = new Map();
@@ -194,6 +195,7 @@ export class RenderService {
 		this.#standby = null;
 		this.#spawnStandby();
 		this.#notes.clear();
+		this.#books.clear();
 		this.#fragments.clear();
 		this.#fragmentEpoch++;
 		this.#configGeneration++;
@@ -208,6 +210,7 @@ export class RenderService {
 		this.#open = false;
 		this.#subscribed.clear();
 		this.#notes.clear();
+		this.#books.clear();
 		this.#fragments.clear();
 		this.#fragmentInflight.clear();
 		this.#refused.clear();
@@ -399,6 +402,37 @@ export class RenderService {
 	}
 
 	/**
+	 * A whole BOOK as ONE preview document (Clew-app 5abf52d, the book print):
+	 * the master with its chapters handed to the engine (processFile's
+	 * `chapters`, relative to the master, and `numbering`), under the preview
+	 * configuration, so it is what reading view would draw, numbered as the
+	 * book is. Kept apart from the master's own render, and served at the
+	 * master's URL with `?book=1` (SchemeHandler.swift). Desktop's
+	 * render-service.js#renderBook.
+	 *
+	 * @returns {Promise<{ html: string, warnings: Array }>}
+	 */
+	async renderBook(masterRel, { chapters, numbering }) {
+		const generation = this.#generation;
+		const result = await this.#runBuild(`${VAULT_ROOT}/${masterRel}`, {
+			to: 'html',
+			output: `${VAULT_ROOT}/.clew/cache/html/book.html`,
+			normalSyntax: this.#vaultOptions.normalSyntax === true,
+			chapters,
+			numbering,
+		});
+		if (generation !== this.#generation) throw new Error('stale render (vault closed)');
+		if (result.type !== 'done') throw new Error(result.message);
+		this.#books.set(masterRel, result.html);
+		return { html: result.html, warnings: Array.isArray(result.warnings) ? result.warnings : [] };
+	}
+
+	/** The last whole-book document built for `masterRel`, or null. */
+	bookHtml(masterRel) {
+		return this.#books.get(masterRel) ?? null;
+	}
+
+	/**
 	 * Markdown snippet → body HTML (canvas cards). Fragment mode: body HTML
 	 * only, no template. Same worker pipeline and engine config as note
 	 * renders, so a card renders exactly like the same text would in a
@@ -439,12 +473,27 @@ export class RenderService {
 		// a `\cite` in it stayed raw while reading mode resolved it. They come
 		// from the note's file, so such a block is dependent — a saved header
 		// change reaches it.
-		const header = options.sourcePath ? this.#citationHeaderOf(options.sourcePath) : '';
+		// A chapter's citations (live edit's pills, cite-text.js) render under
+		// its BOOK's header instead (Clew-app 886e2e5): `book` is the master
+		// then the chapters, vault paths the caller resolved.
+		const { book, ...rest } = options;
+		const header = book?.length ? this.#bookCitationHeaderOf(book)
+			: options.sourcePath ? this.#citationHeaderOf(options.sourcePath) : '';
 		const full = header + text;
-		const opts = { ...options, ...(header ? { dependent: true } : {}), document: true };
+		const opts = { ...rest, ...(header ? { dependent: true } : {}), document: true };
 		const key = this.#fragmentKey(full, opts);
 		await this.#cachedBuild(full, opts);
 		return key;
+	}
+
+	/** A book's citation header (citation-header.js#bookCitationHeader), or ''. */
+	#bookCitationHeaderOf([master, ...chapters]) {
+		const piece = (rel) => {
+			const abs = `${VAULT_ROOT}/${rel}`;
+			const dir = abs.slice(0, abs.lastIndexOf('/'));
+			try { return { text: String(vfs.read(abs)), dir }; } catch { return { text: '', dir }; }
+		};
+		return bookCitationHeader(piece(master), chapters.map(piece));
 	}
 
 	/** The source note's citation header, or '' (no note, no header, unreadable). */

@@ -80,6 +80,14 @@ let fakeScan = 'scan';
 let fakeQuickAction = null;
 // What DemoSync.swift did as the vault opened, when it did anything.
 let fakeDemoSync = null;
+// The Keychain (AppSecrets.swift): vault US app US name → value. The open
+// vault is 'documents:test'; a call scoped to another is refused, as native
+// refuses it.
+const fakeSecrets = new Map();
+const secretAccount = (p) => [p.vault, p.app, p.name].join('\u001f');
+const secretScope = (p) => {
+	if (p.vault !== 'documents:test' || !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(p.app ?? '')) throw new Error('badPayload');
+};
 const fakeBridge = {
 	calls: [],
 	async call(method, params) {
@@ -196,6 +204,19 @@ const fakeBridge = {
 					: fs.existsSync(p)
 					? { path: p, ok: true, resolved: p, name: path.basename(p), kind: 'external' }
 					: { path: p, ok: false, name: path.basename(p), kind: 'external', reason: 'The folder can’t be found.' }));
+			case 'appSecretGet': secretScope(params); return fakeSecrets.get(secretAccount(params)) ?? null;
+			case 'appSecretSet': secretScope(params); fakeSecrets.set(secretAccount(params), params.value); return true;
+			case 'appSecretDelete': secretScope(params); return fakeSecrets.delete(secretAccount(params));
+			case 'appSecretNames': secretScope(params);
+				return [...fakeSecrets.keys()].map((k) => k.split('\u001f')).filter(([v, a]) => v === params.vault && a === params.app).map(([, , n]) => n).sort();
+			case 'appSecretsClearApp': secretScope(params);
+				for (const k of [...fakeSecrets.keys()]) if (k.startsWith(`${params.vault}\u001f${params.app}\u001f`)) fakeSecrets.delete(k);
+				return 0;
+			case 'appSecretCounts': {
+				const out = {};
+				for (const k of fakeSecrets.keys()) { const [v, a] = k.split('\u001f'); if (v === params.vault) out[a] = (out[a] ?? 0) + 1; }
+				return out;
+			}
 			case 'setNextVault':
 				return fs.existsSync(params.path) ? { ok: true, path: params.path } : { ok: false, reason: 'The folder can’t be found.' };
 			case 'forgetVault':
@@ -1675,9 +1696,102 @@ test('apps: a network grant is bound to its origins — asked once, reached afte
 	await clew.invoke('clew:app-revoke', { id: 'stock-ticker' });
 });
 
-test('books: Build refuses on the iPad with a sentence, not an unknown channel', async () => {
-	await assert.rejects(() => clew.invoke('clew:export-book', { master: 'Books/Signals/Signals.md', format: 'pdf' }),
-		/building a book needs Clew on a Mac/);
+test('apps: secrets kept on this device — granted first, scoped from the port, the shared limits, never in a vault file, cleared by Revoke (Clew-app 0cc8547)', async () => {
+	fakeHtml = '<body><clew-app-embed class="clew-app-embed" data-app="Apps/Ticker"></clew-app-embed></body>';
+	try { await native.renderNote('Guide/Panels.md'); } finally { fakeHtml = FAKE_HTML; }
+	const key = createHash('sha256').update('documents:test\0stock-ticker', 'utf8').digest('hex').slice(0, 40);
+	const call = (method, params = {}) => clew.invoke('clew:app-call', { key, notePath: 'Guide/Panels.md', method, params });
+	const SECRET = 'fh-SECRET-0123456789';
+	const denied = await call('secrets.set', { name: 'finnhub-key', value: SECRET });
+	assert.deepEqual([denied.ok, denied.error.code], [false, 'denied'], 'not before its prompt');
+	const st = await clew.invoke('clew:app-status', { key });
+	assert.ok(st.ask.includes('app.secrets'));
+	assert.match(st.describe['app.secrets'], /on this device only/);
+	assert.ok((await clew.invoke('clew:app-answer', { key, allow: true })).granted.includes('app.secrets'));
+	assert.deepEqual(await call('secrets.get', { name: 'finnhub-key' }), { ok: true, result: null });
+	assert.deepEqual(await call('secrets.set', { name: 'finnhub-key', value: SECRET }), { ok: true, result: true });
+	assert.deepEqual(await call('secrets.get', { name: 'finnhub-key' }), { ok: true, result: SECRET });
+	assert.deepEqual([...fakeSecrets.keys()], ['documents:test\u001fstock-ticker\u001ffinnhub-key'], 'scoped to the device vault and the manifest id');
+	// The shared limits (app-calls.js), with the Keychain behind them.
+	assert.equal((await call('secrets.set', { name: 'bad name', value: 'x' })).error.code, 'bad-params');
+	assert.equal((await call('secrets.set', { name: 'big', value: 'x'.repeat(8 * 1024 + 1) })).error.code, 'too-large');
+	for (let i = 1; i < 32; i += 1) assert.equal((await call('secrets.set', { name: `n${i}`, value: 'v' })).ok, true);
+	const many = await call('secrets.set', { name: 'one-too-many', value: 'v' });
+	assert.equal(many.error.code, 'too-many');
+	assert.ok(!JSON.stringify(many).includes(SECRET));
+	assert.equal((await clew.invoke('clew:apps-list')).find((a) => a.id === 'stock-ticker').secrets, 32, 'Settings → Apps counts them');
+	assert.deepEqual(await call('secrets.delete', { name: 'n1' }), { ok: true, result: true });
+	assert.deepEqual(await call('secrets.delete', { name: 'n1' }), { ok: true, result: false });
+	// Never in a vault file or the grants.
+	await native.flush();
+	const kvFile = path.join(vaultDir, 'clewdata.json');
+	assert.ok(!fakeAppGrants.includes(SECRET), 'not in the grants');
+	assert.ok(!fs.existsSync(kvFile) || !fs.readFileSync(kvFile, 'utf8').includes(SECRET), 'not in the kv store');
+	assert.ok(!fs.readdirSync(vaultDir, { recursive: true }).some((f) => {
+		const abs = path.join(vaultDir, f);
+		return fs.statSync(abs).isFile() && fs.statSync(abs).size < 4_000_000 && fs.readFileSync(abs, 'utf8').includes(SECRET);
+	}), 'in no file of the vault');
+	// Revoke: it starts again with none.
+	await clew.invoke('clew:app-revoke', { id: 'stock-ticker' });
+	assert.equal(fakeSecrets.size, 0);
+});
+
+test('apps: a manifest that only asks for more is asked without a reload; a new host still reloads (Clew-app 93912fa, manifestNeed)', async () => {
+	fakeHtml = '<body><clew-app-embed class="clew-app-embed" data-app="Apps/Picker"></clew-app-embed></body>';
+	try { await native.renderNote('Guide/Search.md'); } finally { fakeHtml = FAKE_HTML; }
+	const key = createHash('sha256').update('documents:test\0seminar-picker', 'utf8').digest('hex').slice(0, 40);
+	await clew.invoke('clew:app-answer', { key, allow: true });
+	assert.equal(native.appServe(key, '/index.html').rel, 'Apps/Picker/index.html', 'served once: its frames are running');
+	const manifest = 'Apps/Picker/clew-app.json';
+	const original = await clew.invoke(CH.NOTE_READ, { path: manifest });
+	const parsed = JSON.parse(original);
+	const events = [];
+	const offAsk = clew.on('clew:ev-app-ask', (p) => events.push(['ask', p.key]));
+	const offReload = clew.on('clew:ev-app-grants-changed', (p) => events.push(['reload', p.key]));
+	const edit = (m, at) => {
+		const text = JSON.stringify(m);
+		native.externalDiff({ changed: { [manifest]: { text, size: text.length, mtimeMs: Date.now() + at } }, removed: [] });
+	};
+	edit({ ...parsed, capabilities: [...parsed.capabilities, 'notes.read'] }, 1000);
+	await settle();
+	edit({ ...parsed, capabilities: [...parsed.capabilities, 'notes.read', 'network'], network: ['https://example.org'] }, 2000);
+	await settle();
+	edit(parsed, 3000);
+	await settle();
+	offAsk(); offReload();
+	assert.deepEqual(events, [['ask', key], ['reload', key]], 'a capability alone asks; a host reloads; back to what it was asks nothing');
+	await clew.invoke('clew:app-revoke', { id: 'seminar-picker' });
+});
+
+test('books: a chapter\'s citation pills render under its BOOK\'s header when the request names the book; a path leaving the vault is refused (Clew-app 886e2e5)', async () => {
+	const text = '\\citep{skyrms1996}';
+	const chapter = 'Books/Signals/Conventions.md';
+	const book = ['Books/Signals/Signals.md', 'Books/Signals/Senders and Receivers.md', chapter, 'Books/Signals/Deception.md'];
+	const own = await native.renderBlock(text, chapter);
+	const asBook = await native.renderBlock(text, chapter, book);
+	assert.notEqual(asBook, own, 'another header, another document');
+	assert.equal(await native.renderBlock(text, chapter, book), asBook, 'the same book, the same document');
+	assert.equal(await native.renderBlock(text, chapter, []), own, 'an empty book is no book');
+	await assert.rejects(() => native.renderBlock(text, chapter, ['Books/Signals/Signals.md', '../../escape.md']), /escapes vault/);
+});
+
+test('books: PDF, LaTeX and HTML builds refuse on the iPad with a sentence; the PRINT is the reading view, printed into the share sheet (Clew-app 5abf52d)', async () => {
+	for (const format of ['pdf', 'latex', 'html']) {
+		await assert.rejects(() => clew.invoke('clew:export-book', { master: 'Books/Signals/Signals.md', format }),
+			/building a book needs Clew on a Mac/);
+	}
+	const mark = fakeBridge.calls.length;
+	const result = await clew.invoke('clew:export-book', { master: 'Books/Signals/Signals.md', format: 'print' });
+	assert.equal(result.output, 'Signals (reading view).pdf');
+	assert.ok(Array.isArray(result.warnings));
+	const print = fakeBridge.calls.slice(mark).find(([m]) => m === 'printPdf')?.[1];
+	assert.match(print.url, /^clew-preview:\/\/vault\/s[0-9a-f]+\/Books\/Signals\/Signals\.md\.html\?book=1$/);
+	assert.equal(print.name, 'Signals (reading view).pdf');
+	assert.match(print.arm, /section\.jmd-chapter, section\.jmd-book-references, nav\.index \{ break-before: page; \}/);
+	assert.match(print.arm, /__clewPrintReady/, 'the note print\'s arm follows');
+	assert.equal(typeof await native.bookDocument('Books/Signals/Signals.md'), 'string', 'the book document, at the master\'s URL');
+	await assert.rejects(() => native.bookDocument('Books/Signals/Conventions.md'), /no book document has been built/);
+	await assert.rejects(() => clew.invoke('clew:export-book', { master: 'Welcome.md', format: 'print' }), /is not a book/);
 });
 
 // ---- PDF save safety (Clew-app 686232b; pdf-unification.md §7b) ------------

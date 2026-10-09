@@ -18,3 +18,4 @@ run vault-paths "$root/ios/Clew/Sources/VaultPaths.swift" "$root/ios/Tests/Vault
 run atomic-file "$root/ios/Clew/Sources/AtomicFile.swift" "$root/ios/Tests/AtomicFile/main.swift"
 DEMO_BUNDLE="$root/seed-vault" DEMO_HISTORY="$root/vendor/clew/main/demo-history.json" \
 	run demo-sync "$root/ios/Clew/Sources/DemoSync.swift" "$root/ios/Clew/Sources/VaultPaths.swift" "$root/ios/Clew/Sources/AtomicFile.swift" "$root/ios/Tests/DemoSync/main.swift"
+run app-secrets "$root/ios/Clew/Sources/AppSecrets.swift" "$root/ios/Tests/AppSecrets/main.swift"

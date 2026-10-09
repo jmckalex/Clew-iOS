@@ -34,7 +34,8 @@ import { VaultManager, VAULT_ROOT, GLOBAL_PLUGINS_ROOT, normalizeAccess } from '
 import { RenderService } from './render-service.js';
 import { settings } from './settings.js';
 import { bridgeCall, toBase64 } from './native-bridge.js';
-import { ARM_SCRIPT, READY_PROBE, LIGHT_THEME_SCRIPT, PAPER_SIZES } from './print-pdf.js';
+import { ARM_SCRIPT, BOOK_ARM_SCRIPT, READY_PROBE, LIGHT_THEME_SCRIPT, PAPER_SIZES } from './print-pdf.js';
+import { readMaster, laterNotice, placeWarnings } from '../../vendor/clew/shared/book.js';
 
 /**
  * Where an entry's BibTeX `file` field points (upstream ipc.js, verbatim
@@ -176,9 +177,11 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 			if (rel === KV_FILE) kvStore.externalChange();
 			// An app's manifest edited: if its running frames no longer match
 			// its grant (a host added or dropped), they reload — narrowed at
-			// once, or asked about the new host first (desktop session.js).
+			// once, or asked about the new host first; one that only asks for
+			// more is asked without a reload, and the answer reaches its
+			// running frames live (desktop session.js, §9b).
 			if (rel.endsWith('clew-app.json')) {
-				for (const key of apps.manifestTouched(rel)) send(CH.EV_APP_GRANTS_CHANGED, { key });
+				for (const { key, reload } of apps.manifestTouched(rel)) send(reload ? CH.EV_APP_GRANTS_CHANGED : CH.EV_APP_ASK, { key });
 			}
 		},
 		onStructureChanged: () => {
@@ -869,8 +872,8 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 		[CH.APPS_LIST]: () => apps.list(),
 		// Revoking forgets the app here: its ports close and its frames
 		// reload, so it asks again (§9).
-		[CH.APP_REVOKE]: ({ id }) => {
-			const { done, key } = apps.revoke(id);
+		[CH.APP_REVOKE]: async ({ id }) => {
+			const { done, key } = await apps.revoke(id);
 			if (key) send(CH.EV_APP_GRANTS_CHANGED, { key });
 			return done;
 		},
@@ -1075,8 +1078,42 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 		// Book Build (Clew-app main/export-book.js) runs TeX, latexmk and the
 		// engine in a Node fork and writes build/ beside the master: desktop
 		// only. The Book panel's notice and "Last build failed" read this.
-		[CH.EXPORT_BOOK]: () => {
-			throw new Error('building a book needs Clew on a Mac');
+		// A book (Clew-app main/export-book.js). Its PDF, LaTeX and HTML builds
+		// run TeX, latexmk and the engine in a Node fork and write build/
+		// beside the master: desktop only. Its PRINT (5abf52d) is the reading
+		// view: the book as one preview document (renderBook), printed like a
+		// note's "Export as PDF" into the share sheet, each chapter from a new
+		// page (BOOK_PRINT_CSS).
+		[CH.EXPORT_BOOK]: async ({ master: masterRel, format }) => {
+			if (format !== 'print') throw new Error('building a book needs Clew on a Mac');
+			const masterAbs = vaults.resolve(masterRel);
+			const master = readMaster(String(vfs.read(masterAbs)));
+			if (!master) throw new Error(`${masterRel} is not a book: its front matter needs \`book: true\` and \`chapters:\``);
+			const chapters = indexer.notes.get(masterRel)?.book?.chapters ?? [];
+			const missing = chapters.filter((c) => !c.resolved).map((c) => `[[${c.target}]]`);
+			if (missing.length) {
+				throw new Error(`${missing.join(', ')} ${missing.length === 1 ? 'is' : 'are'} no note in this vault — the book was not built`);
+			}
+			if (!chapters.length) throw new Error('The book has no chapters yet — list them under `chapters:` in its master');
+			const masterDir = nodePath.dirname(masterAbs);
+			// Handed to the engine relative to the master, as its warnings name them.
+			const names = chapters.map((c) => nodePath.relative(masterDir, vaults.resolve(c.resolved)));
+			const { warnings } = await renderService.renderBook(masterRel, { chapters: names, numbering: master.numbering });
+			const base = masterRel.split('/').pop().replace(/\.(md|jmd)$/i, '');
+			const name = `${base} (reading view).pdf`;
+			const encoded = masterRel.split('/').map(encodeURIComponent).join('/');
+			const paper = String(settings.get('printPaperSize') ?? 'a4').toLowerCase();
+			await bridgeCall('printPdf', {
+				url: `clew-preview://vault/${encodeURIComponent(vaults.sessionId)}/${encoded}.html?book=1`,
+				name,
+				paperSize: PAPER_SIZES.includes(paper) ? paper : 'a4',
+				arm: BOOK_ARM_SCRIPT,
+				probe: READY_PROBE,
+				lightTheme: LIGHT_THEME_SCRIPT,
+			});
+			const placed = placeWarnings(warnings, new Map(names.map((n, i) => [n, chapters[i].resolved])), masterRel);
+			const later = laterNotice(master.later);
+			return { output: name, outputRel: null, shared: true, warnings: later ? [{ path: masterRel, line: null, text: later }, ...placed] : placed };
 		},
 		[CH.CANVAS_EXPORT_PNG]: async ({ data, name }) => {
 			await bridgeCall('shareBase64', { name: name ?? 'drawing.png', base64: data });
@@ -1120,15 +1157,27 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 	// Surface the Swift side needs (scheme handler + lifecycle callbacks).
 	const native = {
 		renderNote: async (rel) => apps.rewrite(await servePdfFrames(await renderService.ensureRendered(rel), rel), rel),
+		// `?book=1` on a master's URL: its whole book, as the book print last
+		// built it (renderBook) — at the master's own URL, where the engine's
+		// master-relative paths resolve.
+		bookDocument: async (rel) => {
+			vaults.resolve(rel);
+			const html = renderService.bookHtml(rel);
+			if (html == null) throw new Error(`${rel}: no book document has been built`);
+			return apps.rewrite(await servePdfFrames(html, rel), rel);
+		},
 		renderFragment: async (text) => servePdfFrames(await renderService.renderFragment(text)),
 		// Live edit's block frames (SchemeHandler.swift `__clew_block__`):
 		// POST {text, sourcePath} → the document's key; GET by key → the
 		// HTML, or null once evicted (a 404, and the frame layer POSTs
 		// again). A sourcePath that escapes the vault is refused here —
 		// resolve() throws — which the handler answers as 403.
-		renderBlock: async (text, sourcePath) => {
+		renderBlock: async (text, sourcePath, book = null) => {
 			if (sourcePath != null) vaults.resolve(sourcePath);
-			return renderService.renderBlock(text, { sourcePath: sourcePath ?? null });
+			// A chapter's book (cite-text.js): each path resolved as sourcePath
+			// is, so one leaving the vault is refused (403).
+			if (Array.isArray(book)) for (const rel of book) vaults.resolve(rel);
+			return renderService.renderBlock(text, { sourcePath: sourcePath ?? null, ...(book?.length ? { book } : {}) });
 		},
 		blockDocument: async (key) => {
 			const html = renderService.blockDocument(key);

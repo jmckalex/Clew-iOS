@@ -404,10 +404,39 @@ final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 		case "trustedVaultsList":
 			reply(trustedVaultsList(), nil)
 
+		// Apps' secrets (AppSecrets.swift, `app.secrets`): the shim scopes
+		// each call to the app behind the port; here the vault must be the
+		// open one. Values travel in the reply only, never in an error.
+		case "appSecretGet", "appSecretSet", "appSecretDelete", "appSecretNames", "appSecretsClearApp":
+			guard let vault = params["vault"] as? String, let app = params["app"] as? String,
+				let path = vaults.currentVaultPath,
+				vault == vaults.trust.identity(URL(fileURLWithPath: path, isDirectory: true)) else { throw ClewError.badPayload }
+			let store = AppSecretStore.shared
+			let name = params["name"] as? String ?? ""
+			switch method {
+			case "appSecretGet":
+				performIO(reply) { try store.get(vault: vault, app: app, name: name) ?? NSNull() }
+			case "appSecretSet":
+				guard let value = params["value"] as? String, value.utf8.count <= 8 * 1024 else { throw ClewError.badPayload }
+				performIO(reply) { try store.set(vault: vault, app: app, name: name, value: value); return true }
+			case "appSecretDelete":
+				performIO(reply) { try store.delete(vault: vault, app: app, name: name) }
+			case "appSecretNames":
+				performIO(reply) { try store.names(vault: vault, app: app) }
+			default:
+				performIO(reply) { try store.clearApp(vault: vault, app: app) }
+			}
+
+		case "appSecretCounts":
+			guard let vault = params["vault"] as? String else { throw ClewError.badPayload }
+			performIO(reply) { try AppSecretStore.shared.counts(vault: vault) }
+
 		case "trustedVaultsSet":
 			guard let key = params["key"] as? String, let action = params["action"] as? String else { throw ClewError.badPayload }
 			if action == "forget" {
 				vaults.trust.forgetKey(key)
+				// Forgetting a vault forgets what its apps kept secret here too.
+				vaults.ioQueue.async { _ = try? AppSecretStore.shared.clearVault(key) }
 			} else if let root = vaults.trust.rootURL(forKey: key) {
 				if action == "trust" { vaults.trust.trust(root) } else if action == "revoke" { vaults.trust.revoke(root) }
 			}

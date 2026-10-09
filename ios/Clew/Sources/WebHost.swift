@@ -23,6 +23,10 @@ final class WebHost: NSObject, ObservableObject {
 		// Create the trust store here, on main, before any I/O-queue open
 		// can race to (and migrate the device's known vaults on first use).
 		_ = vaults.trust
+		// Apps' secrets an earlier install left in the Keychain go, first
+		// thing on the serial I/O queue, before any app can ask for one
+		// (AppSecrets.swift).
+		vaults.ioQueue.async { AppSecretStore.shared.sweepIfNewInstall() }
 		config.setURLSchemeHandler(schemeHandler, forURLScheme: "clew-app")
 		config.setURLSchemeHandler(schemeHandler, forURLScheme: "clew-preview")
 		// Apps in notes: each app on an origin of its own (frame-bridge.md §7).

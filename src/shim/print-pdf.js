@@ -43,3 +43,22 @@ export const READY_PROBE = `(() => {
 export const LIGHT_THEME_SCRIPT = `window.postMessage({ source: 'clew-preview-host', type: 'theme', theme: 'light' }, '*'); true;`;
 
 export const PAPER_SIZES = ['a4', 'letter', 'legal', 'tabloid'];
+
+// A BOOK's print (Clew-app 5abf52d): each chapter, the book's references and
+// its index from a new page, and a chapter's further level-one headings too.
+// Upstream's BOOK_PRINT_CSS, verbatim. Upstream injects it with insertCSS;
+// here the arm script adopts it as a constructed sheet, which the preview's
+// CSP does not govern, and UIKit's print formatter applies print media.
+export const BOOK_PRINT_CSS = `@media print {
+	section.jmd-chapter, section.jmd-book-references, nav.index { break-before: page; }
+	section.jmd-chapter > h1 ~ h1:not(.unnumbered) { break-before: page; }
+}`;
+
+export const BOOK_ARM_SCRIPT = `(() => {
+	try {
+		const sheet = new CSSStyleSheet();
+		sheet.replaceSync(${JSON.stringify(BOOK_PRINT_CSS)});
+		document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
+	} catch { /* an old WebKit: chapters run on */ }
+	return true;
+})(); ${ARM_SCRIPT}`;
