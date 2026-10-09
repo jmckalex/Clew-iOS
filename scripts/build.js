@@ -264,12 +264,17 @@ const rendererPatches = {
 		// above a chapter's reading view offers the print that numbers it as
 		// the book does, where desktop offers the HTML build. Upstream
 		// candidate: a platform's build formats, asked of the host.
-		builder.onLoad({ filter: /vendor\/clew\/renderer\/components\/panels\/clew-book\.js$/ }, (args) => ({
-			contents: patched('clew-book.js', fs.readFileSync(args.path, 'utf8'),
+		builder.onLoad({ filter: /vendor\/clew\/renderer\/components\/panels\/clew-book\.js$/ }, (args) => {
+			let src = fs.readFileSync(args.path, 'utf8');
+			src = patched('clew-book.js', src,
 				"for (const [format, label] of [['pdf', 'PDF'], ['latex', 'LaTeX'], ['html', 'HTML'], ['print', 'Print PDF']]) {",
-				"for (const [format, label] of [['print', 'Print PDF']]) {"),
-			loader: 'js',
-		}));
+				"for (const [format, label] of [['print', 'Print PDF']]) {");
+			// The print goes to the share sheet here, not into build/.
+			src = patched('clew-book.js', src,
+				"'Print the book as reading view draws it — each chapter from a new page, no TeX — into build/ beside its master'",
+				"'Print the book as reading view draws it — each chapter from a new page — and share the PDF'");
+			return { contents: src, loader: 'js' };
+		});
 		builder.onLoad({ filter: /vendor\/clew\/renderer\/books\.js$/ }, (args) => {
 			let src = fs.readFileSync(args.path, 'utf8');
 			src = patched('books.js', src, "\tbuild.textContent = 'Build';\n", "\tbuild.textContent = 'Print PDF';\n");

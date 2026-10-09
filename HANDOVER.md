@@ -1,16 +1,40 @@
-# Handover — 2026-10-06 (the sync to Clew-app cbfa692: book mode, origin-bound app grants, the demo vault's update)
+# Handover — 2026-10-10 (the sync to Clew-app 5abf52d: app secrets on the Keychain, book mode phase 2, the book print)
 
 Current state for a fresh session, rewritten whole. Durable architecture
 lives in **README.md** and **PORT-PLAN.md**. Each sync's reasoning and
 measurements are in its record: `UPSTREAM-*-PLAN.md`. The latest records
-are `UPSTREAM-CBFA692-PLAN.md` (book mode and the demo vault's update,
-2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-10-04),
+are `UPSTREAM-5ABF52D-PLAN.md` (app secrets, book mode phase 2, the book
+print, 2026-10-10), `UPSTREAM-CBFA692-PLAN.md` (book mode and the demo
+vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-10-04),
 `UPSTREAM-F3A7D5B-PLAN.md` (the sync of 2026-10-03/04),
 `UPSTREAM-03BB33A-PLAN.md` (the overnight sync of 2026-10-02),
 `UPSTREAM-18C5E45-PLAN.md` (sync #3) and `UPSTREAM-0.12.0-PLAN.md`. The coordinator's ledger is `~/Source/Clew/SYNC-LEDGER.md`.
 
 ## 1. Where things stand
 
+- **The sync to Clew-app `5abf52d` (2026-10-10) is DONE, and every
+  acceptance check was green.** The owner, relayed by Clew-boss: "Please
+  drive the iOS port through to completion. All the way to a push and a
+  TestFlight build." The chain is `sync5abf52d-p1-vendor` → `-p2-build` →
+  `-p3-contract` → `-p4-verify`. The record is UPSTREAM-5ABF52D-PLAN.md.
+  - **App secrets on the Keychain** (AppSecrets.swift). The Ticker's
+    Finnhub key now survives a relaunch, and a reinstall sweeps what an
+    earlier install left.
+  - **manifestNeed:** an app that only asks for more is asked live,
+    without a reload.
+  - **Book mode phase 2:** book numbers in live edit, cross-chapter
+    references and jumps, and citations in book order (the render body's
+    `book`).
+  - **The book print is PORTED:** the reading view's PDF of the whole book,
+    one chapter per page, to the share sheet. Its PDF, LaTeX and HTML
+    builds still refuse. The Book panel and the reading-view line offer
+    Print PDF.
+  - The live-edit equation number is shown once.
+  - **Vendor** is at Clew-app `5abf52d`.
+  - **Next sync:** Clew-app c115418 (book pills follow a master edited in
+    its editor) and its sibling for notes in no book.
+- **The sync to Clew-app `cbfa692` (2026-10-06) is DONE and PUSHED**
+  (3947dd7; the Xcode Cloud archive succeeded).
 - **The sync to Clew-app `cbfa692` (2026-10-06) is DONE, and every
   acceptance check was green.** The owner, relayed by Clew-boss: "Push
   and sync the iOS build tonight, for sure." The chain is
@@ -166,7 +190,10 @@ are `UPSTREAM-CBFA692-PLAN.md` (book mode and the demo vault's update,
 
 ## 3. Next
 
-- **The next sync's range starts at Clew-app `cbfa692`.**
+- **The next sync's range starts at Clew-app `5abf52d`.**
+- **iPad checks from the 5abf52d sync:** its record's checklist (the
+  Ticker's key across a relaunch, the book print, a real finger on the
+  grip and a chip).
 - **iPad checks from the cbfa692 sync:** its record's checklist (the demo
   vault's notice, the Book grip under a finger, the Ticker asked once).
 - **iPad checks from this sync:**
