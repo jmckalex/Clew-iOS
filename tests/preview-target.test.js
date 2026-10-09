@@ -37,6 +37,16 @@ test('display math: $$, \\[ \\], a top-level environment, @begin(align)', () => 
 	assert.equal(begin.tex, '\\begin{align}\nc &= d\n\\end{align}');
 });
 
+test('@begin(equation) is an unnumbered display: the "(n)" is Clew\'s, as the engine\'s HTML is', () => {
+	// Wrapped in \begin{equation}, MathJax (tags: 'ams') numbered it as well,
+	// from its own count — "(1)(1)" in live edit (mathEnvironmentTex).
+	const doc = 'P\n\n@begin(equation){#eq-e}\ne^{i\\pi} + 1 = 0\n@end(equation)\n';
+	const t = at(doc, 'e^{');
+	assert.equal(t.kind, 'math-display');
+	assert.equal(t.tex, 'e^{i\\pi} + 1 = 0');
+	assert.ok(!/\\begin\{equation\}/.test(t.tex));
+});
+
 test('fences: previewed languages only, closed only, from the first character', () => {
 	const doc = 'P\n\n```mermaid\ngraph TD\n  A --> B\n```\n\n```js\nx\n```\n\n```tikz\n\\draw (0,0);\n```\n\n```query\ntable: a\n```\n';
 	const m = at(doc, '```mermaid');

@@ -25,13 +25,21 @@ test('typed words come from the engine: equation parenthesised, capitalised form
 });
 
 test('theorem kinds share ONE counter; proof is unnumbered', () => {
-	const n = num('@begin(theorem)[Main]{#t}\nA\n@end(theorem)\n\n@begin(proof){#p}\nB\n@end(proof)\n\n@begin(lemma){#l}\nC\n@end(lemma)\n\n:::corollary{id=c}\nD\n:::\n');
+	const n = num('@begin(theorem)[Main]{#t}\nA\n@end(theorem)\n\n@begin(proof){#p}\nB\n@end(proof)\n\n@begin(lemma){#l}\nC\n@end(lemma)\n\n@begin(corollary){id=c}\nD\n@end(corollary)\n');
 	assert.deepEqual([n.labels.get('t').number, n.labels.get('l').number, n.labels.get('c').number], ['1', '2', '3']);
 	assert.equal(n.labels.get('l').type, 'lemma');
 	assert.equal(n.labels.get('p').status, 'numberless');
 	assert.equal(refDisplay(n, 'l', 'cref').text, `lemma${nbsp}2`);
 	assert.equal(refDisplay(n, 'c', 'Cref').text, `Corollary${nbsp}3`);
 	assert.equal(headText(n.lines.get(1)), 'Theorem 1');
+});
+
+test('::: forms are the engine\'s generic container: no number, no count, a reference prints ??', () => {
+	const n = num('@begin(theorem){#t}\nA\n@end(theorem)\n\n:::corollary{id=c}\nD\n:::\n\n:::figure[F]{#f}\nx @label[inf]\n:::\n\n@begin(figure)[G]{#g}\n:::subfigure[S]{#s}\ny\n:::\n@end(figure)\n\n@begin(lemma){#l}\nL\n@end(lemma)\n\n:::equation{#e}\na=b\n:::\n');
+	for (const key of ['c', 'f', 'inf', 's', 'e']) assert.equal(refDisplay(n, key, 'ref').text, '??', key);
+	assert.equal(refDisplay(n, 'c', 'ref').state, 'numberless');
+	assert.deepEqual([n.labels.get('g').number, n.labels.get('l').number], ['1', '2'], 'they count nothing');
+	assert.equal(n.lines.has(5), false, 'no head number for :::corollary');
 });
 
 test('equations: @begin(equation) only; $$ is unnumbered; a label inside is not one', () => {
