@@ -16,7 +16,9 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
   acceptance check was green.** The owner, relayed by Clew-boss: "Please
   drive the iOS port through to completion. All the way to a push and a
   TestFlight build." The chain is `sync5abf52d-p1-vendor` → `-p2-build` →
-  `-p3-contract` → `-p4-verify`. The record is UPSTREAM-5ABF52D-PLAN.md.
+  `-p3-contract` → `-p4-verify` → `-p5-repin-fb3635a`. Clew-boss verified
+  the chain. Main is fast-forwarded to the p5 branch, and a build commit
+  sits on top. The record is UPSTREAM-5ABF52D-PLAN.md.
   - **App secrets on the Keychain** (AppSecrets.swift). The Ticker's
     Finnhub key now survives a relaunch, and a reinstall sweeps what an
     earlier install left.
@@ -215,6 +217,13 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
 
 ## 4. Standing rules (also in Claude's memory)
 
+- **End every message the owner reads with a short executive summary**
+  (the owner's rule since 2026-10-06): what matters, what needs the
+  owner's action, and "details on request: …" for what was left out.
+  Reports to Clew-boss keep their full detail.
+- **A push waits for the owner's own word typed here** when they have put
+  a hold on directly here, or the permission classifier wants it (it
+  blocked a relayed release once, on 2026-10-04).
 - **Push whenever Clew-boss says to.** The owner's rule, 2026-09-30:
   "Please push whenever @Clew-boss tells you to." Clew-boss sends a push
   instruction only with the owner's authorisation. Never push on your own
