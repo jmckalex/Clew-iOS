@@ -33,14 +33,20 @@ import { calloutsEnv } from './callout-types.js';
 import { iconTable } from './callout-files.js';
 import { settings } from './settings.js';
 import { paths } from './paths.js';
+import { printNoteToPdf } from './print-pdf.js';
 
-const FORMATS = { html: 'html', latex: 'tex', pdf: 'pdf' };
+const FORMATS = { html: 'html', latex: 'tex', pdf: 'pdf', print: 'pdf' };
 
 /**
- * Build the book whose master is `masterRel`. format: 'html' | 'latex' | 'pdf'.
+ * Build the book whose master is `masterRel`. format: 'html' | 'latex' | 'pdf'
+ * | 'print' — the reading view's PDF (phase 3): the book as ONE preview
+ * document (render-service.js#renderBook, the session's own render service,
+ * so the vault's trust applies as in reading view) printed by print-pdf.js,
+ * each chapter from a new page, no TeX. It needs `renderService`,
+ * `sessionId` and `callerToken`; the others do not.
  * @returns {Promise<{ output: string, outputRel: string|null, warnings: Array<{path, line, text}>, engine?, reason? }>}
  */
-export async function exportBook({ vaults, indexer, masterRel, format, trusted = false }) {
+export async function exportBook({ vaults, indexer, masterRel, format, trusted = false, renderService = null, sessionId = null, callerToken = null }) {
 	if (!FORMATS[format]) throw new Error(`A book is built as HTML, LaTeX or PDF, not "${format}"`);
 	const masterAbs = vaults.resolve(masterRel);
 	const masterText = fs.readFileSync(masterAbs, 'utf8');
@@ -87,6 +93,14 @@ export async function exportBook({ vaults, indexer, masterRel, format, trusted =
 		const r = path.relative(vaults.root, abs);
 		return r.startsWith('..') || path.isAbsolute(r) ? null : r.split(path.sep).join('/');
 	};
+
+	if (format === 'print') {
+		// Named apart from the LaTeX PDF, which is `<master>.pdf` in the same folder.
+		const output = path.join(outDir, `${base} (reading view).pdf`);
+		const { warnings } = await renderService.renderBook(masterRel, { chapters: names, numbering: master.numbering });
+		await printNoteToPdf({ sessionId, callerToken, relPath: masterRel, outFile: output, paperSize: settings.get('printPaperSize'), book: true });
+		return { output, outputRel: rel(output), warnings: place(warnings) };
+	}
 
 	if (format === 'html') {
 		// One page per chapter (D4, engine piece 2ac7048): asked for

@@ -36,8 +36,8 @@ export function tokenMatches(expected, given) {
 
 /**
  * A render POST's body, checked before the engine sees any of it:
- * `{ text, sourcePath }`, or `{ status, message }` to refuse with. The body
- * is JSON `{ token, text, sourcePath? }` whatever its Content-Type — callers
+ * `{ text, sourcePath, book }`, or `{ status, message }` to refuse with. The
+ * body is JSON `{ token, text, sourcePath?, book? }` whatever its Content-Type — callers
  * send none (fetch's text/plain), because a JSON type makes the request
  * non-simple, and a preflight is an OPTIONS request the iOS handler does not
  * answer.
@@ -45,6 +45,9 @@ export function tokenMatches(expected, given) {
  * @param {string} body
  * @param {string|null} expected - the session's token
  */
+/** The most pieces a book's citation context may name. */
+const BOOK_LIMIT = 2000;
+
 export function readRenderBody(body, expected) {
 	if (typeof body !== 'string' || body.length > RENDER_BODY_LIMIT) return { status: 413, message: 'Too large' };
 	let parsed;
@@ -55,8 +58,13 @@ export function readRenderBody(body, expected) {
 	}
 	if (!parsed || typeof parsed !== 'object') return { status: 400, message: 'Bad request' };
 	if (!tokenMatches(expected, parsed.token)) return { status: 403, message: 'Forbidden' };
-	const { text, sourcePath = null } = parsed;
+	const { text, sourcePath = null, book = null } = parsed;
 	if (typeof text !== 'string') return { status: 400, message: 'Bad request' };
 	if (sourcePath !== null && typeof sourcePath !== 'string') return { status: 400, message: 'Bad request' };
-	return { text, sourcePath };
+	// A chapter's citations render under its book's header (cite-text.js):
+	// the master then the chapters, vault paths the route resolves in turn.
+	if (book !== null && !(Array.isArray(book) && book.length <= BOOK_LIMIT && book.every((p) => typeof p === 'string'))) {
+		return { status: 400, message: 'Bad request' };
+	}
+	return { text, sourcePath, book };
 }

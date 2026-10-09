@@ -66,6 +66,45 @@ export function citationHeader(noteText, noteDir) {
 	return lines.length ? `---\n${lines.join('\n')}\n---\n` : '';
 }
 
+/**
+ * The citation header a BOOK's citations render under (docs/dev/book-mode.md
+ * §4; jmarkdown bibliographies.js#namedFiles, book.js#chapterSettings): every
+ * setting is the MASTER's — a chapter's own `Bibliography style` and the rest
+ * are warned and not applied — except `Bibliography`, which each chapter may
+ * add to: the book has ONE list, the master's files then each chapter's in
+ * book order, each against its own folder. A master that says `Bibliography
+ * mode: replace` but names no file of its own keeps the configured files
+ * (the engine's rule), so the mode is not carried then: the chapters' files
+ * would otherwise replace them.
+ *
+ * @param {{ text: string, dir: string }} master - dir absolute
+ * @param {Array<{ text: string, dir: string }>} chapters - in book order
+ * @returns {string} as citationHeader
+ */
+export function bookCitationHeader(master, chapters) {
+	const lines = citationLines(master.text);
+	const named = lines.find((line) => line.key === 'bibliography');
+	const files = [
+		...(named ? absoluteList(named.value, master.dir) : []),
+		...chapters.flatMap((chapter) => {
+			const own = citationLines(chapter.text).find((line) => line.key === 'bibliography');
+			return own ? absoluteList(own.value, chapter.dir) : [];
+		}),
+	].filter((file, i, all) => all.indexOf(file) === i);
+	const out = [];
+	for (const { key, name, value } of lines) {
+		if (key === 'bibliography') {
+			if (files.length) out.push(`${name}: ${files.join(', ')}`);
+			continue;
+		}
+		if (key === 'bibliography mode' && !named && value.trim().toLowerCase() === 'replace') continue;
+		const file = key === 'bibliography style' && /\.csl['"]?$/i.test(value);
+		out.push(`${name}: ${file ? absolutise(value, master.dir) : unquote(value)}`);
+	}
+	if (!named && files.length) out.push(`Bibliography: ${files.join(', ')}`);
+	return out.length ? `---\n${out.join('\n')}\n---\n` : '';
+}
+
 // A citation construct: the LaTeX family (`\cite{`, `\citep[`, `\fullcite{`…)
 // or an `@bibliography`; pandoc's `[@key]` / `@key` only where the vault turns
 // them on (`@` is otherwise the directive sigil). Over-inclusive on purpose:

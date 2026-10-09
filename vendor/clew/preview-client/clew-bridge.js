@@ -20,6 +20,7 @@
 //   clew.can('note.read')
 //   const text = await clew.notes.read();  // the note this app sits in
 //   await clew.kv.set('best', 42);         // app.kv
+//   await clew.secrets.set('api-key', k);  // app.secrets: this device only
 //   clew.on('theme', ({ theme }) => …);
 //   await clew.notes.write(null, text);   // note.write: through the editor
 //   clew.on('find', ({ query }) => …);    // Clew's Find in this note
@@ -131,6 +132,13 @@
 			write: (path, data) => call('files.write', { path, data }),
 			delete: (path) => call('files.delete', { path }),
 			mkdir: (path) => call('files.mkdir', { path }),
+		}),
+		// Small strings kept on this DEVICE only, encrypted by the OS — never
+		// in the vault (app.kv travels with it). get → string | null.
+		secrets: Object.freeze({
+			get: (name) => call('secrets.get', { name }),
+			set: (name, value) => call('secrets.set', { name, value }),
+			delete: (name) => call('secrets.delete', { name }),
 		}),
 		open: (target) => call('open', { target }),
 		on(name, fn) {

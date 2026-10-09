@@ -137,9 +137,30 @@ const readText = (abs) => {
 	return fs.readFileSync(abs, 'utf8');
 };
 
+// ---- app.secrets: small strings kept on this DEVICE only (§9c) -----------
+// The host hands `ctx.secrets` already scoped to the calling app (vault
+// identity × manifest id, from the port): main/app-secrets.js on the desktop,
+// the Keychain on Clew-iOS — so its methods may answer with a promise. The
+// limits live here, shared; a value is never put in an error message.
+const SECRET_NAME = /^[A-Za-z0-9._-]{1,64}$/;
+export const SECRET_LIMIT = 8 * 1024;   // bytes of UTF-8
+export const SECRETS_PER_APP = 32;
+
+function secretName(p) {
+	const name = p?.name;
+	if (typeof name !== 'string' || !SECRET_NAME.test(name)) throw appError('bad-params', 'a secret\'s name is 1–64 of A–Z a–z 0–9 . _ -');
+	return name;
+}
+
+function secretStore(ctx) {
+	if (!ctx.secrets) throw appError('unavailable', 'secrets are not kept on this device');
+	return ctx.secrets;
+}
+
 /**
  * The methods, each with the capability it needs. `ctx`: { root, restricted,
- * excludes, notePath, app, granted (Set), indexer, search, kv }.
+ * excludes, notePath, app, granted (Set), indexer, search, kv, clipboard,
+ * secrets }. A `run` may return a promise (secrets on Clew-iOS).
  */
 export const METHODS = {
 	// ---- note.read / notes.read ------------------------------------------------
@@ -342,6 +363,28 @@ Object.assign(METHODS, {
 		},
 	},
 	'clipboard.paste': { cap: 'clipboard', run: (ctx) => ctx.clipboard.readText() },
+	// ---- app.secrets --------------------------------------------------------
+	'secrets.get': {
+		cap: 'app.secrets',
+		run: async (ctx, p) => (await secretStore(ctx).get(secretName(p))) ?? null,
+	},
+	'secrets.set': {
+		cap: 'app.secrets',
+		run: async (ctx, p) => {
+			const name = secretName(p);
+			if (typeof p?.value !== 'string') throw appError('bad-params', 'a secret is a string');
+			if (new TextEncoder().encode(p.value).length > SECRET_LIMIT) throw appError('too-large', 'a secret is limited to 8 KB');
+			const store = secretStore(ctx);
+			const names = await store.names();
+			if (!names.includes(name) && names.length >= SECRETS_PER_APP) throw appError('too-many', `an app keeps at most ${SECRETS_PER_APP} secrets`);
+			await store.set(name, p.value);
+			return true;
+		},
+	},
+	'secrets.delete': {
+		cap: 'app.secrets',
+		run: async (ctx, p) => Boolean(await secretStore(ctx).delete(secretName(p))),
+	},
 });
 
 function kvKey(ctx, key) {
@@ -351,9 +394,10 @@ function kvKey(ctx, key) {
 
 /**
  * Run one request. Resolves to `{ ok: true, result }` or `{ ok: false,
- * error: { code, message } }` — never throws.
+ * error: { code, message } }` — never rejects. Always a promise: a method may
+ * answer asynchronously (secrets in the Keychain, on Clew-iOS).
  */
-export function callApp(ctx, method, params) {
+export async function callApp(ctx, method, params) {
 	const spec = Object.hasOwn(METHODS, method) ? METHODS[method] : null;
 	if (!spec) return { ok: false, error: { code: 'unknown-method', message: `no method ${method}` } };
 	const allowed = typeof spec.cap === 'function' ? spec.cap(ctx, params) : ctx.granted.has(spec.cap);
@@ -362,7 +406,7 @@ export function callApp(ctx, method, params) {
 		return { ok: false, error: { code: 'denied', message: `${method} needs "${name}", which this app has not been granted here` } };
 	}
 	try {
-		return { ok: true, result: spec.run(ctx, params ?? {}) };
+		return { ok: true, result: await spec.run(ctx, params ?? {}) };
 	} catch (err) {
 		return { ok: false, error: { code: err.code && typeof err.code === 'string' && !/^E[A-Z]+$/.test(err.code) ? err.code : 'internal', message: String(err.message ?? err) } };
 	}

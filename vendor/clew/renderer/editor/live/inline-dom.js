@@ -32,12 +32,14 @@ const TAGS = {
  * @param {number} from
  * @param {number} to
  * @param {object[]} model - liveModel(state)
+ * @param {object|null} [given] - the note's numbering, when the caller has it
  * @returns {object[]} tokens: {type:'text',text} | {type:<kind>, children?, …}
  */
-export function inlineTokens(doc, from, to, model) {
+export function inlineTokens(doc, from, to, model, given = null) {
 	const inside = model.filter((c) => c.level === 'inline' && c.tier !== 'C' && c.from >= from && c.to <= to);
-	// References and labels (§5.13) resolve against the note's numbering.
-	let numbering = null;
+	// References and labels (§5.13) resolve against the note's numbering —
+	// the caller's when it has one (a chapter's is its BOOK's, book-map.js).
+	let numbering = given;
 	const numbers = () => (numbering ??= numberDocument(doc));
 	return walk(from, to);
 

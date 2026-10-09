@@ -43,6 +43,10 @@ function trustPaths() {
 		// What each app in a note may do, per vault and app id
 		// (main/app-grants.js; frame-bridge.md §9) — never in the vault.
 		appGrants: path.join(app.getPath('userData'), 'app-grants.json'),
+		// What each app keeps SECRET on this device (main/app-secrets.js;
+		// frame-bridge.md §9c): ciphertext under an OS-held key — never in a
+		// vault, never synced.
+		appSecrets: path.join(app.getPath('userData'), 'app-secrets.json'),
 		// A restricted vault's exports run from here, not from the note's
 		// folder: the engine's config cascade then sees the user's global
 		// ~/.jmarkdown and this directory's one key, never a vault's own

@@ -152,14 +152,43 @@ export function numberDocument(doc, { numbered = new Map() } = {}) {
 	return result;
 }
 
-function compute(text, numbered) {
+/** Counters at the start of a document — or of a chapter, in a book. */
+export function freshState() {
+	return { h: [0, 0, 0, 0, 0, 0], counters: { figure: 0, table: 0, listing: 0, theorem: 0, equation: 0 }, custom: {}, chapter: 0 };
+}
+
+/**
+ * One pass. `book` (book-numbering.js) makes it one piece of a BOOK, which
+ * the engine numbers as one document (post-processor.js#numberer):
+ *   meta        the MASTER's header settings (a chapter's own are ignored);
+ *   perChapter  `Numbering: per chapter` — "2.3", every counter restarting at
+ *               each numbered level-1 heading (a chapter; `{-}` is none);
+ *   state       the counters where the previous piece left them;
+ *   insertTitle the engine inserts this chapter's `#` title (it has none),
+ *               which starts a chapter before its first line.
+ * The state the piece ends with comes back as `out.end`. Without `book`,
+ * exactly the single-note pass it always was.
+ */
+function compute(text, numbered, book = null) {
 	const raw = text.split('\n');
 	const lines = masked(text).split('\n');
-	const meta = headerMeta(raw);
+	const own = headerMeta(raw);
+	const meta = book ? { ...book.meta, end: own.end } : own;
 	const out = { headingsNumeric: meta.headingsNumeric, lines: new Map(), labels: new Map() };
-	const h = [0, 0, 0, 0, 0, 0];
-	const counters = { figure: 0, table: 0, listing: 0, theorem: 0, equation: 0 };
-	const custom = {};
+	const state = book?.state ? structuredClone(book.state) : freshState();
+	const { h, counters, custom } = state;
+	const perChapter = book?.perChapter === true;
+	const num = (n) => (perChapter ? `${state.chapter}.${n}` : `${n}`);
+	const newChapter = () => {
+		state.chapter += 1;
+		if (!perChapter) return;
+		for (const k of Object.keys(counters)) counters[k] = 0;
+		for (const k of Object.keys(custom)) delete custom[k];
+	};
+	if (book?.insertTitle) {
+		newChapter();
+		if (meta.headingsNumeric) { h[0] += 1; for (let d = 1; d < 6; d += 1) h[d] = 0; }
+	}
 	const footnotes = new Map();   // group → inline notes so far
 	const classic = classicOrder(raw.slice(meta.end));
 	/** Open environments: {name, colons, line, number, type, numbered, title, sub}. */
@@ -196,7 +225,14 @@ function compute(text, numbered) {
 		if (open) {
 			const name = open[1] ?? open[3];
 			const env = { name, colons: Boolean(open[2]), line: lineNo, title: (open[4] ?? '').trim(), numbered: false, pending: [] };
-			if (name === 'subfigure') {
+			if (env.colons) {
+				// `:::figure`, `:::theorem`, `:::equation` … are the engine's
+				// GENERIC container directive (extended-directives.js): a bare
+				// <figure id>, <theorem id>, numbered by nothing and counting
+				// nothing, so a reference to one prints ?? — only @begin(…) is
+				// the numbered environment (measured 2026-10-09; until then
+				// this numbered them, and the book parity scenario caught it).
+			} else if (name === 'subfigure') {
 				const parent = [...envs].reverse().find((e) => e.name === 'figure');
 				if (parent) {
 					parent.sub = (parent.sub ?? 0) + 1;
@@ -204,14 +240,14 @@ function compute(text, numbered) {
 				}
 			} else if (FLOATS.has(name) || name === 'equation') {
 				counters[name] += 1;
-				Object.assign(env, { numbered: true, type: name, number: `${counters[name]}` });
+				Object.assign(env, { numbered: true, type: name, number: num(counters[name]) });
 			} else if (THEOREMS.has(name)) {
 				counters.theorem += 1;
-				Object.assign(env, { numbered: true, type: name, number: `${counters.theorem}` });
+				Object.assign(env, { numbered: true, type: name, number: num(counters.theorem) });
 			} else if (numbered.has(name)) {
 				const spec = numbered.get(name);
 				custom[spec.counter] = (custom[spec.counter] ?? 0) + 1;
-				Object.assign(env, { numbered: true, type: spec.type, number: `${custom[spec.counter]}`, customTitle: spec.title });
+				Object.assign(env, { numbered: true, type: spec.type, number: num(custom[spec.counter]), customTitle: spec.title });
 			} else {
 				env.uncounted = !['proof', 'TeX', 'HTML', 'comment', 'center', 'abstract'].includes(name);
 			}
@@ -234,6 +270,9 @@ function compute(text, numbered) {
 		let headingType;
 		if (heading) {
 			const depth = heading[1].length;
+			// In a book a numbered level-1 heading starts a chapter
+			// (post-processor.js#numberer), with or without `Headings: numeric`.
+			if (book && depth === 1 && !UNNUMBERED_RE.test(heading[2])) newChapter();
 			// `{-}` marks a heading unnumbered (index.js#stripUnnumberedMarker);
 			// like LaTeX's \section* it leaves the count alone — the engine's
 			// numbering pass honours it since jmarkdown b212e82. Headings the
@@ -278,7 +317,35 @@ function compute(text, numbered) {
 			if (hostEnv && !note) hostEnv.pending.push(key);
 		}
 	}
+	if (book) out.end = state;
 	return out;
+}
+
+/**
+ * The settings a BOOK numbers by, from its master's text: `Headings:
+ * numeric`, `Heading base`, `Document class` — `book` when the master names
+ * none, as the engine sets it (book.js#prepareBook) — and per-chapter or
+ * continuous numbering (shared/book.js reads `numbering` as the engine does).
+ */
+export function bookMeta(masterText, numbering = 'chapter') {
+	const meta = headerMeta(String(masterText ?? '').split('\n'));
+	return {
+		meta: { headingsNumeric: meta.headingsNumeric, headingBase: meta.headingBase, documentClass: meta.documentClass || 'book' },
+		perChapter: numbering !== 'continuous',
+	};
+}
+
+/** Does this text have a level-1 heading the engine would take as its title
+ *  (book.js#scanHeadings: any `#` heading, code fences aside)? */
+export function hasTitleHeading(text) {
+	const lines = masked(String(text ?? '')).split('\n');
+	const end = headerMeta(String(text ?? '').split('\n')).end;
+	return lines.slice(end).some((line) => /^ {0,3}#[ \t]+\S/.test(line));
+}
+
+/** A book's piece: `numberDocument`'s result for it, with its end state. */
+export function numberPiece(text, { numbered = new Map(), book }) {
+	return compute(String(text ?? ''), numbered, book);
 }
 
 /**
@@ -292,7 +359,10 @@ function compute(text, numbered) {
 export function refDisplay(numbering, key, form) {
 	const target = numbering.labels.get(key) ?? null;
 	// The engine prints `??` for an unknown key too; the key is in the tip.
-	if (!target) return { text: '??', state: 'missing', tip: `No label “${key}” in this note (a reference to another note's label is not resolved in v1)`, target };
+	if (!target) {
+		const where = numbering.book ? `in the book “${numbering.book.title}”` : 'in this note (a reference to another note\'s label is not resolved in v1)';
+		return { text: '??', state: 'missing', tip: `No label “${key}” ${where}`, target };
+	}
 	if (target.status === 'uncounted') {
 		return { text: '?', state: 'uncounted', tip: `Clew cannot number “${target.kind}”; the export will`, target };
 	}
@@ -304,7 +374,9 @@ export function refDisplay(numbering, key, form) {
 	}
 	const text = form === 'ref' ? target.number : typedRefText(target.type, target.number, form === 'Cref');
 	const twice = target.count > 1 ? ' (defined twice — the last one wins)' : '';
-	return { text, state: 'ok', tip: `${form}[${key}] → ${typedRefText(target.type, target.number, true)}${target.title ? ` — ${target.title}` : ''}${twice}. Numbered within this note.`, target };
+	const scope = !numbering.book ? 'Numbered within this note.'
+		: `Numbered as in the book “${numbering.book.title}”${target.path && target.path !== numbering.book.path ? ` — in ${target.path.split('/').pop().replace(/\.(md|jmd)$/i, '')}` : ''}.`;
+	return { text, state: 'ok', tip: `${form}[${key}] → ${typedRefText(target.type, target.number, true)}${target.title ? ` — ${target.title}` : ''}${twice}. ${scope}`, target };
 }
 
 /** The heading an environment's head widget shows: "Theorem 2", "Figure 1". */
@@ -325,15 +397,17 @@ const HIDE_FRAGMENT_NUMBERS = '<style>.theorem-label, .env-label, .eqn-number, .
  * belongs to, rendered through the block endpoint, and a header naming it
  * with the number this note gives it. A heading host previews its section.
  *
- * @param {import('@codemirror/state').Text} doc
+ * @param {import('@codemirror/state').Text} doc - the text the label is IN
  * @param {string} key
- * @param {string|null} notePath
+ * @param {string|null} notePath - that text's note
+ * @param {object} [numbering] - the numbers to show (a chapter's are its
+ *   book's — numbering-source.js); the doc's own when not given
  * @returns {{ text: string, label: string } | null}
  */
-export function labelPreview(doc, key, notePath) {
-	const target = numberDocument(doc).labels.get(key);
+export function labelPreview(doc, key, notePath, numbering = numberDocument(doc)) {
+	const target = numbering.labels.get(key);
 	if (!target) return null;
-	const shown = refDisplay(numberDocument(doc), key, 'Cref');
+	const shown = refDisplay(numbering, key, 'Cref');
 	const label = (shown.state === 'ok' ? shown.text : key) + (target.title ? ` — ${target.title}` : '');
 	if (target.kind === 'heading' && notePath) {
 		const heading = doc.line(target.line).text.replace(/^#{1,6}[ \t]+/, '').replace(/[@:]label\[[^\]]*\]/g, '').trim();

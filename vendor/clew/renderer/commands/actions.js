@@ -244,14 +244,17 @@ export function jumpToHeading(tab, path, fragment) {
  *  mounted, deferred via pendingLine when it isn't (yet). */
 export function jumpToLine(tabId, line) {
 	const entry = editorPool.get(tabId);
-	if (entry?.view?.dom.isConnected) {
+	const found = workspaceStore.findTab(tabId);
+	// Only an editor already holding THIS note: a tab just navigated to
+	// another note still has the old note's entry for a moment, and the
+	// cursor went into that one (a jump to a label in another chapter).
+	if (entry?.view?.dom.isConnected && (!found || entry.path === found.tab.path)) {
 		const doc = entry.view.state.doc;
 		const target = doc.line(Math.max(1, Math.min(line, doc.lines)));
 		entry.view.dispatch({ selection: { anchor: target.from }, scrollIntoView: true });
 		entry.view.focus();
-	} else {
-		const found = workspaceStore.findTab(tabId);
-		if (found) found.tab.view.pendingLine = line;
+	} else if (found) {
+		found.tab.view.pendingLine = line;
 	}
 }
 

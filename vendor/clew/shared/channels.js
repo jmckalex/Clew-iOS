@@ -156,6 +156,9 @@ export const CH = {
 	EV_VAULT_ACCESS_CHANGED: 'clew:ev-vault-access-changed',
 	EV_TRUST_NOTICE: 'clew:ev-trust-notice',
 	EV_APP_GRANTS_CHANGED: 'clew:ev-app-grants-changed',
+	// An app's manifest asks for more, and nothing it runs with changed: show
+	// its prompt now, and tell its live ports what is added ({ key }).
+	EV_APP_ASK: 'clew:ev-app-ask',
 	EV_UPDATE_AVAILABLE: 'clew:ev-update-available',
 	// Custom callout types changed — in Settings, or a hand edit of the
 	// vault's vault-settings.json: re-ask CALLOUTS_RESOLVED. No payload.

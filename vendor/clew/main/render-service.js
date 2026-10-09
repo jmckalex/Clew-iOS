@@ -29,7 +29,7 @@ import { engineExtensionEntries } from './plugins.js';
 import { inlineScriptHashes } from './preview-csp.js';
 import { writeFileAtomic } from './fs-utils.js';
 import { isDependentFragment } from '../shared/fragment-deps.js';
-import { citationHeader, noteBibFiles } from './citation-header.js';
+import { citationHeader, bookCitationHeader, noteBibFiles } from './citation-header.js';
 import { refusedNames } from '../shared/refused-names.js';
 import { calloutsEnv } from './callout-types.js';
 import { iconTable } from './callout-files.js';
@@ -109,6 +109,7 @@ export class RenderService {
 	/** fragment cache: key → html string (canvas cards, live-edit blocks; bounded) */
 	#fragments = new Map();
 	#blockSources = new Map();   // block key → the note it was rendered for
+	#books = new Map();          // master → its whole-book document (renderBook)
 	#fragmentInflight = new Map();
 	/** Bumped on every file change: a DEPENDENT fragment's key carries it, so
 	 *  a cached render of `![[Note]]` is never served after Note changed. */
@@ -207,6 +208,7 @@ export class RenderService {
 		this.#standby?.child.kill();
 		this.#spawnStandby();
 		this.#notes.clear();
+		this.#books.clear();
 		this.#fragments.clear();
 		this.#fragmentEpoch++;
 		this.#configGeneration++;
@@ -221,6 +223,7 @@ export class RenderService {
 		this.vaultRoot = null;
 		this.#subscribed.clear();
 		this.#notes.clear();
+		this.#books.clear();
 		this.#fragments.clear();
 		this.#fragmentInflight.clear();
 		this.#refused.clear();
@@ -464,14 +467,11 @@ export class RenderService {
 		return entry.inflight;
 	}
 
-	async #build(relPath, entry) {
-		const generation = this.#generation;
-		const abs = path.join(this.vaultRoot, relPath);
-		const mtimeMs = fs.statSync(abs).mtimeMs;
+	/** One build on a warm worker: the worker's `done` or `error` message. */
+	async #workerBuild(file, options) {
 		const standby = this.#takeStandby();
 		const child = await standby.ready;
-
-		const result = await new Promise((resolve) => {
+		return new Promise((resolve) => {
 			const onMessage = (msg) => {
 				if (msg?.type === 'done' || msg?.type === 'error') resolve(msg);
 			};
@@ -479,17 +479,20 @@ export class RenderService {
 			child.once('exit', (code) => {
 				resolve({ type: 'error', message: `render worker exited (code ${code}) without a result` });
 			});
-			child.send({
-				type: 'build',
-				file: abs,
-				options: {
-					to: 'html',
-					output: entry.htmlFile,
-					// Standard-Markdown vaults: the engine keeps its extensions but
-					// reverts *em*/**strong** etc. to normal marked semantics.
-					normalSyntax: this.#vaultOptions.normalSyntax === true,
-				},
-			});
+			child.send({ type: 'build', file, options });
+		});
+	}
+
+	async #build(relPath, entry) {
+		const generation = this.#generation;
+		const abs = path.join(this.vaultRoot, relPath);
+		const mtimeMs = fs.statSync(abs).mtimeMs;
+		const result = await this.#workerBuild(abs, {
+			to: 'html',
+			output: entry.htmlFile,
+			// Standard-Markdown vaults: the engine keeps its extensions but
+			// reverts *em*/**strong** etc. to normal marked semantics.
+			normalSyntax: this.#vaultOptions.normalSyntax === true,
 		});
 
 		if (generation !== this.#generation) throw new Error('stale render (vault closed)');
@@ -514,6 +517,41 @@ export class RenderService {
 		}
 		this.send(CH.EV_RENDER_ERROR, { path: relPath, message: result.message, stack: result.stack });
 		throw new Error(result.message);
+	}
+
+	/**
+	 * A whole BOOK as ONE preview document (book-mode.md, phase 3's print
+	 * PDF): the master with its chapters handed to the engine
+	 * (processFile's `chapters`, relative to the master, and `numbering`, as
+	 * export-book.js hands them over), under the PREVIEW configuration, so it is what
+	 * reading view would draw, numbered as the book is. Kept beside the note
+	 * renders under its own name — the master's own render is untouched — and
+	 * served at the master's URL with `?book=1` (protocol.js), which is where
+	 * the engine's master-relative paths resolve.
+	 *
+	 * @returns {Promise<{ htmlFile: string, warnings: Array }>}
+	 */
+	async renderBook(masterRel, { chapters, numbering }) {
+		const generation = this.#generation;
+		const hash = crypto.createHash('sha1').update(`book\u0000${masterRel}`).digest('hex').slice(0, 16);
+		const htmlFile = path.join(this.cacheDir, `book-${hash}.html`);
+		const result = await this.#workerBuild(path.join(this.vaultRoot, masterRel), {
+			to: 'html',
+			output: htmlFile,
+			normalSyntax: this.#vaultOptions.normalSyntax === true,
+			chapters,
+			numbering,
+		});
+		if (generation !== this.#generation) throw new Error('stale render (vault closed)');
+		if (result.type !== 'done') throw new Error(result.message);
+		this.#books.set(masterRel, htmlFile);
+		return { htmlFile, warnings: Array.isArray(result.warnings) ? result.warnings : [] };
+	}
+
+	/** The last whole-book document built for `masterRel`, or null. */
+	bookHtmlFile(masterRel) {
+		const file = this.#books.get(masterRel);
+		return file && fs.existsSync(file) ? file : null;
 	}
 
 	/**
@@ -546,17 +584,22 @@ export class RenderService {
 	 * the key; `blockDocument(key)` returns the HTML while it is cached.
 	 *
 	 * @param {string} text
-	 * @param {{ sourcePath?: string|null, dependent?: boolean }} [options]
+	 * @param {{ sourcePath?: string|null, book?: string[]|null, dependent?: boolean }} [options]
+	 *   `book`: the master then its chapters (vault paths) — the snippet's
+	 *   citations render under the BOOK's header, not the note's
 	 * @returns {Promise<string>} the block's key
 	 */
 	async renderBlock(text, options = {}) {
 		// The note's citation keys go in front (citation-header.js): a block
 		// renders on its own, and a `\cite` in it stayed raw while reading
 		// mode resolved it. They come from the note's file, so such a block is
-		// dependent — a saved header change reaches it.
-		const header = options.sourcePath ? this.#citationHeaderOf(options.sourcePath) : '';
+		// dependent — a saved header change reaches it. A chapter's citations
+		// (live edit's pills, cite-text.js) render under its book's.
+		const { book, ...rest } = options;
+		const header = book?.length ? this.#bookCitationHeaderOf(book)
+			: options.sourcePath ? this.#citationHeaderOf(options.sourcePath) : '';
 		const full = header + text;
-		const opts = { ...options, ...(header ? { dependent: true } : {}), document: true };
+		const opts = { ...rest, ...(header ? { dependent: true } : {}), document: true };
 		const key = this.#fragmentKey(full, opts);
 		await this.#cachedBuild(full, opts);
 		// Its note, for what the document itself cannot say: a block is served
@@ -580,6 +623,15 @@ export class RenderService {
 		} catch {
 			return '';
 		}
+	}
+
+	/** A book's citation header (citation-header.js#bookCitationHeader), or ''. */
+	#bookCitationHeaderOf([master, ...chapters]) {
+		const piece = (rel) => {
+			const abs = path.join(this.vaultRoot, rel);
+			try { return { text: fs.readFileSync(abs, 'utf8'), dir: path.dirname(abs) }; } catch { return { text: '', dir: path.dirname(abs) }; }
+		};
+		return bookCitationHeader(piece(master), chapters.map(piece));
 	}
 
 	/** A built block document by key, or undefined once evicted. */

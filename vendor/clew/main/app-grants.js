@@ -135,6 +135,27 @@ export function mergeOrigins(had, add) {
  *   mayRun: boolean, granted: string[], network: null|'*'|string[],
  *   askNetwork: null|'*'|string[] }}
  */
+/**
+ * What an app's RUNNING frames need when its manifest changes on disk
+ * (app-registry.js#manifestTouched), from its new state `st` (grantState) and
+ * `served` — the JSON of the hosts its frames were served with, null when
+ * none was served yet:
+ *   'reload' — what only a load fixes: hosts narrowed or widened (the CSP is
+ *     fixed at load); a new host to ask about (it reaches nothing new
+ *     meanwhile); a run that is not allowed, or must be approved again (a
+ *     restricted vault's pinned code). Its ports close and its frames reload.
+ *   'ask' — anything else new to ask (§9b): the prompt is shown at once, and
+ *     its answer reaches the running frames as `grant-changed`. From 917303b
+ *     until 2026-10-07 this reloaded too, so no app ever got a grant live.
+ *   null — nothing to do.
+ */
+export function manifestNeed(st, served) {
+	if (served !== null && JSON.stringify(st.network ?? null) !== served) return 'reload';
+	if (!st.ask.length && !st.askRun) return null;
+	if (!st.mayRun || st.askRun || st.ask.includes('network')) return 'reload';
+	return 'ask';
+}
+
 export function grantState(record, manifest, { restricted, code }) {
 	let granted = manifest.capabilities.filter((c) => record?.granted?.[c]);
 	const answered = (c) => Boolean(record?.granted?.[c] || record?.denied?.[c]);

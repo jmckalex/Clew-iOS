@@ -36,6 +36,17 @@ const MARGIN = 0.6;
 
 const PAGE_SIZES = { a4: 'A4', letter: 'Letter', legal: 'Legal', tabloid: 'Tabloid' };
 
+// A BOOK prints each chapter from a new page (book-mode.md, phase 3): the
+// engine wraps every chapter file in `section.jmd-chapter`, a further
+// numbered `#` in one starts a chapter of its own, and the master's
+// bibliography and index follow the last chapter. Added by insertCSS — the
+// browser's own sheet, which a restricted vault's CSP cannot refuse — and
+// only to a book's print: a note's prints as it always has.
+const BOOK_PRINT_CSS = `@media print {
+	section.jmd-chapter, section.jmd-book-references, nav.index { break-before: page; }
+	section.jmd-chapter > h1 ~ h1:not(.unnumbered) { break-before: page; }
+}`;
+
 /**
  * Arm the flag the probe reads: MathJax and document.fonts hand out promises
  * rather than state, so the page has to remember for us.
@@ -87,10 +98,14 @@ const READY_PROBE = `(() => {
  *
  * A folded `![[Note|collapsed]]` embed prints folded. That is the promise of
  * "as displayed": what is on screen is what comes out.
+ *
+ * `book`: `relPath` is a master, and what prints is its whole book as one
+ * document (render-service.js#renderBook, built just before), each chapter
+ * from a new page.
  */
-export async function printNoteToPdf({ sessionId, callerToken = null, relPath, outFile, paperSize = 'a4' }) {
+export async function printNoteToPdf({ sessionId, callerToken = null, relPath, outFile, paperSize = 'a4', book = false }) {
 	const encoded = relPath.split('/').map(encodeURIComponent).join('/');
-	const url = `clew-preview://vault/${encodeURIComponent(sessionId)}/${encoded}.html`;
+	const url = `clew-preview://vault/${encodeURIComponent(sessionId)}/${encoded}.html${book ? '?book=1' : ''}`;
 
 	const win = new BrowserWindow({
 		show: false,
@@ -102,6 +117,7 @@ export async function printNoteToPdf({ sessionId, callerToken = null, relPath, o
 	});
 	try {
 		await win.loadURL(url);
+		if (book) await win.webContents.insertCSS(BOOK_PRINT_CSS);
 		await win.webContents.executeJavaScript(ARM_SCRIPT);
 		win.webContents.executeJavaScript(
 			`window.postMessage({ source: 'clew-preview-host', type: 'theme', theme: 'light' }, 'clew-preview://vault'); true;`);

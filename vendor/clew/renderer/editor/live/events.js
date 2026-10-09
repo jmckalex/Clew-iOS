@@ -27,7 +27,7 @@ import { setCalloutFold, calloutFolded } from './block-field.js';
 import { liveStateField } from './reveal-field.js';
 import { activateCell } from './table-cell-editor.js';
 import { openTableMenu } from '../toolbar/popovers.js';
-import { numberDocument } from './numbering.js';
+import { numberingFor } from './numbering-source.js';
 import { workspaceStore } from '../../state/workspace-store.js';
 
 const TARGETS = '[data-le-cite],[data-le-cell],[data-le-task],[data-le-fold],[data-le-copy],[data-le-goto],[data-le-command],[data-le-href],[data-le-target],[data-le-tag],[data-le-ref],[data-le-blockid],.le-reveal-on-click';
@@ -129,8 +129,14 @@ export const liveEvents = Prec.high(EditorView.domEventHandlers({
 		if (el.dataset.leRef) {
 			// Jump to what the reference names (numbering.js knows where
 			// every label is), leaving a Back entry, as a TOC jump does.
-			const target = numberDocument(view.state.doc).labels.get(el.dataset.leRef);
+			const notePath = view.state.field(liveStateField, false)?.config?.notePath ?? null;
+			const target = numberingFor(view.state.doc, notePath).labels.get(el.dataset.leRef);
 			if (!target) { placeCursor(view, view.posAtDOM(el)); return true; }
+			// A label in another chapter of the book: open it there.
+			if (target.path && target.path !== notePath) {
+				actions.openNoteAtLine(target.path, target.line);
+				return true;
+			}
 			const from = view.state.doc.lineAt(view.state.selection.main.head).number;
 			const at = view.state.doc.line(Math.min(target.line, view.state.doc.lines)).from;
 			const tab = workspaceStore.activeTab();

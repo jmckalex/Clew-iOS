@@ -23,7 +23,7 @@
 // source mode — the overlay's jmd-* faces and the theme's cmt-* classes.
 import { ViewPlugin, Decoration } from '@codemirror/view';
 import { StateEffect, countColumn } from '@codemirror/state';
-import { liveStateField } from './reveal-field.js';
+import { liveStateField, liveRebuild } from './reveal-field.js';
 import { MathWidget } from './widgets/math.js';
 import {
 	BulletWidget, TaskWidget, CalloutHeadWidget, FenceHeadWidget, FenceFootWidget,
@@ -33,7 +33,8 @@ import { calloutFolded } from './block-field.js';
 import { ImageWidget } from './widgets/image.js';
 import { imageSpec } from './images.js';
 import { ChipWidget } from './widgets/chip.js';
-import { numberDocument, refDisplay, headText, typedRefText } from './numbering.js';
+import { refDisplay, headText, typedRefText } from './numbering.js';
+import { numberingFor } from './numbering-source.js';
 import { vaultStore } from '../../state/vault-store.js';
 import { citationLabel, citationsReady, citationsLoaded } from '../complete/citations.js';
 import { engineCiteText, engineCiteHtml, wantCiteTexts, onCiteTexts, citeSignature } from './cite-text.js';
@@ -72,7 +73,7 @@ function build(view) {
 	const replaced = [];
 
 	// What the engine will number, and what each label resolves to (§5.13).
-	const numbering = numberDocument(doc, config.numbered?.size ? { numbered: config.numbered } : undefined);
+	const numbering = numberingFor(doc, config.notePath, config.numbered?.size ? { numbered: config.numbered } : undefined);
 
 	// Every citation in the note, in order, for the engine's texts: asked for
 	// once per change of the list, whatever is in view (cite-text.js).
@@ -435,7 +436,9 @@ export const inlineLayer = ViewPlugin.fromClass(class {
 
 	update(update) {
 		const live = update.state.field(liveStateField);
-		const refreshed = update.transactions.some((tr) => tr.effects.some((e) => e.is(liveRefresh)));
+		// liveRebuild too: what a construct means moved outside the editor (a
+		// book's numbers, book-map.js) even when the model came back the same.
+		const refreshed = update.transactions.some((tr) => tr.effects.some((e) => e.is(liveRefresh) || e.is(liveRebuild)));
 		if (update.docChanged || update.viewportChanged || live !== this.live || refreshed) {
 			this.live = live;
 			this.decorations = build(update.view);

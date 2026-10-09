@@ -101,13 +101,44 @@ export function bookStatusItem(path) {
 	return el;
 }
 
+/**
+ * The quiet line above a chapter's — or the master's — reading view
+ * (book-mode.md §3): reading view renders a piece ALONE, so a chapter's
+ * numbers are its own, counted from 1, and a reference to another chapter's
+ * label prints ??; this says so, with the build that shows them as the book
+ * prints them. Null for a note in no book: such a view gets no element at
+ * all. `data-key` changes only when the text would, so a view redraws it
+ * only then.
+ */
+export function bookReadingBanner(path) {
+	const master = masterEntry(path) ? path : null;
+	const book = master ? { master, title: bookTitle(master), number: 0 } : bookOfNote(path);
+	if (!book) return null;
+	const el = document.createElement('div');
+	el.className = 'book-reading-banner';
+	el.dataset.key = `${book.master}\u0000${book.number}\u0000${book.title}`;
+	const text = document.createElement('span');
+	text.textContent = master
+		? `Master of ${book.title} · numbers as in the book:`
+		: `Chapter ${book.number} of ${book.title} · numbers as in the book:`;
+	text.title = master
+		? `Reading view shows the master on its own, so a reference to a label in a chapter prints ??. Live edit and the built book resolve it across “${book.title}”.`
+		: `Reading view shows this chapter on its own, so its figures, theorems and equations are numbered from 1. Live edit and the built book number them as chapter ${book.number} of “${book.title}”.`;
+	const build = document.createElement('button');
+	build.textContent = 'Build';
+	build.title = `Build “${book.title}” as HTML pages`;
+	build.addEventListener('click', () => buildBook(book.master, 'html'));
+	el.append(text, build);
+	return el;
+}
+
 /** The master a build from `path` builds: the note itself, or its book. */
 export function bookToBuild(path) {
 	if (masterEntry(path)) return path;
 	return bookOfNote(path)?.master ?? null;
 }
 
-const FORMAT_WORDS = { pdf: 'PDF', latex: 'LaTeX', html: 'HTML' };
+const FORMAT_WORDS = { pdf: 'PDF', latex: 'LaTeX', html: 'HTML', print: 'PDF (reading view)' };
 
 /** Each book's last build this session: master → { format, output, warnings, at }. */
 export const bookBuilds = new (class extends Emitter {
@@ -203,7 +234,7 @@ export function installBooks() {
 	vaultStore.on('vault-changed', () => { facts.clear(); bookBuilds.clear(); });
 	registerCommand({ id: 'book:next-chapter', name: 'Book: next chapter', when: inBook, run: () => stepChapter(1) });
 	registerCommand({ id: 'book:previous-chapter', name: 'Book: previous chapter', when: inBook, run: () => stepChapter(-1) });
-	for (const format of ['pdf', 'latex', 'html']) {
+	for (const format of ['pdf', 'latex', 'html', 'print']) {
 		registerCommand({
 			id: `export:book-${format}`,
 			name: `Export book as ${FORMAT_WORDS[format]}${format === 'pdf' ? ' (via LaTeX)' : ''}`,

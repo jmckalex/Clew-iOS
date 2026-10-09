@@ -31,12 +31,21 @@
 // it dependent, so a .bib edit retires the cached block. Until the text is
 // in, or where the engine gives none (no bibliography, an unknown key), the
 // pill shows the local label (complete/citations.js#citationLabel).
+//
+// In a BOOK (phase 2, book-mode.md §4) a chapter's citations are not the
+// chapter's alone: the engine builds the book as one document, so a numeric
+// style numbers by first citation in the book and author-date letters count
+// every work it cites. The render then carries the book's other citations in
+// order around the chapter's own (unmarked, so read back as nothing) and asks
+// for the BOOK's citation header (book-map.js#citeContext) — and is re-asked
+// when that context changes, as when the chapter's own list does.
 import { renderPost } from '../../lib/caller-token.js';
 import { blockUrl, blockDocumentUrl } from '../../lib/preview-url.js';
 import { ipc, CH } from '../../ipc.js';
 import { vaultStore } from '../../state/vault-store.js';
 import { vaultSettingsStore } from '../../state/vault-settings-store.js';
 import { citationLines } from '../../../shared/citation-keys.js';
+import { bookCiteContext } from './numbering-source.js';
 
 const DEBOUNCE_MS = 250;
 /** Vault settings that reconfigure the engine (frame-layer.js has the same
@@ -68,6 +77,13 @@ ipc.on(CH.EV_FILE_CHANGED, ({ path }) => { if (/\.bib$/i.test(path ?? '')) bump(
 vaultStore.on('vault-changed', bump);
 vaultSettingsStore.on('vault-settings-changed', (key) => {
 	if (ENGINE_VAULT_KEYS.has(key)) setTimeout(bump, RECONFIGURE_MS);
+});
+// Another chapter saved, the master's settings changed: a chapter whose book
+// context moved redraws, and its redraw asks again (wantCiteTexts).
+vaultStore.on('index-changed', () => {
+	for (const [notePath, slot] of notes) {
+		if ((bookCiteContext(notePath)?.key ?? null) !== slot.contextKey) changed(notePath);
+	}
 });
 
 /** What a note's citations render under: its header's citation keys. */
@@ -124,12 +140,14 @@ export function wantCiteTexts(notePath, sig, sources) {
 	let slot = notes.get(notePath);
 	if (!slot || slot.sig !== sig) {
 		if (slot) clearTimeout(slot.timer);
-		slot = { sig, texts: new Map(), asked: null, wanted: null, timer: null, busy: false, again: false };
+		slot = { sig, texts: new Map(), asked: null, wanted: null, wantedContext: null, contextKey: null, timer: null, busy: false, again: false };
 		notes.set(notePath, slot);
 	}
-	const list = sources.join('\n');
+	const context = bookCiteContext(notePath);
+	const list = (context ? `${context.key}\u0001` : '') + sources.join('\n');
 	if (list === slot.asked || list === slot.wanted) return;
 	slot.wanted = list;
+	slot.wantedContext = context;
 	clearTimeout(slot.timer);
 	slot.timer = setTimeout(() => run(notePath, slot), DEBOUNCE_MS);
 }
@@ -140,11 +158,13 @@ async function run(notePath, slot) {
 	if (list === null || list === slot.asked) return;
 	slot.busy = true;
 	slot.asked = list;
-	const sources = list.split('\n');
+	const context = slot.wantedContext;
+	slot.contextKey = context?.key ?? null;
+	const sources = list.slice(list.indexOf('\u0001') + 1).split('\n');
 	const startEpoch = epoch;
 	let texts;
 	try {
-		texts = await renderCites(notePath, sources);
+		texts = await renderCites(notePath, sources, context);
 	} catch {
 		// No engine to ask (a vault closing, a render error): the local label
 		// stands, and a later change asks again.
@@ -186,10 +206,12 @@ function inlineHtml(element) {
 	return out.innerHTML.replace(/\s+/g, ' ').trim();
 }
 
-/** One block render of the note's citations; each one's {text, html}, or null. */
-async function renderCites(notePath, sources) {
-	const text = sources.map((source, i) => `${MARK(i)} ${source}`).join('\n\n');
-	const response = await renderPost(blockUrl(), { text, sourcePath: notePath });
+/** One block render of the note's citations — in a book, among the book's
+ *  others and under its header; each one's {text, html}, or null. */
+async function renderCites(notePath, sources, context = null) {
+	const own = sources.map((source, i) => `${MARK(i)} ${source}`);
+	const text = (context ? [...context.before, ...own, ...context.after] : own).join('\n\n');
+	const response = await renderPost(blockUrl(), { text, sourcePath: notePath, ...(context ? { book: context.book } : {}) });
 	if (!response.ok) throw new Error(String(response.status));
 	const { hash } = await response.json();
 	const html = await (await fetch(blockDocumentUrl(hash))).text();

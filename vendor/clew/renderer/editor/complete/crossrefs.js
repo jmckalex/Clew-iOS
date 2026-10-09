@@ -13,7 +13,12 @@
 // over the CURRENT editor state — so a label typed seconds ago completes —
 // each detailed with the number the engine will print and its title. The
 // wikilink source's shape. `@label[` completes nothing: a new key is typed.
-import { numberDocument, typedRefText } from '../live/numbering.js';
+import { typedRefText } from '../live/numbering.js';
+import { numberingFor, bookPlace } from '../live/numbering-source.js';
+import { viewNotePath } from '../view-note-path.js';
+
+/** A chapter's title for a completion's detail (book-map.js), else its file name. */
+const chapterName = (path) => bookPlace(path)?.chapter ?? path.split('/').pop().replace(/\.(md|jmd)$/i, '');
 import { fuzzyScore } from '../../lib/fuzzy.js';
 
 const PREFIX = /(?:^|[^\w@:\\])[@:](?:ref|cref|Cref)\[([^\]\n]*)$/;
@@ -36,15 +41,17 @@ export function refPrefix(before) {
  * @param {string} query
  * @returns {{ label: string, detail: string, boost: number }[]}
  */
-export function labelOptions(numbering, query) {
+export function labelOptions(numbering, query, notePath = null) {
 	const out = [];
 	for (const [key, target] of numbering.labels) {
 		const score = query ? fuzzyScore(query, key) : 0;
 		if (score === null) continue;
 		const number = target.status === 'ok' && target.number ? typedRefText(target.type, target.number) : 'no number';
+		// In a book, a label in another chapter says which.
+		const where = target.path && notePath && target.path !== notePath ? ` · ${chapterName(target.path)}` : '';
 		out.push({
 			label: key,
-			detail: `${number}${target.title ? ` — ${target.title}` : ''}`,
+			detail: `${number}${target.title ? ` — ${target.title}` : ''}${where}`,
 			boost: Math.min(99, Math.max(-99, Math.round((score ?? 0) / 12))),
 		});
 	}
@@ -55,7 +62,8 @@ export function crossrefCompletions(context) {
 	const line = context.state.doc.lineAt(context.pos);
 	const query = refPrefix(line.text.slice(0, context.pos - line.from));
 	if (query === null) return null;
-	const options = labelOptions(numberDocument(context.state.doc), query).map((o) => ({
+	const notePath = context.view ? viewNotePath(context.view) : null;
+	const options = labelOptions(numberingFor(context.state.doc, notePath), query, notePath).map((o) => ({
 		...o,
 		type: 'constant',
 		// The key, and the closing bracket unless one is already there.

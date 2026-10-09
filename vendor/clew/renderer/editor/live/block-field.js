@@ -22,7 +22,7 @@
 // edits nothing (calloutFoldField).
 import { StateField, StateEffect } from '@codemirror/state';
 import { EditorView, Decoration } from '@codemirror/view';
-import { liveStateField } from './reveal-field.js';
+import { liveStateField, liveRebuild } from './reveal-field.js';
 import { MathWidget } from './widgets/math.js';
 import { HrWidget, TocWidget, BannerWidget, PropertiesWidget } from './widgets/blocks.js';
 import { TableWidget } from './widgets/table.js';
@@ -35,7 +35,8 @@ import { inlineTokens } from './inline-dom.js';
 import { splitRow, alignmentOf } from '../tables.js';
 import { cellRanges, isExtendedTable, CELL_EDIT_LIMITS } from './table-cell-model.js';
 import { activeCellOf } from './active-cell.js';
-import { numberDocument } from './numbering.js';
+import { numberingFor } from './numbering-source.js';
+import { mathEnvironmentTex } from '../jmd/math-segments.js';
 import { ChipWidget } from './widgets/chip.js';
 
 /** Toggle a foldable callout: `{ id, folded }`. */
@@ -68,7 +69,8 @@ function build(state) {
 	const out = [];
 	const sel = state.selection.ranges;
 	const text = (a, b) => doc.sliceString(a, b);
-	const numbering = numberDocument(doc, config.numbered?.size ? { numbered: config.numbered } : undefined);
+	// The note's numbers — its BOOK's when it is a chapter (book-map.js).
+	const numbering = numberingFor(doc, config.notePath, config.numbered?.size ? { numbered: config.numbered } : undefined);
 
 	// A concealed MULTI-LINE footnote (§5.2 as corrected): an INLINE
 	// replacement across its line breaks — not a block — so the note collapses
@@ -134,7 +136,7 @@ function build(state) {
 			case 'math': {
 				if (!config.renderMath) break;
 				const tex = c.environment
-					? `\\begin{${c.env}}\n${text(c.body.start ?? c.body.from, c.body.end ?? c.body.to)}\n\\end{${c.env}}`
+					? mathEnvironmentTex(c.env, text(c.body.start ?? c.body.from, c.body.end ?? c.body.to))
 					: text(c.body.from, c.body.to);
 				// `@begin(equation)` is numbered; `$$…$$` is not (numbering.js).
 				const tag = c.env === 'equation' && c.environment
@@ -170,7 +172,11 @@ export const blockField = StateField.define({
 	update(value, tr) {
 		const live = tr.state.field(liveStateField);
 		const folds = tr.effects.some((e) => e.is(setCalloutFold) || e.is(setFrameHeight));
-		if (live === value.live && !folds && !(tr.selection && hasFoldedCallouts(tr.state))) return value;
+		// What a construct MEANS moved outside the editor (a book's numbers,
+		// book-map.js; a custom callout): drawn again even when the model
+		// came back the same.
+		const rebuilt = tr.effects.some((e) => e.is(liveRebuild));
+		if (live === value.live && !folds && !rebuilt && !(tr.selection && hasFoldedCallouts(tr.state))) return value;
 		return { live, deco: build(tr.state) };
 	},
 	provide: (field) => EditorView.decorations.from(field, (value) => value.deco),
@@ -191,7 +197,7 @@ function tableWidget(state, c, model) {
 	const rows = ranges.rows.map((row, r) => ({
 		header: r < ranges.headerRows,
 		cells: row.map((cell) => ({
-			tokens: inlineTokens(doc, cell.from, cell.to, model),
+			tokens: inlineTokens(doc, cell.from, cell.to, model, numbering),
 			offset: cell.from - c.lineFrom,
 		})),
 	}));

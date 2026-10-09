@@ -273,6 +273,7 @@ class AppMenu {
 						c('export:book-pdf', 'Book as PDF (via LaTeX)', { needs: 'book' }),
 						c('export:book-latex', 'Book as LaTeX', { needs: 'book' }),
 						c('export:book-html', 'Book as HTML', { needs: 'book' }),
+						c('export:book-print', 'Book as PDF (reading view)', { needs: 'book' }),
 						{ type: 'separator' },
 						c('export:site', 'Vault as Website…', { needs: 'vault' }),
 					],

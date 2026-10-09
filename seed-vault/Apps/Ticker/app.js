@@ -6,9 +6,10 @@
 //     /api/v1/quote (live.js has the rules: each symbol about once a minute,
 //     within the free limit; a 429 backs off and says so; the market shows
 //     as closed once every quote is old). It needs your own free key, kept
-//     in THIS APP'S OWN STORAGE on this device (localStorage on its
-//     clew-frame:// origin) — never in app.kv, which is clewdata.json in the
-//     vault and travels with it — and never logged.
+//     as a SECRET of this app on this device (`app.secrets`: encrypted by
+//     the system — the Keychain on a Mac or an iPad) — never in app.kv,
+//     which is clewdata.json in the vault and travels with it — and never
+//     logged. Without that grant the key lasts this session only.
 //   - ECB rates: the euro's reference rates from api.frankfurter.dev.
 // Its manifest names exactly those two hosts under `network`, so its CSP
 // lets it reach them and no other; it asks nothing of either until you
@@ -33,18 +34,54 @@ const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
 const { nextDelay, backoffAfter429, quoteFrom, marketState, quoteUrl } = globalThis.TickerLive;
 
 // ---- the key: this device only --------------------------------------------
+// Clew keeps it, as this app's secret on this device (`clew.secrets`), when
+// "keep secrets" is allowed; otherwise it lasts this session only. A key an
+// older Ticker left in this frame's localStorage moves across once (on an
+// iPad that storage never outlived a launch anyway).
 
-function readKey() {
-	try { return localStorage.getItem(KEY_NAME) || null; } catch { return null; }
-}
-function writeKey(value) {
+let key = null;
+let keyKept = false;   // whether the key outlives this session
+
+function legacyKey(remove = false) {
 	try {
-		if (value) localStorage.setItem(KEY_NAME, value);
-		else localStorage.removeItem(KEY_NAME);
-		return true;
+		const old = localStorage.getItem(KEY_NAME) || null;
+		if (remove) localStorage.removeItem(KEY_NAME);
+		return old;
 	} catch {
-		return false;
+		return null;
 	}
+}
+
+async function loadKey() {
+	keyKept = clew.can('app.secrets');
+	if (!keyKept) { key = legacyKey(); return; }
+	try {
+		key = await clew.secrets.get(KEY_NAME);
+		const old = legacyKey();
+		if (!key && old) { await clew.secrets.set(KEY_NAME, old); key = old; }
+		if (old) legacyKey(true);
+	} catch {
+		keyKept = false;
+		key = legacyKey();
+	}
+}
+
+function readKey() { return key; }
+
+/** Keep `value` (or forget it, null); false when it could not be kept. */
+async function writeKey(value) {
+	if (keyKept) {
+		try {
+			if (value) await clew.secrets.set(KEY_NAME, value);
+			else await clew.secrets.delete(KEY_NAME);
+		} catch {
+			// No secure storage on this device: this session only.
+			keyKept = false;
+		}
+	}
+	if (!value) legacyKey(true);
+	key = value || null;
+	return true;
 }
 
 // ---- the note's table -----------------------------------------------------
@@ -338,7 +375,9 @@ function status(text) { $('status').textContent = text; }
 
 function openPanel() {
 	const has = Boolean(readKey());
-	$('keyState').textContent = has ? 'A key is saved on this device.' : 'No key saved.';
+	$('keyState').textContent = !has ? 'No key saved.'
+		: keyKept ? 'A key is saved on this device.'
+		: 'A key is kept for this session only: allow “keep secrets” to keep it on this device.';
 	$('keyForget').disabled = !has;
 	document.body.dataset.hasKey = has ? '1' : '0';
 	$('keyPanel').classList.add('open');
@@ -394,6 +433,15 @@ async function main() {
 		for (const id of ['modeStocks', 'modeEcb', 'keyBtn']) $(id).disabled = true;
 		$('modeStocks').parentElement.title = 'Needs “send data to the internet”, for finnhub.io and api.frankfurter.dev only';
 	}
+	await loadKey();
+	// "keep secrets" allowed later, live: a session's key is kept from now on.
+	clew.on('grant-changed', async () => {
+		if (!keyKept && clew.can('app.secrets')) {
+			const current = key;
+			keyKept = true;
+			if (current) await writeKey(current);
+		}
+	});
 	tableRows = tableIn(await clew.notes.read());
 	drawWatchlist();
 	clew.on('note-changed', () => readTable().catch(() => {}));
@@ -403,14 +451,14 @@ async function main() {
 	$('keySave').addEventListener('click', async () => {
 		const value = $('keyInput').value.trim();
 		if (!value) return;
-		if (!writeKey(value)) { $('keyState').textContent = 'This app cannot keep a key here (its storage is unavailable).'; return; }
+		await writeKey(value);
 		closePanel();
 		document.body.dataset.hasKey = '1';
 		await setMode('stocks');
 	});
 	$('keyInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('keySave').click(); });
 	$('keyForget').addEventListener('click', async () => {
-		writeKey(null);
+		await writeKey(null);
 		closePanel();
 		document.body.dataset.hasKey = '0';
 		if (mode === 'stocks') {

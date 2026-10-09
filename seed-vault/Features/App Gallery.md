@@ -23,14 +23,17 @@ band says SIMULATED. /Live stocks/ shows real US quotes for the same
 symbols from Finnhub, each refreshed about once a minute, with the time of
 the last update in the band (and "Closed · as of …" when the market is
 shut). It needs your own key — free at finnhub.io: choose /Key…/ in the
-app, paste it, and it is kept on this device only, in the app's own
-storage, never in the vault (so it does not travel with a copy you share);
-/Forget key/ removes it. /ECB rates/ shows the euro's reference rates from
-the European Central Bank. Which symbols show is your watchlist.
+app, paste it, and Clew keeps it on this device only, as the app's secret
+in the system's secure storage (the Keychain on a Mac or an iPad), never in
+the vault (so it does not travel with a copy you share); without *keep
+secrets* it lasts this session only. /Forget key/ removes it. /ECB rates/
+shows the euro's reference rates from the European Central Bank. Which
+symbols show is your watchlist.
 
 It asks to *read this note* (the table), to *keep a little data of its
-own* (the watchlist and the mode) and to *send data to the internet — to
-finnhub.io and api.frankfurter.dev, and nowhere else*. Its manifest names
+own* (the watchlist and the mode), to *keep secrets* (your key) and to
+*send data to the internet — to finnhub.io and api.frankfurter.dev, and
+nowhere else*. Its manifest names
 those two hosts and Clew's rules for the app's page let it reach them and
 no other; in Simulated mode it asks nothing of either.
 

@@ -40,7 +40,7 @@ import { ENABLE_KEYS, identityKey } from './vault-trust.js';
 import { readVaultRequests } from './vault-requests.js';
 import { codeSummary } from './vault-code.js';
 import { insideByRealpath } from '../engine/vault-bounds.js';
-import { appByKey, stateOf, grants } from './app-registry.js';
+import { appByKey, stateOf, grants, secrets } from './app-registry.js';
 import { mergeOrigins } from './app-grants.js';
 import { appKey, appsById, describeCapabilities } from './app-frames.js';
 import { callApp } from './app-calls.js';
@@ -459,7 +459,8 @@ export function registerIpc() {
 			if (!proceed) return { cancelled: true, list: trustedVaultsList() };
 		}
 		const root = open?.vaults.root ?? key;
-		if (action === 'forget') trust.forgetKey(key);
+		// Forgetting a vault forgets what its apps kept secret here too.
+		if (action === 'forget') { trust.forgetKey(key); secrets.clearVault(key); }
 		else if (action === 'trust') trust.trust(root);
 		else if (action === 'revoke') trust.revoke(root);
 		if (open) {
@@ -534,17 +535,20 @@ export function registerIpc() {
 		// changed from elsewhere (Settings → Revoke), which reloads frames.
 		return appStatus(s, key, registered);
 	});
-	handle(CH.APP_CALL, (s, { key, notePath, method, params }) => {
+	handle(CH.APP_CALL, async (s, { key, notePath, method, params }) => {
 		const registered = ownApp(s, key);
 		if (!registered) return { ok: false, error: { code: 'denied', message: 'no such app in this window' } };
 		const restricted = !s.trusted;
 		const st = stateOf(registered, restricted);
 		if (!st.mayRun) return { ok: false, error: { code: 'denied', message: 'this app has not been allowed to run here' } };
-		const out = callApp({
+		const out = await callApp({
 			root: s.vaults.root, restricted, excludes: s.vaults.excludes,
 			notePath: typeof notePath === 'string' ? notePath : null,
 			app: registered, granted: new Set(st.granted),
 			indexer: s.indexer, search: s.searchService, kv: s.kvStore, clipboard: appClipboard,
+			// Scoped HERE, from the key the port carries — never from the
+			// message — to this vault and this app (app-secrets.js).
+			secrets: secrets.scoped(identityKey(s.vaults.root), registered.manifest.id),
 		}, String(method), params);
 		// A note an app created is a new file Clew wrote: the tree shows it
 		// now, whatever the watcher's budget (CLAUDE.md).
@@ -561,10 +565,10 @@ export function registerIpc() {
 		const out = [];
 		for (const [id, folders] of ids) {
 			const r = records[id] ?? null;
-			out.push({ id, key: appKey(vault, id), folders, duplicate: folders.length > 1, granted: Object.keys(r?.granted ?? {}), denied: Object.keys(r?.denied ?? {}), run: Boolean(r?.run), runDenied: Boolean(r?.runDenied), pinned: Boolean(r?.code) });
+			out.push({ id, key: appKey(vault, id), folders, duplicate: folders.length > 1, granted: Object.keys(r?.granted ?? {}), denied: Object.keys(r?.denied ?? {}), run: Boolean(r?.run), runDenied: Boolean(r?.runDenied), pinned: Boolean(r?.code), secrets: secrets.count(vault, id) });
 		}
 		for (const [id, r] of Object.entries(records)) {
-			if (!ids.has(id)) out.push({ id, key: appKey(vault, id), folders: r.folder ? [r.folder] : [], missing: true, granted: Object.keys(r.granted ?? {}), denied: Object.keys(r.denied ?? {}), run: Boolean(r.run), runDenied: Boolean(r.runDenied), pinned: Boolean(r.code) });
+			if (!ids.has(id)) out.push({ id, key: appKey(vault, id), folders: r.folder ? [r.folder] : [], missing: true, granted: Object.keys(r.granted ?? {}), denied: Object.keys(r.denied ?? {}), run: Boolean(r.run), runDenied: Boolean(r.runDenied), pinned: Boolean(r.code), secrets: secrets.count(vault, id) });
 		}
 		return out.sort((a, b) => a.id.localeCompare(b.id));
 	});
@@ -574,6 +578,8 @@ export function registerIpc() {
 		if (!s.vaults.root) return false;
 		const vault = identityKey(s.vaults.root);
 		const done = grants.revoke(vault, String(id));
+		// Its secrets go with its grants: asked again, it starts with none.
+		secrets.clearApp(vault, String(id));
 		s.send(CH.EV_APP_GRANTS_CHANGED, { key: appKey(vault, String(id)) });
 		return done;
 	});
@@ -682,7 +688,10 @@ export function registerIpc() {
 	// A book (book-mode.md §5): its master and chapters as one document, into
 	// build/ beside the master.
 	handle(CH.EXPORT_BOOK, async (s, { master, format }) => {
-		const result = await exportBook({ vaults: s.vaults, indexer: s.indexer, masterRel: master, format, trusted: s.trusted });
+		const result = await exportBook({
+			vaults: s.vaults, indexer: s.indexer, masterRel: master, format, trusted: s.trusted,
+			renderService: s.renderService, sessionId: s.id, callerToken: s.callerToken,
+		});
 		if (result?.output) s.vaults.refreshIfInside(result.output);
 		// The renderer opens built pages in the browser only for a vault this
 		// device trusts: they carry the notes' own <script>s, which a browser

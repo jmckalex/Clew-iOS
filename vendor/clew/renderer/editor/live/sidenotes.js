@@ -18,6 +18,7 @@
 // A body that opens with a fence or a table stays the badge's tooltip.
 import { ViewPlugin } from '@codemirror/view';
 import { liveStateField } from './reveal-field.js';
+import { numberingFor } from './numbering-source.js';
 import { inlineTokens, tokensToDom } from './inline-dom.js';
 import { mathElement } from './widgets/math.js';
 import { settingsStore } from '../../state/settings-store.js';
@@ -106,7 +107,7 @@ class Sidenotes {
 				const n = document.createElement('span');
 				n.className = 'le-sidenote-number';
 				n.textContent = String(note.number);
-				el.append(n, ' ', tokensToDom(inlineTokens(doc, note.body.from, firstEnd, model), mathElement));
+				el.append(n, ' ', tokensToDom(inlineTokens(doc, note.body.from, firstEnd, model, numberingFor(doc, this.view.state.field(liveStateField, false)?.config?.notePath ?? null)), mathElement));
 				if (paragraphs.length > 1) el.append(' …');
 				this.cache.set(key, el);
 			}

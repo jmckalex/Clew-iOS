@@ -121,9 +121,13 @@ export class VaultSession {
 				if (rel === KV_FILE) this.kvStore.externalChange();
 				// An app's manifest edited: if its running frames no longer match
 				// its grant (a host added or dropped), they reload — narrowed at
-				// once, or asked about the new host first (app-grants.js).
+				// once, or asked about the new host first (app-grants.js); one
+				// that only asks for more is asked without a reload, and the
+				// answer reaches its running frames live (§9b).
 				if (rel.endsWith('clew-app.json')) {
-					for (const key of manifestTouched(this.id, rel, !this.trusted)) this.send(CH.EV_APP_GRANTS_CHANGED, { key });
+					for (const { key, reload } of manifestTouched(this.id, rel, !this.trusted)) {
+						this.send(reload ? CH.EV_APP_GRANTS_CHANGED : CH.EV_APP_ASK, { key });
+					}
 				}
 			},
 			onStructureChanged: () => this.indexer.onStructureChanged(),

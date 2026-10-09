@@ -36,6 +36,7 @@ import { installBuildWarnings } from './build-warnings.js';
 import { installConflictScans } from './conflicts.js';
 import { installCalloutSync } from './callouts.js';
 import { installBooks } from './books.js';
+import { installBookMap } from './book-map.js';
 import './components/chrome/clew-app.js';
 import './editor/toolbar/clew-selection-bubble.js';
 import { linkPreview } from './editor/link-preview.js';
@@ -154,6 +155,7 @@ installAppHost();
 installUpdateNotice();
 installCalloutSync();
 installBooks();
+installBookMap();
 officeDock.init();
 
 // ---- dev hook -------------------------------------------------------------
@@ -169,6 +171,7 @@ window.__clew = { linkPreview, previewPane, workspaceStore, vaultStore, vaultSet
 import('./editor/live/table-cell-editor.js').then((m) => { window.__clew.activeCellView = m.activeCellView; });
 import('./commands/registry.js').then((registry) => { window.__clew.registry = registry; });
 import('./editor/live/numbering.js').then((m) => { window.__clew.numbering = m; });
+import('./editor/live/numbering-source.js').then((m) => { window.__clew.numberingSource = m; });
 import('./pdf-annotations.js').then((m) => { window.__clew.pdfAnnotations = m; });
 import('./pdf-quote.js').then((m) => { window.__clew.pdfQuote = m; });
 import('./build-warnings.js').then((m) => { window.__clew.buildWarnings = m; });

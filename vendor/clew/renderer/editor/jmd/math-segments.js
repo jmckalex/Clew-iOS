@@ -132,6 +132,23 @@ export const MATH_ENVIRONMENT_NAMES = Object.freeze([
 ]);
 
 /**
+ * The TeX MathJax is given for an `@begin(<name>)` math block (live edit's
+ * widget, the preview pane). An `equation` is an UNNUMBERED display, as the
+ * engine's HTML is (jmarkdown equations.js: `\[…\]`, its "(n)" appended by
+ * the post-processor) — the number is Clew's own (live/numbering.js). Given
+ * `\begin{equation}`, MathJax (`tags: 'ams'`) numbered it too, from its own
+ * running count: "(1)(1)" overlapping at the right. Every other environment
+ * is MathJax's to number, in reading view as here, so it goes as written.
+ *
+ * @param {string} name
+ * @param {string} body
+ * @returns {string}
+ */
+export function mathEnvironmentTex(name, body) {
+	return name === 'equation' ? body : `\\begin{${name}}\n${body}\n\\end{${name}}`;
+}
+
+/**
  * The full LaTeX config: every delimiter pair plus `\begin…\end` math
  * environments. This is the historical (and default) behaviour, used by
  * `latex-mode`.

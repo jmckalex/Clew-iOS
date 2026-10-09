@@ -20,7 +20,7 @@
 // per typing pause would rescan the vault.
 import { syntaxTree } from '@codemirror/language';
 import { scanFor } from './jmd/scan-cache.js';
-import { MATH_ENVIRONMENT_NAMES } from './jmd/math-segments.js';
+import { MATH_ENVIRONMENT_NAMES, mathEnvironmentTex } from './jmd/math-segments.js';
 
 /** Fence languages previewed, and their typing pause (ms). */
 export const PREVIEW_FENCES = new Map([
@@ -79,7 +79,7 @@ export function previewTargetAt(state, pos) {
 			if (isMathEnv(name)) {
 				return {
 					kind: 'math-display', from: c.start, to: c.end, pause: MATH_PAUSE,
-					tex: `\\begin{${name}}\n${slice(c.body.start, c.body.end)}\n\\end{${name}}`,
+					tex: mathEnvironmentTex(name, slice(c.body.start, c.body.end)),
 				};
 			}
 		}

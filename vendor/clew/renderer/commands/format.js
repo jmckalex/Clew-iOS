@@ -29,7 +29,10 @@ import {
 	insertRow, deleteRow, insertColumn, deleteColumn, moveRow, moveColumn, setAlignment,
 } from '../editor/tables.js';
 import { notice } from '../plugins.js';
-import { numberDocument, typedRefText } from '../editor/live/numbering.js';
+import { typedRefText } from '../editor/live/numbering.js';
+import { numberingFor, bookPlace } from '../editor/live/numbering-source.js';
+import { viewNotePath } from '../editor/view-note-path.js';
+import { openNoteAtLine } from './actions.js';
 import { openListModal } from '../components/modals/list-modal.js';
 import { workspaceStore } from '../state/workspace-store.js';
 import { EditorView } from '@codemirror/view';
@@ -412,11 +415,16 @@ function toggleTask(view) {
 /** A list of the note's labels (§5.13) — kind, number, title — to jump to;
  *  Back returns. */
 function jumpToLabel(view) {
-	const numbering = numberDocument(view.state.doc);
+	// In a book, every label of the book (book-map.js): one in another
+	// chapter says which, and opens it there.
+	const notePath = viewNotePath(view);
+	const numbering = numberingFor(view.state.doc, notePath);
 	const items = [...numbering.labels].map(([key, t]) => ({
 		label: key,
-		detail: `${t.status === 'ok' && t.number ? typedRefText(t.type, t.number, true) : 'no number'}${t.title ? ` — ${t.title}` : ''}`,
+		detail: `${t.status === 'ok' && t.number ? typedRefText(t.type, t.number, true) : 'no number'}${t.title ? ` — ${t.title}` : ''}`
+			+ (t.path && t.path !== notePath ? ` · ${bookPlace(t.path)?.chapter ?? t.path}` : ''),
 		run: () => {
+			if (t.path && t.path !== notePath) { openNoteAtLine(t.path, t.line); return; }
 			const from = view.state.doc.lineAt(view.state.selection.main.head).number;
 			const tab = workspaceStore.activeTab();
 			if (tab) workspaceStore.recordAnchorJump(tab.id, from, t.line, { editor: true });
@@ -425,7 +433,7 @@ function jumpToLabel(view) {
 			view.focus();
 		},
 	}));
-	openListModal({ placeholder: 'Jump to a label in this note…', items, emptyText: 'No labels in this note' });
+	openListModal({ placeholder: numbering.book ? `Jump to a label in “${numbering.book.title}”…` : 'Jump to a label in this note…', items, emptyText: numbering.book ? 'No labels in this book' : 'No labels in this note' });
 }
 
 // ---- the commands ----------------------------------------------------------

@@ -39,6 +39,7 @@ export const CAPABILITIES = Object.freeze({
 	'query': 'search this vault and read its index',
 	'app.kv': 'keep a little data of its own (which travels with the vault)',
 	'app.files': 'keep files of its own in its data folder (which travel with the vault)',
+	'app.secrets': 'keep secrets, such as an API key, on this device only (never in the vault)',
 	'links.open': 'open notes and links',
 	'note.write': 'edit this note',
 	'notes.write': 'edit the notes in this vault',

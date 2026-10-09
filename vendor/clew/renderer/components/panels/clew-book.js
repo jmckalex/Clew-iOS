@@ -249,13 +249,14 @@ export class ClewBook extends ClewElement {
 		row.className = 'book-build-row';
 		row.append('Build: ');
 		const dangling = resolved.some((p) => !p);
-		for (const [format, label] of [['pdf', 'PDF'], ['latex', 'LaTeX'], ['html', 'HTML']]) {
+		for (const [format, label] of [['pdf', 'PDF'], ['latex', 'LaTeX'], ['html', 'HTML'], ['print', 'Print PDF']]) {
 			const button = document.createElement('button');
 			button.className = 'book-build-button';
 			button.dataset.format = format;
 			button.textContent = label;
 			button.disabled = dangling || !resolved.length;
 			button.title = dangling ? 'A chapter links to no note — fix the list first'
+				: format === 'print' ? 'Print the book as reading view draws it — each chapter from a new page, no TeX — into build/ beside its master'
 				: `Build the book as ${label} into build/ beside its master`;
 			button.addEventListener('click', () => buildBook(master, format));
 			row.append(button);

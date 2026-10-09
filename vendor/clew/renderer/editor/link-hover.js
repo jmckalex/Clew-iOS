@@ -23,7 +23,10 @@ import { literalAt } from './literal-at.js';
 import { linkPreview } from './link-preview.js';
 import { vaultStore } from '../state/vault-store.js';
 import { settingsStore } from '../state/settings-store.js';
+import { Text } from '@codemirror/state';
+import { viewNotePath } from './view-note-path.js';
 import { labelPreview } from './live/numbering.js';
+import { numberingFor, bookPieceText } from './live/numbering-source.js';
 import { citationLabel } from './complete/citations.js';
 import { vaultSettingsStore } from '../state/vault-settings-store.js';
 
@@ -39,19 +42,26 @@ export const vaultResolvers = (current, doc = null) => ({
 	note: (name) => vaultStore.resolveNoteName(name),
 	file: (name) => vaultStore.resolveFileName(name),
 	current,
-	// A reference's label lives in the note being edited (v1: per note).
-	label: (key) => (doc ? labelPreview(doc, key, current) : null),
+	// A reference's label: in the note being edited, or — in a book — in
+	// another chapter, previewed from that chapter's text (book-map.js).
+	label: (key) => {
+		if (!doc) return null;
+		const numbering = numberingFor(doc, current);
+		const target = numbering.labels.get(key);
+		if (target?.path && target.path !== current) {
+			const text = bookPieceText(target.path);
+			return text === null ? null : labelPreview(Text.of(text.split('\n')), key, target.path, numbering);
+		}
+		return labelPreview(doc, key, current, numbering);
+	},
 	// A citation's entry, from the .bib cache completion keeps (§5.14).
 	cite: (key) => citationLabel(key),
 	fullcite: Boolean(String(vaultSettingsStore.get('bibliography') ?? '').trim()),
 });
 
-/** Which note each view shows — the pool says (pool.js), since a state
- *  outlives any one path and a view is re-pointed on navigation. */
-const notePaths = new WeakMap();
-export function setViewNotePath(view, path) { notePaths.set(view, path); }
-/** The note a view shows (null before the pool has said). */
-export const viewNotePath = (view) => notePaths.get(view) ?? null;
+// Which note each view shows: view-note-path.js (import-free), re-exported
+// for the callers that have always found it here.
+export { setViewNotePath, viewNotePath } from './view-note-path.js';
 
 export function linkHover() {
 	return ViewPlugin.fromClass(class {
@@ -100,7 +110,7 @@ export function linkHover() {
 			}
 			if (found.key === this.key) return;
 			this.key = found.key;
-			const path = notePaths.get(this.view) ?? null;
+			const path = viewNotePath(this.view);
 			linkPreview().hover(previewSpec(found.link, vaultResolvers(path, this.view.state.doc)), found.rect, path, { now });
 		}
 

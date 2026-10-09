@@ -13,6 +13,7 @@
 // in place (morphdom in the preview client) on re-renders.
 import { ClewElement } from '../base/clew-element.js';
 import { workspaceStore } from '../../state/workspace-store.js';
+import { vaultStore } from '../../state/vault-store.js';
 import { settingsStore } from '../../state/settings-store.js';
 import { ipc, CH } from '../../ipc.js';
 import * as actions from '../../commands/actions.js';
@@ -24,6 +25,7 @@ import { parseTarget, previewSpec } from '../../editor/link-at.js';
 import { scrollSyncBus, makeSuppressor } from '../../preview/scroll-sync.js';
 import { previewUrl } from '../../lib/preview-url.js';
 import { PREVIEW_ORIGIN } from '../../../shared/message-guard.js';
+import { bookReadingBanner } from '../../books.js';
 
 const HOST_SOURCE = 'clew-preview-host';
 /** After the frame's `load`, a client that has not said 'ready' within this
@@ -40,6 +42,7 @@ class ClewPreviewView extends ClewElement {
 	#lastCursorLine = null;
 	#readyWatch = null;
 	#watchdogSpentOn = null;   // the note a rebuild was spent on (once per element and note)
+	#banner = null;            // a chapter's book line (books.js#bookReadingBanner), or null
 
 	subscribe() {
 		this.listen({ on: ipc.on }, CH.EV_RENDER_DONE, ({ path }) => {
@@ -78,6 +81,10 @@ class ClewPreviewView extends ClewElement {
 			this.#suppressor.suppress();
 			this.#post({ type: 'scroll-to-line', line, behavior: 'auto' });
 		});
+		// The chapter's book line follows the book: a chapter added, moved or
+		// removed, the book it shows switched (D10).
+		this.listen(vaultStore, 'index-changed', () => this.#syncBanner());
+		this.listen(workspaceStore, 'book-changed', () => this.#syncBanner());
 		window.addEventListener('message', this.#onMessage);
 	}
 
@@ -91,7 +98,20 @@ class ClewPreviewView extends ClewElement {
 		this.classList.add('preview-host');
 		ipc.invoke(CH.RENDER_SUBSCRIBE, { path: this.path }).catch(() => {});
 		this.replaceChildren();
+		this.#banner = null;
+		this.#syncBanner();
 		this.#buildFrame();
+	}
+
+	/** A chapter's quiet line above the frame — app chrome, never in the
+	 *  note's document, and a sibling the frame is never moved for (a moved
+	 *  iframe reloads). A note in no book gets nothing. */
+	#syncBanner() {
+		const next = bookReadingBanner(this.path);
+		if ((this.#banner?.dataset.key ?? null) === (next?.dataset.key ?? null)) return;
+		this.#banner?.remove();
+		this.#banner = next;
+		if (next) this.prepend(next);
 	}
 
 	/** The preview iframe — built by render(), and rebuilt by the watchdog. */
