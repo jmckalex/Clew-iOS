@@ -1083,8 +1083,11 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 		// beside the master: desktop only. Its PRINT (5abf52d) is the reading
 		// view: the book as one preview document (renderBook), printed like a
 		// note's "Export as PDF" into the share sheet, each chapter from a new
-		// page (BOOK_PRINT_CSS).
+		// page (BOOK_PRINT_CSS). Proof this chapter (ef22b0b) is a LaTeX run of
+		// one chapter: its row and command are not offered here (build.js),
+		// and the request is refused by name if anything sends it.
 		[CH.EXPORT_BOOK]: async ({ master: masterRel, format }) => {
+			if (format === 'proof') throw new Error('Proof this chapter typesets with LaTeX, which the iPad does not have — proof it in Clew on a Mac');
 			if (format !== 'print') throw new Error('building a book needs Clew on a Mac');
 			const masterAbs = vaults.resolve(masterRel);
 			const master = readMaster(String(vfs.read(masterAbs)));

@@ -198,6 +198,20 @@ const rendererPatches = {
 				+ "\t\t\t\t\t+ 'polyglossia or Lua code (a \\\\setmainfont in your jmarkdown config, say) is compiled with '\n"
 				+ "\t\t\t\t\t+ 'LuaLaTeX, anything else with pdfLaTeX. Choose an engine here for what that cannot see.'),\n",
 				'');
+			// "TikZ and MetaPost figures in exports" (Clew-app 2cc6d89) picks
+			// what draws figures in desktop's note and book exports: the
+			// installed TeX tools or mp-tikz-wasm. The iPad has neither an
+			// installation nor those exports, so the row and its hint go.
+			src = patched('clew-settings-view.js', src,
+				"\t\t\t\tthis.#selectRow('TikZ and MetaPost figures in exports', 'exportFigureEngine',\n"
+				+ "\t\t\t\t\t[['external', 'Your TeX installation'], ['auto', 'Clew\\'s built-in TeX']]),\n"
+				+ "\t\t\t\tthis.#hint('For a note or book exported as HTML, LaTeX or PDF. Clew\\'s built-in TeX is the '\n"
+				+ "\t\t\t\t\t+ 'one the preview draws with, and needs no TeX installed; a figure naming a font it cannot '\n"
+				+ "\t\t\t\t\t+ 'find goes to your installation instead. It lacks some packages your installation may '\n"
+				+ "\t\t\t\t\t+ 'have (siunitx, for one), and a figure that needs one shows an error. In a vault '\n"
+				+ "\t\t\t\t\t+ `${DEVICE} does not trust, the built-in TeX always draws the figures, so that vault's TeX `\n"
+				+ "\t\t\t\t\t+ 'never runs on your installation.'),\n",
+				'');
 			// The daily update check (Clew-app 036befe) asks clew-app.com for
 			// a newer desktop build; the iPad's updates are the App Store's
 			// (UPDATE_CHECK answers 'off'), so the section goes.
@@ -273,6 +287,12 @@ const rendererPatches = {
 			src = patched('clew-book.js', src,
 				"'Print the book as reading view draws it — each chapter from a new page, no TeX — into build/ beside its master'",
 				"'Print the book as reading view draws it — each chapter from a new page — and share the PDF'");
+			// Proof this chapter (Clew-app ef22b0b) typesets one chapter with
+			// LaTeX's \\includeonly; the iPad has no LaTeX, so the row is not
+			// offered (EXPORT_BOOK refuses `proof` by name besides).
+			src = patched('clew-book.js', src,
+				"\t\tconst at = active && active !== master ? resolved.indexOf(active) : -1;\n",
+				"\t\tconst at = -1; // iOS: no proof without LaTeX (scripts/build.js)\n");
 			return { contents: src, loader: 'js' };
 		});
 		builder.onLoad({ filter: /vendor\/clew\/renderer\/books\.js$/ }, (args) => {
@@ -282,6 +302,18 @@ const rendererPatches = {
 				"\tbuild.title = `Print “${book.title}” as one PDF, each chapter numbered as the book numbers it`;\n");
 			src = patched('books.js', src, "\tbuild.addEventListener('click', () => buildBook(book.master, 'html'));\n",
 				"\tbuild.addEventListener('click', () => buildBook(book.master, 'print'));\n");
+			// And Proof this chapter's palette command, for the same reason.
+			src = patched('books.js', src,
+				"\tregisterCommand({\n"
+				+ "\t\tid: 'export:book-proof',\n"
+				+ "\t\tname: 'Proof this chapter (PDF via LaTeX)',\n"
+				+ "\t\twhen: (ctx) => chapterToProof(ctx.notePath) !== null,\n"
+				+ "\t\trun: (ctx) => {\n"
+				+ "\t\t\tconst at = chapterToProof(ctx?.notePath ?? workspaceStore.activeTab()?.path);\n"
+				+ "\t\t\tif (at) buildBook(at.master, 'proof', { chapter: at.chapter });\n"
+				+ "\t\t},\n"
+				+ "\t});\n",
+				'');
 			return { contents: src, loader: 'js' };
 		});
 		// The shell panel cannot exist on iOS (no PTY), so its command — and

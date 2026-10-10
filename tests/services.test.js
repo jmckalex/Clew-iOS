@@ -1775,11 +1775,14 @@ test('books: a chapter\'s citation pills render under its BOOK\'s header when th
 	await assert.rejects(() => native.renderBlock(text, chapter, ['Books/Signals/Signals.md', '../../escape.md']), /escapes vault/);
 });
 
-test('books: PDF, LaTeX and HTML builds refuse on the iPad with a sentence; the PRINT is the reading view, printed into the share sheet (Clew-app 5abf52d)', async () => {
+test('books: PDF, LaTeX, HTML and a chapter\'s proof refuse on the iPad with a sentence; the PRINT is the reading view, printed into the share sheet (Clew-app 5abf52d)', async () => {
 	for (const format of ['pdf', 'latex', 'html']) {
 		await assert.rejects(() => clew.invoke('clew:export-book', { master: 'Books/Signals/Signals.md', format }),
 			/building a book needs Clew on a Mac/);
 	}
+	// Proof this chapter (Clew-app ef22b0b) is refused by its own name.
+	await assert.rejects(() => clew.invoke('clew:export-book', { master: 'Books/Signals/Signals.md', format: 'proof', chapter: 'Books/Signals/Conventions.md' }),
+		/Proof this chapter typesets with LaTeX, which the iPad does not have/);
 	const mark = fakeBridge.calls.length;
 	const result = await clew.invoke('clew:export-book', { master: 'Books/Signals/Signals.md', format: 'print' });
 	assert.equal(result.output, 'Signals (reading view).pdf');
