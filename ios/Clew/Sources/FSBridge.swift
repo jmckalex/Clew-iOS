@@ -177,6 +177,33 @@ final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 				}
 			}
 
+		case "snapshotHtml":
+			// "Export as HTML": the same settled preview document as the PDF,
+			// serialized by html-share.js's script in a content world of its
+			// own (PrintPDF.swift#snapshot), and handed back for the shim's
+			// own check before it is shared.
+			guard let urlString = params["url"] as? String, let url = URL(string: urlString),
+				url.scheme == "clew-preview",
+				let arm = params["arm"] as? String, let probe = params["probe"] as? String,
+				let lightTheme = params["lightTheme"] as? String,
+				let script = params["script"] as? String else { throw ClewError.badPayload }
+			guard let webView, let window = webView.window,
+				let handler = webView.configuration.urlSchemeHandler(forURLScheme: "clew-preview") else {
+				return reply(nil, "no window to export from")
+			}
+			let request = PdfPrinter.Request(url: url, paperSize: "a4", armScript: arm, readyProbe: probe,
+				lightThemeScript: lightTheme, callerToken: vaults.callerToken)
+			let arguments: [String: Any] = [
+				"maxImage": params["maxImage"] as? Int ?? 2 * 1024 * 1024,
+				"maxTotal": params["maxTotal"] as? Int ?? 10 * 1024 * 1024,
+			]
+			printer.snapshot(request, .init(script: script, arguments: arguments), schemeHandler: handler, in: window) { result in
+				switch result {
+				case .success(let page): reply(page, nil)
+				case .failure(let error): reply(nil, error.localizedDescription)
+				}
+			}
+
 		case "shareBase64":
 			guard let name = params["name"] as? String, let base64 = params["base64"] as? String,
 				let data = Data(base64Encoded: base64) else { throw ClewError.badPayload }

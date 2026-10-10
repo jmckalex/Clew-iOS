@@ -88,6 +88,7 @@ const secretAccount = (p) => [p.vault, p.app, p.name].join('\u001f');
 const secretScope = (p) => {
 	if (p.vault !== 'documents:test' || !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(p.app ?? '')) throw new Error('badPayload');
 };
+let fakeSnapshot = null;
 const fakeBridge = {
 	calls: [],
 	async call(method, params) {
@@ -113,6 +114,10 @@ const fakeBridge = {
 				return { path: globalDir };
 			case 'printPdf':
 				return { bytes: 1234 };
+			case 'snapshotHtml':
+				// What PrintPDF.swift#snapshot hands back: the page html-share.js
+				// serialized (a test may set what the page "returned").
+				return fakeSnapshot ?? { html: '<!DOCTYPE html>\n<html><head><meta charset="utf-8"></head><body><p>drawn</p></body></html>', stats: { bytes: 90, images: 0 } };
 			case 'noteFonts':
 				// What NoteFonts.swift answers once the four faces are built.
 				return { family: 'Avenir Next', dir: '/fake/notefonts', faces: {
@@ -852,6 +857,42 @@ test('export as PDF (reading view): the bridge prints this session\'s own previe
 	await clew.invoke('clew:export-note', { path: 'Guide/Links and Embeds.md', format: 'print-pdf' });
 	assert.equal(fakeBridge.calls.at(-1)[1].paperSize, 'a4', 'an unknown paper size falls back to A4');
 	await assert.rejects(clew.invoke('clew:export-note', { path: '../outside.md', format: 'print-pdf' }), /escapes/i);
+});
+
+test('export as HTML: the drawn page, snapshotted from this session\'s own preview document; a page still carrying a script or an internal path is not shared', async () => {
+	await clew.invoke('clew:vault-open-path', { path: vaultDir });
+	const mark = fakeBridge.calls.length;
+	const result = await clew.invoke('clew:export-note', { path: 'Guide/Links and Embeds.md', format: 'html' });
+	assert.equal(result.shared, true);
+	assert.equal(result.stats.bytes, 90, 'the snapshot\'s own account comes back');
+	const calls = fakeBridge.calls.slice(mark);
+	const [, snap] = calls.find(([m]) => m === 'snapshotHtml') ?? [];
+	assert.ok(snap, 'the bridge was asked for a snapshot');
+	assert.equal(snap.url, `clew-preview://vault/${fakeSession.sessionId}/Guide/Links%20and%20Embeds.md.html`, 'the document reading view shows');
+	assert.match(snap.probe, /__clewFiguresPending/, 'settled as the PDF is: figures typeset first');
+	assert.match(snap.lightTheme, /theme: 'light'/);
+	assert.match(snap.script, /script-src 'none'/, 'html-share.js\'s script');
+	assert.equal(snap.maxImage, 2 * 1024 * 1024);
+	assert.equal(snap.maxTotal, 10 * 1024 * 1024);
+	const [, share] = calls.find(([m]) => m === 'shareText') ?? [];
+	assert.equal(share.name, 'Links and Embeds.html');
+	assert.match(share.text, /<p>drawn<\/p>/, 'what is shared is the snapshot, not the engine\'s HTML');
+	// The shim's own check, after the page's: nothing internal leaves.
+	for (const [html, named] of [
+		['<!DOCTYPE html><html><body><img src="clew-preview://vault/x/y.png"></body></html>', /a clew-preview: URL/],
+		[`<!DOCTYPE html><html><body><img src="/${fakeSession.sessionId}/Attachments/x.png"></body></html>`, /the session id/],
+		['<!DOCTYPE html><html><body><script>1</script></body></html>', /a script/],
+		[`<!DOCTYPE html><html><body><p title="${vaultDir}/x.md">x</p></body></html>`, /the vault's path on this device/],
+	]) {
+		fakeSnapshot = { html, stats: {} };
+		const before = fakeBridge.calls.length;
+		await assert.rejects(clew.invoke('clew:export-note', { path: 'Guide/Links and Embeds.md', format: 'html' }), named);
+		assert.ok(!fakeBridge.calls.slice(before).some(([m]) => m === 'shareText'), 'and nothing was shared');
+	}
+	fakeSnapshot = { html: '', stats: {} };
+	await assert.rejects(clew.invoke('clew:export-note', { path: 'Guide/Links and Embeds.md', format: 'html' }), /could not be made/);
+	fakeSnapshot = null;
+	await assert.rejects(clew.invoke('clew:export-note', { path: '../outside.md', format: 'html' }), /escapes/i);
 });
 
 test('font=note: the bridge\'s face map reaches EVERY engine worker\'s env, the first standby included', async () => {

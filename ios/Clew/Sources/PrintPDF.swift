@@ -11,6 +11,11 @@
 // the paper's printable width) rather than an orphan: WebKit lays out and
 // paints only views that are in a window, and the print formatter draws
 // what has been laid out.
+//
+// "Export as HTML" uses the same settled document: snapshot() runs the
+// script src/shim/html-share.js sends, in a content world of its own (the
+// note's scripts share the page's DOM with it, never its functions), and
+// hands back the page it serialized instead of printing.
 import UIKit
 import WebKit
 
@@ -40,9 +45,20 @@ final class PdfPrinter: NSObject, WKNavigationDelegate {
 	/// WebKit keeps painting for a beat after the last promise settles.
 	private static let settle: TimeInterval = 0.35
 
+	/// A snapshot's script (an async function body) and its arguments.
+	struct Snapshot {
+		let script: String
+		let arguments: [String: Any]
+	}
+	/// A reading pane's width, so the page lays out as reading view does.
+	private static let snapshotSize = CGSize(width: 820, height: 1180)
+	private static let snapshotWorld = WKContentWorld.world(name: "clew-share")
+
 	private var webView: WKWebView?
 	private var request: Request?
 	private var completion: ((Result<Data, Error>) -> Void)?
+	private var snapshot: Snapshot?
+	private var snapshotCompletion: ((Result<[String: Any], Error>) -> Void)?
 	private var deadline = Date()
 
 	/// One print at a time; a second request while one runs is refused.
@@ -54,14 +70,27 @@ final class PdfPrinter: NSObject, WKNavigationDelegate {
 		let paper = Self.papers[request.paperSize.lowercased()] ?? Self.papers["a4"]!
 		let printable = CGRect(x: Self.margin, y: Self.margin,
 			width: paper.width - 2 * Self.margin, height: paper.height - 2 * Self.margin)
+		self.completion = completion
+		load(request, size: printable.size, schemeHandler: schemeHandler, in: window)
+	}
 
+	/// The settled document serialized by `snapshot.script`, which returns
+	/// a dictionary ({ html, stats }); one at a time, with print().
+	func snapshot(_ request: Request, _ snapshot: Snapshot, schemeHandler: WKURLSchemeHandler, in window: UIWindow,
+		completion: @escaping (Result<[String: Any], Error>) -> Void) {
+		guard !isBusy else { return completion(.failure(ClewError.printBusy)) }
+		self.snapshot = snapshot
+		self.snapshotCompletion = completion
+		load(request, size: Self.snapshotSize, schemeHandler: schemeHandler, in: window)
+	}
+
+	private func load(_ request: Request, size: CGSize, schemeHandler: WKURLSchemeHandler, in window: UIWindow) {
 		// Its own configuration on the SAME preview scheme handler: the
 		// document, its assets and its rendered HTML come from the running
 		// app exactly as the reading pane's do. No bridge, no console hook.
 		let config = WKWebViewConfiguration()
 		config.setURLSchemeHandler(schemeHandler, forURLScheme: "clew-preview")
-		let view = WKWebView(frame: CGRect(origin: .zero, size: CGSize(width: printable.width, height: printable.height)),
-			configuration: config)
+		let view = WKWebView(frame: CGRect(origin: .zero, size: size), configuration: config)
 		view.navigationDelegate = self
 		view.isOpaque = true
 		view.backgroundColor = .white
@@ -71,7 +100,6 @@ final class PdfPrinter: NSObject, WKNavigationDelegate {
 
 		self.webView = view
 		self.request = request
-		self.completion = completion
 		self.deadline = Date().addingTimeInterval(Self.readyTimeout)
 		view.load(URLRequest(url: request.url))
 	}
@@ -91,6 +119,28 @@ final class PdfPrinter: NSObject, WKNavigationDelegate {
 		}
 	}
 
+	/// The note's own document and nothing else in the main frame: a note's
+	/// `<meta http-equiv=refresh>`, or a script setting `location`, must not
+	/// put another page into the PDF or the share (measured: a refresh to
+	/// example.com was shared in the note's place). Frames inside the page
+	/// load as they do in reading view; new windows never open.
+	func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
+		decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+		guard let frame = navigationAction.targetFrame else { return decisionHandler(.cancel) }
+		guard frame.isMainFrame else { return decisionHandler(.allow) }
+		decisionHandler(Self.isDocument(navigationAction.request.url, of: request?.url) ? .allow : .cancel)
+	}
+
+	/// The same document, its fragment aside.
+	static func isDocument(_ url: URL?, of wanted: URL?) -> Bool {
+		guard let url, let wanted,
+			var a = URLComponents(url: url, resolvingAgainstBaseURL: false),
+			var b = URLComponents(url: wanted, resolvingAgainstBaseURL: false) else { return false }
+		a.fragment = nil
+		b.fragment = nil
+		return a.url == b.url
+	}
+
 	func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
 		finish(.failure(error))
 	}
@@ -105,7 +155,9 @@ final class PdfPrinter: NSObject, WKNavigationDelegate {
 			let ready = (result as? Bool) ?? false
 			if ready || Date() > self.deadline {
 				// Print what there is rather than nothing, after the settle.
-				DispatchQueue.main.asyncAfter(deadline: .now() + Self.settle) { self.render() }
+				DispatchQueue.main.asyncAfter(deadline: .now() + Self.settle) {
+					if self.snapshot != nil { self.serialize() } else { self.render() }
+				}
 			} else {
 				DispatchQueue.main.asyncAfter(deadline: .now() + Self.pollInterval) { self.poll() }
 			}
@@ -137,12 +189,46 @@ final class PdfPrinter: NSObject, WKNavigationDelegate {
 		finish(.success(data as Data))
 	}
 
+	private func serialize() {
+		guard let webView, let snapshot else { return }
+		guard Self.isDocument(webView.url, of: request?.url) else {
+			return finishSnapshot(.failure(ClewError.printFailed("the note's page navigated away")))
+		}
+		webView.callAsyncJavaScript(snapshot.script, arguments: snapshot.arguments, in: nil, in: Self.snapshotWorld) { result in
+			switch result {
+			case .success(let value):
+				guard let page = value as? [String: Any], page["html"] is String else {
+					return self.finishSnapshot(.failure(ClewError.printFailed("the page returned no HTML")))
+				}
+				self.finishSnapshot(.success(page))
+			case .failure(let error):
+				self.finishSnapshot(.failure(error))
+			}
+		}
+	}
+
 	private func finish(_ result: Result<Data, Error>) {
+		if snapshot != nil {
+			// A load failure reaches here in either mode.
+			if case .failure(let error) = result { return finishSnapshot(.failure(error)) }
+		}
 		let done = completion
+		teardown()
+		done?(result)
+	}
+
+	private func finishSnapshot(_ result: Result<[String: Any], Error>) {
+		let done = snapshotCompletion
+		teardown()
+		done?(result)
+	}
+
+	private func teardown() {
 		webView?.removeFromSuperview()
 		webView = nil
 		request = nil
 		completion = nil
-		done?(result)
+		snapshot = nil
+		snapshotCompletion = nil
 	}
 }

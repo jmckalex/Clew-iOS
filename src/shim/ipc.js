@@ -35,6 +35,7 @@ import { RenderService } from './render-service.js';
 import { settings } from './settings.js';
 import { bridgeCall, toBase64 } from './native-bridge.js';
 import { ARM_SCRIPT, BOOK_ARM_SCRIPT, READY_PROBE, LIGHT_THEME_SCRIPT, PAPER_SIZES } from './print-pdf.js';
+import { SNAPSHOT_SCRIPT, SHARE_IMAGE_MAX, SHARE_IMAGES_MAX, shareLeaks } from './html-share.js';
 import { readMaster, laterNotice, placeWarnings } from '../../vendor/clew/shared/book.js';
 
 /**
@@ -1070,10 +1071,31 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 			if (format !== 'html') {
 				throw new Error(`${format} export needs a LaTeX toolchain and is not available on iOS`);
 			}
-			const html = await renderService.ensureRendered(path);
-			const name = `${base}.html`;
-			await bridgeCall('shareText', { name, text: html });
-			return { shared: true };
+			// The note as reading view drew it, in one file: the same hidden
+			// document as the PDF, serialized with no scripts, its styles,
+			// figures, maths and images inside (html-share.js). The finished
+			// page is checked here as well, and never shared with a script or
+			// an internal path still in it.
+			vaults.resolve(path);
+			const encoded = path.split('/').map(encodeURIComponent).join('/');
+			const snap = await bridgeCall('snapshotHtml', {
+				url: `clew-preview://vault/${encodeURIComponent(vaults.sessionId)}/${encoded}.html`,
+				arm: ARM_SCRIPT,
+				probe: READY_PROBE,
+				lightTheme: LIGHT_THEME_SCRIPT,
+				script: SNAPSHOT_SCRIPT,
+				maxImage: SHARE_IMAGE_MAX,
+				maxTotal: SHARE_IMAGES_MAX,
+			});
+			const html = String(snap?.html ?? '');
+			const leaks = shareLeaks(html, { sessionId: vaults.sessionId ?? '', vaultPath: vaults.realPath ?? '' });
+			if (!html || leaks.length) {
+				throw new Error(html
+					? `the page was not shared: it would have carried ${leaks.join(', ')}`
+					: 'the page could not be made');
+			}
+			await bridgeCall('shareText', { name: `${base}.html`, text: html });
+			return { shared: true, stats: snap.stats ?? null };
 		},
 		// Book Build (Clew-app main/export-book.js) runs TeX, latexmk and the
 		// engine in a Node fork and writes build/ beside the master: desktop
