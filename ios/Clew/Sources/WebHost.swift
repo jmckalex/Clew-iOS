@@ -88,7 +88,12 @@ final class WebHost: NSObject, ObservableObject {
 		self.webView = webView
 		schemeHandler.webView = webView
 
-		webView.load(URLRequest(url: URL(string: "clew-app://app/index.html")!))
+		// The TeX engines are served `immutable` (SchemeHandler) at URLs that
+		// carry no version, so a changed build (an app update, a restage)
+		// must not be answered from WebKit's cache: Clew-app's asset-stamp.js,
+		// here. The page loads once any clear is done.
+		let page = URLRequest(url: URL(string: "clew-app://app/index.html")!)
+		AssetStamp.clearIfChanged { [weak webView] in webView?.load(page) }
 
 		// External writers (iCloud sync landing, Working Copy pulls, Files
 		// app edits) surface mid-session, not just on foregrounding. The

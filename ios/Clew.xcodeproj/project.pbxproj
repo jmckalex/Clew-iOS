@@ -18,6 +18,8 @@
 		C1E0000000000000000000AA /* AtomicFile.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F0000000000000000000AA /* AtomicFile.swift */; };
 		C1E0000000000000000000D7 /* DemoSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F0000000000000000000D7 /* DemoSync.swift */; };
 		C1E0000000000000000000D8 /* AppSecrets.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F0000000000000000000D8 /* AppSecrets.swift */; };
+		C1E0000000000000000000D9 /* SystemFonts.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F0000000000000000000D9 /* SystemFonts.swift */; };
+		C1E0000000000000000000DA /* AssetStamp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F0000000000000000000DA /* AssetStamp.swift */; };
 		C1E0000000000000000000AB /* OfficeThumbs.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F0000000000000000000AB /* OfficeThumbs.swift */; };
 		C1E0000000000000000000AC /* PrintPDF.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F0000000000000000000AC /* PrintPDF.swift */; };
 		C1E0000000000000000000AD /* NoteFonts.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1F0000000000000000000AD /* NoteFonts.swift */; };
@@ -44,6 +46,8 @@
 		C1F0000000000000000000AA /* AtomicFile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AtomicFile.swift; sourceTree = "<group>"; };
 		C1F0000000000000000000D7 /* DemoSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoSync.swift; sourceTree = "<group>"; };
 		C1F0000000000000000000D8 /* AppSecrets.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSecrets.swift; sourceTree = "<group>"; };
+		C1F0000000000000000000D9 /* SystemFonts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemFonts.swift; sourceTree = "<group>"; };
+		C1F0000000000000000000DA /* AssetStamp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssetStamp.swift; sourceTree = "<group>"; };
 		C1F0000000000000000000AB /* OfficeThumbs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OfficeThumbs.swift; sourceTree = "<group>"; };
 		C1F0000000000000000000AC /* PrintPDF.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrintPDF.swift; sourceTree = "<group>"; };
 		C1F0000000000000000000AD /* NoteFonts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoteFonts.swift; sourceTree = "<group>"; };
@@ -106,6 +110,8 @@
 				C1F0000000000000000000AA /* AtomicFile.swift */,
 				C1F0000000000000000000D7 /* DemoSync.swift */,
 				C1F0000000000000000000D8 /* AppSecrets.swift */,
+				C1F0000000000000000000D9 /* SystemFonts.swift */,
+				C1F0000000000000000000DA /* AssetStamp.swift */,
 				C1F0000000000000000000AB /* OfficeThumbs.swift */,
 				C1F0000000000000000000AC /* PrintPDF.swift */,
 				C1F0000000000000000000AD /* NoteFonts.swift */,
@@ -218,6 +224,8 @@
 				C1E0000000000000000000AA /* AtomicFile.swift in Sources */,
 				C1E0000000000000000000D7 /* DemoSync.swift in Sources */,
 				C1E0000000000000000000D8 /* AppSecrets.swift in Sources */,
+				C1E0000000000000000000D9 /* SystemFonts.swift in Sources */,
+				C1E0000000000000000000DA /* AssetStamp.swift in Sources */,
 				C1E0000000000000000000AB /* OfficeThumbs.swift in Sources */,
 				C1E0000000000000000000AC /* PrintPDF.swift in Sources */,
 				C1E0000000000000000000AD /* NoteFonts.swift in Sources */,

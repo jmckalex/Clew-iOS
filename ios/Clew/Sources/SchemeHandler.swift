@@ -214,6 +214,35 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 				}
 				return respondFile(task, fileURL: file, rangeHeader: nil)
 			}
+			// A figure's named font families (SystemFonts.swift; desktop's
+			// system-fonts.js), in protocol.js's URL shape:
+			//   systemfonts/family/<family>.json → { files: [name…] }
+			//   systemfonts/file/<family>/<n>    → that family's nth file
+			// Only files CoreText's faces of that family were written to: no
+			// path is ever taken from the request. Built off the main thread
+			// on first use (a family is a few faces' tables).
+			if rest.hasPrefix("systemfonts/") {
+				let pieces = rest.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+				guard pieces.count >= 3 else { return fail(task, "Not found", status: 404) }
+				let kind = pieces[1]
+				let family = kind == "family" && pieces[2].hasSuffix(".json") ? String(pieces[2].dropLast(5)) : pieces[2]
+				let index = pieces.count >= 4 ? Int(pieces[3]) : nil
+				DispatchQueue.global(qos: .userInitiated).async {
+					let files = SystemFonts.shared.files(family: family)
+					DispatchQueue.main.async {
+						guard !self.isStopped(task) else { return }
+						if kind == "family" {
+							let body = try! JSONSerialization.data(withJSONObject: ["files": files.map(\.lastPathComponent)])
+							return self.respondData(task, data: body, mime: "application/json")
+						}
+						guard kind == "file", let index, files.indices.contains(index) else {
+							return self.fail(task, "Not found", status: 404)
+						}
+						self.respondFile(task, fileURL: files[index], rangeHeader: nil)
+					}
+				}
+				return
+			}
 			let parts = rest.split(separator: "/", maxSplits: 1).map(String.init)
 			guard parts.count == 2, let base = Self.assetRoots[parts[0]], let webRoot = webRootURL else {
 				return fail(task, "unknown asset root")
