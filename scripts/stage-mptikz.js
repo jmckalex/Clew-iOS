@@ -28,6 +28,14 @@
 // type declarations and source maps. --require makes a missing build a hard
 // failure — what ios/ci_scripts/ci_post_clone.sh passes, so Xcode Cloud never
 // ships an app whose figures cannot typeset. --force restages regardless.
+//
+// From 0.4.0 the release pins a SECOND archive beside the engines,
+// `manifest.ghostscript`: Ghostscript's module (ghostscript/gs.mjs +
+// gs.wasm, GNU AGPL v3, which upstream ships apart). It is SHA256-verified
+// like the first and unpacked into the same tree. --no-ghostscript leaves it
+// out (preview-client/figures.js then treats PostScript as unavailable: it
+// asks for it only when ghostscript/SOURCE.md is there). --release skips
+// the local candidates and stages the pinned release itself.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -42,10 +50,12 @@ const dest = path.join(root, 'mptikz-assets');
 const stamp = path.join(dest, 'STAGED.json');
 const required = process.argv.includes('--require');
 const force = process.argv.includes('--force');
+const fromRelease = process.argv.includes('--release');
+const withGhostscript = !process.argv.includes('--no-ghostscript');
 
 const isBuild = (dir) => fs.existsSync(path.join(dir, 'index.js')) && fs.existsSync(path.join(dir, 'bundles'));
 
-const candidates = [
+const candidates = fromRelease ? [] : [
 	process.env.MPTIKZ_SRC,
 	path.join(os.homedir(), 'Source', 'mp-tikz-wasm', 'dist'),
 	path.resolve(root, '..', 'Clew-app', 'mptikz-assets'),
@@ -65,7 +75,7 @@ function identityOf(from) {
 	// bundles/index.json is in the list because bundles are rebuilt separately
 	// from the engines upstream (adding `opentype` was exactly that).
 	const mtimes = ['index.js', 'mplib.wasm', 'tex.wasm', 'dvisvgm.wasm', 'luatex.wasm',
-		path.join('bundles', 'index.json'), path.join('bundles', 'hot.json')]
+		path.join('bundles', 'index.json'), path.join('bundles', 'hot.json'), path.join('ghostscript', 'gs.wasm')]
 		.map((f) => { try { return fs.statSync(path.join(from, f)).mtimeMs; } catch { return 0; } });
 	// Upstream's own stamp, when the source is its staged tree: says whether
 	// THAT came from the master or the pin.
@@ -86,7 +96,8 @@ function copyTree(from) {
 		// here reads them; the source tree's own stamp and download cache are
 		// its business, not ours.
 		filter: (src) => !/\.(js\.map|d\.ts)$/.test(src)
-			&& path.basename(src) !== 'STAGED.json' && path.basename(src) !== '.cache',
+			&& path.basename(src) !== 'STAGED.json' && path.basename(src) !== '.cache'
+			&& (withGhostscript || path.relative(from, src).split(path.sep)[0] !== 'ghostscript'),
 	});
 }
 
@@ -148,44 +159,65 @@ if (candidates.length) {
 }
 
 // ---- 4. the pinned release --------------------------------------------------
+// The main archive, and — from 0.4.0 — Ghostscript's module as an archive of
+// its own (`manifest.ghostscript`), whose dist/ghostscript/ unpacks into the
+// same tree. Each is SHA256-pinned and verified; a manifest without the
+// second, or --no-ghostscript, stages the first alone. Upstream's
+// scripts/stage-mptikz.js, with this repo's cache folder.
 
 const cache = path.join(root, 'build', 'mptikz-cache');
-const archive = path.join(cache, manifest.archive);
+const assets = [manifest, withGhostscript ? manifest.ghostscript : null].filter(Boolean);
+const pins = assets.map((a) => a.sha256);
 
 function sha256(file) {
 	return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 }
 
-async function download() {
-	console.log(`stage-mptikz: fetching ${manifest.url} (${Math.round(manifest.bytes / 1e6)} MB)…`);
-	const res = await fetch(manifest.url, { redirect: 'follow' });
+async function download(asset, file) {
+	console.log(`stage-mptikz: fetching ${asset.url} (${Math.round(asset.bytes / 1e6)} MB)…`);
+	const res = await fetch(asset.url, { redirect: 'follow' });
 	if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
 	fs.mkdirSync(cache, { recursive: true });
-	fs.writeFileSync(archive, Buffer.from(await res.arrayBuffer()));
+	fs.writeFileSync(file, Buffer.from(await res.arrayBuffer()));
+}
+
+/** The asset's archive in the cache, fetched if need be and VERIFIED. */
+async function verified(asset) {
+	const file = path.join(cache, asset.archive);
+	if (!fs.existsSync(file)) await download(asset, file);
+	const digest = sha256(file);
+	if (digest !== asset.sha256) {
+		// REFUSE rather than "probably fine": the pin names one exact file.
+		fs.rmSync(file, { force: true });
+		throw new Error(`SHA256 mismatch for ${asset.archive}\n  expected ${asset.sha256}\n  got      ${digest}`);
+	}
+	return file;
 }
 
 const current = staged();
-if (!force && current?.source === 'release' && current.version === manifest.version && isBuild(dest)) {
+if (!force && current?.source === 'release' && current.version === manifest.version
+	&& JSON.stringify(current.archives ?? [current.sha256]) === JSON.stringify(pins) && isBuild(dest)) {
 	console.log(`stage-mptikz: mptikz-assets/ already holds the pinned ${manifest.version}; nothing to do.`);
 	process.exit(0);
 }
 
 try {
-	if (!fs.existsSync(archive)) await download();
-	const digest = sha256(archive);
-	if (digest !== manifest.sha256) {
-		// REFUSE rather than "probably fine": the pin names one exact file.
-		fs.rmSync(archive, { force: true });
-		throw new Error(`SHA256 mismatch for ${manifest.archive}\n  expected ${manifest.sha256}\n  got      ${digest}`);
-	}
+	const files = [];
+	for (const asset of assets) files.push(await verified(asset));
 	const unpacked = path.join(cache, 'unpacked');
 	fs.rmSync(unpacked, { recursive: true, force: true });
 	fs.mkdirSync(unpacked, { recursive: true });
-	// dist/ inside the archive IS the tree (two components deep).
-	execFileSync('tar', ['xzf', archive, '-C', unpacked, '--strip-components=2', manifest.unpackedDir], { stdio: 'inherit' });
+	// dist/ inside each archive IS (part of) the tree, two components deep.
+	assets.forEach((asset, i) => {
+		execFileSync('tar', ['xzf', files[i], '-C', unpacked, '--strip-components=2', asset.unpackedDir], { stdio: 'inherit' });
+	});
 	copyTree(unpacked);
 	fs.rmSync(unpacked, { recursive: true, force: true });
-	report({ source: 'release', version: manifest.version, from: manifest.url, describe: `pinned ${manifest.tag}`, sha256: manifest.sha256 });
+	report({
+		source: 'release', version: manifest.version, from: manifest.url,
+		describe: `pinned ${manifest.tag}${assets.includes(manifest.ghostscript) ? ' + ghostscript' : ''}`,
+		sha256: manifest.sha256, archives: pins,
+	});
 } catch (err) {
 	const message = `stage-mptikz: no mp-tikz-wasm build staged — ${String(err.message ?? err)}`;
 	if (required) {
