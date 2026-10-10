@@ -1,9 +1,9 @@
 # Upstream sync to Clew-app f959799 — plan and record
 
-**STATUS: EXECUTED 2026-10-10.** Pinned by Clew-boss under the owner's
-standing order to drive the port through to a TestFlight build. Commit
-locally; the push waits for Clew-boss's check and the owner's word typed in
-this window.
+**STATUS: EXECUTED 2026-10-10, VERIFIED by Clew-boss.** Pinned by Clew-boss
+under the owner's standing order to drive the port through to a TestFlight
+build. Main is fast-forwarded to p4 with a build commit on top; the push
+waits for the owner's word typed in this window.
 
 The chain, off main 35c8922:
 - `syncf959799-p1-vendor`: dc04437.

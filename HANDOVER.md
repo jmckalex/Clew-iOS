@@ -16,8 +16,9 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
 
 - **The sync to Clew-app `f959799` (2026-10-10) is DONE, and every
   acceptance check was green.** The chain is `syncf959799-p1-vendor` →
-  `-p2-build` → `-p3-contract` → `-p4-verify`, off main 35c8922, not
-  pushed. The record is UPSTREAM-F959799-PLAN.md.
+  `-p2-build` → `-p3-contract` → `-p4-verify`, off main 35c8922. Clew-boss
+  verified it. Main is fast-forwarded to the p4 branch, and a build commit
+  sits on top. The record is UPSTREAM-F959799-PLAN.md.
   - **jmarkdown 21dee42's figure engine** is bundled and inert: the
     iPad's engine config never sets `Figure engine`, and a guard test holds
     that.
@@ -232,6 +233,11 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
 - **If jmarkdown's figure engine is ever turned on in the worker**, shim
   `setImmediate` first: figure-engine.js's runAll() awaits it, and the
   worker does not define it (UPSTREAM-F959799-PLAN.md).
+- **Next range (Clew-boss, 2026-10-10):** drop the palette's book exports
+  that only refuse on the iPad ("Export book as PDF (via LaTeX)", "… as
+  LaTeX", "… as HTML"), as the Proof command was dropped. Give each a test
+  that the built bundle lacks it. "Export book as PDF (reading view)"
+  stays.
 - **The note HTML export carries no drawn figures** (0/11 on Diagrams), and
   its styles and scripts resolve only inside Clew. A plan to carry the
   preview's drawn SVGs goes to Clew-boss first.
