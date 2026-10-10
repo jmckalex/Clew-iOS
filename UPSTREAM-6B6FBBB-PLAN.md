@@ -133,6 +133,9 @@ launches had a matching record and did not clear.
   it renders.
 - A figure with `\setmainfont{Optima}` (or Gill Sans, Hoefler Text, STIX
   Two Math as the math font): it renders in that face.
-- Features/Diagrams in reading view: no blank or reloading preview.
+- **A heavy figure note on the device:** Features/Diagrams in reading view
+  (11 TikZ, MetaPost and LuaTeX figures; it peaks at **1,285 MB** in the
+  simulator's content process). Every figure appears, and the preview does
+  not go blank or reload. If it does, iPadOS ended the content process.
 - Print a long book (Books/Signals, or longer): the share sheet appears,
   and Clew stays up.

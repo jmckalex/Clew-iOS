@@ -15,8 +15,10 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
 
 - **The sync to Clew-app `6b6fbbb` (2026-10-10) is DONE, and every
   acceptance check was green.** The chain is `sync6b6fbbb-p1-vendor` →
-  `-p2-build` → `-p3-contract` → `-p4-verify`. The record is
-  UPSTREAM-6B6FBBB-PLAN.md.
+  `-p2-build` → `-p3-contract` → `-p4-verify`. Clew-boss verified it. Main
+  is fast-forwarded to the p4 branch, and a build commit sits on top. The
+  main checkout's mptikz-assets is restaged with `--release` ("pinned
+  v0.4.0 + ghostscript"). The record is UPSTREAM-6B6FBBB-PLAN.md.
   - **mp-tikz-wasm 0.4.0 + Ghostscript**, staged from the release (two
     pinned archives; `--no-ghostscript` drops the AGPL module).
   - **PostScript figures render:** PSTricks, EPS, `\rotatebox`. gs.wasm
@@ -214,7 +216,8 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
 
 - **The next sync's range starts at Clew-app `6b6fbbb`.**
 - **iPad checks from the 6b6fbbb sync:** its record's checklist
-  (PostScript, named families, a heavy figure note, a long book's print).
+  (PostScript, named families, Features/Diagrams on the device (it peaks
+  at 1,285 MB in the simulator), a long book's print).
 - **iPad checks from the 5abf52d sync:** its record's checklist (the
   Ticker's key across a relaunch, the book print, a real finger on the
   grip and a chip).
