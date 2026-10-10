@@ -220,3 +220,18 @@ test('TeX fragments: CLEW_TEX_FRAGMENTS reaches figures.js — the vault list, t
 	assert.ok(!viaGlobal.includes('clew-figure-refused'), 'the global list is consulted (case-insensitive names)');
 	assert.match(viaGlobal, /definecolor\{clewink\}/);
 });
+
+test('the figure engine (jmarkdown 21dee42) stays off: the iPad\'s config names none, and figures go to the preview', async () => {
+	// figure-engine.js runs TikZ and MetaPost through mp-tikz-wasm IN the
+	// engine when `Figure engine` is auto or wasm and `MP-TikZ dist` names a
+	// release dist/ (config or host only; desktop sets it for exports). The
+	// iPad's preview draws figures itself (preview-client/figures.js), so its
+	// config sets neither, and the worker never imports the library.
+	const { engineConfig } = await import('../src/shim/engine-config.js');
+	const config = engineConfig({ vaultOptions: { jmarkdownProject: true, pandocCitations: true } });
+	assert.ok(!('Figure engine' in config) && !('MP-TikZ dist' in config), 'no figure engine in the generated config');
+	const html = render('Features/Diagrams.md');
+	assert.equal((html.match(/<tikz-diagram\b/g) ?? []).length, 9, 'each TikZ figure is the preview\'s');
+	assert.equal((html.match(/<metapost-diagram\b/g) ?? []).length, 2, 'and each MetaPost one');
+	assert.ok(!/Figure engine|mp-tikz-wasm would not load/.test(html), 'nothing names the figure engine');
+});

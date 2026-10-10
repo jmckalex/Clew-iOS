@@ -63,8 +63,11 @@ const DEFAULTS = {
 	callouts: [],
 	// Desktop-only, kept so a settings object reads the same everywhere: no
 	// LaTeX toolchain (the row is dropped, scripts/build.js), no CJK font
-	// download (its section is dropped), no shell (stubbed).
+	// download (its section is dropped), no shell (stubbed), and no note or
+	// book export that draws figures with TeX (exportFigureEngine, Clew-app
+	// 2cc6d89: the installed tools or mp-tikz-wasm; its row is dropped).
 	latexEngine: 'auto',
+	exportFigureEngine: 'external',
 	pdfCjkFonts: false,
 	shellFont: '',
 	// The daily update check (Clew-app 036befe) is desktop's: the iPad's
