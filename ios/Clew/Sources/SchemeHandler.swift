@@ -238,6 +238,9 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 						guard kind == "file", let index, files.indices.contains(index) else {
 							return self.fail(task, "Not found", status: 404)
 						}
+						#if DEBUG
+						NSLog("CLEWPROBE asset systemfonts/%@", files[index].lastPathComponent)
+						#endif
 						self.respondFile(task, fileURL: files[index], rangeHeader: nil)
 					}
 				}
@@ -254,6 +257,11 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 			// build whose bundles a figure re-reads by the dozen, and whose
 			// wasm WebKit may only code-cache if it is allowed to store it.
 			let extra = parts[0] == "mptikz" ? ["Cache-Control": "public, max-age=31536000, immutable"] : [:]
+			#if DEBUG
+			// Scenarios: whether Ghostscript's module was fetched (desktop's
+			// CLEW_SMOKE_LOG `smoke-asset:` lines).
+			if parts[0] == "mptikz", parts[1].hasPrefix("ghostscript/") { NSLog("CLEWPROBE asset mptikz/%@", parts[1]) }
+			#endif
 			return respondFile(task, fileURL: file, rangeHeader: task.request.value(forHTTPHeaderField: "Range"), extra: extra)
 		}
 

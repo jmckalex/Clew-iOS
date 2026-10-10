@@ -1,10 +1,11 @@
-# Handover — 2026-10-10 (the sync to Clew-app 5abf52d: app secrets on the Keychain, book mode phase 2, the book print)
+# Handover — 2026-10-10 (the sync to Clew-app 6b6fbbb: PostScript figures, system font families, mp-tikz-wasm 0.4.0)
 
 Current state for a fresh session, rewritten whole. Durable architecture
 lives in **README.md** and **PORT-PLAN.md**. Each sync's reasoning and
 measurements are in its record: `UPSTREAM-*-PLAN.md`. The latest records
-are `UPSTREAM-5ABF52D-PLAN.md` (app secrets, book mode phase 2, the book
-print, 2026-10-10), `UPSTREAM-CBFA692-PLAN.md` (book mode and the demo
+are `UPSTREAM-6B6FBBB-PLAN.md` (PostScript figures, system font families,
+mp-tikz-wasm 0.4.0, 2026-10-10), `UPSTREAM-5ABF52D-PLAN.md` (app secrets,
+book mode phase 2, the book print, 2026-10-10), `UPSTREAM-CBFA692-PLAN.md` (book mode and the demo
 vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-10-04),
 `UPSTREAM-F3A7D5B-PLAN.md` (the sync of 2026-10-03/04),
 `UPSTREAM-03BB33A-PLAN.md` (the overnight sync of 2026-10-02),
@@ -12,6 +13,24 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
 
 ## 1. Where things stand
 
+- **The sync to Clew-app `6b6fbbb` (2026-10-10) is DONE, and every
+  acceptance check was green.** The chain is `sync6b6fbbb-p1-vendor` →
+  `-p2-build` → `-p3-contract` → `-p4-verify`. The record is
+  UPSTREAM-6B6FBBB-PLAN.md.
+  - **mp-tikz-wasm 0.4.0 + Ghostscript**, staged from the release (two
+    pinned archives; `--no-ghostscript` drops the AGPL module).
+  - **PostScript figures render:** PSTricks, EPS, `\rotatebox`. gs.wasm
+    loads only for them and costs about 60 MB.
+  - **System font families from CoreText** (SystemFonts.swift): Optima,
+    Avenir Next, Gill Sans, Hoefler Text, STIX Two Math and more.
+  - **The engines' cache stamp** (AssetStamp.swift): an app update never
+    serves stale engines.
+  - **Memory, simulator:** a heavy figure note peaks at about 1.3 GB; the
+    40-chapter book's print takes 5.9 s, about 0.8 GB plus 0.4 GB. These
+    need a device check.
+  - **Vendor** is at Clew-app `6b6fbbb`.
+- **The sync to Clew-app `fb3635a` (5abf52d + the pill fixes) is DONE and
+  PUSHED** (94f0571; the Xcode Cloud archive succeeded).
 - **The sync to Clew-app `5abf52d` (2026-10-10) is DONE, and every
   acceptance check was green.** The owner, relayed by Clew-boss: "Please
   drive the iOS port through to completion. All the way to a push and a
@@ -193,7 +212,9 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
 
 ## 3. Next
 
-- **The next sync's range starts at Clew-app `fb3635a`.**
+- **The next sync's range starts at Clew-app `6b6fbbb`.**
+- **iPad checks from the 6b6fbbb sync:** its record's checklist
+  (PostScript, named families, a heavy figure note, a long book's print).
 - **iPad checks from the 5abf52d sync:** its record's checklist (the
   Ticker's key across a relaunch, the book print, a real finger on the
   grip and a chip).
@@ -221,6 +242,10 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
   (the owner's rule since 2026-10-06): what matters, what needs the
   owner's action, and "details on request: …" for what was left out.
   Reports to Clew-boss keep their full detail.
+- **Before the first App Store submission: decide the GPL/AGPL engines**
+  (Clew-boss and the owner). dvisvgm, pdfTeX and LuaTeX are GPL;
+  Ghostscript is AGPL and can be dropped with `--no-ghostscript` in
+  ios/ci_scripts/ci_post_clone.sh. TestFlight builds ship them all.
 - **A push waits for the owner's own word typed here** when they have put
   a hold on directly here, or the permission classifier wants it (it
   blocked a relayed release once, on 2026-10-04).
