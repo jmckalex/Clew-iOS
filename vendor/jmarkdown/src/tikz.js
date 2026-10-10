@@ -13,6 +13,7 @@ import { configManager } from './config-manager.js';
 import { requirePackage, addPreamble } from './preamble.js';
 import { registerBlockEnvironment } from './begin-end-core.js';
 import { htmlCachePath, compileInRunDir, cacheDir } from './figure-cache.js';
+import { figureEngineWanted } from './figure-engine.js';
 import Mustache from 'mustache';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -63,6 +64,42 @@ function emptyCache(TiKZ_directory) {
 	}
 }
 
+// The installed tools: lualatex then dvisvgm, unless the SVG is cached.
+function compileTikzExternal(token, doc, dir, hash) {
+	if (fs.existsSync(path.join(dir, `${hash}.svg`))) return;
+	// Compiled in a run folder of its own (figure-cache.js): only
+	// the SVG is kept; the .aux/.dvi/.log, and anything the
+	// document's TeX wrote (\openout), go with the folder.
+	compileInRunDir(dir, (run) => {
+		const tex = path.join(run, `${hash}.tex`);
+		try {
+			fs.writeFileSync(tex, doc);
+			const opts = { cwd: run };
+			// Argument arrays, no shell: the paths sit under the
+			// document's own folder, whose name is the document's to
+			// choose — in a shell string, `$(…)` in it ran as a command.
+			let args = ['--output-format=dvi', tex];
+			console.log(`Executing: lualatex ${args.join(' ')}`);
+			execFileSync('lualatex', args, opts);
+			args = ['--bbox=min', LIBGS, '--no-fonts=1', OPTIMISE, tex.replace(/\.tex$/, '.dvi')];
+			console.log(`Executing: dvisvgm ${args.join(' ')}`);
+			execFileSync('dvisvgm', args, opts);
+			return [`${hash}.svg`];
+		}
+		catch (error) {
+			token['has_error'] = true;
+			const log = path.join(run, `${hash}.log`);
+			try {
+				token['error_log'] = fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : (error.message || 'Unknown error');
+			} catch {
+				token['error_log'] = error.message || 'Unknown error, unable to read log file';
+			}
+			console.error(`Error processing TikZ: ${error.message}`);
+			return [];
+		}
+	});
+}
+
 function createTiKZ(marker) {
 	return {
 		level: 'container',
@@ -96,39 +133,17 @@ function createTiKZ(marker) {
 			token['has_error'] = false;
 			token['error_log'] = '';
 
-			if (fs.existsSync(svg_name) == false) {
-				// Compiled in a run folder of its own (figure-cache.js): only
-				// the SVG is kept; the .aux/.dvi/.log, and anything the
-				// document's TeX wrote (\openout), go with the folder.
-				compileInRunDir(TiKZ_directory, (run) => {
-					const tex = path.join(run, `${hash}.tex`);
-					try {
-						fs.writeFileSync(tex, file_contents);
-						const opts = { cwd: run };
-						// Argument arrays, no shell: the paths sit under the
-						// document's own folder, whose name is the document's to
-						// choose — in a shell string, `$(…)` in it ran as a command.
-						let args = ['--output-format=dvi', tex];
-						console.log(`Executing: lualatex ${args.join(' ')}`);
-						execFileSync('lualatex', args, opts);
-						args = ['--bbox=min', LIBGS, '--no-fonts=1', OPTIMISE, tex.replace(/\.tex$/, '.dvi')];
-						console.log(`Executing: dvisvgm ${args.join(' ')}`);
-						execFileSync('dvisvgm', args, opts);
-						return [`${hash}.svg`];
-					}
-					catch (error) {
-						token['has_error'] = true;
-						const log = path.join(run, `${hash}.log`);
-						try {
-							token['error_log'] = fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : (error.message || 'Unknown error');
-						} catch {
-							token['error_log'] = error.message || 'Unknown error, unable to read log file';
-						}
-						console.error(`Error processing TikZ: ${error.message}`);
-						return [];
-					}
-				});
+			// With mp-tikz-wasm as the figure engine (figure-engine.js), the
+			// figure is filled from the async walk, not compiled here; the
+			// installed tools remain its fallback.
+			if (figureEngineWanted()) {
+				const job = token.figureJob = { kind: 'tikz', doc: file_contents, dir: TiKZ_directory };
+				job.use = (tex) => { token['file name'] = tex; job.done = true; };
+				job.fail = (log) => { token['has_error'] = true; token['error_log'] = log; job.done = true; };
+				job.external = () => { compileTikzExternal(token, file_contents, TiKZ_directory, hash); job.done = true; };
+				return token;
 			}
+			compileTikzExternal(token, file_contents, TiKZ_directory, hash);
 
 			return token;
 		},
@@ -141,6 +156,9 @@ function createTiKZ(marker) {
 					addPreamble(`\\usetikzlibrary{${TIKZ_LIBRARIES}}`);
 					return `\\begin{center}\n${token['tikz']}\n\\end{center}\n\n`;
 				}
+				// A figure the walk never filled (a parse that was not async):
+				// the installed tools, as before.
+				if (token.figureJob && !token.figureJob.done) token.figureJob.external();
 				if (token['has_error']) {
 					// Create a button that opens the error log
 					const errorLogBase64 = Buffer.from(token['error_log']).toString('base64');

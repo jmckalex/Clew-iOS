@@ -15,7 +15,10 @@
 // numbered), into a `build/` folder beside the master (D12), named by the
 // master so two books in one folder never collide. LaTeX's intermediates stay in
 // build/ too, so a rebuild is latexmk's quick rerun and nothing lands beside
-// a chapter. The engine's figures are cached outside the vault and copied
+// a chapter. A PDF is built in LaTeX's include layout (a `.tex` a chapter,
+// jmarkdown cf5ed60) and its run recorded, so that a PROOF of one chapter
+// can be typeset alone, numbered from that run (book-proof.js). The engine's
+// figures are cached outside the vault and copied
 // into `build/<master>-figures/`, which the .tex and the pages share
 // (export.js#figureCache, the note exports' arrangement).
 //
@@ -27,9 +30,10 @@
 // the path it was handed — the chapter relative to the master — and
 // placeWarnings (shared/book.js) turns them back into vault paths and lines.
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { readMaster, laterNotice, placeWarnings } from '../shared/book.js';
-import { runWorker, compilePdf, configuredBibliographies, restrictedExportDir, figureCache, clearFigures } from './export.js';
+import { runWorker, compilePdf, configuredBibliographies, restrictedExportDir, figureCache, clearFigures, figureEngine } from './export.js';
 import { figuresFolder, explainFiguresWarnings } from './export-cache.js';
 import { bibliographyDirs } from './citation-header.js';
 import { calloutsEnv } from './callout-types.js';
@@ -37,8 +41,9 @@ import { iconTable } from './callout-files.js';
 import { settings } from './settings.js';
 import { paths } from './paths.js';
 import { printNoteToPdf } from './print-pdf.js';
+import { fullRunFile, fullRunRecord, proofReadiness, copyFullRun } from './book-proof.js';
 
-const FORMATS = { html: 'html', latex: 'tex', pdf: 'pdf', print: 'pdf' };
+const FORMATS = { html: 'html', latex: 'tex', pdf: 'pdf', print: 'pdf', proof: 'pdf' };
 
 /**
  * Build the book whose master is `masterRel`. format: 'html' | 'latex' | 'pdf'
@@ -46,10 +51,15 @@ const FORMATS = { html: 'html', latex: 'tex', pdf: 'pdf', print: 'pdf' };
  * document (render-service.js#renderBook, the session's own render service,
  * so the vault's trust applies as in reading view) printed by print-pdf.js,
  * each chapter from a new page, no TeX. It needs `renderService`,
- * `sessionId` and `callerToken`; the others do not.
+ * `sessionId` and `callerToken`; the others do not. Or 'proof': the
+ * `chapter` (its vault path) typeset alone, LaTeX's \includeonly, every other
+ * chapter's numbers from the last full PDF's .aux files — refused, saying
+ * why, when there is no full run to number from. `bookMap` (HTML only; the
+ * parity scenario's): the engine's book map, returned as `bookMap` and
+ * written beside the output.
  * @returns {Promise<{ output: string, outputRel: string|null, warnings: Array<{path, line, text}>, engine?, reason? }>}
  */
-export async function exportBook({ vaults, indexer, masterRel, format, trusted = false, renderService = null, sessionId = null, callerToken = null }) {
+export async function exportBook({ vaults, indexer, masterRel, format, trusted = false, renderService = null, sessionId = null, callerToken = null, chapter = null, bookMap = false }) {
 	if (!FORMATS[format]) throw new Error(`A book is built as HTML, LaTeX or PDF, not "${format}"`);
 	const masterAbs = vaults.resolve(masterRel);
 	const masterText = fs.readFileSync(masterAbs, 'utf8');
@@ -105,10 +115,19 @@ export async function exportBook({ vaults, indexer, masterRel, format, trusted =
 		return { output, outputRel: rel(output), warnings: place(warnings) };
 	}
 
+	// BibTeX looks in every folder a bibliography names: the master's, each
+	// chapter's own (it ADDS for that chapter, D3), the configured ones.
+	const bibDirs = () => [...new Set([
+		...bibliographyDirs(masterText, masterDir, [...configuredBibliographies(cwd), ...bibliography]),
+		...chapterAbs.flatMap((abs) => bibliographyDirs(fs.readFileSync(abs, 'utf8'), path.dirname(abs))),
+	])];
+	const title = master.title || base;
+
 	const figures = figureCache({ root: vaults.root, trusted });
-	const engineFigures = { cacheDir: figures.cacheDir, copyFigures: true };
+	const engineFigures = { cacheDir: figures.cacheDir, copyFigures: true, ...figureEngine(trusted) };
 	const explained = (warnings) => place(explainFiguresWarnings(warnings, { restricted: !trusted }));
 	const output = path.join(outDir, `${base}.${format === 'html' ? 'html' : 'tex'}`);
+	let work = null;   // a proof's own folder
 	try {
 		if (format === 'html') {
 			// One page per chapter (D4, engine piece 2ac7048): asked for
@@ -125,25 +144,43 @@ export async function exportBook({ vaults, indexer, masterRel, format, trusted =
 			}
 			await clearFigures(vaults, output);
 			const started = Date.now();
-			const { warnings } = await runWorker({ file: masterAbs, options: { ...options, ...engineFigures, to: 'html', output, htmlLayout: 'split' }, cwd, callouts, vault });
+			const built = await runWorker({ file: masterAbs, options: { ...options, ...engineFigures, to: 'html', output, htmlLayout: 'split', ...(bookMap ? { bookMap: true } : {}) }, cwd, callouts, vault });
 			const index = path.join(outDir, base, 'index.html');
 			const split = fs.existsSync(index) && fs.statSync(index).mtimeMs >= started - 1000;
-			const built = split ? index : output;
-			return { output: built, outputRel: rel(built), pages: split, warnings: explained(warnings) };
+			const page = split ? index : output;
+			return { output: page, outputRel: rel(page), pages: split, warnings: explained(built.warnings), ...(bookMap ? { bookMap: built.bookMap } : {}) };
+		}
+		if (format === 'proof') {
+			const index = chapters.findIndex((c) => c.resolved === chapter);
+			if (index < 0) throw new Error(`${chapter ? baseName(chapter) : 'The open note'} is not a chapter of ${title} — open a chapter to proof it`);
+			const ready = proofReadiness({ tex: output, names, title, outDir, base });
+			if (!ready.ok) throw new Error(ready.message);
+			// In a folder of its own, from a COPY of the full run's .aux files, so
+			// the full run's build/ is never touched: LaTeX typesets the chapter
+			// alone and takes the others' numbers and pages from them.
+			work = fs.mkdtempSync(path.join(os.tmpdir(), 'clew-proof-'));
+			copyFullRun({ tex: output, names, work });
+			const proofTex = path.join(work, path.basename(output));
+			const { warnings } = await runWorker({ file: masterAbs, options: { ...options, ...engineFigures, to: 'latex', output: proofTex, latexLayout: 'include', includeOnly: [index + 1] }, cwd, callouts, vault });
+			const { pdf, engine, reason } = await compilePdf(proofTex, masterDir, bibDirs());
+			const proof = path.join(outDir, `${base} (proof, ${baseName(chapter)}).pdf`);
+			fs.copyFileSync(pdf, proof);
+			return { output: proof, outputRel: rel(proof), engine, reason, chapter: index + 1, fullRunAt: ready.record.at, warnings: explained(warnings) };
 		}
 		await clearFigures(vaults, output);
-		const { warnings } = await runWorker({ file: masterAbs, options: { ...options, ...engineFigures, to: 'latex', output }, cwd, callouts, vault });
+		// A PDF is the FULL RUN a proof numbers from: the include layout, and
+		// its record written only once it compiled (none while it runs).
+		const full = format === 'pdf';
+		if (full) fs.rmSync(fullRunFile(outDir, base), { force: true });
+		const { warnings } = await runWorker({ file: masterAbs, options: { ...options, ...engineFigures, to: 'latex', output, ...(full ? { latexLayout: 'include' } : {}) }, cwd, callouts, vault });
 		if (format === 'latex') return { output, outputRel: rel(output), warnings: explained(warnings) };
-		// BibTeX looks in every folder a bibliography names: the master's, each
-		// chapter's own (it ADDS for that chapter, D3), the configured ones.
-		const configured = [...configuredBibliographies(cwd), ...bibliography];
-		const bibDirs = [...new Set([
-			...bibliographyDirs(masterText, masterDir, configured),
-			...chapterAbs.flatMap((abs) => bibliographyDirs(fs.readFileSync(abs, 'utf8'), path.dirname(abs))),
-		])];
-		const { pdf, engine, reason } = await compilePdf(output, masterDir, bibDirs);
+		const { pdf, engine, reason } = await compilePdf(output, masterDir, bibDirs());
+		fs.writeFileSync(fullRunFile(outDir, base), JSON.stringify(fullRunRecord(names), null, '\t') + '\n');
 		return { output: pdf, outputRel: rel(pdf), engine, reason, warnings: explained(warnings) };
 	} finally {
-		figures.done([figuresFolder(output)]);
+		figures.done([figuresFolder(work ? path.join(work, path.basename(output)) : output)]);
+		if (work) fs.rmSync(work, { recursive: true, force: true });
 	}
 }
+
+const baseName = (p) => path.basename(p).replace(/\.(md|jmd)$/i, '');

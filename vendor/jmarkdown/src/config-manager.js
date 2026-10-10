@@ -130,7 +130,13 @@ export const DEFAULT_CONFIG = {
 	// Copy each cached figure an output refers to into `<output>-figures/`
 	// beside it, and refer to the copy (figure-cache.js), so a kept .tex or
 	// .html stands on its own wherever the cache is. Config or host only.
-	'Copy figures': false
+	'Copy figures': false,
+	// What draws TikZ and MetaPost figures (figure-engine.js): 'external' (the
+	// installed lualatex/dvisvgm/mpost/mptopdf, as always), 'auto' or 'wasm'
+	// (mp-tikz-wasm, in-process, from the release dist/ at `MP-TikZ dist`).
+	// Config or host only.
+	'Figure engine': 'external',
+	'MP-TikZ dist': null
 };
 
 class ConfigManager {
@@ -375,6 +381,12 @@ class ConfigManager {
 			case "Copy_figures":
 				// Config or host only (figure-cache.js), like Cache directory.
 				addWarning('Copy figures: copying the figures beside the output is set in .jmarkdown/config.json or by the host, not in a document header — ignored');
+				break;
+			case "Figure_engine":
+			case "MP-TikZ_dist":
+				// Config or host only (figure-engine.js): what the build runs is
+				// the host's to say, not the document's.
+				addWarning(`${formattedKey.replace(/_/g, ' ')}: the figure engine is set in .jmarkdown/config.json or by the host, not in a document header — ignored`);
 				break;
 			case "Callouts":
 				// Config only (src/callouts.js): a definition is an object, which

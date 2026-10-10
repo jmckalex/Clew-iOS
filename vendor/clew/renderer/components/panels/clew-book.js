@@ -117,7 +117,7 @@ export class ClewBook extends ClewElement {
 		totals.title = 'Words of prose: front matter, code, maths and comments are not counted.';
 		frag.append(totals);
 		frag.append(this.#addButton(master, active, entry, editable, order));
-		frag.append(this.#build(master, resolved));
+		frag.append(this.#build(master, resolved, active));
 		this.replaceChildren(frag);
 	}
 
@@ -241,8 +241,8 @@ export class ClewBook extends ClewElement {
 		return el;
 	}
 
-	/** Build (book-mode.md §5) and what the last build said. */
-	#build(master, resolved) {
+	/** Build (book-mode.md §5), a proof of the open chapter, and what the last build said. */
+	#build(master, resolved, active) {
 		const box = document.createElement('div');
 		box.className = 'book-build';
 		const row = document.createElement('div');
@@ -262,6 +262,23 @@ export class ClewBook extends ClewElement {
 			row.append(button);
 		}
 		box.append(row);
+		// A proof (phase 3): the open chapter alone, LaTeX's \includeonly,
+		// numbered from the book's last full PDF — offered only while a chapter
+		// of THIS book is the active note.
+		const at = active && active !== master ? resolved.indexOf(active) : -1;
+		if (at >= 0 && !dangling) {
+			const proof = document.createElement('div');
+			proof.className = 'book-build-row book-proof-row';
+			proof.append('Proof: ');
+			const button = document.createElement('button');
+			button.className = 'book-build-button';
+			button.dataset.format = 'proof';
+			button.textContent = `${baseName(active)} (ch. ${at + 1})`;
+			button.title = 'Typeset this chapter alone (LaTeX\'s \\includeonly), every other chapter numbered from the book\'s last full PDF — build the PDF once first';
+			button.addEventListener('click', () => buildBook(master, 'proof', { chapter: active }));
+			proof.append(button);
+			box.append(proof);
+		}
 		const last = bookBuilds.get(master);
 		if (last) {
 			const said = document.createElement('div');

@@ -102,6 +102,26 @@ function layoutPolicy(value) {
 /** 'split' when a book is to be written as pages (book-pages.js), else 'single'. */
 export function bookLayout() { return book ? book.layout : 'single'; }
 
+// `LaTeX layout:` (the master's header) or processFile's `latexLayout` option:
+// 'single' (one .tex, the default) or 'include' (book-latex.js: a master .tex
+// that \include's one file per chapter).
+function latexLayoutPolicy(value) {
+	const raw = Array.isArray(value) ? value.join(' ') : value;
+	if (raw == null || String(raw).trim() === '') return 'single';
+	const v = norm(raw);
+	if (v === 'include' || v === 'single') return v;
+	addWarning(`book: \`LaTeX layout: ${String(raw).trim()}\` is neither "single" nor "include" — one .tex`);
+	return 'single';
+}
+
+/** 'include' when a book's LaTeX is to be written a file per chapter (book-latex.js), else 'single'. */
+export function bookLatexLayout() { return book ? book.latexLayout : 'single'; }
+
+// The two lines that bracket a chapter's LaTeX when it is to go in a file of its
+// own (book-latex.js cuts the document at them). Written only then.
+export const includeStart = (n) => `%% jmd:include-start ${n}\n`;
+export const includeEnd = (n) => `%% jmd:include-end ${n}\n`;
+
 // A `Numbering` value read, or null when it is neither policy. Unset is the default.
 function parseNumbering(raw) {
 	if (raw == null || String(raw).trim() === '') return 'per chapter';
@@ -167,7 +187,7 @@ const HEADER_KEYS = [
 	'Biblify defer', 'Headings', 'Numbering', 'Load extensions', 'Load directives',
 	'Load javascript', 'Load environments', 'Optionals', 'Inline comment', 'Custom element',
 	'Smart typography', 'Pandoc citations', 'Block elements', 'Silence warnings',
-	'Document class', 'Class options', 'Heading base', 'Chapters', 'Book', 'HTML layout',
+	'Document class', 'Class options', 'Heading base', 'Chapters', 'Book', 'HTML layout', 'LaTeX layout',
 ];
 // Built on first use, not at load: theorems.js and numbered-environments.js
 // import this module from inside config-manager's own import graph, so
@@ -320,7 +340,7 @@ function chapterLines(body) {
  * is processFile's option (a host's list); otherwise the body's
  * `@chapter+(path)` lines name them.
  */
-export function prepareBook(body, { chapters: hostChapters = null, masterDir, isLatex = false, numbering = null, htmlLayout = null } = {}) {
+export function prepareBook(body, { chapters: hostChapters = null, masterDir, isLatex = false, numbering = null, htmlLayout = null, latexLayout = null } = {}) {
 	book = null;
 	const fromHost = Array.isArray(hostChapters) && hostChapters.length > 0;
 	let pieces = chapterLines(body);
@@ -335,7 +355,8 @@ export function prepareBook(body, { chapters: hostChapters = null, masterDir, is
 
 	book = { masterDir, chapters: [], isLatex, numbering: numberingPolicy(numbering ?? masterSetting('Numbering')),
 		lang: languageTag(configManager.get('Lang')) || 'en',
-		layout: layoutPolicy(htmlLayout ?? masterSetting('HTML layout')) };
+		layout: layoutPolicy(htmlLayout ?? masterSetting('HTML layout')),
+		latexLayout: latexLayoutPolicy(latexLayout ?? masterSetting('LaTeX layout')) };
 	// A book's # headings are its chapters: a master naming no class is a book.
 	// Set before the chapters are read, which compare their own settings with it.
 	if (configManager.get('Document_class') == null) configManager.set('Document class', 'book');
@@ -791,7 +812,10 @@ const chapterToken = {
 			// The chapter's language, for hyphenation: otherlanguage*, whose star
 			// leaves headings ("Chapter 3") in the book's language.
 			const babel = bookBabel();
-			if (token.edge === 'end') return c.babel ? '\\end{otherlanguage*}\n' : '';
+			// In the include layout, each chapter's LaTeX is bracketed for
+			// book-latex.js to cut into its own file. Only then.
+			const inc = book.latexLayout === 'include';
+			if (token.edge === 'end') return (c.babel ? '\\end{otherlanguage*}\n' : '') + (inc ? includeEnd(c.index) : '');
 			if (babel) requirePackage('babel', babel);
 			const language = c.babel ? `\\begin{otherlanguage*}{${c.babel}}\n` : '';
 			// Its macros (MathJax's vocabulary, as the master's have), then an
@@ -799,7 +823,7 @@ const chapterToken = {
 			if (macros.length) { requirePackage('amsmath'); requirePackage('amssymb'); }
 			const defined = macros.map((line) => `${latexMacro(line)}\n`).join('');
 			requirePackage('hyperref');
-			return `${defined}\\phantomsection\\label{jmd-chapter-${c.index}}\n${language}`;
+			return `${inc ? includeStart(c.index) : ''}${defined}\\phantomsection\\label{jmd-chapter-${c.index}}\n${language}`;
 		}
 		if (token.edge === 'end') return `${chapterNotesPlaceholder(c.index)}\n</section>\n`;
 		// The chapter's macros, hidden, before any of its maths (as index.js

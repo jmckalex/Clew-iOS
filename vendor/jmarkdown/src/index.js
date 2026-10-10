@@ -33,7 +33,10 @@ import { tabbingFence, tabbing } from './tabbing.js';
 import { obsidianLinks, obsidianText, obsidianEmbed, setObsidianLinks } from './obsidian-links.js';
 import { escapedCharacters } from './escapes.js';
 import { latexLint, resetLatexLint } from './latex-lint.js';
-import { prepareBook, resetBook, getBook, bookExtension, bookLayout } from './book.js';
+import { prepareBook, resetBook, getBook, bookExtension, bookLayout, bookLatexLayout } from './book.js';
+import { writeLatexInclude, unbracket } from './book-latex.js';
+import { figureEngineWanted, withFigureEngine } from './figure-engine.js';
+import { getBookMap, warnNoLatexBookMap } from './book-map.js';
 import { writeBookPages } from './book-pages.js';
 import { bibliographyFiles } from './bibliographies.js';
 import createMarkdownDemo from './markdown-demo.js';
@@ -118,6 +121,17 @@ if (options.cacheDir != null && options.cacheDir !== '') {
 	configManager.set('Cache directory', path.resolve(process.cwd(), String(options.cacheDir)));
 }
 if (options.copyFigures != null) configManager.set('Copy figures', options.copyFigures === true || String(options.copyFigures).toLowerCase() === 'true');
+// What draws TikZ and MetaPost (figure-engine.js): processFile's
+// `figureEngine` / `mpTikzDist`, the CLI's --figure-engine / --mp-tikz-dist,
+// over the config files' for this build. Unset, the installed tools, as always.
+if (options.figureEngine) configManager.set('Figure engine', String(options.figureEngine));
+if (options.mpTikzDist) configManager.set('MP-TikZ dist', path.resolve(process.cwd(), String(options.mpTikzDist)));
+// The book map (book-map.js): processFile's `bookMap`, the CLI's --book-map.
+// Off unless asked; an HTML build's (LaTeX numbers its own book).
+if (options.bookMap === true || String(options.bookMap).toLowerCase() === 'true') {
+	configManager.set('Book map', true);
+	if (isLatex) warnNoLatexBookMap();
+}
 const markdownFile = filename;
 // In stdin mode, [[file.md]] inclusions and the "Markdown file directory"
 // config (used by mathematica/tikz/template/metadata-header) resolve against
@@ -671,6 +685,8 @@ configManager.set('Output file', outFile ? path.resolve(outFile) : null);
 configManager.set('Biblify.host bibliography', [options.bibliography ?? []].flat().filter(Boolean));
 // A split book's pages (book-pages.js), when it writes them instead of outFile.
 let pages = null;
+// A book's LaTeX a file per chapter (book-latex.js), when it writes them.
+let latexFiles = null;
 
 function writeOutput(text) {
 	if (outFile === null) {
@@ -692,7 +708,7 @@ let markdown_no_metadata = await processYAMLheader(input);
 // other document prepareBook returns null and nothing below changes.
 const bookText = prepareBook(markdown_no_metadata, {
 	chapters: options.chapters ?? options.chapter, masterDir: markdownFileDirectory, isLatex,
-	numbering: options.numbering, htmlLayout: options.htmlLayout });
+	numbering: options.numbering, htmlLayout: options.htmlLayout, latexLayout: options.latexLayout });
 if (bookText !== null) markdown_no_metadata = bookText;
 const inBook = getBook() !== null;
 // A book stamps its own chapter lines (book.js): the spliced stream's lines —
@@ -802,7 +818,12 @@ if (isLatex) {
 	marked.use({ renderer: latexRenderer });
 }
 
-const content = marked.parse(text);
+// With mp-tikz-wasm as the figure engine, the parse is asynchronous, so its
+// walk can fill each figure before rendering (figure-engine.js). Otherwise
+// exactly the parse there always was.
+const content = figureEngineWanted()
+	? await withFigureEngine(() => marked.parse(text, { async: true }))
+	: marked.parse(text);
 
 // Index marks whose index never prints are silently lost in both outputs —
 // collect the warning now that the whole document has been parsed.
@@ -819,7 +840,17 @@ if (isLatex) {
 	// document uses grouping/placement — otherwise notes were plain \footnote{}s).
 	const latexBody = fillEndnotes(content, 'latex');
 	const latex = options.fragment ? latexBody : processLatexTemplate(latexBody);
-	writeOutput(latex);
+	// A book in the include layout (book-latex.js): a master .tex and a file
+	// per chapter. Without an output file or a full document, one .tex as
+	// always, its chapter brackets taken out.
+	const includeOnly = [options.includeOnly ?? []].flat().filter(Boolean);
+	if (bookLatexLayout() === 'include' && !options.fragment && outFile !== null) {
+		latexFiles = writeLatexInclude(latex, outFile, includeOnly);
+	} else {
+		if (bookLatexLayout() === 'include') addWarning('book: `LaTeX layout: include` needs an output file and a full document — written as one .tex');
+		if (includeOnly.length) addWarning('book: --include-only needs `LaTeX layout: include` — ignored');
+		writeOutput(bookLatexLayout() === 'include' ? unbracket(latex) : latex);
+	}
 } else {
 	// HTML output: full pipeline with post-processing, template, and inverse search.
 
@@ -896,7 +927,10 @@ if (isLatex) {
 	// during the run — a short stderr summary, like LaTeX's end-of-run nags.
 	reportWarnings();
 
-	return pages ? { outFile, isLatex, pages } : { outFile, isLatex };
+	const result = pages ? { outFile, isLatex, pages } : { outFile, isLatex };
+	if (getBookMap()) result.bookMap = getBookMap();
+	if (latexFiles) result.latexFiles = latexFiles;
+	return result;
 }
 
 // ===========================================================================
@@ -963,6 +997,11 @@ if (isCliEntry) {
 		.option('--obsidian-links', 'Read Obsidian [[links]] and ![[image]] embeds (off by default)')
 		.option('--cache-dir <dir>', 'Keep the figures the engine makes (MetaPost/, TiKZ/, mermaid/, …) under this folder instead of beside the note')
 		.option('--copy-figures', 'Copy each figure the output uses into <output>-figures/ beside it, and refer to the copy')
+		.option('--book-map', 'Write every label\'s number to <output>-bookmap.json (HTML builds)')
+		.option('--latex-layout <layout>', 'A book\'s LaTeX: single (one .tex, the default) or include (a master .tex that \\include\'s a file per chapter)')
+		.option('--include-only <chapter>', 'With --latex-layout include: typeset only this chapter (repeatable), for a quick proof', collectOption, [])
+		.option('--figure-engine <engine>', 'What draws TikZ and MetaPost: external (the installed tools, the default), auto or wasm (mp-tikz-wasm)')
+		.option('--mp-tikz-dist <dir>', 'The mp-tikz-wasm release dist/ folder, for --figure-engine auto or wasm')
 		.action(async (filename, options) => {
 			await processFile(filename, { ...program.opts(), ...options });
 		});
@@ -982,6 +1021,8 @@ if (isCliEntry) {
 		.option('--bibliography <file>', 'Add a bibliography file for every build, as a configured one (repeatable)', collectOption, [])
 		.option('--cache-dir <dir>', 'Keep the figures the engine makes under this folder instead of beside the note')
 		.option('--copy-figures', 'Copy each figure the output uses into <output>-figures/ beside it, and refer to the copy')
+		.option('--figure-engine <engine>', 'What draws TikZ and MetaPost: external (the installed tools, the default), auto or wasm (mp-tikz-wasm)')
+		.option('--mp-tikz-dist <dir>', 'The mp-tikz-wasm release dist/ folder, for --figure-engine auto or wasm')
 		.action(async (filename, options) => {
 			const { startWatch } = await import('./watch.js');
 			await startWatch(filename, options);

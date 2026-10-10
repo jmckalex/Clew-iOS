@@ -89,6 +89,14 @@ class ClewSettingsView extends ClewElement {
 				this.#hint('Automatic reads the exported document: one that loads fontspec, unicode-math, '
 					+ 'polyglossia or Lua code (a \\setmainfont in your jmarkdown config, say) is compiled with '
 					+ 'LuaLaTeX, anything else with pdfLaTeX. Choose an engine here for what that cannot see.'),
+				this.#selectRow('TikZ and MetaPost figures in exports', 'exportFigureEngine',
+					[['external', 'Your TeX installation'], ['auto', 'Clew\'s built-in TeX']]),
+				this.#hint('For a note or book exported as HTML, LaTeX or PDF. Clew\'s built-in TeX is the '
+					+ 'one the preview draws with, and needs no TeX installed; a figure naming a font it cannot '
+					+ 'find goes to your installation instead. It lacks some packages your installation may '
+					+ 'have (siunitx, for one), and a figure that needs one shows an error. In a vault '
+					+ `${DEVICE} does not trust, the built-in TeX always draws the figures, so that vault's TeX `
+					+ 'never runs on your installation.'),
 				this.#textRow('Shell panel font', 'shellFont', 'e.g. MesloLGS NF — blank for the default'),
 				this.#hint('A monospace family for the shell panel — your terminal\'s, say. Blank uses '
 					+ 'Clew\'s monospace font. Prompt symbols (Powerline and Nerd Font glyphs) come from '

@@ -41,6 +41,11 @@ export function recordLabel(key, info) {
 	labels[key] = info;
 }
 
+// Every recorded label, [key, info] in recording order (book-map.js).
+export function labelEntries() {
+	return Object.entries(labels);
+}
+
 // Look up a recorded target, or undefined if the key is unknown.
 export function lookupLabel(key) {
 	return labels[key];

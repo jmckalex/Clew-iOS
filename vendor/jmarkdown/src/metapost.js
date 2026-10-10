@@ -33,6 +33,7 @@ import { registerBlockEnvironment } from './begin-end-core.js';
 import { addWarning } from './warnings.js';
 import { escapeLatexPath } from './latex-graphics.js';
 import { texCachePath, htmlCachePath, compileInRunDir, cacheDir } from './figure-cache.js';
+import { figureJobFor } from './figure-engine.js';
 
 const MP_DIR_NAME = 'MetaPost';
 
@@ -120,9 +121,18 @@ function imgTag(dir, svgName, attrs) {
 // to SVG PATHS — labels then render identically everywhere, exactly as the
 // TikZ pipeline's do (same dvisvgm, same libgs configuration). If dvisvgm
 // is unavailable, the old backend still runs, with a warning.
-function renderMetapostHTML(source, attrs) {
+function renderMetapostHTML(source, attrs, token) {
 	const dir = metapostDir();
-	if (attrs?.['empty-cache']) emptyCache(dir);
+	// Filled by mp-tikz-wasm (figure-engine.js), when it is the engine.
+	const job = token?.figureJob;
+	if (job && !job.done) job.external();
+	if (job?.result?.files) return job.result.files.map((svg) => imgTag(dir, svg, attrs)).join('\n');
+	if (job?.result?.error) {
+		addWarning('MetaPost diagram failed to compile (mp-tikz-wasm) — see the inline error box');
+		return metapostErrorHTML(job.result.error);
+	}
+	// With a job, `empty-cache` emptied the folder before any figure was filled.
+	if (!job && attrs?.['empty-cache']) emptyCache(dir);
 
 	const body = wrapMetapost(source);
 	const fileContents = `prologues := 3;\noutputtemplate := "%j-%c.mps";\n${body}\n`;
@@ -178,9 +188,16 @@ function renderMetapostHTML(source, attrs) {
 }
 
 // LaTeX: convert the source to a cached PDF via mptopdf, \includegraphics it.
-function renderMetapostLatex(source, attrs) {
+function renderMetapostLatex(source, attrs, token) {
 	const dir = metapostDir();
-	if (attrs?.['empty-cache']) emptyCache(dir);
+	const job = token?.figureJob;
+	if (job && !job.done) job.external();
+	if (job?.result?.error) {
+		addWarning('MetaPost diagram failed to compile for LaTeX (mp-tikz-wasm) — skipped');
+		return '';
+	}
+	if (job?.result?.files) return latexIncludes(dir, job.result.files);
+	if (!job && attrs?.['empty-cache']) emptyCache(dir);
 
 	const body = wrapMetapost(source);
 	// Hash a PDF-tagged variant so LaTeX and HTML cache entries never collide.
@@ -215,6 +232,11 @@ function renderMetapostLatex(source, attrs) {
 		addWarning('MetaPost (LaTeX) produced no PDF — skipped');
 		return '';
 	}
+	return latexIncludes(dir, pdfs);
+}
+
+// The cached PDFs, \includegraphics'd one under another.
+function latexIncludes(dir, pdfs) {
 	requirePackage('adjustbox', 'export'); // `max width` for \includegraphics (see mermaid.js)
 	const includes = pdfs
 		.map(pdf => `\\includegraphics[max width=\\linewidth]{${escapeLatexPath(texCachePath(path.join(dir, pdf)))}}`)
@@ -228,8 +250,20 @@ function renderMetapostLatex(source, attrs) {
 // handler[format] (latex) → html.
 registerBlockEnvironment('metapost', {
 	mode: 'verbatim',
-	html: (ctx) => renderMetapostHTML(ctx.rawText, ctx.attrs),
-	latex: (ctx) => renderMetapostLatex(ctx.rawText, ctx.attrs)
+	html: (ctx) => renderMetapostHTML(ctx.rawText, ctx.attrs, ctx.token),
+	latex: (ctx) => renderMetapostLatex(ctx.rawText, ctx.attrs, ctx.token)
+});
+
+// Its job for mp-tikz-wasm (figure-engine.js), made only when that is the engine:
+// the wrapped source, the format, the folder, and `empty-cache` done first.
+figureJobFor('metapost', (token) => {
+	const dir = metapostDir();
+	const job = { kind: 'metapost', body: wrapMetapost(token.rawText), format: global.isLatex ? 'pdf' : 'svg', dir };
+	job.use = (files) => { job.result = { files }; job.done = true; };
+	job.fail = (error) => { job.result = { error }; job.done = true; };
+	job.external = () => { job.result = null; job.done = true; };
+	if (token.attrs?.['empty-cache']) job.emptyFirst = () => emptyCache(dir);
+	return job;
 });
 
 export { renderMetapostHTML, renderMetapostLatex };

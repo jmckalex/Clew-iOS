@@ -150,3 +150,56 @@ export function explainFiguresWarnings(warnings, { restricted }) {
 		return `${m[1]}/ beside the export is not one Clew or jmarkdown made, so its figures were not copied there: ${where}. Rename or move ${m[1]}/ and export again.`;
 	});
 }
+
+// What draws an export's TikZ and MetaPost (jmarkdown 21dee42, figure-engine.js:
+// processFile's `figureEngine` / `mpTikzDist`). 'external' is the installed
+// tools (lualatex, dvisvgm, mpost, mptopdf), as always; 'auto' is mp-tikz-wasm
+// — the preview's own build — with the tools for a font it cannot find; 'wasm'
+// the library alone. A TRUSTED vault's exports follow the `exportFigureEngine`
+// setting ('external' until the engine also falls back on a missing package:
+// the bundles lack some, siunitx among them, which the tools draw today). A
+// RESTRICTED vault's always get 'wasm', whatever the setting: TeX is a
+// programming language, and the installed lualatex reads any file this user
+// can (measured: `\input{<a file outside the vault>}` in a TikZ node drew that
+// file's text into the exported figure), while the library's TeX sees no disk.
+
+/** The values the `exportFigureEngine` setting takes, its default first. */
+export const FIGURE_ENGINE_SETTINGS = ['external', 'auto'];
+
+/**
+ * The processFile options for an export's figures: `{}` (the installed tools,
+ * no option at all) or `{ figureEngine, mpTikzDist }`. `dist` is the staged
+ * mp-tikz-wasm (paths.js#mptikzAssets — the build the preview draws with).
+ */
+export function figureEngineOptions({ trusted, dist, setting }) {
+	if (!trusted) return { figureEngine: 'wasm', mpTikzDist: dist };
+	return setting === 'auto' ? { figureEngine: 'auto', mpTikzDist: dist } : {};
+}
+
+/**
+ * The programs the engine runs over a figure's TeX (tikz.js, metapost.js; a
+ * test holds this to the vendored sources).
+ */
+export const TEX_TOOLS = ['lualatex', 'dvisvgm', 'mpost', 'mptopdf'];
+
+/**
+ * A folder of stand-ins for TEX_TOOLS that refuse, put FIRST on a restricted
+ * export's PATH. 'wasm' is not enough on its own: when the library will not
+ * load, or a figure throws in it, the engine falls back to the installed tools
+ * (measured: a dist with no index.js drew the \input above with lualatex).
+ * With these on PATH that figure is an error box naming why. Only the engine's
+ * worker gets them — compilePdf's latexmk is the user's TeX by nature, and a
+ * PDF via LaTeX typesets the document's own TeX, its TikZ included. POSIX
+ * only: Windows finds programs by extension (.exe), which a script is not —
+ * null there, and the PATH unchanged.
+ */
+export function texRefusalDir(dir, platform = process.platform) {
+	if (platform === 'win32') return null;
+	fs.mkdirSync(dir, { recursive: true });
+	for (const tool of TEX_TOOLS) {
+		const file = path.join(dir, tool);
+		fs.writeFileSync(file, `#!/bin/sh\necho "${tool} was not run: in a vault this device does not trust, an export's figures are drawn by Clew's built-in TeX only" >&2\nexit 1\n`);
+		fs.chmodSync(file, 0o755);
+	}
+	return dir;
+}

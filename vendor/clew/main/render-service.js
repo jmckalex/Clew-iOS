@@ -47,8 +47,16 @@ export function toolchainPath() {
 		? []
 		: ['/Library/TeX/texbin', '/opt/homebrew/bin', '/usr/local/bin'];
 	const current = (process.env.PATH ?? '').split(path.delimiter);
-	return [...current, ...extras.filter((dir) => !current.includes(dir))].join(path.delimiter);
+	const dirs = [...current, ...extras.filter((dir) => !current.includes(dir))];
+	// CLEW_SMOKE_NO_TEX (scenarios only): a machine with no TeX installed —
+	// every folder holding a TeX program is left off, so exports, figures and
+	// PDF builds see what such a machine sees (smoke/export-figures-scenario.js).
+	if (process.env.CLEW_SMOKE && process.env.CLEW_SMOKE_NO_TEX) {
+		return dirs.filter((dir) => !NO_TEX_PROGRAMS.some((p) => fs.existsSync(path.join(dir, p)))).join(path.delimiter);
+	}
+	return dirs.join(path.delimiter);
 }
+const NO_TEX_PROGRAMS = ['lualatex', 'latexmk', 'mpost', 'dvisvgm', 'mptopdf', 'pdflatex'];
 
 /**
  * `fork`, with the one failure that needs explaining translated. The render

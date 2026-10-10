@@ -46,7 +46,7 @@ import { calloutsEnv } from './callout-types.js';
 import { iconTable } from './callout-files.js';
 import { chooseLatexEngine, engineName, latexmkFlag, firstLatexError } from './latex-engine.js';
 import { identityKey } from './vault-trust.js';
-import { figuresFolder, figuresState, otherOutputs, vaultCacheDir, markUsed, pruneExportCache, explainFiguresWarnings } from './export-cache.js';
+import { figuresFolder, figuresState, otherOutputs, vaultCacheDir, markUsed, pruneExportCache, explainFiguresWarnings, figureEngineOptions, texRefusalDir } from './export-cache.js';
 
 const WORKER_PATH = paths.engineWorker;
 // Clew's own export worker (engine/export-worker.mjs): the engine's worker
@@ -60,6 +60,23 @@ export function restrictedExportDir() {
 	fs.mkdirSync(path.join(dir, '.jmarkdown'), { recursive: true });
 	fs.writeFileSync(path.join(dir, '.jmarkdown', 'config.json'), JSON.stringify({ 'Run note code': false }, null, '\t') + '\n');
 	return dir;
+}
+
+/**
+ * What draws this export's TikZ and MetaPost (export-cache.js#
+ * figureEngineOptions): a trusted vault's as the `exportFigureEngine` setting
+ * says, a restricted vault's always the staged mp-tikz-wasm alone.
+ */
+export function figureEngine(trusted) {
+	return figureEngineOptions({ trusted, dist: paths.mptikzAssets, setting: settings.get('exportFigureEngine') });
+}
+
+// A restricted vault's worker finds refusing stand-ins for the TeX tools
+// first on its PATH (export-cache.js#texRefusalDir), so its figures' TeX never
+// reaches the installed lualatex, even where the engine would fall back to it.
+function workerPath(restricted) {
+	const refuse = restricted ? texRefusalDir(path.join(paths.restrictedExport, 'no-tex')) : null;
+	return refuse ? [refuse, toolchainPath()].join(path.delimiter) : toolchainPath();
 }
 
 /**
@@ -79,7 +96,7 @@ export function runWorker({ file, options, cwd, callouts = '', vault = null }) {
 			// LaTeX; CLEW_CALLOUTS hands it this vault's custom types, as the
 			// preview does — a `Callouts` key in the user's own config wins.
 			env: {
-				...process.env, PATH: toolchainPath(), CLEW_CALLOUTS: callouts,
+				...process.env, PATH: workerPath(vault?.restricted === true), CLEW_CALLOUTS: callouts,
 				...(vault ? { CLEW_VAULT_ROOT: vault.root, CLEW_VAULT_RESTRICTED: vault.restricted ? '1' : '0' } : {}),
 			},
 		});
@@ -90,7 +107,10 @@ export function runWorker({ file, options, cwd, callouts = '', vault = null }) {
 			if (msg?.type === 'ready') {
 				child.send({ type: 'build', file, options });
 			} else if (msg?.type === 'done') {
-				resolve({ output: msg.output, warnings: Array.isArray(msg.warnings) ? msg.warnings : [] });
+				resolve({
+					output: msg.output, warnings: Array.isArray(msg.warnings) ? msg.warnings : [],
+					bookMap: msg.bookMap ?? null, latexFiles: msg.latexFiles ?? null,
+				});
 			} else if (msg?.type === 'error') {
 				reject(new Error(msg.message));
 			}
@@ -165,7 +185,9 @@ export async function clearFigures(vaults, output) {
 }
 
 const TEX_DIRS = ['/Library/TeX/texbin', '/usr/local/bin', '/opt/homebrew/bin'];
-const findTex = (name) => TEX_DIRS.map((dir) => path.join(dir, name)).find((p) => fs.existsSync(p)) ?? null;
+// CLEW_SMOKE_NO_TEX (scenarios only; render-service.js#toolchainPath): none here either.
+const findTex = (name) => (process.env.CLEW_SMOKE && process.env.CLEW_SMOKE_NO_TEX ? null
+	: TEX_DIRS.map((dir) => path.join(dir, name)).find((p) => fs.existsSync(p)) ?? null);
 
 /**
  * Compile the exported .tex to a PDF with the engine it needs
@@ -287,7 +309,7 @@ export async function exportNote({ win, vaults, sessionId, callerToken = null, r
 	try {
 		figures = figureCache({ root: vaults.root, trusted });
 		if (!build) await clearFigures(vaults, written);
-		const options = { to: format === 'html' ? 'html' : 'latex', output: written, normalSyntax, bibliography, cacheDir: figures.cacheDir, copyFigures: true };
+		const options = { to: format === 'html' ? 'html' : 'latex', output: written, normalSyntax, bibliography, cacheDir: figures.cacheDir, copyFigures: true, ...figureEngine(trusted) };
 		const built = await runWorker({ file: abs, options, cwd, callouts, vault });
 		const warnings = explainFiguresWarnings(built.warnings, { restricted: !trusted });
 		if (format !== 'pdf') return { output: written, warnings };

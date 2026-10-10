@@ -138,7 +138,14 @@ export function bookToBuild(path) {
 	return bookOfNote(path)?.master ?? null;
 }
 
-const FORMAT_WORDS = { pdf: 'PDF', latex: 'LaTeX', html: 'HTML', print: 'PDF (reading view)' };
+/** The chapter in hand, for a proof: `path` when it is a chapter (not a master) of the book it shows. */
+export function chapterToProof(path) {
+	if (!path || masterEntry(path)) return null;
+	const book = bookOfNote(path);
+	return book ? { master: book.master, chapter: path, number: book.number } : null;
+}
+
+const FORMAT_WORDS = { pdf: 'PDF', latex: 'LaTeX', html: 'HTML', print: 'PDF (reading view)', proof: 'a proof of one chapter (PDF)' };
 
 /** Each book's last build this session: master → { format, output, warnings, at }. */
 export const bookBuilds = new (class extends Emitter {
@@ -154,12 +161,13 @@ export const bookBuilds = new (class extends Emitter {
  * becomes the one its chapters show (D10); the notice names the output and
  * any warnings, which the Book panel lists by chapter and line.
  */
-export async function buildBook(master, format) {
+export async function buildBook(master, format, { chapter = null } = {}) {
 	editorPool.flushAll();
 	const name = bookTitle(master);
-	notice(`Building ${name} as ${FORMAT_WORDS[format]}…`, 2500);
+	const chapterName = chapter ? baseName(chapter) : null;
+	notice(chapter ? `Proofing “${chapterName}” of ${name}…` : `Building ${name} as ${FORMAT_WORDS[format]}…`, 2500);
 	try {
-		const result = await ipc.invoke(CH.EXPORT_BOOK, { master, format });
+		const result = await ipc.invoke(CH.EXPORT_BOOK, { master, format, ...(chapter ? { chapter } : {}) });
 		workspaceStore.setRecentBook(master);
 		const warnings = Array.isArray(result?.warnings) ? result.warnings : [];
 		bookBuilds.set(master, { format, output: result.outputRel ?? result.output, warnings, at: Date.now() });
@@ -180,14 +188,18 @@ export async function buildBook(master, format) {
 		const restrictedNote = restrictedPages
 			? ' Not opened in your browser: this vault is restricted, and the pages may carry its notes\' own scripts — they are shown in Finder.'
 			: '';
+		// A proof says which full run its other chapters' numbers come from.
+		const done = format === 'proof'
+			? `Proofed “${chapterName}” (chapter ${result.chapter}) → ${where}, numbered from the full PDF of ${String(result.fullRunAt ?? '').slice(0, 16).replace('T', ' ')}`
+			: `Built ${name} → ${where}`;
 		notice((warnings.length
-			? `Built ${name} → ${where} — ${warnings.length} warning${warnings.length === 1 ? '' : 's'} (the Book panel lists them).`
-			: `Built ${name} → ${where}.`) + restrictedNote, restrictedNote ? 12000 : 6000);
+			? `${done} — ${warnings.length} warning${warnings.length === 1 ? '' : 's'} (the Book panel lists them).`
+			: `${done}.`) + restrictedNote, restrictedNote ? 12000 : 6000);
 		return result;
 	} catch (err) {
 		const message = String(err?.message ?? err).replace(/^Error invoking remote method '[^']+': (Error: )?/, '');
 		bookBuilds.set(master, { format, output: null, error: message, warnings: [], at: Date.now() });
-		notice(`${name} was not built: ${message}`, 8000);
+		notice(chapter ? `“${chapterName}” was not proofed: ${message}` : `${name} was not built: ${message}`, chapter ? 12000 : 8000);
 		return null;
 	}
 }
@@ -242,6 +254,15 @@ export function installBooks() {
 			run: (ctx) => { const master = bookToBuild(ctx?.notePath ?? workspaceStore.activeTab()?.path); if (master) buildBook(master, format); },
 		});
 	}
+	registerCommand({
+		id: 'export:book-proof',
+		name: 'Proof this chapter (PDF via LaTeX)',
+		when: (ctx) => chapterToProof(ctx.notePath) !== null,
+		run: (ctx) => {
+			const at = chapterToProof(ctx?.notePath ?? workspaceStore.activeTab()?.path);
+			if (at) buildBook(at.master, 'proof', { chapter: at.chapter });
+		},
+	});
 	registerCommand({
 		id: 'book:show-panel', name: 'Book: show the Book panel',
 		when: (ctx) => ctx.vaultOpen && vaultStore.masters().length > 0,

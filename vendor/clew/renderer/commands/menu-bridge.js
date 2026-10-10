@@ -19,7 +19,7 @@ import { workspaceStore } from '../state/workspace-store.js';
 import { vaultStore } from '../state/vault-store.js';
 import { settingsStore } from '../state/settings-store.js';
 import { bookmarkStore } from '../state/bookmark-store.js';
-import { bookToBuild } from '../books.js';
+import { bookToBuild, chapterToProof } from '../books.js';
 
 export function installMenuBridge() {
 	ipc.on(CH.EV_MENU_COMMAND, ({ id }) => runCommand(id));
@@ -43,6 +43,8 @@ export function installMenuBridge() {
 			bookmarked: ctx.notePath !== null && bookmarkStore.has(ctx.notePath),
 			// File → Export → Book as …: the active note is a master or a chapter.
 			bookActive: bookToBuild(ctx.notePath) !== null,
+			// … → Proof This Chapter: the active note is a chapter.
+			chapterActive: chapterToProof(ctx.notePath) !== null,
 			leftSidebar: !!workspaceStore.state.sidebars.left?.open,
 			rightSidebar: !!workspaceStore.state.sidebars.right?.open,
 			shellOpen: !!workspaceStore.shell.open,
@@ -60,9 +62,10 @@ export function installMenuBridge() {
 	vaultStore.on('vault-changed', push);
 	// A master's chapter list changed: push only when the active note's
 	// standing (in a book or not) did — never a menu rebuild per save.
-	let inBook = false;
+	let inBook = '';
 	vaultStore.on('index-changed', () => {
-		const now = bookToBuild(buildContext().notePath) !== null;
+		const path = buildContext().notePath;
+		const now = `${bookToBuild(path) !== null}${chapterToProof(path) !== null}`;
 		if (now !== inBook) { inBook = now; push(); }
 	});
 	settingsStore.on('settings-changed', push);

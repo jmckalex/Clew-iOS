@@ -70,6 +70,9 @@ export function postProcessHTML(html, options = {}) {
 	number_equations($);
 	number_environments($);
 	process_crossrefs($);
+	// The book map (book-map.js), when asked for: every label's number, read
+	// now that every number is in place. Nothing is computed otherwise.
+	if (bookMapWanted()) makeBookMap($);
 	replace_float_lists($);
 	// Back-of-book index: AFTER heading numbering (locators read the
 	// header-label spans) — collects :index marks, replaces ::Index divs.
@@ -555,6 +558,7 @@ export function beautifyHTML(html) {
 import fs from 'fs';
 import { postprocessor_scripts } from './script-blocks.js';
 import { runInThisContext } from './utils.js';
+import { bookMapWanted, makeBookMap } from './book-map.js';
 
 export function runPostprocessScripts(html) {
 	global.fs = fs;

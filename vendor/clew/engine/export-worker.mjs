@@ -14,7 +14,8 @@
 // over IPC, which carries no functions, and the resolvers are functions; so
 // this worker hands the engine its resolvers itself, and otherwise does
 // exactly what that worker does: import the engine, say ready, run ONE
-// build, report its output and warnings, exit.
+// build, report its output and warnings — and a book's map and LaTeX files
+// when the build made them (processFile's result) — exit.
 //
 //   resolveEmbed(name, { file }) — an image embed resolved as the preview
 //     resolves one (vault-files.js#resolveFileTarget, wikilinks.js's own: by
@@ -86,8 +87,8 @@ process.once('message', async (msg) => {
 	building = msg;
 	try {
 		const options = { ...msg.options, obsidianLinks: { resolveEmbed, resolveLink: () => null } };
-		const { outFile } = await processFile(msg.file, options);
-		if (process.send) process.send({ type: 'done', output: outFile, warnings: getWarnings() });
+		const { outFile, bookMap = null, latexFiles = null } = await processFile(msg.file, options);
+		if (process.send) process.send({ type: 'done', output: outFile, warnings: getWarnings(), bookMap, latexFiles });
 	} catch (err) {
 		if (process.send) process.send({ type: 'error', message: String((err && err.message) || err) });
 	} finally {

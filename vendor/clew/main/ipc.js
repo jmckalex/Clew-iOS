@@ -687,10 +687,13 @@ export function registerIpc() {
 
 	// A book (book-mode.md §5): its master and chapters as one document, into
 	// build/ beside the master.
-	handle(CH.EXPORT_BOOK, async (s, { master, format }) => {
+	// `chapter`: the proof's (format 'proof'); `bookMap`: the engine's map of
+	// an HTML build (the parity scenario's).
+	handle(CH.EXPORT_BOOK, async (s, { master, format, chapter = null, bookMap = false }) => {
 		const result = await exportBook({
 			vaults: s.vaults, indexer: s.indexer, masterRel: master, format, trusted: s.trusted,
 			renderService: s.renderService, sessionId: s.id, callerToken: s.callerToken,
+			chapter: typeof chapter === 'string' ? chapter : null, bookMap: bookMap === true,
 		});
 		if (result?.output) s.vaults.refreshIfInside(result.output);
 		// The renderer opens built pages in the browser only for a vault this
