@@ -31,13 +31,10 @@ import { configManager } from './config-manager.js';
 import { requirePackage } from './preamble.js';
 import { registerBlockEnvironment } from './begin-end-core.js';
 import { addWarning } from './warnings.js';
-import { texCachePath, escapeLatexPath } from './latex-graphics.js';
+import { escapeLatexPath } from './latex-graphics.js';
+import { texCachePath, htmlCachePath, compileInRunDir, cacheDir } from './figure-cache.js';
 
 const MP_DIR_NAME = 'MetaPost';
-
-function ensureDirectoryExists(dirPath) {
-	if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true });
-}
 
 function generateHash(string) {
 	return crypto.createHash('md5').update(string).digest('hex');
@@ -45,29 +42,7 @@ function generateHash(string) {
 
 // The cache directory ('MetaPost/' next to the markdown file), created on demand.
 function metapostDir() {
-	const home = configManager.get('Markdown file directory');
-	const dir = path.join(home, MP_DIR_NAME);
-	ensureDirectoryExists(dir);
-	return dir;
-}
-
-// Delete every file in the cache directory (the `empty-cache` attribute).
-function emptyCache(dir) {
-	for (const file of fs.readdirSync(dir)) {
-		const p = path.join(dir, file);
-		try { if (fs.statSync(p).isFile()) fs.unlinkSync(p); } catch { /* ignore */ }
-	}
-}
-
-// Delete the intermediate files named "<hash>.<ext>" (the .mp source, .log, .mpx,
-// the numeric .1 EPS, …). The kept outputs are "<hash>-N.svg" / "<hash>-N.pdf" — a
-// HYPHEN follows the hash there, so they never match this and survive as the cache.
-function cleanupAux(dir, hash) {
-	for (const f of fs.readdirSync(dir)) {
-		if (f.startsWith(hash + '.')) {
-			try { fs.unlinkSync(path.join(dir, f)); } catch { /* ignore */ }
-		}
-	}
+	return cacheDir(MP_DIR_NAME);
 }
 
 // The cached outputs for a hash: files "<hash>-N.<ext>" in document (figure) order.
@@ -76,16 +51,12 @@ function producedFiles(dir, hash, ext) {
 	return fs.readdirSync(dir).filter(f => re.test(f)).sort();
 }
 
-// Remove any produced outputs for a hash. Used on the ERROR path: mpost in
-// nonstopmode can write a partial "<hash>-N.svg" and still exit non-zero, and
-// leaving it would let the next build cache-hit the broken figure instead of
-// re-reporting the error. cleanupAux only removes the "<hash>." aux files, so the
-// produced (hyphen-suffixed) outputs need this explicit sweep.
-function deleteProduced(dir, hash) {
-	for (const ext of ['svg', 'pdf', 'mps']) {
-		for (const f of producedFiles(dir, hash, ext)) {
-			try { fs.unlinkSync(path.join(dir, f)); } catch { /* ignore */ }
-		}
+// Delete every file in the cache directory (the `empty-cache` attribute). Files
+// only: a run folder another build is compiling in is left alone.
+function emptyCache(dir) {
+	for (const file of fs.readdirSync(dir)) {
+		const p = path.join(dir, file);
+		try { if (fs.statSync(p).isFile()) fs.unlinkSync(p); } catch { /* ignore */ }
 	}
 }
 
@@ -136,7 +107,7 @@ function imgTag(dir, svgName, attrs) {
 			// fall through to a file reference
 		}
 	}
-	return `<img src='${MP_DIR_NAME}/${svgName}'${styleAttr}>`;
+	return `<img src='${htmlCachePath(path.join(dir, svgName))}'${styleAttr}>`;
 }
 
 // HTML: compile the source to SVG (cached), return the <img>(s).
@@ -159,41 +130,45 @@ function renderMetapostHTML(source, attrs) {
 
 	let svgs = producedFiles(dir, hash, 'svg');
 	if (svgs.length === 0) {
-		const mpFile = path.join(dir, `${hash}.mp`);
-		try {
-			fs.writeFileSync(mpFile, fileContents);
-			execFileSync('mpost', ['-interaction=nonstopmode', `${hash}.mp`], { cwd: dir, stdio: 'ignore' });
-			const figures = producedFiles(dir, hash, 'mps');
-			if (figures.length === 0) throw new Error('mpost produced no figures');
+		// Compiled in a run folder of its own (figure-cache.js): only the SVGs
+		// are kept; the run's working files, and anything the document's code
+		// wrote, go with the folder.
+		let failure = null;
+		compileInRunDir(dir, (run) => {
+			const mpFile = path.join(run, `${hash}.mp`);
 			try {
-				// A stale configured path (ghostscript upgrades rotate the
-				// versioned Cellar dir) must not scuttle the conversion.
-				const libgs = configManager.get('TiKZ libgs');
-				const gs = libgs && fs.existsSync(libgs) ? [`--libgs=${libgs}`] : [];
-				for (const figure of figures) {
-					const svgName = figure.replace(/\.mps$/, '.svg');
-					execFileSync('dvisvgm', ['--eps', '--bbox=min', ...gs, '--no-fonts=1', figure, '-o', svgName],
-						{ cwd: dir, stdio: 'ignore' });
+				fs.writeFileSync(mpFile, fileContents);
+				execFileSync('mpost', ['-interaction=nonstopmode', `${hash}.mp`], { cwd: run, stdio: 'ignore' });
+				const figures = producedFiles(run, hash, 'mps');
+				if (figures.length === 0) throw new Error('mpost produced no figures');
+				try {
+					// A stale configured path (ghostscript upgrades rotate the
+					// versioned Cellar dir) must not scuttle the conversion.
+					const libgs = configManager.get('TiKZ libgs');
+					const gs = libgs && fs.existsSync(libgs) ? [`--libgs=${libgs}`] : [];
+					for (const figure of figures) {
+						const svgName = figure.replace(/\.mps$/, '.svg');
+						execFileSync('dvisvgm', ['--eps', '--bbox=min', ...gs, '--no-fonts=1', figure, '-o', svgName],
+							{ cwd: run, stdio: 'ignore' });
+					}
+				} catch {
+					addWarning('dvisvgm unavailable — MetaPost labels may render with substituted fonts');
+					const legacy = `outputformat := "svg";\noutputtemplate := "%j-%c.svg";\n${body}\n`;
+					fs.writeFileSync(mpFile, legacy);
+					execFileSync('mpost', ['-interaction=nonstopmode', `${hash}.mp`], { cwd: run, stdio: 'ignore' });
 				}
-			} catch {
-				addWarning('dvisvgm unavailable — MetaPost labels may render with substituted fonts');
-				const legacy = `outputformat := "svg";\noutputtemplate := "%j-%c.svg";\n${body}\n`;
-				fs.writeFileSync(mpFile, legacy);
-				execFileSync('mpost', ['-interaction=nonstopmode', `${hash}.mp`], { cwd: dir, stdio: 'ignore' });
+				return producedFiles(run, hash, 'svg');
+			} catch (error) {
+				failure = { error, log: readLog(path.join(run, `${hash}.log`), error) };
+				return [];
 			}
-			for (const figure of producedFiles(dir, hash, 'mps')) {
-				try { fs.unlinkSync(path.join(dir, figure)); } catch { /* converted or gone */ }
-			}
-			svgs = producedFiles(dir, hash, 'svg');
-			cleanupAux(dir, hash);
-		} catch (error) {
-			const log = readLog(path.join(dir, `${hash}.log`), error);
-			cleanupAux(dir, hash);
-			deleteProduced(dir, hash);   // don't cache a partial figure from a failed run
+		});
+		if (failure) {
 			addWarning('MetaPost diagram failed to compile (mpost) — see the inline error box');
-			console.error(`Error processing MetaPost: ${error.message}`);
-			return metapostErrorHTML(log);
+			console.error(`Error processing MetaPost: ${failure.error.message}`);
+			return metapostErrorHTML(failure.log);
 		}
+		svgs = producedFiles(dir, hash, 'svg');
 	}
 	if (svgs.length === 0) {
 		addWarning('MetaPost produced no SVG output');
@@ -213,23 +188,28 @@ function renderMetapostLatex(source, attrs) {
 
 	let pdfs = producedFiles(dir, hash, 'pdf');
 	if (pdfs.length === 0) {
-		const mpFile = path.join(dir, `${hash}.mp`);
-		try {
-			fs.writeFileSync(mpFile, body + '\n');
-			// Still a shell string, and safely so: the only argument is a hex hash.
-			// It has to be: TeX Live's mptopdf is a Perl script with no #! line
-			// that starts only through a shell's fallback for such files (it
-			// then re-execs perl itself), so execFile gets ENOEXEC.
-			execSync(`mptopdf "${hash}.mp"`, { cwd: dir, stdio: 'ignore' });
-			pdfs = producedFiles(dir, hash, 'pdf');
-			cleanupAux(dir, hash);
-		} catch (error) {
-			cleanupAux(dir, hash);
-			deleteProduced(dir, hash);   // don't cache a partial figure from a failed run
+		// In a run folder of its own, as the HTML path compiles.
+		let failure = null;
+		compileInRunDir(dir, (run) => {
+			try {
+				fs.writeFileSync(path.join(run, `${hash}.mp`), body + '\n');
+				// Still a shell string, and safely so: the only argument is a hex hash.
+				// It has to be: TeX Live's mptopdf is a Perl script with no #! line
+				// that starts only through a shell's fallback for such files (it
+				// then re-execs perl itself), so execFile gets ENOEXEC.
+				execSync(`mptopdf "${hash}.mp"`, { cwd: run, stdio: 'ignore' });
+				return producedFiles(run, hash, 'pdf');
+			} catch (error) {
+				failure = error;
+				return [];
+			}
+		});
+		if (failure) {
 			addWarning('MetaPost diagram failed to compile for LaTeX (mptopdf) — skipped');
-			console.error(`Error processing MetaPost (LaTeX): ${error.message}`);
+			console.error(`Error processing MetaPost (LaTeX): ${failure.message}`);
 			return '';
 		}
+		pdfs = producedFiles(dir, hash, 'pdf');
 	}
 	if (pdfs.length === 0) {
 		addWarning('MetaPost (LaTeX) produced no PDF — skipped');

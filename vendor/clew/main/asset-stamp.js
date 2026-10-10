@@ -39,7 +39,9 @@ import path from 'node:path';
 
 /** The files whose change means "a different build" — stage-mptikz.js#masterIdentity's list. */
 export const STAMP_FILES = ['index.js', 'mplib.wasm', 'tex.wasm', 'dvisvgm.wasm', 'luatex.wasm',
-	path.join('bundles', 'index.json'), path.join('bundles', 'hot.json')];
+	path.join('bundles', 'index.json'), path.join('bundles', 'hot.json'),
+	// Ghostscript (0.4.0): its URL carries no version, unlike a bundle file's.
+	path.join('ghostscript', 'gs.wasm')];
 
 /** A string that changes whenever the staged build or the app does. */
 export function assetStamp(assetsDir, appVersion = '') {

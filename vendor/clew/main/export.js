@@ -26,6 +26,11 @@
 // (images, Bibliography, includes) from the note's own folder, not the
 // working directory, so the export is otherwise the same (measured: HTML and
 // LaTeX byte-identical from either folder).
+//
+// The figures an export makes the engine render — mermaid, MetaPost, TiKZ,
+// video posters, Mathematica — are cached OUTSIDE the vault and copied beside
+// the output (export-cache.js, figureCache below; the owner's "Outside",
+// 2026-10-06): an export writes nothing in the vault but what was asked for.
 import { dialog } from 'electron';
 import { execFile } from 'node:child_process';
 import { fork } from 'node:child_process';
@@ -40,6 +45,8 @@ import { settings } from './settings.js';
 import { calloutsEnv } from './callout-types.js';
 import { iconTable } from './callout-files.js';
 import { chooseLatexEngine, engineName, latexmkFlag, firstLatexError } from './latex-engine.js';
+import { identityKey } from './vault-trust.js';
+import { figuresFolder, figuresState, otherOutputs, vaultCacheDir, markUsed, pruneExportCache, explainFiguresWarnings } from './export-cache.js';
 
 const WORKER_PATH = paths.engineWorker;
 // Clew's own export worker (engine/export-worker.mjs): the engine's worker
@@ -112,6 +119,51 @@ export function configuredBibliographies(cwd) {
 	return bibliographyList(value).filter((p) => !/^[a-z][a-z0-9+.-]*:\/\//i.test(p)).map((p) => path.resolve(cwd, p));
 }
 
+let exportsRunning = 0;
+
+/**
+ * Where this export's engine keeps the figures it makes — never in the vault
+ * (processFile's `cacheDir`, jmarkdown d134995). A trusted vault's: its folder
+ * in the device's export cache, reused by its later exports and pruned once
+ * no export is running (least recently used first, to EXPORT_CACHE_LIMIT). A
+ * restricted vault's: a temporary folder of this export's own, removed when
+ * it ends, so nothing of it stays anywhere. `done(figures)` ends it, with the
+ * folders the engine copied this export's figures into (markUsed: what they
+ * hold is kept longest); call it once, before any of them is removed.
+ */
+export function figureCache({ root, trusted }) {
+	if (!trusted) {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clew-figures-'));
+		return { cacheDir: dir, done: () => fs.rmSync(dir, { recursive: true, force: true }) };
+	}
+	const dir = vaultCacheDir(paths.exportCache, identityKey(root));
+	fs.mkdirSync(dir, { recursive: true });
+	exportsRunning += 1;
+	return {
+		cacheDir: dir,
+		done: (figures = []) => {
+			for (const f of figures) markUsed(dir, f);
+			exportsRunning -= 1;
+			if (exportsRunning) return;
+			try { pruneExportCache(paths.exportCache); } catch (err) { console.warn('[clew] export cache prune:', err?.message ?? err); }
+		},
+	};
+}
+
+/**
+ * Before an export writes `output`: the `-figures/` folder an earlier one
+ * left goes to the Trash — never deleted — so a diagram since removed leaves
+ * no copy behind. Only a folder the engine MARKED as its own (FIGURES_MARKER),
+ * and only while no other export it serves is there (a note's .tex and .html
+ * share one; a book's pages use it too). A folder of that name the user made
+ * is never touched — the engine leaves it alone too, and warns
+ * (explainFiguresWarnings).
+ */
+export async function clearFigures(vaults, output) {
+	const dir = figuresFolder(output);
+	if (figuresState(dir) === 'marked' && !otherOutputs(output).length) await vaults.trashExported(dir);
+}
+
 const TEX_DIRS = ['/Library/TeX/texbin', '/usr/local/bin', '/opt/homebrew/bin'];
 const findTex = (name) => TEX_DIRS.map((dir) => path.join(dir, name)).find((p) => fs.existsSync(p)) ?? null;
 
@@ -176,7 +228,7 @@ export function compilePdf(texFile, noteDir, bibDirs = [noteDir]) {
  *
  * Prompts for a destination; returns { output } or { canceled: true }.
  */
-export async function exportNote({ win, vaults, sessionId, callerToken = null, relPath, format, outFile, trusted = false, buildApart = false }) {
+export async function exportNote({ win, vaults, sessionId, callerToken = null, relPath, format, outFile, trusted = false }) {
 	const abs = vaults.resolve(relPath);
 	const cwd = trusted ? path.dirname(abs) : restrictedExportDir();
 	// Exports honor the vault's standard-syntax choice, like previews do.
@@ -223,30 +275,30 @@ export async function exportNote({ win, vaults, sessionId, callerToken = null, r
 		return { output: filePath };
 	}
 
-	if (format === 'html') {
-		const { warnings } = await runWorker({ file: abs, options: { to: 'html', output: filePath, normalSyntax, bibliography }, cwd, callouts, vault });
-		return { output: filePath, warnings };
-	}
-
-	// LaTeX (and PDF via LaTeX): build the .tex next to the requested output,
-	// then compile if PDF was asked for; the note's folder is on TEXINPUTS
-	// (compilePdf), so its relative graphics resolve wherever the build runs.
-	// `buildApart` (the clew command, 2026-10-04): a PDF is built in a
-	// temporary folder, removed afterwards, and ONLY the PDF delivered — the
-	// build's .tex/.aux/.log/.fls/.out/.fdb_latexmk never land beside the
-	// note. The menu's export still builds beside its output and leaves them.
-	const build = format === 'pdf' && buildApart ? fs.mkdtempSync(path.join(os.tmpdir(), 'clew-export-')) : null;
+	// HTML, LaTeX, or PDF via LaTeX — the last built in a temporary folder,
+	// removed afterwards, and ONLY the PDF delivered: the build's .tex, .aux,
+	// .log, .fls, .out, .fdb_latexmk and its figures' copies never land beside
+	// it (the clew command's since 2026-10-04; the menu's too since the
+	// figures moved out of the vault). The note's folder is on TEXINPUTS
+	// (compilePdf), so its relative graphics resolve from there.
+	const build = format === 'pdf' ? fs.mkdtempSync(path.join(os.tmpdir(), 'clew-export-')) : null;
+	const written = build ? path.join(build, `${base}.tex`) : filePath;
+	let figures = null;
 	try {
-		const texFile = format === 'latex' ? filePath : build ? path.join(build, `${base}.tex`) : filePath.replace(/\.pdf$/i, '.tex');
-		const { warnings } = await runWorker({ file: abs, options: { to: 'latex', output: texFile, normalSyntax, bibliography }, cwd, callouts, vault });
-		if (format === 'latex') return { output: texFile, warnings };
+		figures = figureCache({ root: vaults.root, trusted });
+		if (!build) await clearFigures(vaults, written);
+		const options = { to: format === 'html' ? 'html' : 'latex', output: written, normalSyntax, bibliography, cacheDir: figures.cacheDir, copyFigures: true };
+		const built = await runWorker({ file: abs, options, cwd, callouts, vault });
+		const warnings = explainFiguresWarnings(built.warnings, { restricted: !trusted });
+		if (format !== 'pdf') return { output: written, warnings };
 		const noteDir = path.dirname(abs);
 		const configured = [...configuredBibliographies(cwd), ...bibliography];
 		const bibDirs = bibliographyDirs(fs.readFileSync(abs, 'utf8'), noteDir, configured);
-		const { pdf, engine, reason } = await compilePdf(texFile, noteDir, bibDirs);
-		if (pdf !== filePath) fs.copyFileSync(pdf, filePath);
+		const { pdf, engine, reason } = await compilePdf(written, noteDir, bibDirs);
+		fs.copyFileSync(pdf, filePath);
 		return { output: filePath, engine, reason, warnings };
 	} finally {
+		figures?.done([figuresFolder(written)]);
 		if (build) fs.rmSync(build, { recursive: true, force: true });
 	}
 }

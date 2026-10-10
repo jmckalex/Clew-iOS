@@ -109,6 +109,15 @@ resetBook();
 // Obsidian links and embeds (obsidian-links.js): off unless this option, the
 // CLI's --obsidian-links, or an `Obsidian links: true` key turns them on.
 setObsidianLinks(options.obsidianLinks);
+// Where the engine keeps the figures it makes, and whether an output gets
+// copies of them beside it (figure-cache.js): processFile's `cacheDir` /
+// `copyFigures`, the CLI's --cache-dir / --copy-figures — a host's say, over
+// the config files' for this build (a header's is ignored). A relative
+// cacheDir is the working directory's, as the config key's is.
+if (options.cacheDir != null && options.cacheDir !== '') {
+	configManager.set('Cache directory', path.resolve(process.cwd(), String(options.cacheDir)));
+}
+if (options.copyFigures != null) configManager.set('Copy figures', options.copyFigures === true || String(options.copyFigures).toLowerCase() === 'true');
 const markdownFile = filename;
 // In stdin mode, [[file.md]] inclusions and the "Markdown file directory"
 // config (used by mathematica/tikz/template/metadata-header) resolve against
@@ -952,6 +961,8 @@ if (isCliEntry) {
 		.option('--chapter <file>', 'Build a book: a chapter file, in order (repeatable; instead of the master\'s @chapter+ lines)', collectOption, [])
 		.option('--html-layout <layout>', 'A book\'s HTML: single (one page, the default) or split (a page per chapter, in a folder named after the output)')
 		.option('--obsidian-links', 'Read Obsidian [[links]] and ![[image]] embeds (off by default)')
+		.option('--cache-dir <dir>', 'Keep the figures the engine makes (MetaPost/, TiKZ/, mermaid/, …) under this folder instead of beside the note')
+		.option('--copy-figures', 'Copy each figure the output uses into <output>-figures/ beside it, and refer to the copy')
 		.action(async (filename, options) => {
 			await processFile(filename, { ...program.opts(), ...options });
 		});
@@ -969,6 +980,8 @@ if (isCliEntry) {
 		.option('--js', 'Live-track JS assets (full page reload). Omit BOTH --css/--js to track both kinds')
 		.option('--no-sync', 'Do not inject the editor preview-sync bridge (forward/inverse search when embedded)')
 		.option('--bibliography <file>', 'Add a bibliography file for every build, as a configured one (repeatable)', collectOption, [])
+		.option('--cache-dir <dir>', 'Keep the figures the engine makes under this folder instead of beside the note')
+		.option('--copy-figures', 'Copy each figure the output uses into <output>-figures/ beside it, and refer to the copy')
 		.action(async (filename, options) => {
 			const { startWatch } = await import('./watch.js');
 			await startWatch(filename, options);

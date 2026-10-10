@@ -278,11 +278,11 @@ async function cliRequest(req) {
 		if (!format) return { ok: false, error: 'export as latex, pdf or html' };
 		const s = await sessionFor(at.vault);
 		const outFile = exportTarget(cwd, at.abs, format, req.out);
-		// Under the vault's trust, as Export in the menu (export.js) — but a
-		// PDF is built apart, so only the PDF is left where it goes.
+		// Under the vault's trust, exactly as Export in the menu (export.js):
+		// a PDF is built apart, so only the PDF is left where it goes.
 		const result = await exportNote({
 			win: s.win, vaults: s.vaults, sessionId: s.id, callerToken: s.callerToken,
-			relPath: at.note, format, outFile, trusted: s.trusted, buildApart: true,
+			relPath: at.note, format, outFile, trusted: s.trusted,
 		});
 		// Into the vault, it shows in the explorer at once (as the menu's).
 		if (result?.output) s.vaults.refreshIfInside(result.output);

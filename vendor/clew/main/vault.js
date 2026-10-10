@@ -37,6 +37,19 @@ import { renamePdfMeta } from './pdf-meta.js';
 // on by all of them, handed back in close().
 let watchedTotal = 0;
 
+// To the Trash, never deleted. A scenario's never lands in the user's own
+// Trash: it goes into the run's userData, and the log says so.
+async function moveToTrash(abs, label) {
+	if (process.env.CLEW_SMOKE) {
+		const bin = path.join(app.getPath('userData'), 'smoke-trash');
+		fs.mkdirSync(bin, { recursive: true });
+		fs.renameSync(abs, path.join(bin, `${Date.now()}-${path.basename(abs)}`));
+		console.log(`smoke-trash: ${label}`);
+	} else {
+		await shell.trashItem(abs);
+	}
+}
+
 export class VaultManager {
 	/** Absolute path of the open vault, or null. */
 	root = null;
@@ -449,19 +462,17 @@ export class VaultManager {
 	}
 
 	async trash(rel) {
-		const abs = this.resolve(rel);
-		if (process.env.CLEW_SMOKE) {
-			// A scenario's file never lands in the user's own Trash: it goes
-			// into the run's userData, and the log says so.
-			const bin = path.join(app.getPath('userData'), 'smoke-trash');
-			fs.mkdirSync(bin, { recursive: true });
-			fs.renameSync(abs, path.join(bin, `${Date.now()}-${path.basename(abs)}`));
-			console.log(`smoke-trash: ${rel}`);
-		} else {
-			await shell.trashItem(abs);
-		}
+		await moveToTrash(this.resolve(rel), rel);
 		this.guard.forget(rel);
 		this.refreshTree();
+	}
+
+	/** Something an EXPORT wrote, wherever the user had it written: in the
+	 *  vault as trash(), elsewhere straight to the Trash. */
+	async trashExported(abs) {
+		const rel = path.relative(this.root, abs);
+		if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) return this.trash(rel.split(path.sep).join('/'));
+		await moveToTrash(abs, abs);
 	}
 
 	reveal(rel) {

@@ -120,7 +120,17 @@ export const DEFAULT_CONFIG = {
 	// header keys (src/note-code.js). A host rendering documents it did not
 	// write sets false, and each path refuses by name. Config only — a
 	// metadata header can never set it (mergeMetadata drops the key).
-	'Run note code': true
+	'Run note code': true,
+	// Where the engine keeps the files it makes for a document (figure-cache.js):
+	// one folder per kind — mermaid/, MetaPost/, TiKZ/, Video/, Mathematica/ —
+	// under this one. null: beside the note (a book's: the master), as always.
+	// A relative path resolves against the working directory. Config or host
+	// only — where the engine writes is not a document's to say.
+	'Cache directory': null,
+	// Copy each cached figure an output refers to into `<output>-figures/`
+	// beside it, and refer to the copy (figure-cache.js), so a kept .tex or
+	// .html stands on its own wherever the cache is. Config or host only.
+	'Copy figures': false
 };
 
 class ConfigManager {
@@ -356,6 +366,15 @@ class ConfigManager {
 				// Never from a header: the switch exists so a host can keep a
 				// document it did not write from running code, and a document
 				// that could set it would simply switch itself back on.
+				break;
+			case "Cache_directory":
+				// Config or host only (figure-cache.js): where the engine writes
+				// is the host's to say, not the document's.
+				addWarning('Cache directory: where the engine keeps the figures it makes is set in .jmarkdown/config.json or by the host, not in a document header — ignored');
+				break;
+			case "Copy_figures":
+				// Config or host only (figure-cache.js), like Cache directory.
+				addWarning('Copy figures: copying the figures beside the output is set in .jmarkdown/config.json or by the host, not in a document header — ignored');
 				break;
 			case "Callouts":
 				// Config only (src/callouts.js): a definition is an object, which

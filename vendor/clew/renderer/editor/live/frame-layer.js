@@ -89,6 +89,10 @@ class FrameLayer {
 		// Every block renders under the note's citation keys (main/
 		// citation-header.js); a save that changes them re-renders the frames.
 		this.citeKeys = this.#citationKeys();
+		// …and the blocks that read the vault read this note's front matter
+		// too (dataviewjs's dv.current(), a query's `this`, a Meta Bind VIEW):
+		// a save that changes it re-renders those.
+		this.frontMatter = this.#frontMatter();
 		this.offKv = ipc.on(CH.EV_KV_CHANGED, (payload) => this.#broadcast({ type: 'event', name: 'kv', payload }));
 		this.offTheme = settingsStore.on('settings-changed', (key) => {
 			if (key === 'theme') this.#broadcast({ type: 'theme', theme: document.body.dataset.theme ?? 'dark' });
@@ -496,14 +500,23 @@ class FrameLayer {
 	#fileChanged(path) {
 		if (path === this.config.notePath) {
 			// This note's own saves re-render nothing — unless its citation keys
-			// changed, which every one of its blocks renders under. Compared a
-			// beat later: a change made outside reaches the editor after this.
+			// changed, which every one of its blocks renders under, or its front
+			// matter, which the blocks reading the vault read as this note's
+			// fields (the demo's dashboard chart followed its own `target`
+			// widget in reading view and not here, 2026-10-10). Compared a beat
+			// later: a change made outside reaches the editor after this.
 			clearTimeout(this.citeTimer);
 			this.citeTimer = setTimeout(() => {
 				const keys = this.#citationKeys();
-				if (keys === this.citeKeys) return;
-				this.citeKeys = keys;
-				this.#restale({ all: true });
+				const frontMatter = this.#frontMatter();
+				const fieldsMoved = frontMatter !== this.frontMatter;
+				this.frontMatter = frontMatter;
+				if (keys !== this.citeKeys) {
+					this.citeKeys = keys;
+					this.#restale({ all: true });
+				} else if (fieldsMoved) {
+					this.#restale();
+				}
 			}, RESTALE_MS);
 			return;
 		}
@@ -526,6 +539,12 @@ class FrameLayer {
 	#citationKeys() {
 		const doc = this.view.state.doc;
 		return JSON.stringify(citationLines(doc.sliceString(0, Math.min(doc.length, 4096))));
+	}
+
+	/** The note's front matter as written (empty when it has none). */
+	#frontMatter() {
+		const head = this.view.state.doc.sliceString(0, Math.min(this.view.state.doc.length, 65536));
+		return /^---\r?\n[\s\S]*?\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/.exec(head)?.[0] ?? '';
 	}
 
 	/** Every frame re-renders (the engine was reconfigured), debounced — a

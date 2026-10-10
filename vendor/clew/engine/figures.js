@@ -478,7 +478,9 @@ export function figureElement(kind, rawSource, rawAttrs = {}) {
 	// Marked when font=note put a block somewhere (source or preamble), or
 	// the author's own document loads the machinery. MetaPost never is; a
 	// plain figure on a machine with no note face was left untouched.
-	const opentype = applied || (kind !== 'metapost' && wantsOpenType(source));
+	// The preamble counts too: a TeX fragment (clew-fragments) that loads
+	// fontspec lands there, and its figure needs the bundle as much.
+	const opentype = applied || (kind !== 'metapost' && (wantsOpenType(source) || wantsOpenType(attrs.preamble ?? '')));
 
 	const data = [];
 	if (opentype) data.push(' data-opentype="1"');

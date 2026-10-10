@@ -28,6 +28,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { Readable } from 'node:stream';
+import { buildIndex, fontDirs, familyFiles } from './system-fonts.js';
 import { NOTE_EXTENSIONS } from '../shared/channels.js';
 import { sessionById } from './session.js';
 import { previewPluginScripts, enabledPlugins } from './plugins.js';
@@ -159,7 +160,11 @@ export function installFrameProtocol({ bridgeFile }) {
 }
 
 /** After app.whenReady(). */
-export function installPreviewProtocol({ distDir, nodeModulesDir, engineAssetsDir, embedpdfDir, stampsDir = null, mptikzDir, zetaDir, noteFontsDir = null, globalPluginsDir = null }) {
+export function installPreviewProtocol({ distDir, nodeModulesDir, engineAssetsDir, embedpdfDir, stampsDir = null, mptikzDir, zetaDir, noteFontsDir = null, systemFontIndex = null, globalPluginsDir = null }) {
+	// The machine's fonts by family (system-fonts.js), indexed on the first
+	// figure that names one — never before.
+	let fontIndex = null;
+	const systemFamily = (family) => familyFiles(fontIndex ??= buildIndex(fontDirs(), systemFontIndex), family);
 	const assetRoots = {
 		mathjax: path.join(nodeModulesDir, 'mathjax', 'es5'),
 		mermaid: path.join(nodeModulesDir, 'mermaid', 'dist'),
@@ -351,6 +356,24 @@ export function installPreviewProtocol({ distDir, nodeModulesDir, engineAssetsDi
 					const config = fallbackConfig(settings.get('pdfCjkFonts') === true);
 					if (!config) return new Response('null', { headers: headers('application/json') });
 					return new Response(JSON.stringify(config), { headers: headers('application/json') });
+				}
+				// A figure's named font families (engine/figure-fonts.js):
+				//   systemfonts/family/<family>.json → { files: [basename…] }
+				//   systemfonts/file/<family>/<n>    → that family's nth file
+				// Only files the index maps the family to: no path is ever taken
+				// from the request.
+				if (rest.startsWith('systemfonts/')) {
+					const [kind, family, n] = rest.split('/').slice(1);
+					// `rest` is decoded already (pathname, above).
+					const name = String(family ?? '').replace(/\.json$/, '');
+					const files = name ? systemFamily(name) : [];
+					if (kind === 'family') {
+						return new Response(JSON.stringify({ files: files.map((f) => path.basename(f)) }), { headers: headers('application/json') });
+					}
+					const file = kind === 'file' ? files[Number(n)] : null;
+					if (!file) return new Response('Not found', { status: 404, headers: headers('text/plain') });
+					if (process.env.CLEW_SMOKE_LOG) console.log(`smoke-asset: systemfonts/${path.basename(file)}`);
+					return fileResponse(file);
 				}
 				const [root, ...restParts] = rest.split('/');
 				const base = assetRoots[root];

@@ -37,6 +37,7 @@
 
 import { parseFigureError } from '../shared/figure-errors.js';
 import { parentOrigin, postTo } from '../shared/message-guard.js';
+import { namedFontFamilies } from '../engine/figure-fonts.js';
 
 // Assets root: the preview protocol in the app, ./assets on exported sites
 // (the exporter sets window.__clewAssetBase before this bundle loads).
@@ -65,21 +66,35 @@ const OPENTYPE = 'tikz-diagram[data-opentype], metapost-diagram[data-opentype]';
 // looped.
 let loaderState = null;
 let reloading = false;
-let openTypeAvailable = null;
+let stagedFeatures = null;
 const RELOAD_FLAG = 'clew-figures-reloaded-for-opentype';
 
 /**
- * Does the staged build carry the `opentype` bundle (fontspec, luaotfload,
- * fontspec's default faces)? mp-tikz-wasm 0.2.1 as pinned does not, and
- * asking for a bundle that is not there fails the whole engine, so this is
- * checked against the build's own index before anything is asked for.
+ * What the staged build can be asked for, checked against the build itself
+ * before anything is asked for — asking for a bundle that is not there fails
+ * the whole engine:
+ *   opentype     the `opentype` bundle (fontspec, luaotfload, fontspec's
+ *                default faces); mp-tikz-wasm 0.2.1 has none.
+ *   ghostscript  PostScript through Ghostscript (mp-tikz-wasm 0.4.0): the
+ *                `ghostscript` bundle (dvips headers, PSTricks) in the main
+ *                archive AND the AGPL module, `ghostscript/gs.mjs` +
+ *                `gs.wasm` (12.5 MB), which ships as an archive of its own and
+ *                may be missing. Its 774-byte SOURCE.md says it is there;
+ *                gs.wasm itself is fetched only by a note whose DVI carries
+ *                PostScript (the library loads it lazily).
  */
-function hasOpenTypeBundle() {
-	openTypeAvailable ??= fetch(`${ASSETS()}/mptikz/bundles/index.json`)
+function stagedBuild() {
+	const base = `${ASSETS()}/mptikz/`;
+	stagedFeatures ??= fetch(`${base}bundles/index.json`)
 		.then((res) => (res.ok ? res.json() : null))
-		.then((index) => !!index?.bundles?.some((b) => b.name === 'opentype'))
-		.catch(() => false);
-	return openTypeAvailable;
+		.then(async (index) => {
+			const listed = (name) => !!index?.bundles?.some((b) => b.name === name);
+			const module = listed('ghostscript')
+				&& await fetch(`${base}ghostscript/SOURCE.md`).then((res) => res.ok).catch(() => false);
+			return { opentype: listed('opentype'), ghostscript: module };
+		})
+		.catch(() => ({ opentype: false, ghostscript: false }));
+	return stagedFeatures;
 }
 
 /**
@@ -98,6 +113,42 @@ async function noteFontFiles() {
 		}
 		return files;
 	} catch { return {}; }
+}
+
+// The machine's own font families handed over so far: a figure that names
+// one (`\setmainfont{Optima}`) gets its files from main/system-fonts.js.
+const handedFamilies = new Set();
+const FONTS_RELOAD_FLAG = 'clew-figures-reloaded-for-fonts';
+
+/** The families the page's OpenType figures name, in source or preamble. */
+function familiesOnPage() {
+	const out = new Set();
+	for (const el of document.querySelectorAll(OPENTYPE)) {
+		for (const family of namedFontFamilies(`${el.textContent}\n${el.dataset.preamble ?? ''}`)) out.add(family);
+	}
+	return [...out];
+}
+
+/**
+ * The files of these families on this machine (protocol.js serves only what
+ * the index maps a family to), as addFiles takes them — whole collections:
+ * mp-tikz-wasm finds every style of a supplied family by name. A family the
+ * machine lacks hands over nothing, and its figure says so in its own place.
+ */
+async function systemFontFiles(families) {
+	const files = {};
+	for (const family of families) {
+		handedFamilies.add(family);
+		try {
+			const name = encodeURIComponent(family);
+			const list = await fetch(`${ASSETS()}/systemfonts/family/${name}.json`).then((res) => (res.ok ? res.json() : null));
+			for (const [i, file] of (list?.files ?? []).entries()) {
+				const bytes = await fetch(`${ASSETS()}/systemfonts/file/${name}/${i}`).then((res) => (res.ok ? res.arrayBuffer() : null));
+				if (bytes) files[file] = new Uint8Array(bytes);
+			}
+		} catch { /* the figure reports the font it could not load */ }
+	}
+	return files;
 }
 
 /** An error figure in the element's own place, the way the library draws one. */
@@ -136,13 +187,14 @@ async function ensureLoader() {
 	// The OpenType decision, taken now because auto.js reads its bundle list
 	// once: wanted by a figure on the page, and there to be had.
 	const wanted = !!document.querySelector(OPENTYPE);
-	const opentype = wanted && await hasOpenTypeBundle();
+	const staged = await stagedBuild();
+	const opentype = wanted && staged.opentype;
 	if (wanted && !opentype) refuseOpenType();
 	// The faces are fetched BEFORE the loader goes in: addFiles must be
 	// called before the engine finishes starting for the first figure's run
 	// to see them, and the library holds files handed over early until an
 	// engine exists.
-	const files = opentype ? await noteFontFiles() : null;
+	const files = opentype ? { ...(await noteFontFiles()), ...(await systemFontFiles(familiesOnPage())) } : null;
 	loaderState = opentype ? 'opentype' : 'plain';
 	try { if (opentype) sessionStorage.removeItem(RELOAD_FLAG); } catch { /* storage may be off */ }
 	const base = `${ASSETS()}/mptikz/`;
@@ -155,7 +207,11 @@ async function ensureLoader() {
 	script.dataset.base = base;
 	// `+` adds to the library's default bundles rather than replacing them
 	// (a bare list would hard-code all ten names here and go stale).
-	if (opentype) script.dataset.bundles = '+opentype';
+	// Ghostscript whenever the build has it: it costs nothing until a figure's
+	// PostScript (PSTricks, an EPS image, \rotatebox, a raw \special) would
+	// otherwise be lost.
+	const extra = [opentype && '+opentype', staged.ghostscript && '+ghostscript'].filter(Boolean);
+	if (extra.length) script.dataset.bundles = extra.join(' ');
 	script.onload = () => {
 		if (files && Object.keys(files).length) window.mpTikzWasm?.addFiles(files);
 	};
@@ -278,6 +334,24 @@ export function initFigures() {
 	}
 	stale.clear();
 	if (needsEngines()) ensureLoader();
+	// A figure naming a font family the running loader was not given (the
+	// author just wrote \setmainfont{Optima}): addFiles reaches a running
+	// engine, but not before the figure's first run, so — as for OpenType —
+	// the preview reloads once, and the loader starts with the files.
+	if (loaderState === 'opentype' && !reloading) {
+		const missing = familiesOnPage().filter((family) => !handedFamilies.has(family));
+		if (missing.length) {
+			const key = `${location.href}#${missing.sort().join('|')}`;
+			let already = false;
+			try { already = sessionStorage.getItem(FONTS_RELOAD_FLAG) === key; } catch { /* storage may be off */ }
+			if (!already) {
+				reloading = true;
+				try { sessionStorage.setItem(FONTS_RELOAD_FLAG, key); } catch { /* storage may be off */ }
+				location.reload();
+				return;
+			}
+		}
+	}
 	// A figure that needs OpenType, arriving after the loader went in
 	// without it (the author just wrote `font=note` into a note that had
 	// no such figure): the bundle list cannot be changed on a running
@@ -287,7 +361,7 @@ export function initFigures() {
 	// never twice for one document (the sessionStorage flag): a second
 	// reload could only mean the decision came out the same way again.
 	if (loaderState === 'plain' && !reloading && document.querySelector(OPENTYPE)) {
-		hasOpenTypeBundle().then((ok) => {
+		stagedBuild().then(({ opentype: ok }) => {
 			let already = false;
 			try { already = sessionStorage.getItem(RELOAD_FLAG) === location.href; } catch { /* storage may be off */ }
 			if (!ok || already) return refuseOpenType();

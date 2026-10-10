@@ -79,6 +79,7 @@ import { requirePackage } from './preamble.js';
 import { escapeLatexText } from './latex-escape.js';
 import { latexGraphic, resolveGraphic, isRemote, markdownDir, escapeLatexPath, texPath } from './latex-graphics.js';
 import { addWarning } from './warnings.js';
+import { compileInRunDir, cacheDir, texCachePath } from './figure-cache.js';
 
 const VIDEO_DIR_NAME = 'Video';
 
@@ -364,22 +365,29 @@ function extractPoster(file) {
 	const stamp = crypto.createHash('md5')
 		.update(`${path.resolve(file)}|${st.size}|${st.mtimeMs}`)
 		.digest('hex').slice(0, 16);
-	const rel = `${VIDEO_DIR_NAME}/${stamp}-poster.png`;
-	const out = path.join(markdownDir(), rel);
-	if (fs.existsSync(out)) return rel;
+	// In the cache (figure-cache.js cacheDir), by its absolute path: the
+	// .tex refers to it through texCachePath.
+	const out = path.join(cacheDir(VIDEO_DIR_NAME), `${stamp}-poster.png`);
+	if (fs.existsSync(out)) return out;
 
 	if (!hasFFmpeg()) {
 		addWarning('@video: no poster given and ffmpeg is not installed — the LaTeX output has no still frame');
 		return null;
 	}
-	try {
-		fs.mkdirSync(path.dirname(out), { recursive: true });
-		execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-i', file, '-frames:v', '1', out], { stdio: 'ignore' });
-		if (fs.existsSync(out)) return rel;
-	} catch (error) {
-		try { fs.unlinkSync(out); } catch { /* nothing to clean up */ }
-		addWarning(`@video: could not extract a poster frame from ${path.basename(file)} (${error.message.split('\n')[0]})`);
-	}
+	// Extracted in a run folder of its own (figure-cache.js) and renamed into
+	// place: a half-written frame is never cached, nor read by another build.
+	let failure = null;
+	compileInRunDir(path.dirname(out), (run) => {
+		try {
+			execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-i', file, '-frames:v', '1', path.join(run, path.basename(out))], { stdio: 'ignore' });
+			return [path.basename(out)];
+		} catch (error) {
+			failure = error;
+			return [];
+		}
+	});
+	if (fs.existsSync(out)) return out;
+	if (failure) addWarning(`@video: could not extract a poster frame from ${path.basename(file)} (${failure.message.split('\n')[0]})`);
 	return null;
 }
 
@@ -432,6 +440,9 @@ function videoLatex(ctx) {
 	// The poster: an explicit {poster=…}/{tex-poster=…}, else a cached still.
 	const posterAttr = own.poster ?? pass.poster;
 	let poster = posterAttr ? String(posterAttr) : (exists ? extractPoster(file) : null);
+	// An extracted still is the engine's, in its cache (an absolute path); an
+	// author's poster is a path as written, like any image's.
+	const cachedPoster = !posterAttr && poster !== null;
 	if (poster && !fs.existsSync(path.resolve(markdownDir(), poster))) {
 		addWarning(`@video: poster ${poster} was not found`);
 		poster = null;
@@ -448,7 +459,7 @@ function videoLatex(ctx) {
 	// (latex-graphics.js texPath). The checks above read the master's.
 	const opts = latexOptions(dims, own, 'video');
 	const posterBox = poster
-		? `\\includegraphics${opts.length ? `[${opts.join(',')}]` : ''}{${escapeLatexPath(texPath(poster))}}`
+		? `\\includegraphics${opts.length ? `[${opts.join(',')}]` : ''}{${escapeLatexPath(cachedPoster ? texCachePath(poster) : texPath(poster))}}`
 		: null;
 	if (posterBox) requirePackage('graphicx');
 	const caption = escapeLatexText(alt || src);

@@ -66,31 +66,32 @@ When a view needs actual logic — counting, binning, arithmetic — a
 for output, and `renderChart(config)` for a live
 [Chart.js](https://www.chartjs.org/docs/latest/) chart. This one reads
 the same `Projects/` notes and, together with the widget above, closes
-the loop — it reads this page's own `target` property, so change the
-widget and the chart's title line follows:
+the loop: it plots the active projects against this page's own `target`
+property. Change the widget and the chart redraws — the ring fills
+toward the new target, its title and the line above it follow:
 
 ```dataviewjs
 const projects = dv.pages().values.filter(p => String(p.file.folder).startsWith('Projects'));
 const active = projects.filter(p => p.status === 'active').length;
-const target = dv.current().target ?? 1;
+const target = Math.max(Number(dv.current().target ?? 1) || 0, 0);
+const counted = `${active} active project${active === 1 ? '' : 's'}`;
 dv.paragraph(active >= target
-	? `${active} active projects — at or over the target of ${target}.`
-	: `${active} active projects of a target of ${target}.`);
-const byStatus = {};
-for (const p of projects) {
-	if (p.status) byStatus[p.status] = (byStatus[p.status] ?? 0) + 1;
-}
+	? `${counted} — at or over the target of ${target}.`
+	: `${counted} of a target of ${target}: ${target - active} still to go.`);
 renderChart({
 	type: 'doughnut',
 	data: {
-		labels: Object.keys(byStatus),
+		labels: ['Active', 'Still to go'],
 		datasets: [{
-			data: Object.values(byStatus),
-			backgroundColor: ['rgba(96,130,220,0.6)', 'rgba(75,192,130,0.6)', 'rgba(200,120,90,0.6)'],
+			data: [active, Math.max(target - active, 0)],
+			backgroundColor: ['rgba(75,192,130,0.7)', 'rgba(150,150,150,0.25)'],
 			borderWidth: 0,
 		}],
 	},
-	options: { aspectRatio: 2.5 },
+	options: {
+		aspectRatio: 2.5,
+		plugins: { title: { display: true, text: `Active projects: ${active} of ${target}` } },
+	},
 }, this.container);
 ```
 

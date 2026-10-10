@@ -15,7 +15,9 @@
 // numbered), into a `build/` folder beside the master (D12), named by the
 // master so two books in one folder never collide. LaTeX's intermediates stay in
 // build/ too, so a rebuild is latexmk's quick rerun and nothing lands beside
-// a chapter.
+// a chapter. The engine's figures are cached outside the vault and copied
+// into `build/<master>-figures/`, which the .tex and the pages share
+// (export.js#figureCache, the note exports' arrangement).
 //
 // Everything else is a note export's (export.js, whose helpers these are):
 // the same worker, the working folder the vault's trust decides, the vault's
@@ -27,7 +29,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { readMaster, laterNotice, placeWarnings } from '../shared/book.js';
-import { runWorker, compilePdf, configuredBibliographies, restrictedExportDir } from './export.js';
+import { runWorker, compilePdf, configuredBibliographies, restrictedExportDir, figureCache, clearFigures } from './export.js';
+import { figuresFolder, explainFiguresWarnings } from './export-cache.js';
 import { bibliographyDirs } from './citation-header.js';
 import { calloutsEnv } from './callout-types.js';
 import { iconTable } from './callout-files.js';
@@ -102,37 +105,45 @@ export async function exportBook({ vaults, indexer, masterRel, format, trusted =
 		return { output, outputRel: rel(output), warnings: place(warnings) };
 	}
 
-	if (format === 'html') {
-		// One page per chapter (D4, engine piece 2ac7048): asked for
-		// `build/<master>.html`, the engine writes the folder `build/<master>/`
-		// — index.html (the master's text and the contents), a page per
-		// chapter, references.html — and says so with a warning when it has to
-		// fall back to the one page instead.
-		const output = path.join(outDir, `${base}.html`);
-		// Clew owns build/<master>/: the previous pages go to the Trash —
-		// never deleted — so a chapter removed from the book leaves no page
-		// behind (vault.js#trash; a scenario's go to its own userData).
-		const pagesRel = rel(path.join(outDir, base));
-		if (pagesRel && fs.existsSync(path.join(outDir, base)) && fs.statSync(path.join(outDir, base)).isDirectory()) {
-			await vaults.trash(pagesRel);
+	const figures = figureCache({ root: vaults.root, trusted });
+	const engineFigures = { cacheDir: figures.cacheDir, copyFigures: true };
+	const explained = (warnings) => place(explainFiguresWarnings(warnings, { restricted: !trusted }));
+	const output = path.join(outDir, `${base}.${format === 'html' ? 'html' : 'tex'}`);
+	try {
+		if (format === 'html') {
+			// One page per chapter (D4, engine piece 2ac7048): asked for
+			// `build/<master>.html`, the engine writes the folder `build/<master>/`
+			// — index.html (the master's text and the contents), a page per
+			// chapter, references.html — and says so with a warning when it has to
+			// fall back to the one page instead.
+			// Clew owns build/<master>/: the previous pages go to the Trash —
+			// never deleted — so a chapter removed from the book leaves no page
+			// behind (vault.js#trash; a scenario's go to its own userData).
+			const pagesRel = rel(path.join(outDir, base));
+			if (pagesRel && fs.existsSync(path.join(outDir, base)) && fs.statSync(path.join(outDir, base)).isDirectory()) {
+				await vaults.trash(pagesRel);
+			}
+			await clearFigures(vaults, output);
+			const started = Date.now();
+			const { warnings } = await runWorker({ file: masterAbs, options: { ...options, ...engineFigures, to: 'html', output, htmlLayout: 'split' }, cwd, callouts, vault });
+			const index = path.join(outDir, base, 'index.html');
+			const split = fs.existsSync(index) && fs.statSync(index).mtimeMs >= started - 1000;
+			const built = split ? index : output;
+			return { output: built, outputRel: rel(built), pages: split, warnings: explained(warnings) };
 		}
-		const started = Date.now();
-		const { warnings } = await runWorker({ file: masterAbs, options: { ...options, to: 'html', output, htmlLayout: 'split' }, cwd, callouts, vault });
-		const index = path.join(outDir, base, 'index.html');
-		const split = fs.existsSync(index) && fs.statSync(index).mtimeMs >= started - 1000;
-		const built = split ? index : output;
-		return { output: built, outputRel: rel(built), pages: split, warnings: place(warnings) };
+		await clearFigures(vaults, output);
+		const { warnings } = await runWorker({ file: masterAbs, options: { ...options, ...engineFigures, to: 'latex', output }, cwd, callouts, vault });
+		if (format === 'latex') return { output, outputRel: rel(output), warnings: explained(warnings) };
+		// BibTeX looks in every folder a bibliography names: the master's, each
+		// chapter's own (it ADDS for that chapter, D3), the configured ones.
+		const configured = [...configuredBibliographies(cwd), ...bibliography];
+		const bibDirs = [...new Set([
+			...bibliographyDirs(masterText, masterDir, configured),
+			...chapterAbs.flatMap((abs) => bibliographyDirs(fs.readFileSync(abs, 'utf8'), path.dirname(abs))),
+		])];
+		const { pdf, engine, reason } = await compilePdf(output, masterDir, bibDirs);
+		return { output: pdf, outputRel: rel(pdf), engine, reason, warnings: explained(warnings) };
+	} finally {
+		figures.done([figuresFolder(output)]);
 	}
-	const tex = path.join(outDir, `${base}.tex`);
-	const { warnings } = await runWorker({ file: masterAbs, options: { ...options, to: 'latex', output: tex }, cwd, callouts, vault });
-	if (format === 'latex') return { output: tex, outputRel: rel(tex), warnings: place(warnings) };
-	// BibTeX looks in every folder a bibliography names: the master's, each
-	// chapter's own (it ADDS for that chapter, D3), the configured ones.
-	const configured = [...configuredBibliographies(cwd), ...bibliography];
-	const bibDirs = [...new Set([
-		...bibliographyDirs(masterText, masterDir, configured),
-		...chapterAbs.flatMap((abs) => bibliographyDirs(fs.readFileSync(abs, 'utf8'), path.dirname(abs))),
-	])];
-	const { pdf, engine, reason } = await compilePdf(tex, masterDir, bibDirs);
-	return { output: pdf, outputRel: rel(pdf), engine, reason, warnings: place(warnings) };
 }

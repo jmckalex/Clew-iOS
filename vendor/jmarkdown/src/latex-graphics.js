@@ -23,11 +23,9 @@
 	book's pages are onto theirs (book-pages.js). kpathsea never searches
 	TEXINPUTS for a `./` or `../` name, so nothing else would find them.
 
-	A file the ENGINE made — a cached diagram PDF (mermaid.js, metapost.js),
-	known by its absolute path — is printed relative to the .tex's folder too,
-	in a single file as in a book (texCachePath): as an absolute path it put the
-	user's folders into the .tex, and under pdfLaTeX into the PDF as well
-	(/PTEX.FileName).
+	A file the ENGINE made — a cached diagram PDF — is printed relative to the
+	.tex's folder too, in a single file as in a book (figure-cache.js
+	texCachePath). Both count from REAL paths (figure-cache.js texRelative).
 */
 
 import fs from 'fs';
@@ -37,6 +35,7 @@ import { addWarning } from './warnings.js';
 import { requirePackage } from './preamble.js';
 import { escapeLatexText, escapeTexText } from './latex-escape.js';
 import { getBook } from './book.js';
+import { texRelative } from './figure-cache.js';
 
 // \href and \includegraphics take their argument almost verbatim, but a `%` or
 // `#` in a path still has to be escaped for TeX.
@@ -53,24 +52,6 @@ export function isRemote(src) {
 	return /^[a-z][a-z0-9+.-]*:\/\//i.test(src) || src.startsWith('//');
 }
 
-// A path as found from the folder of the .tex at `out`. Both ends are REAL
-// paths: TeX climbs `..` physically, from where the .tex really is, so a
-// relative path worked out lexically missed whenever a symlink stood on
-// either side — an output under os.tmpdir() (/var/folders/… is really
-// /private/var/…), or a vault reached through a link — and LaTeX could not
-// find the file. A path that does not exist (yet) keeps its missing tail on
-// the real path of the part that does.
-function realPath(p) {
-	try { return fs.realpathSync(p); } catch { /* not there yet */ }
-	const parent = path.dirname(p);
-	return parent === p ? p : path.join(realPath(parent), path.basename(p));
-}
-
-function fromTexFolder(out, target) {
-	const rel = path.relative(realPath(path.dirname(out)), realPath(target));
-	return rel.split(path.sep).join('/') || '.';
-}
-
 /**
  * A local path as the .tex prints it (see above): in a book with an output
  * file, a relative path (relative to the master, markdownDir()) made relative
@@ -84,21 +65,7 @@ export function texPath(src) {
 		addWarning('book: the LaTeX goes to stdout, so its image and media paths are relative to the master\'s folder — compile it there, or give an output file');
 		return src;
 	}
-	return fromTexFolder(out, path.resolve(markdownDir(), src));
-}
-
-/**
- * A file the engine made, by its absolute path, as the .tex prints it (see
- * above): relative to the output's folder. On stdout there is no folder, so
- * the absolute path stays, with a warning.
- */
-export function texCachePath(abs) {
-	const out = configManager.get('Output file');
-	if (!out) {
-		addWarning('the LaTeX goes to stdout, so its cached diagrams are included by absolute path (which names your folders) — give an output file to make them relative');
-		return abs;
-	}
-	return fromTexFolder(out, abs);
+	return texRelative(out, path.resolve(markdownDir(), src));
 }
 
 /**

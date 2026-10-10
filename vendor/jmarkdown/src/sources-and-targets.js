@@ -6,6 +6,14 @@ export const targets = {
 	marker: ':',
 	renderer(token) {
 		if (token.meta.name === "target") {
+			// `:target` with no `[…]` (prose such as Meta Bind's
+			// `INPUT[number:target]`, or `:target{…}`) names no target: its text
+			// prints as it stands, exactly as a text token would, as if the rule
+			// had not matched. It used to throw (`token.text` undefined) and stop
+			// the build.
+			if (typeof token.text !== 'string') {
+				return this.parser.renderer.text({ type: 'text', raw: token.raw, text: token.raw });
+			}
 			return `<span data-target-id='${token.text.trim()}'></span>`;
 		}
 		return false;

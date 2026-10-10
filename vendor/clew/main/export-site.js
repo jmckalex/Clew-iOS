@@ -34,6 +34,7 @@ import { iconTable } from './callout-files.js';
 import { toolchainPath } from './render-service.js';
 import { enabledPlugins, previewPluginScripts } from './plugins.js';
 import { bakeFigures, figureEngineAvailable, hasFigures } from './figure-bake.js';
+import { buildIndex, fontDirs, familyFiles } from './system-fonts.js';
 import { siteFiles, staticAppEmbeds, NOTE_EXT } from './site-files.js';
 
 const SITE_MARK = '@@SITE@@';
@@ -159,7 +160,7 @@ export async function exportSite({ vaultRoot, engineDir, outDir, distDir, vaultO
 			try {
 				const baked = await bakeFigures(figurePages, paths.mptikzAssets, ({ done, total }) => {
 					onProgress({ done: notes.length, total: notes.length, note: `figure ${done} of ${total}…` });
-				}, { noteFontsDir: paths.noteFonts });
+				}, { noteFontsDir: paths.noteFonts, systemFontFiles: (family) => familyFiles(buildIndex(fontDirs(), paths.systemFontIndex), family) });
 				if (baked.failed) {
 					failures.push({ note: `${baked.failed} figure(s)`, message: 'did not typeset; the page shows the error log instead' });
 				}

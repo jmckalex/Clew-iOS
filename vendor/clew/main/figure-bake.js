@@ -36,6 +36,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { noteFontFiles } from './note-fonts.js';
+import { namedFontFamilies } from '../engine/figure-fonts.js';
 
 // Clew's own emission is always one of these two elements (engine/figures.js).
 // A hand-written <script type="text/tikz"> in a note's raw HTML is the
@@ -73,6 +74,17 @@ export function openTypeAvailable(assetsDir) {
 	return fs.existsSync(path.join(assetsDir, 'bundles', 'opentype', 'manifest.json'));
 }
 
+/**
+ * Does the staged build carry PostScript (mp-tikz-wasm 0.4.0): the
+ * `ghostscript` bundle AND the AGPL module beside it (an archive of its own,
+ * so it may be missing)? Asked for whenever it is there, as the preview does:
+ * the library loads gs.wasm only for a figure whose DVI carries PostScript.
+ */
+export function ghostscriptAvailable(assetsDir) {
+	return fs.existsSync(path.join(assetsDir, 'bundles', 'ghostscript', 'manifest.json'))
+		&& fs.existsSync(path.join(assetsDir, 'ghostscript', 'gs.wasm'));
+}
+
 const load = (assetsDir, name) => import(pathToFileURL(path.join(assetsDir, name)).href);
 
 /**
@@ -94,10 +106,16 @@ const load = (assetsDir, name) => import(pathToFileURL(path.join(assetsDir, name
  * @param {string[]} files absolute paths of already-written pages
  * @param {string} assetsDir the staged mp-tikz-wasm build (paths.js#mptikzAssets)
  * @param {(p: {done: number, total: number}) => void} onProgress
- * @param {{noteFontsDir?: string|null}} [options]
+ * A figure whose preamble names a font FAMILY (`\setmainfont{Optima}`,
+ * engine/figure-fonts.js) gets that family's files from this machine, as the
+ * preview does: `systemFontFiles(family) → [absolute paths]`
+ * (main/system-fonts.js; export-site.js passes it in, so this module stays
+ * electron-free). Outlines either way: no face is embedded in a page.
+ *
+ * @param {{noteFontsDir?: string|null, systemFontFiles?: ((family: string) => string[])|null}} [options]
  * @returns {Promise<{figures: number, rendered: number, failed: number}>}
  */
-export async function bakeFigures(files, assetsDir, onProgress = () => {}, { noteFontsDir = null } = {}) {
+export async function bakeFigures(files, assetsDir, onProgress = () => {}, { noteFontsDir = null, systemFontFiles = null } = {}) {
 	const { MetaPost, DEFAULT_BUNDLES } = await load(assetsDir, 'index.js');
 	const { figureHash, renderFigure, parseAttributes, decodeEntities } = await load(assetsDir, 'figures.js');
 
@@ -122,13 +140,25 @@ export async function bakeFigures(files, assetsDir, onProgress = () => {}, { not
 	let failed = 0;
 	const wantsOpenType = [...requests.values()].some((r) => r.opentype);
 	const opentype = wantsOpenType && openTypeAvailable(assetsDir);
+	const extra = [opentype && 'opentype', ghostscriptAvailable(assetsDir) && 'ghostscript'].filter(Boolean);
 	const mp = await MetaPost.create({
 		logLevel: 'warn',
-		...(opentype ? { bundles: [...DEFAULT_BUNDLES, 'opentype'] } : {}),
+		...(extra.length ? { bundles: [...DEFAULT_BUNDLES, ...extra] } : {}),
 	});
 	try {
 		if (opentype && noteFontsDir) {
 			const fonts = noteFontFiles(noteFontsDir);
+			if (Object.keys(fonts).length) await mp.addFiles(fonts);
+		}
+		if (opentype && systemFontFiles) {
+			const families = new Set();
+			for (const r of requests.values()) {
+				if (r.opentype) for (const f of namedFontFamilies(`${r.source}\n${r.attrs.preamble ?? ''}`)) families.add(f);
+			}
+			const fonts = {};
+			for (const family of families) {
+				for (const file of systemFontFiles(family)) fonts[path.basename(file)] = new Uint8Array(fs.readFileSync(file));
+			}
 			if (Object.keys(fonts).length) await mp.addFiles(fonts);
 		}
 		let done = 0;
