@@ -1,9 +1,10 @@
-# Handover — 2026-10-10 (the sync to Clew-app 6b6fbbb: PostScript figures, system font families, mp-tikz-wasm 0.4.0)
+# Handover — 2026-10-10 (the sync to Clew-app f959799: the figure engine bundled and off, Proof this chapter Mac only)
 
 Current state for a fresh session, rewritten whole. Durable architecture
 lives in **README.md** and **PORT-PLAN.md**. Each sync's reasoning and
 measurements are in its record: `UPSTREAM-*-PLAN.md`. The latest records
-are `UPSTREAM-6B6FBBB-PLAN.md` (PostScript figures, system font families,
+are `UPSTREAM-F959799-PLAN.md` (the figure engine, Proof this chapter, figures
+in exports measured, 2026-10-10), `UPSTREAM-6B6FBBB-PLAN.md` (PostScript figures, system font families,
 mp-tikz-wasm 0.4.0, 2026-10-10), `UPSTREAM-5ABF52D-PLAN.md` (app secrets,
 book mode phase 2, the book print, 2026-10-10), `UPSTREAM-CBFA692-PLAN.md` (book mode and the demo
 vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-10-04),
@@ -13,11 +14,25 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
 
 ## 1. Where things stand
 
-- **The sync to Clew-app `6b6fbbb` (2026-10-10) is DONE, and every
-  acceptance check was green.** The chain is `sync6b6fbbb-p1-vendor` →
-  `-p2-build` → `-p3-contract` → `-p4-verify`. Clew-boss verified it. Main
-  is fast-forwarded to the p4 branch, and a build commit sits on top. The
-  main checkout's mptikz-assets is restaged with `--release` ("pinned
+- **The sync to Clew-app `f959799` (2026-10-10) is DONE, and every
+  acceptance check was green.** The chain is `syncf959799-p1-vendor` →
+  `-p2-build` → `-p3-contract` → `-p4-verify`, off main 35c8922, not
+  pushed. The record is UPSTREAM-F959799-PLAN.md.
+  - **jmarkdown 21dee42's figure engine** is bundled and inert: the
+    iPad's engine config never sets `Figure engine`, and a guard test holds
+    that.
+  - **Proof this chapter is Mac only:** its Book panel row and palette
+    command are not offered, and EXPORT_BOOK refuses `proof` by name.
+  - **The exports' figure setting** (exportFigureEngine) has no Settings
+    row. The parity gate and the export cache are n/a.
+  - **Figures in exports, measured:** note PDF and book print draw 11/11;
+    the note HTML export draws 0/11 (its figures are source, and its
+    assets resolve only inside Clew).
+  - **Vendor** is at Clew-app `f959799`.
+- **The sync to Clew-app `6b6fbbb` (2026-10-10) is DONE and PUSHED**
+  (origin/main 35c8922; the Xcode Cloud archive succeeded). The chain is
+  `sync6b6fbbb-p1-vendor` → `-p2-build` → `-p3-contract` → `-p4-verify`.
+  The main checkout's mptikz-assets is restaged with `--release` ("pinned
   v0.4.0 + ghostscript"). The record is UPSTREAM-6B6FBBB-PLAN.md.
   - **mp-tikz-wasm 0.4.0 + Ghostscript**, staged from the release (two
     pinned archives; `--no-ghostscript` drops the AGPL module).
@@ -30,7 +45,6 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
   - **Memory, simulator:** a heavy figure note peaks at about 1.3 GB; the
     40-chapter book's print takes 5.9 s, about 0.8 GB plus 0.4 GB. These
     need a device check.
-  - **Vendor** is at Clew-app `6b6fbbb`.
 - **The sync to Clew-app `fb3635a` (5abf52d + the pill fixes) is DONE and
   PUSHED** (94f0571; the Xcode Cloud archive succeeded).
 - **The sync to Clew-app `5abf52d` (2026-10-10) is DONE, and every
@@ -214,7 +228,15 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
 
 ## 3. Next
 
-- **The next sync's range starts at Clew-app `6b6fbbb`.**
+- **The next sync's range starts at Clew-app `f959799`.**
+- **If jmarkdown's figure engine is ever turned on in the worker**, shim
+  `setImmediate` first: figure-engine.js's runAll() awaits it, and the
+  worker does not define it (UPSTREAM-F959799-PLAN.md).
+- **The note HTML export carries no drawn figures** (0/11 on Diagrams), and
+  its styles and scripts resolve only inside Clew. A plan to carry the
+  preview's drawn SVGs goes to Clew-boss first.
+- **iPad checks from the f959799 sync:** its record's checklist (no Proof
+  row in a chapter's Book panel; a book with figures prints them).
 - **iPad checks from the 6b6fbbb sync:** its record's checklist
   (PostScript, named families, Features/Diagrams on the device (it peaks
   at 1,285 MB in the simulator), a long book's print).
