@@ -18,6 +18,20 @@ test('Proof this chapter (Clew-app ef22b0b): no palette command, and the Book pa
 	assert.match(bundle.slice(row - 160, row), /=-1;if\(\w+>=0&&/, 'its guard is always false');
 });
 
+test('the palette\'s book exports: the print alone; PDF via LaTeX, LaTeX and HTML are not registered', () => {
+	// books.js registers `export:book-${format}` for each format in one
+	// loop, so the ids never appear whole in the bundle: the loop's list is
+	// what the patch narrows, and what decides which commands exist.
+	const at = bundle.indexOf('export:book-${');
+	assert.ok(at > 0, 'the book export commands are still registered from their loop');
+	const loop = bundle.slice(at - 120, at);
+	assert.match(loop, /of\["print"\]\)/, 'the loop registers the print alone');
+	for (const format of ['pdf', 'latex', 'html']) {
+		assert.ok(!loop.includes(`"${format}"`), `no export:book-${format} ("Export book as ${format === 'pdf' ? 'PDF (via LaTeX)' : format.toUpperCase().replace('LATEX', 'LaTeX')}")`);
+	}
+	assert.ok(bundle.includes('PDF (reading view)'), '"Export book as PDF (reading view)" keeps its words');
+});
+
 test('the exports\' figure-engine setting (Clew-app 2cc6d89) has no Settings row', () => {
 	// (The key itself stays in the shim's defaults, src/shim/settings.js.)
 	assert.ok(!bundle.includes('TikZ and MetaPost figures in exports'));

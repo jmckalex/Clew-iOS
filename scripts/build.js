@@ -302,6 +302,13 @@ const rendererPatches = {
 				"\tbuild.title = `Print “${book.title}” as one PDF, each chapter numbered as the book numbers it`;\n");
 			src = patched('books.js', src, "\tbuild.addEventListener('click', () => buildBook(book.master, 'html'));\n",
 				"\tbuild.addEventListener('click', () => buildBook(book.master, 'print'));\n");
+			// The palette's book exports that need TeX and a Node fork (PDF via
+			// LaTeX, LaTeX, HTML) only ever refused here; the palette offers
+			// the print alone, as the Book panel does. EXPORT_BOOK still
+			// refuses the others by name.
+			src = patched('books.js', src,
+				"\tfor (const format of ['pdf', 'latex', 'html', 'print']) {\n",
+				"\tfor (const format of ['print']) {\n");
 			// And Proof this chapter's palette command, for the same reason.
 			src = patched('books.js', src,
 				"\tregisterCommand({\n"
