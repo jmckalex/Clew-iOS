@@ -235,3 +235,30 @@ test('the figure engine (jmarkdown 21dee42) stays off: the iPad\'s config names 
 	assert.equal((html.match(/<metapost-diagram\b/g) ?? []).length, 2, 'and each MetaPost one');
 	assert.ok(!/Figure engine|mp-tikz-wasm would not load/.test(html), 'nothing names the figure engine');
 });
+
+test('the Inserts\' @ forms (Clew-app acd9c27, jmarkdown 851e8e8) draw through the worker', async (t) => {
+	// Phase 1 of the colon directives' retirement: every Insert writes the
+	// engine's @ form. The iPad's toolbar runs the same commands, so each
+	// block, today's date and a theorem must draw here as they do on desktop.
+	const { BLOCK_INSERTS, TODAY_INSERT } = await import('../vendor/clew/shared/format-spec.js');
+	const vault = fs.mkdtempSync(path.join(os.tmpdir(), 'clew-inserts-'));
+	t.after(() => fs.rmSync(vault, { recursive: true, force: true }));
+	const blocks = Object.values(BLOCK_INSERTS).map((b) => `${b.header}\n${b.body}\n${b.footer}\n`);
+	fs.writeFileSync(path.join(vault, 'Inserts.md'),
+		`# Inserts\n\n${blocks.join('\n')}\nSigned ${TODAY_INSERT}.\n\n@begin(theorem)\nA claim.\n@end(theorem)\n`);
+	const html = flat(renderIn(vault, 'Inserts.md'));
+	assert.equal((html.match(/<tikz-diagram\b/g) ?? []).length, 1, 'TiKZ: the preview\'s figure');
+	assert.match(html, /class="mermaid/, 'Mermaid');
+	assert.match(html, /data-jmd-refused="Mathematica"/, 'Mathematica: refused by name (note code is off)');
+	assert.equal((html.match(/<td class="payoffs">/g) ?? []).length, 4, 'game: the 2×2 game, not one column of rows');
+	assert.match(html, /markdown-demo-container/, 'markdown-demo');
+	assert.ok(!html.includes('LaTeX-only content'), 'TeX: LaTeX only');
+	assert.match(html, /Web-only content/, 'HTML: web only');
+	assert.match(html, /Abstract text\./, 'abstract');
+	assert.match(html, /title-box/, 'title-box');
+	assert.ok(!html.includes('Editorial note'), 'comment: not drawn');
+	assert.match(html, /<name\b[^>]*>\s*(<p[^>]*>)?\s*Content/, 'a custom element');
+	assert.match(html, /Signed <span class="date">/, '@today');
+	assert.match(html, /Theorem 1/, 'the theorem, numbered');
+	assert.ok(!/@(begin|end)\(|@today/.test(html.slice(html.indexOf('<body'))), 'no @ form left as text');
+});
