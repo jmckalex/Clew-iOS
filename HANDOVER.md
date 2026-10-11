@@ -229,6 +229,13 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
 
 ## 2. Waiting on the owner
 
+- **Push main** (a push to main is a TestFlight build). It carries
+  everything since origin/main 35c8922:
+  - the f959799 sync;
+  - the iPad HTML share;
+  - the 185e950 sync with "Convert this vault".
+  Clew-boss asks when it has verified the chain; the push is on the
+  owner's word typed in the Clew-iOS window.
 0. **Push `integration`** (a push to main is a TestFlight build), and say
    whether the share extension should follow, after the App Store
    Connect steps in CAPTURE.md. On the device, check:
