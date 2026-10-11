@@ -634,6 +634,46 @@ final class VaultStore {
 		return nil
 	}
 
+	/// Write a text file's exact bytes, unguarded: "Convert this vault"'s
+	/// undo puts back a note byte for byte from its backup (ColonConversion
+	/// .swift). The converter's own check, a fresh read's hash just before,
+	/// is its guard.
+	func write(rel: String, bytes: Data) throws {
+		let url = try resolve(rel)
+		try coordinatedWrite(to: url) { try AtomicFile.write(bytes, to: $0) }
+		knownMtimes[rel] = currentMtimeMs(url)
+	}
+
+	/// A file's bytes as they are on the device now, not as the mirror last
+	/// saw them: the converter reads each note once more just before writing
+	/// it, and an iCloud or Files change must count.
+	func readBytes(rel: String) throws -> Data {
+		let url = try resolve(rel)
+		var result: Data?
+		var readError: Error?
+		var coordinationError: NSError?
+		NSFileCoordinator().coordinate(readingItemAt: url, options: [], error: &coordinationError) { readURL in
+			do { result = try Data(contentsOf: readURL) } catch { readError = error }
+		}
+		if let error = coordinationError { throw error }
+		if let error = readError { throw error }
+		return result ?? Data()
+	}
+
+	/// What a colon scan needs that the mirror lacks (ColonVaultFiles): the
+	/// folder configs, and the bytes of the notes in `empty` (mirrored as "")
+	/// that are not UTF-8.
+	func colonPrepare(empty: [String]) throws -> [String: Any] {
+		guard let vault = currentVaultPath else { throw ClewError.noVault }
+		let root = URL(fileURLWithPath: vault, isDirectory: true)
+		guard let real = currentVaultRealRoot ?? VaultPaths.realPath(vault) else { throw ClewError.noVault }
+		let raw = ColonVaultFiles.nonUTF8(root: root, realRoot: real, rels: empty)
+		return [
+			"configs": ColonVaultFiles.folderConfigs(root: root, realRoot: real),
+			"raw": raw.mapValues { $0.base64EncodedString() },
+		]
+	}
+
 	/// The renderer adopted the disk's version that a guarded write was
 	/// refused over (Keep theirs reads it afresh): this app has now seen it,
 	/// so the next save is not refused for it. Only while that version is

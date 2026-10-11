@@ -10,6 +10,7 @@ final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 	private let folderPicker = FolderPicker()
 	private let quickLook = QuickLookPresenter()
 	private let printer = PdfPrinter()
+	private let colonBackups = ColonBackupStore(root: ColonBackupStore.deviceRoot())
 	private let scanner = DocumentScanner()
 
 	init(vaults: VaultStore) {
@@ -71,15 +72,44 @@ final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 			performIO(reply) { try self.vaults.openVault(path: path).merging(session) { _, minted in minted } }
 
 		case "write":
-			guard let rel = params["rel"] as? String, let text = params["text"] as? String else {
-				throw ClewError.badPayload
+			guard let rel = params["rel"] as? String else { throw ClewError.badPayload }
+			if params["text"] == nil, let base64 = params["base64"] as? String {
+				// Exact bytes (the colon conversion's undo), never guarded.
+				guard let bytes = Data(base64Encoded: base64) else { throw ClewError.badPayload }
+				performIO(reply) { try self.vaults.write(rel: rel, bytes: bytes); return nil }
+				return
 			}
+			guard let text = params["text"] as? String else { throw ClewError.badPayload }
 			// A `guard`ed write (an editor's save) is refused when the file
 			// changed elsewhere since last seen: {conflict, disk, mtimeMs};
 			// `force` is "keep mine".
 			let guarded = params["guard"] as? Bool ?? false
 			let force = params["force"] as? Bool ?? false
 			performIO(reply) { try self.vaults.write(rel: rel, text: text, guarded: guarded, force: force) }
+
+		case "readNoteBytes":
+			guard let rel = params["rel"] as? String else { throw ClewError.badPayload }
+			performIO(reply) { try self.vaults.readBytes(rel: rel).base64EncodedString() }
+
+		// "Convert this vault" (ColonConversion.swift; the converter is
+		// src/shim/colon-conversion.js).
+		case "colonPrepare":
+			let empty = (params["empty"] as? [String]) ?? []
+			performIO(reply) { try self.vaults.colonPrepare(empty: empty) }
+
+		case "colonBackupWrite":
+			guard let path = params["path"] as? String, let base64 = params["base64"] as? String,
+				let data = Data(base64Encoded: base64) else { throw ClewError.badPayload }
+			performIO(reply) { try self.colonBackups.write(path, data: data); return nil }
+
+		case "colonBackupManifests":
+			guard let folder = params["folder"] as? String else { throw ClewError.badPayload }
+			performIO(reply) { try self.colonBackups.manifests(folder: folder) }
+
+		case "colonBackupNotes":
+			guard let folder = params["folder"] as? String, let id = params["id"] as? String,
+				let paths = params["paths"] as? [String] else { throw ClewError.badPayload }
+			performIO(reply) { try self.colonBackups.notes(folder: folder, id: id, paths: paths).mapValues { $0.base64EncodedString() } }
 
 		case "markSeen":
 			guard let rel = params["rel"] as? String, let mtimeMs = params["mtimeMs"] as? Double else {

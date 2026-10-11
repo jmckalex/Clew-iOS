@@ -36,6 +36,7 @@ import { settings } from './settings.js';
 import { bridgeCall, toBase64 } from './native-bridge.js';
 import { ARM_SCRIPT, BOOK_ARM_SCRIPT, READY_PROBE, LIGHT_THEME_SCRIPT, PAPER_SIZES } from './print-pdf.js';
 import { SNAPSHOT_SCRIPT, SHARE_IMAGE_MAX, SHARE_IMAGES_MAX, shareLeaks } from './html-share.js';
+import { createColonConversion } from './colon-conversion.js';
 import { readMaster, laterNotice, placeWarnings } from '../../vendor/clew/shared/book.js';
 
 /**
@@ -201,6 +202,10 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 		send(CH.EV_TREE_CHANGED, { tree: vaults.tree() });
 		vaults.hooks.onStructureChanged?.();
 	};
+
+	// "Convert this vault" — the colon directives' retirement, phase 2:
+	// upstream's converter over the mirror and the device (colon-conversion.js).
+	const colon = createColonConversion({ vaults, send, fileChanged, progressChannel: CH.EV_COLON_PROGRESS });
 
 	/**
 	 * A PDF's bytes to the device. On the device: ONE binary POST to the app
@@ -484,6 +489,13 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 			vaults.markSeenOnRead(path);
 			return text;
 		},
+		// "Convert this vault" (desktop's ipc.js COLON_*): a dry run, the chosen
+		// conversion, its end for the notes an editor took, undo, the newest.
+		[CH.COLON_SCAN]: () => colon.scan(),
+		[CH.COLON_APPLY]: ({ scanId, picks, editing } = {}) => colon.apply({ scanId, picks, editing }),
+		[CH.COLON_FINISH]: ({ id, applied } = {}) => colon.finish({ id, applied }),
+		[CH.COLON_UNDO]: ({ id = null } = {}) => colon.undo({ id }),
+		[CH.COLON_LAST]: () => colon.last(),
 		[CH.NOTE_WRITE]: async ({ path, content, guard = false, force = false }) => {
 			// A write that CREATES the note (a template, a daily note, a
 			// plugin's note) is in the explorer at once (Clew-app 5077207).

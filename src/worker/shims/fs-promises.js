@@ -1,6 +1,7 @@
 // Node `fs/promises` over the vfs — import-compatibility for library code
 // (chokidar/readdirp) that never actually runs in the worker.
 import { vfs } from './vfs.js';
+import { decodeUtf8 } from './buffer.js';
 
 export async function stat(p) { return vfs.stat(p); }
 export const lstat = stat;
@@ -9,7 +10,7 @@ export async function realpath(p) { return p; }
 export async function readFile(p, options) {
 	const data = vfs.read(p);
 	const encoding = typeof options === 'string' ? options : options?.encoding;
-	if (encoding && typeof data !== 'string') return new TextDecoder().decode(data);
+	if (encoding && typeof data !== 'string') return decodeUtf8(data);
 	return data;
 }
 export async function writeFile(p, data) { vfs.write(p, data); }

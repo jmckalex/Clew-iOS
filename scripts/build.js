@@ -22,6 +22,7 @@ for (const [mod, file] of Object.entries({
 	child_process: 'child_process.js', module: 'module.js', vm: 'vm.js',
 	os: 'os.js', stream: 'stream.js', events: 'events.js', http: 'http.js',
 	'fs/promises': 'fs-promises.js', process: 'process.js', util: 'util.js',
+	perf_hooks: 'perf_hooks.js',
 })) {
 	builtinAlias[mod] = path.join(shims, file);
 	builtinAlias[`node:${mod}`] = path.join(shims, file);
@@ -122,6 +123,50 @@ const webroot = path.join(dist, 'webroot');
 
 // Renderer patches for touch devices — build-time transforms of vendored
 // files (vendor stays untouched on disk; upstream candidates).
+// "Convert this vault" (vendor/clew/main/colon-conversion.js) runs verbatim in
+// the app page (src/shim/colon-conversion.js), which has neither of the two
+// Node globals its pacing reads. Both the app bundle and the services test
+// bundle take these, so the tests run the code the iPad runs.
+//   setImmediate   its slices yield with it. A MessageChannel message yields
+//                  as promptly (setTimeout(0) is clamped to 4 ms once nested,
+//                  which would idle a third of every 8 ms slice); where
+//                  setImmediate exists (Node), it is used.
+//   process        its peak RSS: 0 where there is no process (the iPad's is
+//                  measured natively, on the host).
+//   SLICE_MS       8 → 4: the page it shares is the window's (below).
+const colonPatches = {
+	name: 'clew-colon-conversion-patches',
+	setup(builder) {
+		builder.onLoad({ filter: /vendor\/clew\/main\/colon-conversion\.js$/ }, (args) => {
+			let source = patched('colon-conversion.js', fs.readFileSync(args.path, 'utf8'),
+				'const tick = () => new Promise((resolve) => setImmediate(resolve));',
+				'// iOS: no setImmediate in the app page (scripts/build.js colonPatches).\n'
+				+ 'let yieldPort = null;\n'
+				+ 'const yielded = [];\n'
+				+ 'const tick = () => new Promise((resolve) => {\n'
+				+ '\tif (typeof setImmediate === \'function\') { setImmediate(resolve); return; }\n'
+				+ '\tif (!yieldPort) {\n'
+				+ '\t\tconst channel = new MessageChannel();\n'
+				+ '\t\tchannel.port1.onmessage = () => yielded.shift()?.();\n'
+				+ '\t\tyieldPort = channel.port2;\n'
+				+ '\t}\n'
+				+ '\tyielded.push(resolve);\n'
+				+ '\tyieldPort.postMessage(0);\n'
+				+ '});');
+			// Its slices: 8 ms on desktop, where main is not the window's
+			// thread. Here it is: an 8 ms slice straddling a vsync held a frame
+			// to ~24 ms (measured on 5,006 notes); 4 ms keeps every frame whole.
+			source = patched('colon-conversion.js', source, 'const SLICE_MS = 8;', 'const SLICE_MS = 4; // iOS: the page is the window\'s (scripts/build.js colonPatches)');
+			const reads = source.split('process.memoryUsage().rss').length - 1;
+			if (reads !== 3) {
+				throw new Error(`[build] colon-conversion.js reads process.memoryUsage().rss ${reads}× (expected 3) — upstream changed its pacing; update colonPatches in scripts/build.js.`);
+			}
+			source = source.split('process.memoryUsage().rss').join('(globalThis.process?.memoryUsage?.().rss ?? 0)');
+			return { contents: source, loader: 'js' };
+		});
+	},
+};
+
 const rendererPatches = {
 	name: 'clew-renderer-patches',
 	setup(builder) {
@@ -390,7 +435,7 @@ export async function buildAppBundle({ minify = true } = {}) {
 		// packages at module scope (see src/shim/xterm-stub.js).
 		alias: { ...builtinAlias, '@xterm/xterm': xtermStub, '@xterm/addon-fit': xtermStub, '@xterm/addon-unicode11': xtermStub },
 		inject: bufferInject,
-		plugins: [rendererPatches],
+		plugins: [rendererPatches, colonPatches],
 		minify,
 		sourcemap: false,
 		logLevel: 'warning',
@@ -633,6 +678,7 @@ export async function buildServicesTestBundle() {
 		outfile: path.join(dist, 'test', 'services.js'),
 		alias: builtinAlias,
 		inject: bufferInject,
+		plugins: [colonPatches],
 		logLevel: 'warning',
 		metafile: true,
 	});

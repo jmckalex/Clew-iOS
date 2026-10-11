@@ -2,13 +2,13 @@
 // sync throughout); the callback/promise forms exist so incidental library
 // code (chokidar's module graph, never actually run on iOS) can import.
 import { vfs } from './vfs.js';
-import { BufferShim } from './buffer.js';
+import { BufferShim, decodeUtf8 } from './buffer.js';
 import * as fsPromises from './fs-promises.js';
 
 export function readFileSync(p, options) {
 	const encoding = typeof options === 'string' ? options : options?.encoding;
 	const data = vfs.read(p);
-	if (encoding) return typeof data === 'string' ? data : new TextDecoder().decode(data);
+	if (encoding) return typeof data === 'string' ? data : decodeUtf8(data);
 	// No encoding: a Buffer, as Node returns — vendored code compares
 	// snapshots with .equals() (history.js). A view over the same bytes.
 	return BufferShim.view(data);

@@ -16,7 +16,8 @@
 // format is identical by construction, and its fs calls (copy, utimes, rm,
 // rename) reach the device through the same write-through hooks.
 import { vfs } from '../worker/shims/vfs.js';
-import { snapshotBeforeWrite, renameHistory } from '../../vendor/clew/main/history.js';
+import { decodeUtf8 } from '../worker/shims/buffer.js';
+import { snapshotBeforeWrite, renameHistory, keepVersion } from '../../vendor/clew/main/history.js';
 import { renamePdfMeta } from '../../vendor/clew/main/pdf-meta.js';
 import { bridgeCall, toBase64 } from './native-bridge.js';
 import { settings } from './settings.js';
@@ -36,6 +37,14 @@ export const VAULT_ROOT = '/vault';
 // (#relOf maps /vault only), and no rescan diffs it: a plugin dropped in
 // mid-session is picked up at the next vault open.
 export const GLOBAL_PLUGINS_ROOT = '/global-plugins';
+
+// "Convert this vault"'s backups (colon-conversion.js): each conversion's
+// notes as they were and its manifest, written by upstream's converter with
+// fs under this root, and written through to the DEVICE's store
+// (ColonConversion.swift, Application Support/colon-conversion) — never the
+// vault. Through the vault's own write queue, so every backup and the
+// manifest are on the device before the first note they back up is written.
+export const DEVICE_BACKUP_ROOT = '/colon-conversion';
 
 // Which files are text lives with the engine config — the Node harness needs
 // both without dragging the bridge in. Re-exported here for existing callers.
@@ -162,6 +171,12 @@ export class VaultManager {
 		// bridge write exactly that shape, and a temp file must never leave
 		// the mirror (the walks that skip it are the point of the name).
 		vfs.onWrite = (abs, data) => {
+			if (abs.startsWith(DEVICE_BACKUP_ROOT + '/')) {
+				const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
+				const path = abs.slice(DEVICE_BACKUP_ROOT.length + 1);
+				this.#enqueue(() => bridgeCall('colonBackupWrite', { path, base64: toBase64(bytes) }));
+				return;
+			}
 			const rel = this.#relOf(abs);
 			if (rel === null || isAtomicTemp(rel)) return;
 			if (typeof data !== 'string') {
@@ -169,7 +184,7 @@ export class VaultManager {
 				// Buffer) are text: the mirror keeps text as strings, and the
 				// device gets them. Binaries have their own bridge calls.
 				if (!isTextPath(rel)) return;
-				data = new TextDecoder().decode(data);
+				data = decodeUtf8(data);
 				const entry = vfs.files.get(abs);
 				if (entry) entry.data = data;
 			}
@@ -189,7 +204,7 @@ export class VaultManager {
 				// so readers and the rescan diff see one representation.
 				const entry = vfs.files.get(toAbs);
 				if (entry && typeof entry.data !== 'string' && isTextPath(newRel)) {
-					entry.data = new TextDecoder().decode(entry.data);
+					entry.data = decodeUtf8(entry.data);
 				}
 				if (typeof entry?.data !== 'string') {
 					console.error(`[clew-ios] atomic write of a non-text file is not supported: ${newRel}`);
@@ -366,13 +381,40 @@ export class VaultManager {
 
 	readNote(rel) {
 		const data = vfs.read(this.resolve(rel));
-		return typeof data === 'string' ? data : new TextDecoder().decode(data);
+		return typeof data === 'string' ? data : decodeUtf8(data);
 	}
 
 	writeNote(rel, content) {
 		const abs = this.resolve(rel);
 		this.snapshotHistory(rel);
 		vfs.write(abs, content);
+	}
+
+	/**
+	 * Desktop's writeNoteAsync (vault.js), for a writer of many notes at once
+	 * ("Convert this vault"): history as writeNote keeps it, then the device's
+	 * atomic write through the queue, AWAITED — it resolves once the note is
+	 * on the device and rejects with the device's error — and only then the
+	 * mirror. Unguarded, as desktop's: the converter's own check (a fresh
+	 * read's hash just before) is its guard. Text goes as text; bytes (undo's
+	 * backup) go as bytes, exactly.
+	 */
+	async writeNoteAsync(rel, content) {
+		const abs = this.resolve(rel);
+		const created = !vfs.has(abs);
+		this.snapshotHistory(rel);
+		const text = typeof content === 'string' ? content : null;
+		await this.#enqueue(() => bridgeCall('write', text !== null
+			? { vault: this.realPath, rel, text }
+			: { vault: this.realPath, rel, base64: toBase64(content) }));
+		vfs.patch(abs, text ?? decodeUtf8(content), Date.now());
+		return { written: true, created };
+	}
+
+	/** Keep `text` as a version of `rel` in its history, now (history.js
+	 *  #keepVersion, as desktop's VaultManager.keepVersion). */
+	keepVersion(rel, text) {
+		return keepVersion(VAULT_ROOT, this.resolve(rel).slice(VAULT_ROOT.length + 1), text);
 	}
 
 	/**

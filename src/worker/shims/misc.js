@@ -2,6 +2,8 @@
 // vm, child_process, module, http, crypto. Each is re-exported by a matching
 // one-line entry file (esbuild aliases resolve module names to files 1:1).
 
+import { decodeUtf8 } from './buffer.js';
+
 // ---- events ---------------------------------------------------------------
 
 export class EventEmitter {
@@ -273,7 +275,7 @@ const hexToBase64 = (hex) => {
 export function createHash(algorithm = 'sha1') {
 	let buffer = '';
 	return {
-		update(data) { buffer += typeof data === 'string' ? data : new TextDecoder().decode(data); return this; },
+		update(data) { buffer += typeof data === 'string' ? data : decodeUtf8(data); return this; },
 		digest(encoding) {
 			const hex = algorithm === 'md5' ? md5Hex(buffer)
 				: algorithm === 'sha256' ? sha256Hex(buffer)

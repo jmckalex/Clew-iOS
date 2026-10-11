@@ -3,7 +3,12 @@
 // byte-equality). Shared by the worker's injected globals and the fs shim,
 // which returns one from encoding-less reads exactly as Node does.
 const textEncoder = new TextEncoder();
-const textDecoder = new TextDecoder();
+// Node's utf8 decoding keeps a leading BOM (U+FEFF) as a character; the
+// WHATWG decoder drops it unless told not to. Every bytes → text decode in
+// the shims goes through this one, so a note that starts with a BOM reads,
+// hashes and writes back exactly as on desktop.
+const textDecoder = new TextDecoder('utf-8', { ignoreBOM: true });
+export const decodeUtf8 = (bytes) => textDecoder.decode(bytes);
 
 export class BufferShim extends Uint8Array {
 	toString(encoding = 'utf8') {
