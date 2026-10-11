@@ -50,6 +50,8 @@ import { planOpen, pathFromFileUrl } from './open-file.js';
 import { resolvedCallouts } from './callout-types.js';
 import { iconTable } from './callout-files.js';
 import { iconKey } from '#jmarkdown/callout-definitions.js';
+import { colonConverter } from './colon-conversion.js';
+import { isExcalidrawPath } from '../shared/file-types.js';
 import fs from 'node:fs';
 import nodePath from 'node:path';
 
@@ -684,6 +686,36 @@ export function registerIpc() {
 		if (result?.output) s.vaults.refreshIfInside(result.output);
 		return result;
 	});
+
+	// "Convert this vault" — the colon directives' retirement, phase 2
+	// (colon-conversion.js). One converter per window, over its vault as it is
+	// now: the tree walk lists the notes (the vault's excludes, a restricted
+	// vault's realpath clamp), writes go through writeNoteAsync (atomic,
+	// history, the write guard told), reads through resolve (the same clamp).
+	const colonFor = (s) => s.colonConversion ??= colonConverter({
+		vault: {
+			get root() { return s.vaults.root; },
+			get restricted() { return !!s.vaults.restricted; },
+			listNotes: () => {
+				const files = [];
+				s.vaults.tree(null, files);
+				return files.filter((rel) => /\.(md|jmd)$/i.test(rel) && !isExcalidrawPath(rel));
+			},
+			read: (rel) => fs.readFileSync(s.vaults.resolve(rel)),
+			readAsync: (rel) => fs.promises.readFile(s.vaults.resolve(rel)),
+			write: (rel, text) => s.vaults.writeNoteAsync(rel, text),
+			keepVersion: (rel, text) => s.vaults.keepVersion(rel, text),
+		},
+		backupRoot: paths.colonConversion,
+		log: (line) => console.log(line),
+		debug: (line) => { if (process.env.CLEW_COLON_DEBUG) console.log(line); },
+	});
+	const colonProgress = (s) => (p) => s.send(CH.EV_COLON_PROGRESS, p);
+	handle(CH.COLON_SCAN, (s) => colonFor(s).scan({ progress: colonProgress(s) }));
+	handle(CH.COLON_APPLY, (s, { scanId, picks, editing }) => colonFor(s).apply({ scanId, picks, editing, progress: colonProgress(s) }));
+	handle(CH.COLON_FINISH, (s, { id, applied }) => colonFor(s).finish({ id, applied }));
+	handle(CH.COLON_UNDO, (s, { id = null } = {}) => colonFor(s).undo({ id, progress: colonProgress(s) }));
+	handle(CH.COLON_LAST, (s) => colonFor(s).last());
 
 	// A book (book-mode.md §5): its master and chapters as one document, into
 	// build/ beside the master.

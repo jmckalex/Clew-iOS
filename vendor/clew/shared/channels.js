@@ -94,6 +94,16 @@ export const CH = {
 	// invoke: export via the engine
 	EXPORT_NOTE: 'clew:export-note',
 	EXPORT_BOOK: 'clew:export-book',
+	// The colon directives' retirement, phase 2 (main/colon-conversion.js):
+	// "Convert this vault" — a dry run, the chosen conversion, its end for the
+	// notes an editor took, and undo; EV_COLON_PROGRESS { done, total } while
+	// a scan or a conversion runs.
+	COLON_SCAN: 'clew:colon-scan',
+	COLON_APPLY: 'clew:colon-apply',
+	COLON_FINISH: 'clew:colon-finish',
+	COLON_UNDO: 'clew:colon-undo',
+	COLON_LAST: 'clew:colon-last',
+	EV_COLON_PROGRESS: 'clew:ev-colon-progress',
 	CANVAS_EXPORT_PNG: 'clew:canvas-export-png',
 	EXPORT_SITE: 'clew:export-site',
 	SNIPPETS_GET: 'clew:snippets-get',

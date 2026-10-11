@@ -19,7 +19,7 @@ import { toggleWrapSpec } from '../editor/toggle-wrap.js';
 import { vaultSettingsStore } from '../state/vault-settings-store.js';
 import { saveAndInsert } from '../editor/attachments.js';
 import { CALLOUT_TYPES, BUILTIN_CALLOUT_TYPES } from '#jmarkdown/callout-table.js';
-import { CELL_SAFE_COMMANDS } from '../../shared/format-spec.js';
+import { CELL_SAFE_COMMANDS, BLOCK_INSERTS, TODAY_INSERT, environmentBlock } from '../../shared/format-spec.js';
 import {
 	activeCellView, applyStructure, leaveCell, tableTarget, activateCell, rowIndex,
 } from '../editor/live/table-cell-editor.js';
@@ -250,7 +250,7 @@ function insertBlock(view, text, placeholder = null) {
 }
 
 /** Wrap the selection (or a placeholder) in a container fence. */
-function wrapContainer(view, header, footer = ':::', placeholder = 'Content') {
+function wrapContainer(view, header, footer, placeholder = 'Content') {
 	const range = view.state.selection.main;
 	if (range.empty) {
 		insertBlock(view, `${header}\n${placeholder}\n${footer}`, placeholder);
@@ -388,13 +388,20 @@ function insertFigure(view, kind, show) {
 }
 
 /**
- * `:::name` around the selection — or `@begin(name)`/`@end(name)` when the
- * note already writes its environments that way (one look, not a setting).
+ * `@begin(name)`/`@end(name)` around the selection — the engine's numbered
+ * environment for a name it numbers (theorem → "Theorem 1."). Until 2026-10-10
+ * this wrote `:::name` unless the note already used `@begin`, and `:::theorem`
+ * is the engine's generic container: no number, its caption dropped.
  */
 function wrapEnvironment(view, name) {
-	const atStyle = /^[ \t]*@begin\(/m.test(view.state.doc.toString());
-	if (atStyle) wrapContainer(view, `@begin(${name})`, `@end(${name})`, 'Content');
-	else wrapContainer(view, `:::${name}`, ':::', 'Content');
+	const { header, footer } = environmentBlock(name);
+	wrapContainer(view, header, footer, 'Content');
+}
+
+/** One of the Block group's environments (shared/format-spec.js#BLOCK_INSERTS). */
+function insertEnvironment(view, id) {
+	const { header, footer, body } = BLOCK_INSERTS[id];
+	wrapContainer(view, header, footer, body);
 }
 
 /**
@@ -549,37 +556,24 @@ export function registerFormatCommands() {
 		{ id: 'format:Cref', name: 'Insert capitalised typed reference (@Cref[key])',
 			fn: (v) => { insertInline(v, '@Cref[', ']', ''); startCompletion(v); } },
 		{ id: 'format:toc', name: 'Insert table of contents ({{TOC}})', fn: (v) => insertBlock(v, '{{TOC}}') },
-		{ id: 'format:today', name: "Insert today's date (:today)", fn: (v) => insertInline(v, ':today', '') },
+		{ id: 'format:today', name: "Insert today's date (@today)", fn: (v) => insertInline(v, TODAY_INSERT, '') },
 
 		// Blocks.
 		{ id: 'format:code-fence', name: 'Insert code fence',
 			fn: (v) => wrapContainer(v, '```', '```', 'code') },
 		{ id: 'format:math-block', name: 'Insert math block ($$…$$)',
 			fn: (v) => wrapContainer(v, '$$', '$$', 'e = mc^2') },
-		{ id: 'format:mermaid', name: 'Insert mermaid diagram',
-			fn: (v) => wrapContainer(v, ':::mermaid', ':::', 'graph LR\n  A --> B') },
-		{ id: 'format:tikz', name: 'Insert TiKZ diagram',
-			fn: (v) => wrapContainer(v, ':::TiKZ', ':::',
-				'\\begin{tikzpicture}\n  \\draw (0,0) -- (1,1);\n\\end{tikzpicture}') },
-		{ id: 'format:mathematica', name: 'Insert Mathematica block',
-			fn: (v) => wrapContainer(v, ':::Mathematica{output="svg"}', ':::', 'Plot[Sin[x], {x, 0, 2 Pi}]') },
-		{ id: 'format:game', name: 'Insert game matrix (:::game)',
-			fn: (v) => wrapContainer(v, ':::game', ':::',
-				'       | Cooperate | Defect\n-------+-----------+--------\nCooperate | 3, 3   | 0, 5\nDefect    | 5, 0   | 1, 1') },
-		{ id: 'format:markdown-demo', name: 'Insert markdown demo block',
-			fn: (v) => wrapContainer(v, ':::markdown-demo', ':::', 'This is *some* /text/.') },
-		{ id: 'format:tex-block', name: 'Insert LaTeX-only block (:::TeX)',
-			fn: (v) => wrapContainer(v, ':::TeX', ':::', '% LaTeX-only content (verbatim)') },
-		{ id: 'format:html-block', name: 'Insert HTML-only block (:::HTML)',
-			fn: (v) => wrapContainer(v, ':::HTML', ':::', 'Web-only content (markdown processed)') },
-		{ id: 'format:abstract', name: 'Insert abstract block',
-			fn: (v) => wrapContainer(v, ':::abstract', ':::', 'Abstract text.') },
-		{ id: 'format:title-box', name: 'Insert title box',
-			fn: (v) => wrapContainer(v, ':::title-box', ':::', 'Title\n***\nBody text.') },
-		{ id: 'format:comment', name: 'Insert comment block (omitted from output)',
-			fn: (v) => wrapContainer(v, ':::comment', ':::', 'Editorial note.') },
-		{ id: 'format:container', name: 'Insert generic container (:::name)',
-			fn: (v) => wrapContainer(v, ':::name', ':::', 'Content') },
+		{ id: 'format:mermaid', name: 'Insert mermaid diagram', fn: (v) => insertEnvironment(v, 'format:mermaid') },
+		{ id: 'format:tikz', name: 'Insert TiKZ diagram', fn: (v) => insertEnvironment(v, 'format:tikz') },
+		{ id: 'format:mathematica', name: 'Insert Mathematica block', fn: (v) => insertEnvironment(v, 'format:mathematica') },
+		{ id: 'format:game', name: 'Insert game matrix (@begin(game))', fn: (v) => insertEnvironment(v, 'format:game') },
+		{ id: 'format:markdown-demo', name: 'Insert markdown demo block', fn: (v) => insertEnvironment(v, 'format:markdown-demo') },
+		{ id: 'format:tex-block', name: 'Insert LaTeX-only block (@begin(TeX))', fn: (v) => insertEnvironment(v, 'format:tex-block') },
+		{ id: 'format:html-block', name: 'Insert HTML-only block (@begin(HTML))', fn: (v) => insertEnvironment(v, 'format:html-block') },
+		{ id: 'format:abstract', name: 'Insert abstract block', fn: (v) => insertEnvironment(v, 'format:abstract') },
+		{ id: 'format:title-box', name: 'Insert title box', fn: (v) => insertEnvironment(v, 'format:title-box') },
+		{ id: 'format:comment', name: 'Insert comment block (omitted from output)', fn: (v) => insertEnvironment(v, 'format:comment') },
+		{ id: 'format:container', name: 'Insert generic container (@begin(<name>))', fn: (v) => insertEnvironment(v, 'format:container') },
 		// Live edit's toolbar (docs/dev/live-edit.md §6.2); every one
 		// works in source mode too. Args come from the toolbar's popovers.
 		{ id: 'edit:undo', name: 'Undo', main: (v) => { undo(v); refocus(v); } },

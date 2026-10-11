@@ -33,6 +33,7 @@ import { buildWarnings } from '../build-warnings.js';
 import { warningSummary } from '../../shared/build-warnings.js';
 import { openListModal } from '../components/modals/list-modal.js';
 import { openHistoryModal } from '../components/modals/clew-history-modal.js';
+import { convertVault, undoConversion } from '../colon-conversion.js';
 import { ipc, CH } from '../ipc.js';
 
 const needsVault = (ctx) => ctx.vaultOpen;
@@ -172,6 +173,12 @@ export function registerBuiltinCommands() {
 				editorPool.flush(ctx.activeTab.id);
 				openHistoryModal(ctx.notePath);
 			} },
+		// The colon directives' retirement, phase 2: a dry run of the whole
+		// vault, then the sheet (renderer/colon-conversion.js). Never automatic.
+		{ id: 'vault:convert-colons', name: 'Convert colon directives in this vault…', when: needsVault,
+			run: () => convertVault() },
+		{ id: 'vault:undo-colon-conversion', name: 'Undo the last colon conversion…', when: needsVault,
+			run: () => undoConversion() },
 
 		// navigation
 		// §5.15: the active PDF tab's annotations, as a note beside it.

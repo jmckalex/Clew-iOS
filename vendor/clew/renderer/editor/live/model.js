@@ -160,7 +160,8 @@ function build(doc, tree, config) {
 				} else {
 					add('environment', 'A', 'line', s.start, s.end, {
 						name, body: s.body, content: s.content, attrs: s.attrs,
-						openLine: open, closeLine: close, texOnly: name === 'TeX',
+						openLine: open, closeLine: close,
+						texOnly: name === 'TeX', htmlOnly: name === 'HTML', comment: name === 'comment',
 						extents: close ? [open, close] : [open],
 					});
 					if (name === 'TeX') opaque.push({ from: s.start, to: s.end });

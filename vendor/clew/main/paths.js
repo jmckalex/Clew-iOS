@@ -63,6 +63,10 @@ function trustPaths() {
 		// whole DEVICE (remote-pdf-cache.js) — never in a vault, whose .clew/
 		// travels and could carry a planted copy.
 		remotePdfs: path.join(app.getPath('userData'), 'remote-pdfs'),
+		// "Convert this vault" (colon-conversion.js): each conversion's notes as
+		// they were, and its manifest — what undo puts back. The device's, never
+		// a vault's: a backup inside the vault would itself be converted.
+		colonConversion: path.join(app.getPath('userData'), 'colon-conversion'),
 	};
 }
 

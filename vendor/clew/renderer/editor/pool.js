@@ -298,6 +298,12 @@ class EditorPool extends Emitter {
 		await this.#save(tabId);
 	}
 
+	/** Save every editor holding unsaved edits, and wait: a change made from
+	 *  the disk — "Convert this vault" — must see what is on screen. */
+	async saveAll() {
+		await Promise.all([...this.#entries.keys()].map((id) => this.saveNow(id)));
+	}
+
 	/** Flush a pending save immediately (blur, tab switch, close). */
 	flush(tabId) {
 		this.#entries.get(tabId)?.save.flush();

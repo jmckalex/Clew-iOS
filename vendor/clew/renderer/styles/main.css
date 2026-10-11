@@ -184,6 +184,74 @@ button {
 .clew-conflict-buttons button.is-primary { background: var(--clew-accent); border-color: var(--clew-accent); color: var(--clew-text-on-accent, #fff); }
 .clew-conflict-buttons button.is-primary:hover { background: var(--clew-accent-hover); }
 
+/* ---- "Convert this vault": the colon directives' sheet (colon-conversion.js) */
+.clew-colon-sheet {
+	position: fixed;
+	inset: 0;
+	z-index: 300;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: var(--clew-overlay, rgba(0, 0, 0, 0.35));
+}
+.clew-colon-card {
+	width: min(860px, calc(100vw - 32px));
+	max-height: calc(100vh - 64px);
+	display: flex;
+	flex-direction: column;
+	background: var(--clew-bg-secondary);
+	border: 1px solid var(--clew-border);
+	border-radius: 10px;
+	padding: 18px 20px 14px;
+	box-shadow: 0 12px 40px var(--clew-shadow);
+	color: var(--clew-text-normal);
+	font-size: 13.5px;
+	line-height: 1.45;
+	outline: none;
+}
+.clew-colon-card h2 { margin: 0 0 8px; font-size: 16px; }
+.clew-colon-card p { margin: 0 0 8px; }
+.clew-colon-body { flex: 1 1 auto; min-height: 0; overflow: auto; margin: 0 0 12px; }
+.clew-colon-explain { color: var(--clew-text-muted); }
+.clew-colon-summary { font-weight: 600; }
+.clew-colon-progress { height: 6px; border-radius: 3px; background: var(--clew-bg-primary); overflow: hidden; }
+.clew-colon-progress-fill { height: 100%; width: 0; background: var(--clew-accent); }
+.clew-colon-progress.is-indeterminate .clew-colon-progress-fill { width: 30%; }
+.clew-colon-group { margin: 14px 0 0; padding-top: 10px; border-top: 1px solid var(--clew-border); }
+.clew-colon-group-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.clew-colon-group h3 { margin: 0 0 4px; font-size: 14px; }
+.clew-colon-pick-all, .clew-colon-pick { white-space: nowrap; cursor: pointer; }
+.clew-colon-list > summary { cursor: pointer; color: var(--clew-text-muted); margin: 2px 0; }
+/* Thousands of folds: off-screen ones are neither laid out nor painted. */
+.clew-colon-note { margin: 2px 0; content-visibility: auto; contain-intrinsic-size: auto 22px; }
+.clew-colon-note > summary { cursor: pointer; display: flex; gap: 10px; padding: 2px 0; }
+.clew-colon-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.clew-colon-count { color: var(--clew-text-faint); white-space: nowrap; }
+.clew-colon-note > :not(summary) { margin-left: 18px; }
+.clew-colon-row { margin: 6px 0 8px; padding: 6px 10px; border-left: 3px solid var(--clew-border); background: var(--clew-bg-primary); border-radius: 0 6px 6px 0; }
+.clew-colon-row.is-changes-output { border-left-color: var(--clew-accent); }
+.clew-colon-row-head { display: flex; gap: 12px; align-items: baseline; margin-bottom: 2px; }
+.clew-colon-line { color: var(--clew-text-faint); font-size: 12px; }
+.clew-colon-left { color: var(--clew-text-muted); font-style: italic; }
+.clew-colon-item { font-size: 12.5px; overflow-wrap: anywhere; }
+.clew-colon-item code { font-family: var(--clew-mono-font); font-size: 12px; white-space: pre-wrap; }
+.clew-colon-arrow { color: var(--clew-text-faint); }
+.clew-colon-why { color: var(--clew-text-muted); font-size: 12.5px; overflow-wrap: anywhere; }
+.clew-colon-buttons { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.clew-colon-buttons button {
+	font: inherit;
+	border-radius: 6px;
+	padding: 5px 12px;
+	cursor: pointer;
+	background: none;
+	border: 1px solid var(--clew-border);
+	color: var(--clew-text-normal);
+}
+.clew-colon-buttons button:hover:not(:disabled) { background: var(--clew-hover); }
+.clew-colon-buttons button:disabled { opacity: 0.5; cursor: default; }
+.clew-colon-buttons button.is-primary { background: var(--clew-accent); border-color: var(--clew-accent); color: var(--clew-text-on-accent, #fff); }
+.clew-colon-buttons button.is-primary:hover:not(:disabled) { background: var(--clew-accent-hover); }
+
 /* ---- vault trust: the prompt and the status-bar indicator (trust-banner.js) */
 .clew-trust-sheet {
 	position: fixed;

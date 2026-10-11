@@ -53,8 +53,12 @@ export const CHAPTER_CLASSES = ['book', 'report', 'memoir', 'scrbook', 'scrreprt
 const THEOREMS = new Set(THEOREM_KINDS);
 const FLOATS = new Set(['figure', 'table', 'listing']);
 const VERBATIM = new Set(['equation', 'TeX', 'HTML', 'comment', 'mermaid', 'TiKZ', 'tikz', 'tikzpicture', 'metapost']);
-const ENV_OPEN_RE = /^[ \t]*(?:@begin\(([\w*-]+)\)|(:{3,})[ \t]*([\w*-]+))(?:\[([^\]\n]*)\])?(?:\{([^}\n]*)\})?/;
-const ENV_CLOSE_RE = /^[ \t]*(?:@end\(([\w*-]+)\)|(:{3,})[ \t]*$)/;
+// `@begin(.name)` / `@begin(<name>)` force a class or an element for a name
+// the engine does not know, and change nothing for one it does: the engine's
+// `@begin(<figure>)` is still Figure 1 (begin-end-core.js; measured on
+// 21dee42) — so the sigil is read past here, as the engine reads it.
+const ENV_OPEN_RE = /^[ \t]*(?:@begin\([ \t]*[.<]?[ \t]*([\w*-]+)[ \t]*>?[ \t]*\)|(:{3,})[ \t]*([\w*-]+))(?:\[([^\]\n]*)\])?(?:\{([^}\n]*)\})?/;
+const ENV_CLOSE_RE = /^[ \t]*(?:@end\([ \t]*[.<]?[ \t]*([\w*-]+)[ \t]*>?[ \t]*\)|(:{3,})[ \t]*$)/;
 const HEADING_RE = /^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$/;
 const UNNUMBERED_RE = /\{-\}/;
 const LABEL_RE = /(^|[^\w@:\\])[@:]label\[([^\]\n]+)\]/g;
@@ -79,7 +83,7 @@ function classicOrder(lines) {
  *  note full of diagrams (@begin(TiKZ)) costs a keystroke nothing. Plugin-
  *  declared environments bypass the check. */
 const NUMBERED_NAMES = 'theorem|lemma|corollary|proposition|definition|example|remark|equation|figure|subfigure|table|listing';
-const WORTH = new RegExp(`[@:](?:label|c?ref|Cref)\\[|Headings:|@begin\\((?:${NUMBERED_NAMES})\\)|:::+[ \\t]*(?:${NUMBERED_NAMES})\\b`);
+const WORTH = new RegExp(`[@:](?:label|c?ref|Cref)\\[|Headings:|@begin\\([ \\t]*[.<]?[ \\t]*(?:${NUMBERED_NAMES})[ \\t]*>?[ \\t]*\\)|:::+[ \\t]*(?:${NUMBERED_NAMES})\\b`);
 
 /** "section 3", "Theorem 2", "equation (1)" — the engine's own words, with its
  *  `&#160;` as a real no-break space for the DOM. */

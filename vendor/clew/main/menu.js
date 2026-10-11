@@ -280,6 +280,8 @@ class AppMenu {
 						c('export:site', 'Vault as Website…', { needs: 'vault' }),
 					],
 				},
+				c('vault:convert-colons', 'Convert Colon Directives…', { needs: 'vault' }),
+				c('vault:undo-colon-conversion', 'Undo Colon Conversion…', { needs: 'vault' }),
 				{ type: 'separator' },
 				c('workspace:close-tab', 'Close Tab', { chord: 'Mod-w', needs: 'tab' }),
 				...(isMac ? [] : [

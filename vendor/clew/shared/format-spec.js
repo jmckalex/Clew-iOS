@@ -102,7 +102,7 @@ export const FORMAT_MENU = [
 			{ id: 'format:cref', label: 'Typed Reference — @cref[key]' },
 			{ separator: true },
 			{ id: 'format:toc', label: 'Table of Contents — {{TOC}}' },
-			{ id: 'format:today', label: "Today's Date — :today" },
+			{ id: 'format:today', label: "Today's Date — @today" },
 		],
 	},
 	{
@@ -114,19 +114,55 @@ export const FORMAT_MENU = [
 			{ id: 'format:mermaid', label: 'Mermaid Diagram' },
 			{ id: 'format:tikz', label: 'TiKZ Diagram' },
 			{ id: 'format:mathematica', label: 'Mathematica' },
-			{ id: 'format:game', label: 'Game Matrix — :::game' },
+			{ id: 'format:game', label: 'Game Matrix — @begin(game)' },
 			{ id: 'format:markdown-demo', label: 'Markdown Demo — source + output' },
 			{ separator: true },
-			{ id: 'format:tex-block', label: 'LaTeX Only — :::TeX' },
-			{ id: 'format:html-block', label: 'HTML Only — :::HTML' },
+			{ id: 'format:tex-block', label: 'LaTeX Only — @begin(TeX)' },
+			{ id: 'format:html-block', label: 'HTML Only — @begin(HTML)' },
 			{ separator: true },
 			{ id: 'format:abstract', label: 'Abstract' },
 			{ id: 'format:title-box', label: 'Title Box' },
 			{ id: 'format:comment', label: 'Comment (omitted from output)' },
-			{ id: 'format:container', label: 'Generic Container — :::name' },
+			{ id: 'format:container', label: 'Generic Container — @begin(<name>)' },
 		],
 	},
 ];
+
+/**
+ * What the Block group's environments WRITE — the menu, the palette, the
+ * toolbar's Insert popover and the `//` menu all run these commands. Always the
+ * engine's `@` forms: jmarkdown is retiring its colon directives (`:::name`,
+ * the owner's decision 2026-10-10), so Clew writes none. A name the engine
+ * knows is `@begin(name)`; the generic container is `@begin(<name>)`, the `<…>`
+ * sigil keeping it the element `<name>…</name>` that `:::name` printed. The
+ * closer is the bare name either way (the engine matches `@end` by name).
+ */
+export const environmentBlock = (name, { element = false, attrs = '' } = {}) => ({
+	header: `@begin(${element ? `<${name}>` : name})${attrs}`,
+	footer: `@end(${name})`,
+});
+
+/** command id → { header, footer, body }; the body is the placeholder selected
+ *  when there is no selection to wrap. */
+export const BLOCK_INSERTS = {
+	'format:mermaid': { ...environmentBlock('mermaid'), body: 'graph LR\n  A --> B' },
+	'format:tikz': { ...environmentBlock('TiKZ'), body: '\\begin{tikzpicture}\n  \\draw (0,0) -- (1,1);\n\\end{tikzpicture}' },
+	'format:mathematica': { ...environmentBlock('Mathematica', { attrs: '{output="svg"}' }), body: 'Plot[Sin[x], {x, 0, 2 Pi}]' },
+	// The engine's game syntax: column strategies first, then a row each, cells
+	// separated by `&` (until 2026-10-10 this was a `|` table, which the engine
+	// read as one column of rows).
+	'format:game': { ...environmentBlock('game'), body: '          Cooperate & Defect\nCooperate & (3,3) & (0,5)\nDefect    & (5,0) & (1,1)' },
+	'format:markdown-demo': { ...environmentBlock('markdown-demo'), body: 'This is *some* /text/.' },
+	'format:tex-block': { ...environmentBlock('TeX'), body: '% LaTeX-only content (verbatim)' },
+	'format:html-block': { ...environmentBlock('HTML'), body: 'Web-only content (markdown processed)' },
+	'format:abstract': { ...environmentBlock('abstract'), body: 'Abstract text.' },
+	'format:title-box': { ...environmentBlock('title-box'), body: 'Title\n***\nBody text.' },
+	'format:comment': { ...environmentBlock('comment'), body: 'Editorial note.' },
+	'format:container': { ...environmentBlock('name', { element: true }), body: 'Content' },
+};
+
+/** Today's Date — the engine's inline `@today` (`:today` is a colon form). */
+export const TODAY_INSERT = '@today';
 
 /**
  * The commands that make sense inside a table cell edited in place (live

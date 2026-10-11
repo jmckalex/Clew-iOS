@@ -377,3 +377,34 @@ export function writeFileAtomic(file, data) {
 	}
 	fs.renameSync(temp, target);
 }
+
+/**
+ * writeFileAtomic, off the main thread: the same temp file, fsync and rename,
+ * through fs.promises — for a writer of many files at once ("Convert this
+ * vault", colon-conversion.js), where a synchronous fsync each (~6 ms on
+ * APFS, measured) held main for half a minute over 4,000 notes.
+ */
+export async function writeFileAtomicAsync(file, data) {
+	let target = file;
+	try {
+		target = await fs.promises.realpath(file);
+	} catch { /* new file — nothing to follow */ }
+	const temp = path.join(path.dirname(target), `.${path.basename(target)}.clew-tmp`);
+	let mode;
+	try {
+		mode = (await fs.promises.stat(target)).mode;
+	} catch { /* new file — default mode */ }
+	const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
+	const handle = await fs.promises.open(temp, 'w');
+	try {
+		if (mode !== undefined) await handle.chmod(mode);
+		await handle.writeFile(buf);
+		await handle.sync();
+		await handle.close();
+	} catch (err) {
+		await handle.close().catch(() => {});
+		await fs.promises.rm(temp, { force: true });
+		throw err;
+	}
+	await fs.promises.rename(temp, target);
+}

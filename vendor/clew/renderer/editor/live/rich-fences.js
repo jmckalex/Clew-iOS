@@ -35,9 +35,12 @@ export const RICH_DIRECTIVES = new Set([
 ]);
 
 /** `@begin(name)` environments the engine renders richly — `app` the block
- *  form of `@app+[…]` (the inline `@app[…]` mid-sentence stays a chip). */
+ *  form of `@app+[…]` (the inline `@app[…]` mid-sentence stays a chip); game,
+ *  Mathematica and markdown-demo since the Inserts write `@begin` for them
+ *  (the colon directives' retirement, 2026-10-10). */
 export const RICH_ENVIRONMENTS = new Set([
 	'TiKZ', 'tikz', 'tikzpicture', 'metapost', 'mermaid', 'reveal', 'tabbing', 'app',
+	'game', 'Mathematica', 'markdown-demo',
 ]);
 
 /**

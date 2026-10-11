@@ -19,7 +19,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { settings } from './settings.js';
-import { direntKind, shouldRecurse, walkGuard, writeFileAtomic, WATCH_BUDGET, WATCH_CEILING, watchFilter, watchPlan, scanShare, knownPaths } from './fs-utils.js';
+import { direntKind, shouldRecurse, walkGuard, writeFileAtomic, writeFileAtomicAsync, WATCH_BUDGET, WATCH_CEILING, watchFilter, watchPlan, scanShare, knownPaths } from './fs-utils.js';
 import { insideByRealpath } from '../engine/vault-bounds.js';
 import { compileExcludes } from './vault-excludes.js';
 import { snapshotBeforeWrite, renameHistory, keepVersion } from './history.js';
@@ -281,6 +281,20 @@ export class VaultManager {
 		// A NEW file (an annotations note, a template's output, a save to a
 		// path that did not exist) is a structure change; an autosave of an
 		// existing note is not, and must not pay for a tree walk.
+		if (created) this.refreshTree();
+		return { written: true };
+	}
+
+	/** writeNote, unguarded, with the bytes written off the main thread — for
+	 *  a writer of many notes at once ("Convert this vault"). History, the
+	 *  write guard and a new file's tree refresh as writeNote does them. */
+	async writeNoteAsync(rel, content) {
+		const abs = this.resolve(rel);
+		const created = !fs.existsSync(abs);
+		fs.mkdirSync(path.dirname(abs), { recursive: true });
+		this.snapshotHistory(rel);
+		await writeFileAtomicAsync(abs, content);
+		this.guard.wrote(rel, abs, content);
 		if (created) this.refreshTree();
 		return { written: true };
 	}

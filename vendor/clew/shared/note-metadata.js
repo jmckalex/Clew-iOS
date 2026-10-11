@@ -121,9 +121,11 @@ const TAG_RE = /(^|[\s(,;])#([A-Za-z0-9_][A-Za-z0-9_/-]*)/g;
 // reach into the renderer; the regexes below are the scanner's rules for an
 // opener line, restated.
 
-/** `@begin(name)[caption]{attrs}` / `:::name[caption]{attrs}` on its own line. */
-const ENV_OPEN_RE = /^[ \t]*(?:@begin\(([\w*-]+)\)|(:{3,})[ \t]*([\w*-]+))(?:\[([^\]\n]*)\])?(?:\{([^}\n]*)\})?/;
-const ENV_CLOSE_RE = /^[ \t]*(?:@end\(([\w*-]+)\)|(:{3,})[ \t]*$)/;
+/** `@begin(name)[caption]{attrs}` / `:::name[caption]{attrs}` on its own line.
+ *  The name may carry the engine's `.` / `<…>` sigil (`@begin(<note>)`), which
+ *  never changes what a known name is — `@begin(<figure>)` is still a figure. */
+const ENV_OPEN_RE = /^[ \t]*(?:@begin\([ \t]*[.<]?[ \t]*([\w*-]+)[ \t]*>?[ \t]*\)|(:{3,})[ \t]*([\w*-]+))(?:\[([^\]\n]*)\])?(?:\{([^}\n]*)\})?/;
+const ENV_CLOSE_RE = /^[ \t]*(?:@end\([ \t]*[.<]?[ \t]*([\w*-]+)[ \t]*>?[ \t]*\)|(:{3,})[ \t]*$)/;
 const LABEL_RE = /(^|[^\w@:\\])[@:]label\[([^\]\n]+)\]/g;
 /** The same, for stripping a label out of a heading's title (a separate
  *  object: reusing LABEL_RE inside its own exec loop resets lastIndex). */
