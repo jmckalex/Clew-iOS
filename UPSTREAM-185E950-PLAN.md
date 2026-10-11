@@ -13,6 +13,8 @@ The chain, off main 0599ee0 (the HTML share):
 - `sync185e950-p3-port`: 418fb42 (big-vault rescans), 00e4d6b ("Convert
   this vault").
 - `sync185e950-p4-verify`: this record.
+- `sync185e950-p5-backup-guard`: no note without its backup on the device,
+  and the scrubber's spaces (Clew-boss's review, below).
 
 **PIN: Clew-app `185e950`.** It was copied from `git archive 185e950`.
 `diff -rq` against the archive shows no difference in vendor/clew,
@@ -154,6 +156,46 @@ launch):
 - A smoke ran in the wrong vault and its run was terminated mid-convert.
 - Its manifest was on the device. Undo, after the relaunch, restored
   4,001/4,001, and the vault is byte-identical to before.
+
+## Clew-boss's review: no note without its backup (p5)
+
+Upstream writes every backup and the manifest with synchronous fs, so a
+failure throws before any note changes. On the iPad those writes reach the
+device through the vault's queue, unawaited. A refused backup (a path past
+PATH_MAX under Application Support, a full disk) was logged, and the note
+was written anyway, with nothing to undo it from. A refused manifest hid
+the conversion from LAST and Undo.
+
+The fix:
+- VaultManager remembers the first refused backup write inside its own
+  queued job.
+- Each note write of the running apply asks, inside its queued job (every
+  backup before it has settled by then), and refuses: "its backup could not
+  be saved on this iPad (<the device's reason>), so it was left as it was".
+  The converter names those notes "not written after all".
+- No note goes to an editor; each open one is named the same way.
+- The sheet does not say each note was copied.
+- FINISH reports a refused manifest write instead of passing over it.
+
+Tests:
+- a refused note backup: no note written, none to an editor, every note
+  byte for byte, LAST claims nothing, Undo puts back nothing;
+- a refused manifest: nothing written, and after a relaunch LAST claims
+  nothing.
+
+Simulator: a file planted where the vault's backup folder goes, so every
+backup write is refused natively.
+- The sheet: "Nothing was converted."
+- Each note's line gives the device's reason ("The file “Demo
+  Vault-47fce8b2cd18” couldn’t be saved in the folder “colon-conversion”");
+  the open note is among them.
+- Only Done is offered, and every file of the vault is unchanged.
+
+The scrubber now runs a device path to the next quote, bracket, comma,
+semicolon or line end, so "Application Support" and "Mobile Documents"
+paths go whole. The no-device-path test carries both.
+
+npm 788.
 
 ## Found on the way
 

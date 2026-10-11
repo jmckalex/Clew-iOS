@@ -37,6 +37,13 @@
 // from the device (after a relaunch or an app update too); a conversion's
 // notes as they were come back only for UNDO, and leave memory after.
 //
+// No note is changed without its backup: upstream writes every backup and the
+// manifest synchronously, so a failure throws before any note changes. Here
+// they reach the device through the vault's queue; once one of this
+// conversion's is refused, every note write after it is refused too (asked
+// inside its queued job), the converter names those notes "not written after
+// all", and no note goes to an editor.
+//
 // No device path reaches the renderer: the backup's place is said in words,
 // and any path in an error is replaced.
 import nodePath from 'node:path';
@@ -144,6 +151,13 @@ export function createColonConversion({ vaults, send, fileChanged, progressChann
 	};
 	/** The folder configs prepare() laid under the virtual root. */
 	let configsLaid = [];
+	/** An apply is running: its note writes need its backups on the device. */
+	let applying = false;
+	const backupRefusal = () => {
+		const failed = vaults.backupFailure;
+		if (!failed) return null;
+		return `its backup could not be saved on this iPad (${scrub(failed.message)}), so it was left as it was`;
+	};
 
 	const converter = colonConverter({
 		vault: {
@@ -158,7 +172,7 @@ export function createColonConversion({ vaults, send, fileChanged, progressChann
 				return Buffer.from(base64, 'base64');
 			},
 			write: async (rel, content) => {
-				const answer = await vaults.writeNoteAsync(rel, content);
+				const answer = await vaults.writeNoteAsync(rel, content, { refuse: () => (applying ? backupRefusal() : null) });
 				fileChanged(rel);
 				return answer;
 			},
@@ -230,8 +244,13 @@ export function createColonConversion({ vaults, send, fileChanged, progressChann
 	}
 
 	// ---- what reaches the renderer: no device path ------------------------
-	const DEVICE_PATH = /(?:file:\/\/)?(?:\/private)?\/(?:var\/mobile|var\/containers|Users\/[^/\s]+\/Library\/Developer)\/[^\s'"“”‘’,;)]*/g;
-	const INTERNAL_PATH = new RegExp(`(?:${DEVICE_BACKUP_ROOT}|${COLON_VAULTS_ROOT})/[^\\s'"“”‘’,;)]*`, 'g');
+	// A path runs to the next quote, bracket, comma, semicolon or line end, not
+	// the next space: a device path holds spaces ("Application Support",
+	// "Mobile Documents", a vault or note name). Words after an unquoted path
+	// go with it, which is the safe side.
+	const PATH_TAIL = `[^'"“”‘’,;()\\n]*`;
+	const DEVICE_PATH = new RegExp(`(?:file://)?(?:/private)?/(?:var/mobile|var/containers|Users/[^/\\s]+/Library/Developer)/${PATH_TAIL}`, 'g');
+	const INTERNAL_PATH = new RegExp(`(?:${DEVICE_BACKUP_ROOT}|${COLON_VAULTS_ROOT})/${PATH_TAIL}`, 'g');
 	const scrub = (text) => {
 		let out = String(text ?? '');
 		if (vaults.realPath) out = out.split(vaults.realPath).join(vaults.name ?? 'the vault');
@@ -253,9 +272,19 @@ export function createColonConversion({ vaults, send, fileChanged, progressChann
 			if (!vaults.isOpen) throw new Error('No vault open');
 			const folder = await loadManifests();
 			let result;
+			vaults.backupFailure = null;
+			applying = true;
 			try {
 				result = await converter.apply({ scanId, picks, editing, progress });
+				// Every backup job settled (the manifest's last write too): a note
+				// for an editor goes only with its backup on the device.
+				await vaults.flush();
+				const refusal = backupRefusal();
+				if (refusal && result.editorPlans.length) {
+					result = { ...result, failed: [...result.failed, ...result.editorPlans.map((p) => ({ path: p.path, why: refusal }))], editorPlans: [] };
+				}
 			} finally {
+				applying = false;
 				// The backups are on their way to the device (the queue holds
 				// their bytes); the mirror need not keep them. Undo reads them back.
 				const base = `${DEVICE_BACKUP_ROOT}/${folder}/`;
@@ -263,12 +292,22 @@ export function createColonConversion({ vaults, send, fileChanged, progressChann
 					if (abs.startsWith(base) && abs.includes('/notes/')) { vfs.files.delete(abs); vfs.writes.delete(abs); }
 				});
 			}
-			return { ...result, backup: result.backup ? BACKUP_WORDS : null, failed: scrubFailed(result.failed) };
+			// With a backup refused, nothing was changed and nothing was kept:
+			// the sheet says why in each note's line, never "each note was copied".
+			const kept = result.backup && !vaults.backupFailure;
+			return { ...result, backup: kept ? BACKUP_WORDS : null, failed: scrubFailed(result.failed) };
 		}),
 
 		finish: guarded(async ({ id, applied } = {}) => {
 			await loadManifests();
-			return converter.finish({ id, applied });
+			vaults.backupFailure = null;
+			const result = converter.finish({ id, applied });
+			// The manifest's account of the editors' notes, on the device.
+			await vaults.flush();
+			if (vaults.backupFailure) {
+				throw new Error(`The conversion's record could not be saved on this iPad (${scrub(vaults.backupFailure.message)}): the notes changed in their editors are kept in their history`);
+			}
+			return result;
 		}),
 
 		last: guarded(async () => {

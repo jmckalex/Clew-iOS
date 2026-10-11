@@ -44,6 +44,8 @@ export const GLOBAL_PLUGINS_ROOT = '/global-plugins';
 // (ColonConversion.swift, Application Support/colon-conversion) — never the
 // vault. Through the vault's own write queue, so every backup and the
 // manifest are on the device before the first note they back up is written.
+// A backup the device refuses is remembered (backupFailure), inside its own
+// queued job: a note write queued after it can see it and refuse.
 export const DEVICE_BACKUP_ROOT = '/colon-conversion';
 
 // Which files are text lives with the engine config — the Node harness needs
@@ -87,6 +89,9 @@ export class VaultManager {
 	refusedLinks = [];
 	/** @type {(channel: string, payload: any) => void} */
 	send = () => {};
+	/** The first backup write (DEVICE_BACKUP_ROOT) the device refused since
+	 *  this was last cleared: { path, message }, or null. */
+	backupFailure = null;
 	hooks = {};
 	/** The mirror root every service resolves against. */
 	root = VAULT_ROOT;
@@ -174,7 +179,10 @@ export class VaultManager {
 			if (abs.startsWith(DEVICE_BACKUP_ROOT + '/')) {
 				const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
 				const path = abs.slice(DEVICE_BACKUP_ROOT.length + 1);
-				this.#enqueue(() => bridgeCall('colonBackupWrite', { path, base64: toBase64(bytes) }));
+				this.#enqueue(() => bridgeCall('colonBackupWrite', { path, base64: toBase64(bytes) }).catch((err) => {
+					this.backupFailure ??= { path, message: String(err?.message ?? err) };
+					throw err;
+				}));
 				return;
 			}
 			const rel = this.#relOf(abs);
@@ -397,16 +405,22 @@ export class VaultManager {
 	 * on the device and rejects with the device's error — and only then the
 	 * mirror. Unguarded, as desktop's: the converter's own check (a fresh
 	 * read's hash just before) is its guard. Text goes as text; bytes (undo's
-	 * backup) go as bytes, exactly.
+	 * backup) go as bytes, exactly. `refuse`, asked inside the queued job —
+	 * when every write queued before it has settled — returns a reason to
+	 * write nothing (the conversion's backups did not all reach the device).
 	 */
-	async writeNoteAsync(rel, content) {
+	async writeNoteAsync(rel, content, { refuse = null } = {}) {
 		const abs = this.resolve(rel);
 		const created = !vfs.has(abs);
 		this.snapshotHistory(rel);
 		const text = typeof content === 'string' ? content : null;
-		await this.#enqueue(() => bridgeCall('write', text !== null
-			? { vault: this.realPath, rel, text }
-			: { vault: this.realPath, rel, base64: toBase64(content) }));
+		await this.#enqueue(() => {
+			const refusal = refuse?.();
+			if (refusal) throw new Error(refusal);
+			return bridgeCall('write', text !== null
+				? { vault: this.realPath, rel, text }
+				: { vault: this.realPath, rel, base64: toBase64(content) });
+		});
 		vfs.patch(abs, text ?? decodeUtf8(content), Date.now());
 		return { written: true, created };
 	}

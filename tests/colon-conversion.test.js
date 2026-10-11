@@ -82,7 +82,8 @@ const walkFiles = (dir, rel = '') => {
 	return out;
 };
 
-let failWrite = null; // rel → the device's error, once
+let failWrite = new Map(); // rel → the device's error, once
+let failBackup = null; // (store path) → the device refuses that backup write
 const calls = [];
 const fakeBridge = {
 	async call(method, params = {}) {
@@ -97,9 +98,9 @@ const fakeBridge = {
 				};
 			case 'noteFonts': return null;
 			case 'write': {
-				if (failWrite && failWrite.rel === params.rel) {
-					const why = failWrite.why;
-					failWrite = null;
+				if (failWrite.has(params.rel)) {
+					const why = failWrite.get(params.rel);
+					failWrite.delete(params.rel);
 					throw new Error(why);
 				}
 				const bytes = params.text !== undefined ? Buffer.from(params.text, 'utf8') : Buffer.from(params.base64, 'base64');
@@ -133,7 +134,10 @@ const fakeBridge = {
 				}
 				return { configs, raw };
 			}
-			case 'colonBackupWrite': writeAtomic(inStore(params.path), Buffer.from(params.base64, 'base64')); return null;
+			case 'colonBackupWrite':
+				if (failBackup?.(params.path)) throw new Error('The file name is too long.');
+				writeAtomic(inStore(params.path), Buffer.from(params.base64, 'base64'));
+				return null;
 			case 'colonBackupManifests': {
 				const base = inStore(params.folder);
 				const out = {};
@@ -346,16 +350,74 @@ test('a relaunch after an app update: the container moved, Undo still finds the 
 	identity = `documents:${VAULT_NAME}`;
 });
 
+const noteBytes = () => Object.fromEntries(walkFiles(vaultDir).filter((rel) => !rel.startsWith('.clew/')).map((rel) => [rel, disk(rel)]));
+
+async function refusedBackup(failing) {
+	await shim.services.vaults.flush();
+	shim.services.vaults.close();
+	await launch();
+	const before = noteBytes();
+	const scan = await invoke(CH.COLON_SCAN);
+	const planned = scan.notes.filter((n) => !n.refuse && n.autoItems).map((n) => n.path);
+	failBackup = failing;
+	const writesBefore = calls.length;
+	let result;
+	try {
+		result = await invoke(CH.COLON_APPLY, { scanId: scan.scanId, picks: {}, editing: ['Open.md'] });
+		await shim.services.vaults.flush();
+	} finally { failBackup = null; }
+	const noteWrites = calls.slice(writesBefore).filter(([m, p]) => m === 'write' && !p.rel.startsWith('.clew/'));
+	return { before, planned, result, noteWrites };
+}
+
+test('a backup the device refuses: no note is written, none goes to an editor, and Undo has nothing to put back', async () => {
+	const { before, planned, result, noteWrites } = await refusedBackup((p) => p.endsWith('/notes/Same.md'));
+	assert.deepEqual(noteWrites, [], 'not one note written');
+	assert.equal(result.notes, 0);
+	assert.deepEqual(result.written, []);
+	assert.deepEqual(result.editorPlans, [], 'no note handed to an editor');
+	assert.equal(result.backup, null, 'the sheet does not say each note was copied');
+	const failed = Object.fromEntries(result.failed.map((f) => [f.path, f.why]));
+	for (const rel of planned) assert.match(failed[rel] ?? '', /its backup could not be saved on this iPad \(The file name is too long\.\), so it was left as it was/, `${rel} named, with the reason`);
+	assert.deepEqual(noteBytes(), before, 'every note byte for byte as it was');
+	const last = await invoke(CH.COLON_LAST);
+	assert.ok(last === null || last.notes === 0, `LAST claims nothing written: ${JSON.stringify(last)}`);
+	if (last) {
+		const undone = await invoke(CH.COLON_UNDO, { id: last.id });
+		assert.deepEqual(undone.restored, [], 'Undo puts back nothing');
+		assert.deepEqual(noteBytes(), before, 'and changes nothing');
+	}
+});
+
+test('the manifest write refused: nothing is written', async () => {
+	const { before, planned, result, noteWrites } = await refusedBackup((p) => p.endsWith('/manifest.json'));
+	assert.deepEqual(noteWrites, [], 'not one note written');
+	assert.equal(result.notes, 0);
+	assert.deepEqual(result.editorPlans, []);
+	assert.deepEqual(result.failed.map((f) => f.path).sort(), [...planned].sort(), 'each planned note named, the open one among them');
+	assert.ok(result.failed.every((f) => /its backup could not be saved on this iPad/.test(f.why)));
+	assert.deepEqual(noteBytes(), before, 'every note byte for byte as it was');
+	// After a relaunch the device holds no record of it: nothing to undo.
+	await shim.services.vaults.flush();
+	shim.services.vaults.close();
+	await launch();
+	const last = await invoke(CH.COLON_LAST);
+	assert.ok(last === null || last.notes === 0, `LAST claims nothing written: ${JSON.stringify(last)}`);
+});
+
 test('no device path reaches the renderer or a file the user sees', async () => {
 	await shim.services.vaults.flush();
 	shim.services.vaults.close();
 	await launch();
 	const scan = await invoke(CH.COLON_SCAN);
-	// The device refuses one write, and its message names the full path.
-	failWrite = { rel: 'Same.md', why: `The file “Same.md” couldn’t be saved in the folder “${vaultDir}” (/private/var/mobile/Containers/Data/Application/ABC/Documents/x).` };
+	// The device refuses three writes, and its messages name full paths —
+	// spaces in them, as "Application Support" and "Mobile Documents" have.
+	failWrite.set('Same.md', `The file “Same.md” couldn’t be saved in the folder “${vaultDir}” (/private/var/mobile/Containers/Data/Application/ABC/Documents/x).`);
+	failWrite.set('Second.md', 'Could not write /private/var/mobile/Containers/Data/Application/ABCD/Library/Application Support/colon-conversion/v-1/2026/notes/a b.md');
+	failWrite.set('Edges/CRLF.md', 'Could not write /private/var/mobile/Library/Mobile Documents/com~apple~CloudDocs/Vault/x.md');
 	const result = await invoke(CH.COLON_APPLY, { scanId: scan.scanId, picks: {}, editing: [] });
-	assert.equal(result.failed.length, 1, 'the refused write is named');
-	assert.match(result.failed[0].why, /couldn’t be saved/);
+	assert.equal(result.failed.length, 3, 'the refused writes are named');
+	assert.ok(result.failed.every((f) => /couldn’t be saved|Could not write/.test(f.why)), JSON.stringify(result.failed));
 	await invoke(CH.COLON_LAST);
 	await invoke(CH.COLON_UNDO, { id: result.id });
 	await assert.rejects(invoke(CH.COLON_APPLY, { scanId: 'scan-0' }), /out of date/);
@@ -363,7 +425,8 @@ test('no device path reaches the renderer or a file the user sees', async () => 
 	// design: the renderer's vault store holds it).
 	const colonReplies = replies.filter(([channel]) => channel.startsWith('clew:colon-'));
 	const seen = JSON.stringify({ colonReplies, progress, errors });
-	for (const leak of [vaultDir, path.dirname(vaultDir), device, '/var/mobile', 'Containers', 'CoreSimulator', '/colon-conversion/', '/colon-vaults/']) {
+	for (const leak of [vaultDir, path.dirname(vaultDir), device, '/var/mobile', 'Containers', 'CoreSimulator', '/colon-conversion/', '/colon-vaults/',
+		'Application Support', 'Support/', 'Mobile Documents', 'Documents/com~apple', 'CloudDocs', 'notes/a b.md', ' b.md']) {
 		assert.ok(!seen.includes(leak), `no ${leak} in any reply, event or error`);
 	}
 	for (const rel of walkFiles(backupDir).filter((r) => r.endsWith('manifest.json'))) {
