@@ -143,7 +143,11 @@ const nameIn = (box) => {
 			if (!a.value.startsWith('/') && !/^[a-z]+:/i.test(a.value)) return a.value;
 		}
 	}
-	const title = box.querySelector('.embed-title')?.textContent?.trim();
+	// The title bar's own words: the PDF viewer adds its controls (a ⟷ button,
+	// a status chip) to it.
+	const bar = box.querySelector('.embed-title')?.cloneNode(true);
+	for (const control of bar ? bar.querySelectorAll('button, .clew-pdf-status') : []) control.remove();
+	const title = bar?.textContent?.trim();
 	return title || box.getAttribute('title') || '';
 };
 const EMBEDS = [

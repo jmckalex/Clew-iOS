@@ -1,9 +1,9 @@
-# Handover — 2026-10-10 (the sync to Clew-app f959799: the figure engine bundled and off, Proof this chapter Mac only)
+# Handover — 2026-10-11 (the iPad HTML share: the drawn page, with no scripts; on the f959799 sync)
 
 Current state for a fresh session, rewritten whole. Durable architecture
 lives in **README.md** and **PORT-PLAN.md**. Each sync's reasoning and
 measurements are in its record: `UPSTREAM-*-PLAN.md`. The latest records
-are `UPSTREAM-F959799-PLAN.md` (the figure engine, Proof this chapter, figures
+are `HTML-SHARE.md` (the iPad HTML share, 2026-10-11), `UPSTREAM-F959799-PLAN.md` (the figure engine, Proof this chapter, figures
 in exports measured, 2026-10-10), `UPSTREAM-6B6FBBB-PLAN.md` (PostScript figures, system font families,
 mp-tikz-wasm 0.4.0, 2026-10-10), `UPSTREAM-5ABF52D-PLAN.md` (app secrets,
 book mode phase 2, the book print, 2026-10-10), `UPSTREAM-CBFA692-PLAN.md` (book mode and the demo
@@ -14,6 +14,20 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
 
 ## 1. Where things stand
 
+- **The iPad HTML share is the drawn page with no scripts (2026-10-11).**
+  The chain is `share-p1-palette` → `share-p2-snapshot` →
+  `share-p3-record`, off 52cd16a. Clew-boss verified phases 1 and 2, and
+  main is fast-forwarded to p3. The record is HTML-SHARE.md.
+  - "Export as HTML" shares a snapshot of reading view's page: figures,
+    maths and Mermaid drawn; styles inlined; images as data: URLs within
+    2 MB each and 10 MB a page; apps, PDFs, decks and frames as named
+    placeholders; wikilinks as text. No script, handler or internal path
+    is left, and the shim refuses a page that would carry one.
+  - Features/Diagrams shares as 353,722 B with 11/11 figures drawn.
+  - The print's hidden view now lets only the note into its main frame
+    (a meta refresh had swapped another page into it).
+  - The palette offers a book's print alone: its LaTeX, PDF-via-LaTeX and
+    HTML commands only ever refused on the iPad.
 - **The sync to Clew-app `f959799` (2026-10-10) is DONE, and every
   acceptance check was green.** The chain is `syncf959799-p1-vendor` →
   `-p2-build` → `-p3-contract` → `-p4-verify`, off main 35c8922. Clew-boss
@@ -27,8 +41,8 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
   - **The exports' figure setting** (exportFigureEngine) has no Settings
     row. The parity gate and the export cache are n/a.
   - **Figures in exports, measured:** note PDF and book print draw 11/11;
-    the note HTML export draws 0/11 (its figures are source, and its
-    assets resolve only inside Clew).
+    the note HTML export drew 0/11 (its figures were source). The HTML
+    share above now draws 11/11.
   - **Vendor** is at Clew-app `f959799`.
 - **The sync to Clew-app `6b6fbbb` (2026-10-10) is DONE and PUSHED**
   (origin/main 35c8922; the Xcode Cloud archive succeeded). The chain is
@@ -233,14 +247,11 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
 - **If jmarkdown's figure engine is ever turned on in the worker**, shim
   `setImmediate` first: figure-engine.js's runAll() awaits it, and the
   worker does not define it (UPSTREAM-F959799-PLAN.md).
-- **Next range (Clew-boss, 2026-10-10):** drop the palette's book exports
-  that only refuse on the iPad ("Export book as PDF (via LaTeX)", "… as
-  LaTeX", "… as HTML"), as the Proof command was dropped. Give each a test
-  that the built bundle lacks it. "Export book as PDF (reading view)"
-  stays.
-- **The note HTML export carries no drawn figures** (0/11 on Diagrams), and
-  its styles and scripts resolve only inside Clew. A plan to carry the
-  preview's drawn SVGs goes to Clew-boss first.
+- **iPad checks for the HTML share:** HTML-SHARE.md's list (Diagrams
+  shared to Files and opened in Safari, an image over 2 MB, a share opened
+  on a Mac).
+- **Upstream candidate from the share:** two image embeds on one line
+  render the first as "!" plus a link (the engine).
 - **iPad checks from the f959799 sync:** its record's checklist (no Proof
   row in a chapter's Book panel; a book with figures prints them).
 - **iPad checks from the 6b6fbbb sync:** its record's checklist

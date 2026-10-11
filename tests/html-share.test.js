@@ -15,7 +15,7 @@ test('the snapshot script is an async function body of (maxImage, maxTotal), saf
 	assert.equal(SHARE_IMAGES_MAX, 10 * 1024 * 1024, '10 MB of images a page');
 	// What it strips and adds, by name, so a later edit cannot quietly drop one.
 	for (const piece of ["'script, noscript, template, base", "n.startsWith('on')", '(javascript|vbscript|livescript):',
-		"script-src 'none'", 'clew-share-placeholder', "'App'", "'PDF'", "'Presentation'", "'Embedded page'", 'a.replaceWith(...a.childNodes)']) {
+		"script-src 'none'", 'clew-share-placeholder', "'App'", "'PDF'", "'Presentation'", "'Embedded page'", 'a.replaceWith(...a.childNodes)', "'button, .clew-pdf-status'"]) {
 		assert.ok(SNAPSHOT_SCRIPT.includes(piece), piece);
 	}
 });
