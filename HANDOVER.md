@@ -1,9 +1,9 @@
-# Handover — 2026-10-11 (the iPad HTML share: the drawn page, with no scripts; on the f959799 sync)
+# Handover — 2026-10-11 (the sync to Clew-app 185e950: the colon directives' retirement, and "Convert this vault" on the iPad)
 
 Current state for a fresh session, rewritten whole. Durable architecture
 lives in **README.md** and **PORT-PLAN.md**. Each sync's reasoning and
 measurements are in its record: `UPSTREAM-*-PLAN.md`. The latest records
-are `HTML-SHARE.md` (the iPad HTML share, 2026-10-11), `UPSTREAM-F959799-PLAN.md` (the figure engine, Proof this chapter, figures
+are `UPSTREAM-185E950-PLAN.md` (the colon retirement and "Convert this vault", 2026-10-11), `HTML-SHARE.md` (the iPad HTML share, 2026-10-11), `UPSTREAM-F959799-PLAN.md` (the figure engine, Proof this chapter, figures
 in exports measured, 2026-10-10), `UPSTREAM-6B6FBBB-PLAN.md` (PostScript figures, system font families,
 mp-tikz-wasm 0.4.0, 2026-10-10), `UPSTREAM-5ABF52D-PLAN.md` (app secrets,
 book mode phase 2, the book print, 2026-10-10), `UPSTREAM-CBFA692-PLAN.md` (book mode and the demo
@@ -14,6 +14,31 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
 
 ## 1. Where things stand
 
+- **The sync to Clew-app `185e950` (2026-10-11) is DONE; every acceptance
+  check was green in the simulator.** The chain is `sync185e950-p1-vendor` →
+  `-p2-build` → `-p3-port` → `-p4-verify`, off 0599ee0. Main is
+  fast-forwarded to p4, with a build commit on top. The record is
+  UPSTREAM-185E950-PLAN.md.
+  - **Colon phase 1:** the Inserts write the @ forms, and each draws
+    through the iPad's engine (a worker test). jmarkdown is at 851e8e8.
+  - **"Convert this vault"** (Convert colon directives… / Undo the last
+    colon conversion… in the palette): upstream's converter runs verbatim
+    over the mirror, behind src/shim/colon-conversion.js and native
+    ColonConversion.swift.
+    - Backups go to Application Support/colon-conversion, under a virtual
+      root keyed by the device's vault identity, so an app update keeps
+      Undo working.
+    - Folder configs come from native.
+    - A non-UTF-8 note is refused by name; BOM and CRLF are kept.
+    - No device path reaches the sheet.
+  - **Measured on 5,006 notes:**
+    - convert 118 s (every box: 149 s), frames p99 20 ms at 60 Hz;
+    - undo byte-identical;
+    - peak memory 513 MB.
+  - **Fixed on the way:** a big vault's rescans (57 s each, stacked by the
+    20 s timer on the queue every write waits on) now take ~50 ms.
+  - **The shims keep a BOM** as Node does (buffer, fs, the hash, the
+    write-through).
 - **The iPad HTML share is the drawn page with no scripts (2026-10-11).**
   The chain is `share-p1-palette` → `share-p2-snapshot` →
   `share-p3-record`, off 52cd16a. Clew-boss verified phases 1 and 2, and
@@ -243,10 +268,20 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
 
 ## 3. Next
 
-- **The next sync's range starts at Clew-app `f959799`.**
+- **The next sync's range starts at Clew-app `185e950`.**
 - **If jmarkdown's figure engine is ever turned on in the worker**, shim
   `setImmediate` first: figure-engine.js's runAll() awaits it, and the
   worker does not define it (UPSTREAM-F959799-PLAN.md).
+- **iPad checks from the 185e950 sync:** its record's list (an iCloud
+  Drive vault converted, so the conflict key is asked there; a big vault's
+  convert and undo on the device; the sheet under a finger).
+- **Upstream candidates from the 185e950 sync:**
+  - the indexer's cache save stringifies the whole index synchronously,
+    2 s after the last change (a 150–175 ms frame on 5,006 notes);
+  - the sheet's folded 4,001-note list lays out at ~56 ms a frame while it
+    fills.
+- **Next:** colon phase 3 (jmarkdown drops the colon forms). The same
+  sync must drop `tikzDirective` from src/shim/engine-config.js.
 - **iPad checks for the HTML share:** HTML-SHARE.md's list (Diagrams
   shared to Files and opened in Safari, an image over 2 MB, a share opened
   on a Mac).
