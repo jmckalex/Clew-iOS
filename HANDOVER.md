@@ -16,8 +16,8 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
 
 - **The sync to Clew-app `185e950` (2026-10-11) is DONE; every acceptance
   check was green in the simulator.** The chain is `sync185e950-p1-vendor` →
-  `-p2-build` → `-p3-port` → `-p4-verify`, off 0599ee0. Main is
-  fast-forwarded to p4, with a build commit on top. The record is
+  `-p2-build` → `-p3-port` → `-p4-verify` → `-p5-backup-guard`, off 0599ee0. Main is
+  fast-forwarded to p5 (`-p5-backup-guard`), with a build commit on top. The record is
   UPSTREAM-185E950-PLAN.md.
   - **Colon phase 1:** the Inserts write the @ forms, and each draws
     through the iPad's engine (a worker test). jmarkdown is at 851e8e8.
@@ -39,6 +39,9 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
     20 s timer on the queue every write waits on) now take ~50 ms.
   - **The shims keep a BOM** as Node does (buffer, fs, the hash, the
     write-through).
+  - **No note without its backup** (Clew-boss's review, p5): once the
+    device refuses one of a conversion's backups or its manifest, no note
+    is written. The sheet names each note and gives the reason.
 - **The iPad HTML share is the drawn page with no scripts (2026-10-11).**
   The chain is `share-p1-palette` → `share-p2-snapshot` →
   `share-p3-record`, off 52cd16a. Clew-boss verified phases 1 and 2, and
