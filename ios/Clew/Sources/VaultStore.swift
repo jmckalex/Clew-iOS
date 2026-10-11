@@ -41,6 +41,13 @@ final class VaultStore {
 	/// Files with unresolved iCloud conflict versions (the walk's
 	/// ubiquitousItemHasUnresolvedConflicts), reported to the shim.
 	private(set) var cloudConflicts = Set<String>()
+	/// Whether the open vault lives in iCloud. Only then does the walk ask
+	/// each file for its unresolved-conflict flag: that key is answered by
+	/// the File Provider daemon, one synchronous round trip per file, and for
+	/// a vault on this iPad it is always false. Asked anyway, a 5,006-note
+	/// vault's rescan took 57 s in the simulator (measured), and the 20 s
+	/// timer stacked them on the queue every write runs on.
+	private var vaultIsUbiquitous = false
 	/// The security-scoped URL whose access we currently hold, if any.
 	private var activeScopedURL: URL?
 
@@ -386,6 +393,7 @@ final class VaultStore {
 		}
 		currentVaultPath = real
 		currentVaultRealRoot = VaultPaths.realPath(real)
+		vaultIsUbiquitous = FileManager.default.isUbiquitousItem(at: URL(fileURLWithPath: real, isDirectory: true))
 		refusedLinks = [:]
 		UserDefaults.standard.set(real, forKey: "lastVaultPath")
 		knownMtimes = [:]
@@ -471,7 +479,8 @@ final class VaultStore {
 		onConflict: ((String) -> Void)? = nil, visit: (String, URL, Double, Int) -> Void) {
 		let fm = FileManager.default
 		guard let entries = try? fm.contentsOfDirectory(
-			at: dir, includingPropertiesForKeys: [.isDirectoryKey, .contentModificationDateKey, .fileSizeKey, .ubiquitousItemHasUnresolvedConflictsKey],
+			at: dir, includingPropertiesForKeys: [.isDirectoryKey, .contentModificationDateKey, .fileSizeKey]
+				+ (vaultIsUbiquitous ? [.ubiquitousItemHasUnresolvedConflictsKey] : []),
 			options: []) else { return }
 		for entry in entries {
 			var url = entry
@@ -499,7 +508,8 @@ final class VaultStore {
 				}
 			}
 			let childRel = rel.isEmpty ? name : "\(rel)/\(name)"
-			let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey, .contentModificationDateKey, .fileSizeKey, .ubiquitousItemHasUnresolvedConflictsKey])
+			let values = try? url.resourceValues(forKeys: Set([.isDirectoryKey, .isSymbolicLinkKey, .contentModificationDateKey, .fileSizeKey]
+				+ (vaultIsUbiquitous ? [URLResourceKey.ubiquitousItemHasUnresolvedConflictsKey] : [])))
 			if values?.ubiquitousItemHasUnresolvedConflicts == true { onConflict?(childRel) }
 			if values?.isSymbolicLink == true {
 				// A link is followed only while it stays inside the vault

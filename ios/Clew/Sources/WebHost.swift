@@ -138,8 +138,16 @@ final class WebHost: NSObject, ObservableObject {
 			arguments: [:], in: nil, in: .page) { _ in end() }
 	}
 
+	/// A rescan is on the IO queue: the timer and a foregrounding wait for
+	/// its answer rather than queue another behind it (a big vault's walk can
+	/// outlast the 20 s period, and every write waits on that queue).
+	private var rescanPending = false
+
 	func rescanVault() {
+		guard !rescanPending else { return }
+		rescanPending = true
 		vaults.rescan { [weak self] diff in
+			self?.rescanPending = false
 			guard let diff, let data = try? JSONSerialization.data(withJSONObject: diff),
 				let json = String(data: data, encoding: .utf8) else { return }
 			self?.webView.evaluateJavaScript(
