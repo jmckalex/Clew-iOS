@@ -38,7 +38,8 @@ class FileHandle {
 	async sync() {}
 	async writeFile(data) {
 		if (this.#path === null) throw Object.assign(new Error('file closed'), { code: 'EBADF' });
-		this.#chunks.push(typeof data === 'string' ? BufferShim.from(data) : Uint8Array.from(data));
+		// new Uint8Array, never Uint8Array.from: see fs.js#writeSync.
+		this.#chunks.push(typeof data === 'string' ? BufferShim.from(data) : new Uint8Array(data));
 	}
 	async close() {
 		if (this.#path === null) return;

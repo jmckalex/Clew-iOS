@@ -108,7 +108,10 @@ export function writeSync(fd, buffer, offset, length) {
 	if (typeof buffer === 'string') buffer = BufferShim.from(buffer);
 	const start = offset ?? 0;
 	const chunk = buffer.subarray(start, length == null ? undefined : start + length);
-	entry.chunks.push(Uint8Array.from(chunk));
+	// A copy by the typed-array constructor (a memcpy). Uint8Array.from walks
+	// a Buffer (a Uint8Array subclass) byte by byte in WebKit: 117 ms for the
+	// 5.4 MB index cache of 5,000 notes, against under 1 ms (2026-10-15).
+	entry.chunks.push(new Uint8Array(chunk));
 	return chunk.length;
 }
 export function fsyncSync() {}
