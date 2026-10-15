@@ -167,6 +167,50 @@ const colonPatches = {
 	},
 };
 
+// The index cache's save (vendor/clew/main/indexer.js, Clew-app ef5f7f2) builds
+// its JSON in slices that yield with setImmediate, and logs for the desktop's
+// smoke through `process.env` — two Node globals the app page lacks, as in
+// colonPatches above.
+//   setImmediate   a MessageChannel message where there is none (never a
+//                  microtask, which would yield to nothing).
+//   budget         8 → 4 ms, colonPatches' SLICE_MS: the page is the window's.
+//   process        read through globalThis.process?., so it is undefined here.
+// The write itself goes through fs-utils.js#writeFileAtomicAsync, which the
+// vfs's fs.promises serves (src/worker/shims/fs-promises.js).
+const indexerPatches = {
+	name: 'clew-indexer-patches',
+	setup(builder) {
+		builder.onLoad({ filter: /vendor\/clew\/main\/indexer\.js$/ }, (args) => {
+			let source = patched('indexer.js', fs.readFileSync(args.path, 'utf8'),
+				'\t\t\tawait new Promise((resolve) => setImmediate(resolve));',
+				'\t\t\tawait pageTick(); // iOS: no setImmediate in the app page (scripts/build.js indexerPatches)');
+			source = patched('indexer.js', source,
+				'if (written && process.env.CLEW_SMOKE_INDEX_SAVE) {',
+				'if (written && globalThis.process?.env?.CLEW_SMOKE_INDEX_SAVE) {');
+			const left = [...source.matchAll(/(?<![\w$.?])(process|setImmediate)(?=\s*[.([])/g)].length;
+			if (left) {
+				throw new Error(`[build] indexer.js still reads process or setImmediate ${left}× — upstream changed its save; update indexerPatches in scripts/build.js.`);
+			}
+			source = patched('indexer.js', source,
+				'export async function indexCacheJson(version, notes, stale = () => false, budget = 8) {',
+				'let tickPort = null;\n'
+				+ 'const ticked = [];\n'
+				+ 'const pageTick = () => new Promise((resolve) => {\n'
+				+ '\tif (typeof setImmediate === \'function\') { setImmediate(resolve); return; }\n'
+				+ '\tif (!tickPort) {\n'
+				+ '\t\tconst channel = new MessageChannel();\n'
+				+ '\t\tchannel.port1.onmessage = () => ticked.shift()?.();\n'
+				+ '\t\ttickPort = channel.port2;\n'
+				+ '\t}\n'
+				+ '\tticked.push(resolve);\n'
+				+ '\ttickPort.postMessage(0);\n'
+				+ '});\n'
+				+ 'export async function indexCacheJson(version, notes, stale = () => false, budget = 4) { // iOS: 4 ms slices (scripts/build.js indexerPatches)');
+			return { contents: source, loader: 'js' };
+		});
+	},
+};
+
 const rendererPatches = {
 	name: 'clew-renderer-patches',
 	setup(builder) {
@@ -243,19 +287,21 @@ const rendererPatches = {
 				+ "\t\t\t\t\t+ 'polyglossia or Lua code (a \\\\setmainfont in your jmarkdown config, say) is compiled with '\n"
 				+ "\t\t\t\t\t+ 'LuaLaTeX, anything else with pdfLaTeX. Choose an engine here for what that cannot see.'),\n",
 				'');
-			// "TikZ and MetaPost figures in exports" (Clew-app 2cc6d89) picks
-			// what draws figures in desktop's note and book exports: the
-			// installed TeX tools or mp-tikz-wasm. The iPad has neither an
-			// installation nor those exports, so the row and its hint go.
+			// "TikZ and MetaPost figures in exports" (Clew-app 2cc6d89; the
+			// built-in TeX the default since step C, 3267bf5, and the hint
+			// reworded in 72af6a2) picks what draws figures in desktop's note
+			// and book exports: the installed TeX tools or mp-tikz-wasm. The
+			// iPad has neither an installation nor those exports, so the row
+			// and its hint go.
 			src = patched('clew-settings-view.js', src,
 				"\t\t\t\tthis.#selectRow('TikZ and MetaPost figures in exports', 'exportFigureEngine',\n"
-				+ "\t\t\t\t\t[['external', 'Your TeX installation'], ['auto', 'Clew\\'s built-in TeX']]),\n"
+				+ "\t\t\t\t\t[['auto', 'Clew\\'s built-in TeX'], ['external', 'Your TeX installation']]),\n"
 				+ "\t\t\t\tthis.#hint('For a note or book exported as HTML, LaTeX or PDF. Clew\\'s built-in TeX is the '\n"
-				+ "\t\t\t\t\t+ 'one the preview draws with, and needs no TeX installed; a figure naming a font it cannot '\n"
-				+ "\t\t\t\t\t+ 'find goes to your installation instead. It lacks some packages your installation may '\n"
-				+ "\t\t\t\t\t+ 'have (siunitx, for one), and a figure that needs one shows an error. In a vault '\n"
-				+ "\t\t\t\t\t+ `${DEVICE} does not trust, the built-in TeX always draws the figures, so that vault's TeX `\n"
-				+ "\t\t\t\t\t+ 'never runs on your installation.'),\n",
+				+ "\t\t\t\t\t+ 'one the preview draws with, and needs no TeX installed; a figure it cannot draw — one '\n"
+				+ "\t\t\t\t\t+ 'naming a font it cannot find, or needing a package it lacks (siunitx, for one) — goes '\n"
+				+ "\t\t\t\t\t+ 'to your installation instead, and the export says so. In a vault '\n"
+				+ "\t\t\t\t\t+ `${DEVICE} does not trust, HTML and LaTeX exports always draw figures with the built-in `\n"
+				+ "\t\t\t\t\t+ 'TeX; a PDF via LaTeX is still compiled by your TeX installation.'),\n",
 				'');
 			// The daily update check (Clew-app 036befe) asks clew-app.com for
 			// a newer desktop build; the iPad's updates are the App Store's
@@ -435,7 +481,7 @@ export async function buildAppBundle({ minify = true } = {}) {
 		// packages at module scope (see src/shim/xterm-stub.js).
 		alias: { ...builtinAlias, '@xterm/xterm': xtermStub, '@xterm/addon-fit': xtermStub, '@xterm/addon-unicode11': xtermStub },
 		inject: bufferInject,
-		plugins: [rendererPatches, colonPatches],
+		plugins: [rendererPatches, colonPatches, indexerPatches],
 		minify,
 		sourcemap: false,
 		logLevel: 'warning',
@@ -679,7 +725,7 @@ export async function buildServicesTestBundle() {
 		outfile: path.join(dist, 'test', 'services.js'),
 		alias: builtinAlias,
 		inject: bufferInject,
-		plugins: [colonPatches],
+		plugins: [colonPatches, indexerPatches],
 		logLevel: 'warning',
 		metafile: true,
 	});

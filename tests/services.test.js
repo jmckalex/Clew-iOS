@@ -492,6 +492,22 @@ test('indexer resolves wikilinks across the vault', async () => {
 	assert.ok(resolved.length > 5, `resolved links: ${resolved.length}`);
 });
 
+// The cache's save went async upstream (Clew-app ef5f7f2): JSON built in
+// slices, then fs-utils.js#writeFileAtomicAsync, which the vfs's fs.promises
+// serves here (open, rename). The device gets one write of the cache, and
+// no temp file.
+test('the index cache is saved through fs.promises: .clew/cache.json on disk, no temp', async () => {
+	const file = path.join(vaultDir, '.clew', 'cache.json');
+	fs.rmSync(file, { force: true });
+	await services.indexer.saveCache();
+	await native.flush();
+	const kept = JSON.parse(fs.readFileSync(file, 'utf8'));
+	assert.ok(kept.version, 'the cache version');
+	assert.equal(Object.keys(kept.notes).length, services.indexer.notes.size);
+	assert.ok(kept.notes['Welcome.md'], 'Welcome.md kept');
+	assert.equal(fs.existsSync(path.join(vaultDir, '.clew', '.cache.json.clew-tmp')), false, 'no temp on disk');
+});
+
 test('search finds content with line-level matches', async () => {
 	const results = await clew.invoke(CH.SEARCH, { query: 'wikilink' });
 	assert.ok(results.length > 0);

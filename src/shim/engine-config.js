@@ -97,7 +97,10 @@ export function engineConfig({ vaultRoot = '/vault', vaultOptions = {}, engineEx
 		'Run note code': noteCode === true,
 		'Template': '/engine/clew-template.html',
 		'Extensions': [
-			'wikiembed, wikilink from /engine-assets/wikilinks.js',
+			// wikiembedImage (Clew-app 1406ffc): an image embedded within a line,
+			// `![[a.png]] ![[b.png]]`, drawn in place, as live edit and an
+			// export draw it; before, the first showed as "!" and a link.
+			'wikiembed, wikiembedImage, wikilink from /engine-assets/wikilinks.js',
 			'mermaidFence, leafletFence from /engine-assets/obsidian-fences.js',
 			// TikZ, MetaPost, LaTeX and plain TeX typeset by mp-tikz-wasm in the
 			// preview document (vendor/clew/engine/figures.js): the four fences

@@ -65,9 +65,10 @@ const DEFAULTS = {
 	// LaTeX toolchain (the row is dropped, scripts/build.js), no CJK font
 	// download (its section is dropped), no shell (stubbed), and no note or
 	// book export that draws figures with TeX (exportFigureEngine, Clew-app
-	// 2cc6d89: the installed tools or mp-tikz-wasm; its row is dropped).
+	// 2cc6d89: the installed tools or mp-tikz-wasm, the latter the default
+	// since step C, 3267bf5; its row is dropped).
 	latexEngine: 'auto',
-	exportFigureEngine: 'external',
+	exportFigureEngine: 'auto',
 	pdfCjkFonts: false,
 	shellFont: '',
 	// The daily update check (Clew-app 036befe) is desktop's: the iPad's
