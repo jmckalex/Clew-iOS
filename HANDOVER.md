@@ -1,9 +1,9 @@
-# Handover — 2026-10-15 (the sync to Clew-app ef5f7f2: the index cache saves without a stall; tables wrap at words; #page=N; images within a line)
+# Handover — 2026-10-15 (the sync to Clew-app f0aeaa4: EmbedPDF's cards fit a narrow viewer; the colon sheet's long list opens at once)
 
 Current state for a fresh session, rewritten whole. Durable architecture
 lives in **README.md** and **PORT-PLAN.md**. Each sync's reasoning and
 measurements are in its record: `UPSTREAM-*-PLAN.md`. The latest records
-are `UPSTREAM-EF5F7F2-PLAN.md` (the index cache's save, tables wrapping at words, PDF #page=N, images within a line, 2026-10-15), `UPSTREAM-F4FEB68-PLAN.md` (tables in live edit, the guard, the PDF height upstream, 2026-10-15), `UPSTREAM-185E950-PLAN.md` (the colon retirement and "Convert this vault", 2026-10-11), `HTML-SHARE.md` (the iPad HTML share, 2026-10-11), `UPSTREAM-F959799-PLAN.md` (the figure engine, Proof this chapter, figures
+are `UPSTREAM-F0AEAA4-PLAN.md` (EmbedPDF's cards at 208 px, the colon list's fill, the LaTeX refusal, 2026-10-15), `UPSTREAM-EF5F7F2-PLAN.md` (the index cache's save, tables wrapping at words, PDF #page=N, images within a line, 2026-10-15), `UPSTREAM-F4FEB68-PLAN.md` (tables in live edit, the guard, the PDF height upstream, 2026-10-15), `UPSTREAM-185E950-PLAN.md` (the colon retirement and "Convert this vault", 2026-10-11), `HTML-SHARE.md` (the iPad HTML share, 2026-10-11), `UPSTREAM-F959799-PLAN.md` (the figure engine, Proof this chapter, figures
 in exports measured, 2026-10-10), `UPSTREAM-6B6FBBB-PLAN.md` (PostScript figures, system font families,
 mp-tikz-wasm 0.4.0, 2026-10-10), `UPSTREAM-5ABF52D-PLAN.md` (app secrets,
 book mode phase 2, the book print, 2026-10-10), `UPSTREAM-CBFA692-PLAN.md` (book mode and the demo
@@ -14,6 +14,20 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
 
 ## 1. Where things stand
 
+- **The sync to Clew-app `f0aeaa4` (2026-10-15) is DONE; every check was
+  green in the simulator.** The chain is `sync-f0aeaa4-p1-vendor` →
+  `-p2-build` → `-p3-verify`, off main 07810a8. The record is
+  UPSTREAM-F0AEAA4-PLAN.md.
+  - **EmbedPDF's cards stay whole at 208 px** (pdf-card-fit.js): the
+    error's long word wraps, and the prompt's Open stays inside its card.
+  - **The colon sheet's 4,001-note list opens in ~180 ms** (65 s before):
+    the folds sit in a div of their own, and the content-visibility rule
+    that hid them from find is gone.
+  - The desktop's latexmk, biber and PATH guards and its refusal of a
+    restricted vault's PDF via LaTeX are desktop main's, and inert here.
+    iOS has no PDF via LaTeX in any vault. The palette still offers a
+    note's two LaTeX exports, refused when run (the record; the owner's
+    call).
 - **The sync to Clew-app `ef5f7f2` (2026-10-15) is DONE; every check was
   green in the simulator.** The chain is `sync-ef5f7f2-p1-vendor` →
   `-p2-build` → `-p3-verify`, off main c0f2a20. The record is
@@ -33,6 +47,7 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
     (`wikiembedImage`, in engine-config.js).
   - Step C, the inline layer's guard, the figures hint and figureFonts
     came through unchanged on iOS (the record says why).
+  - Pushed 2026-10-15 in 07810a8 (cloud build OK).
 - **No grip above a block frame in Live Edit (2026-10-15, pushed in
   c0f2a20; the owner's report from the device).**
   The short grey bar over every diagram and maths block was this port's
@@ -289,10 +304,13 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
 ## 2. Waiting on the owner
 
 - **Push main** (a push to main is a TestFlight build). origin/main is
-  c0f2a20, pushed 2026-10-15 (cloud build OK): the f4feb68 sync and no
-  grip above frames. The ef5f7f2 sync's build commit (the tip of
-  `sync-ef5f7f2-p3-verify`) goes onto main once Clew-boss has verified it.
-  The push is on the owner's word, typed in the Clew-iOS window.
+  07810a8, pushed 2026-10-15 (cloud build OK): the ef5f7f2 sync. The
+  f0aeaa4 sync's build commit (the tip of `sync-f0aeaa4-p3-verify`) goes
+  onto main once Clew-boss has verified it. The push is on the owner's
+  word, typed in the Clew-iOS window.
+- **Decide:** should the palette keep "Export note as LaTeX (.tex)" and
+  "Export note as PDF (via LaTeX)" on the iPad? Both are refused when run
+  ("needs a LaTeX toolchain"). The book's equivalents were dropped.
 0. **Push `integration`** (a push to main is a TestFlight build), and say
    whether the share extension should follow, after the App Store
    Connect steps in CAPTURE.md. On the device, check:
@@ -332,15 +350,11 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
 
 ## 3. Next
 
-- **The next sync's range starts at Clew-app `ef5f7f2`.** On the Mac, a
-  restricted vault's PDF via LaTeX is to be refused (the owner's call,
-  2026-10-15). iOS has no PDF via LaTeX in any vault; in that sync, check
-  the refusal's wording, or that nothing offers it (UPSTREAM-EF5F7F2-PLAN.md,
-  answer 7).
-- **Upstream candidates from the ef5f7f2 sync:**
-  - the password prompt's "Open" runs past the card at a 208 px viewer;
-  - a broken PDF's error card is wider than a narrow viewer (222 px in
-    208), clipped on both sides.
+- **The next sync's range starts at Clew-app `f0aeaa4`.**
+- (Done upstream in f0aeaa4's range: the ef5f7f2 sync's two card
+  candidates, and the colon list's fill.)
+- **iPad checks from the f0aeaa4 sync:** its record's list (the cards
+  under a finger; the colon list on a big vault).
 - **From the f4feb68 sync's candidates:** the password card's height and
   the letter-a-line table were fixed upstream (ef5f7f2's range). Not
   re-measured: with `#height=` alone, the PDF sat 6 px down.
