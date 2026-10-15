@@ -14,6 +14,34 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
 
 ## 1. Where things stand
 
+- **PDF embeds are one page tall (2026-10-15, branch `pdf-embed-height`
+  off main 49d88a7; the owner's report from the device).** In Live Edit an
+  `![[x.pdf]]` drew as a toolbar over a sliver of page.
+  - **The cause:** upstream's `height: 70vh` is 70% of the block's own
+    frame, and that frame is sized to its content, so each size report
+    shrank it until it settled near 200 px. The desktop's live edit has
+    the same code (Clew-app `src/preview-client/pdf-embed.js` is identical
+    to ours).
+  - **Now** (src/preview/pdf-size.js, wired into the vendored
+    pdf-embed.js by build patches):
+    - the viewer reads at "fit width";
+    - by default it is exactly one page tall at the width it has. That is
+      EmbedPDF's own sums: the viewport's gap, the tallest page, then the
+      page gap, which EmbedPDF scales with the zoom.
+    - It follows the width (rotation, sidebars, ⟷). The height is applied
+      on the next frame, so there is no ResizeObserver loop.
+    - Sizes in the link, Obsidian's syntax: `![[x.pdf#height=600]]`,
+      `#width=480`, `#width=60%`, joined by `&`. The title shows the
+      file's name, not "x.pdf § height=600".
+    - The same in reading mode.
+  - **Measured in the simulator (a probe inside the frames):**
+    - widths 192, 208 and 636 px each give the predicted viewport to the
+      pixel, with nothing of page 2 showing;
+    - `#height=400`, `#width=60%` (A4) and a landscape PDF are right;
+    - an edit to the link takes effect in Live Edit (a new block
+      document) and in reading mode (the same viewer, re-sized).
+  - 14 tests in tests/pdf-size.test.js.
+
 - **The sync to Clew-app `185e950` (2026-10-11) is DONE; every acceptance
   check was green in the simulator.** The chain is `sync185e950-p1-vendor` →
   `-p2-build` → `-p3-port` → `-p4-verify` → `-p5-backup-guard`, off 0599ee0. Main is
@@ -238,7 +266,9 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
   - the iPad HTML share;
   - the 185e950 sync with "Convert this vault".
   Clew-boss asks when it has verified the chain; the push is on the
-  owner's word typed in the Clew-iOS window.
+  owner's word typed in the Clew-iOS window. The PDF-height fix
+  (`pdf-embed-height`) joins main once Clew-boss has checked it, so one
+  push carries both.
 0. **Push `integration`** (a push to main is a TestFlight build), and say
    whether the share extension should follow, after the App Store
    Connect steps in CAPTURE.md. On the device, check:
@@ -279,6 +309,14 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
 ## 3. Next
 
 - **The next sync's range starts at Clew-app `185e950`.**
+- **Upstream candidate: PDF embeds one page tall** (src/preview/pdf-size.js
+  and its patches in scripts/build.js). The desktop's live edit draws the
+  same sliver. If upstream takes it, the patches go and the module is
+  vendored.
+- **iPad checks for the PDF height:**
+  - the owner's 373-page PDF in Live Edit, in landscape, where one page
+    is taller than the screen, so the editor scrolls past it;
+  - annotating in a one-page-tall embed (the save path is untouched).
 - **If jmarkdown's figure engine is ever turned on in the worker**, shim
   `setImmediate` first: figure-engine.js's runAll() awaits it, and the
   worker does not define it (UPSTREAM-F959799-PLAN.md).

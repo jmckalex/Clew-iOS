@@ -454,6 +454,13 @@ export async function buildAppBundle({ minify = true } = {}) {
 // through pdf-page.html, 71180c6.)
 const iosEmbedScroll = fs.readFileSync(path.join(root, 'src', 'preview', 'embed-scroll.js'), 'utf8');
 
+// A PDF embed's height (src/preview/pdf-size.js): one page at its width, or
+// the sizes its link sets (`![[x.pdf#height=600]]`). Upstream's `70vh` is
+// 70% of a live-edit block's own frame, which is sized to its content, so
+// the viewer shrank to a sliver (the owner's report, 2026-10-15). Upstream
+// candidate: the desktop's live edit draws the same sliver.
+const pdfSizeModule = JSON.stringify(path.join(root, 'src', 'preview', 'pdf-size.js'));
+
 const previewClientPatches = {
 	name: 'clew-preview-client-patches',
 	setup(builder) {
@@ -461,6 +468,26 @@ const previewClientPatches = {
 			contents: fs.readFileSync(args.path, 'utf8') + iosEmbedScroll,
 			loader: 'js',
 		}));
+		builder.onLoad({ filter: /vendor\/clew\/preview-client\/pdf-embed\.js$/ }, (args) => {
+			const file = 'pdf-embed.js';
+			let src = fs.readFileSync(args.path, 'utf8');
+			src = patched(file, src, "import { createViewer } from './pdf-core.js';\n",
+				`import { createViewer } from './pdf-core.js';\nimport { sizePdfHost, fitPdfToPage } from ${pdfSizeModule};\n`);
+			src = patched(file, src,
+				'.clew-pdf-inline { height: 70vh; position: relative;',
+				'.clew-pdf-inline { position: relative;');
+			src = patched(file, src, '.clew-pdf-inline[data-wide] { height: 88vh; }\n',
+				'.pdf-embed-box:has(.clew-pdf-inline[data-wide]) { width: 96vw !important; max-width: 96vw !important; }\n');
+			src = patched(file, src, "for (const host of document.querySelectorAll('.clew-pdf-inline')) ensureChrome(host);",
+				"for (const host of document.querySelectorAll('.clew-pdf-inline')) { ensureChrome(host); sizePdfHost(host); }");
+			src = patched(file, src, '\tembed.replaceWith(host);\n\tensureChrome(host);\n',
+				'\tembed.replaceWith(host);\n\tsizePdfHost(host);\n\tensureChrome(host);\n');
+			src = patched(file, src, '\t\tinst.handle = await createViewer({ target: host, src, onStatus });\n',
+				'\t\tinst.handle = await createViewer({ target: host, src, onStatus });\n\t\tfitPdfToPage(host, inst.handle);\n');
+			src = patched(file, src, '\t\thost.replaceChildren(message);\n',
+				'\t\thost.replaceChildren(message);\n\t\tsizePdfHost(host);\n');
+			return { contents: src, loader: 'js' };
+		});
 	},
 };
 
