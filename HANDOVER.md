@@ -1,9 +1,9 @@
-# Handover — 2026-10-15 (the sync to Clew-app f4feb68: a note holding a table keeps its live edit; the PDF embed's height upstream)
+# Handover — 2026-10-15 (the sync to Clew-app ef5f7f2: the index cache saves without a stall; tables wrap at words; #page=N; images within a line)
 
 Current state for a fresh session, rewritten whole. Durable architecture
 lives in **README.md** and **PORT-PLAN.md**. Each sync's reasoning and
 measurements are in its record: `UPSTREAM-*-PLAN.md`. The latest records
-are `UPSTREAM-F4FEB68-PLAN.md` (tables in live edit, the guard, the PDF height upstream, 2026-10-15), `UPSTREAM-185E950-PLAN.md` (the colon retirement and "Convert this vault", 2026-10-11), `HTML-SHARE.md` (the iPad HTML share, 2026-10-11), `UPSTREAM-F959799-PLAN.md` (the figure engine, Proof this chapter, figures
+are `UPSTREAM-EF5F7F2-PLAN.md` (the index cache's save, tables wrapping at words, PDF #page=N, images within a line, 2026-10-15), `UPSTREAM-F4FEB68-PLAN.md` (tables in live edit, the guard, the PDF height upstream, 2026-10-15), `UPSTREAM-185E950-PLAN.md` (the colon retirement and "Convert this vault", 2026-10-11), `HTML-SHARE.md` (the iPad HTML share, 2026-10-11), `UPSTREAM-F959799-PLAN.md` (the figure engine, Proof this chapter, figures
 in exports measured, 2026-10-10), `UPSTREAM-6B6FBBB-PLAN.md` (PostScript figures, system font families,
 mp-tikz-wasm 0.4.0, 2026-10-10), `UPSTREAM-5ABF52D-PLAN.md` (app secrets,
 book mode phase 2, the book print, 2026-10-10), `UPSTREAM-CBFA692-PLAN.md` (book mode and the demo
@@ -14,8 +14,27 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
 
 ## 1. Where things stand
 
-- **No grip above a block frame in Live Edit (2026-10-15, branch
-  `frame-edge-grip` off c7e1f88; the owner's report from the device).**
+- **The sync to Clew-app `ef5f7f2` (2026-10-15) is DONE; every check was
+  green in the simulator.** The chain is `sync-ef5f7f2-p1-vendor` →
+  `-p2-build` → `-p3-verify`, off main c0f2a20. The record is
+  UPSTREAM-EF5F7F2-PLAN.md.
+  - **The index cache saves in the page, without a stall.** Upstream's save
+    went async (writeFileAtomicAsync), which the vfs's fs.promises could
+    not serve: unfixed, every save would have failed. The shim now opens
+    and renames. The frame at a save on 5,006 notes went from 133–146 ms to
+    21–35 ms. Most of it was the shims' own `Uint8Array.from` copy, which
+    WebKit runs byte by byte on a Buffer (117 ms for 5.4 MB).
+  - **Live tables wrap at words** and scroll when wider than the column
+    (the owner's "this article" reads at words). `contain: inline-size`
+    works in WebKit.
+  - **PDF embeds:** `#page=N` opens at that page; the password prompt's
+    height fits a narrow viewer; no ⟷ inside a live-edit block frame.
+  - **Reading view draws an image within a line**, two on a line included
+    (`wikiembedImage`, in engine-config.js).
+  - Step C, the inline layer's guard, the figures hint and figureFonts
+    came through unchanged on iOS (the record says why).
+- **No grip above a block frame in Live Edit (2026-10-15, pushed in
+  c0f2a20; the owner's report from the device).**
   The short grey bar over every diagram and maths block was this port's
   own: src/ios/styles/ios.css (06ed5cd) made upstream's frame edge a 24 px
   handle with a 40×4 px grip. Upstream made that edge an inert 6 px spacer
@@ -28,7 +47,7 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
 - **The sync to Clew-app `f4feb68` (2026-10-15) is DONE; every check was
   green in the simulator.** The chain is `sync-f4feb68-p1-vendor` →
   `-p2-build` → `-p3-verify`, off main 9b0b67e. The record is
-  UPSTREAM-F4FEB68-PLAN.md.
+  UPSTREAM-F4FEB68-PLAN.md. Pushed 2026-10-15 in c0f2a20 (cloud build OK).
   - **A note holding a table keeps its live edit.** Since the 5abf52d
     sync (on TestFlight from 94f0571, 2026-10-10), any table made the
     block field's create throw, and the WHOLE note showed as source in
@@ -270,12 +289,10 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
 ## 2. Waiting on the owner
 
 - **Push main** (a push to main is a TestFlight build). origin/main is
-  9b0b67e, pushed 2026-10-15: the f959799 sync, the HTML share, the
-  185e950 sync and the PDF height. The f4feb68 sync's build commit (the
-  tip of `sync-f4feb68-p3-verify`) goes onto main once Clew-boss has
-  verified it: a note with a table keeps its live edit, and the PDF height
-  is upstream's. The push is on the owner's word, typed in the Clew-iOS
-  window.
+  c0f2a20, pushed 2026-10-15 (cloud build OK): the f4feb68 sync and no
+  grip above frames. The ef5f7f2 sync's build commit (the tip of
+  `sync-ef5f7f2-p3-verify`) goes onto main once Clew-boss has verified it.
+  The push is on the owner's word, typed in the Clew-iOS window.
 0. **Push `integration`** (a push to main is a TestFlight build), and say
    whether the share extension should follow, after the App Store
    Connect steps in CAPTURE.md. On the device, check:
@@ -315,14 +332,21 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
 
 ## 3. Next
 
-- **The next sync's range starts at Clew-app `f4feb68`.**
-- **Upstream candidates from the f4feb68 sync** (its record has the
-  measurements):
-  - the password prompt does not fit at the iPad's narrow width (a 516 px
-    card in the 440 px held for it);
-  - with `#height=` set, the PDF sits 6 px down;
-  - the live table squeezes its columns letter by letter beside a long
-    cell (CodeMirror's `overflow-wrap: anywhere` reaches the cells).
+- **The next sync's range starts at Clew-app `ef5f7f2`.** On the Mac, a
+  restricted vault's PDF via LaTeX is to be refused (the owner's call,
+  2026-10-15). iOS has no PDF via LaTeX in any vault; in that sync, check
+  the refusal's wording, or that nothing offers it (UPSTREAM-EF5F7F2-PLAN.md,
+  answer 7).
+- **Upstream candidates from the ef5f7f2 sync:**
+  - the password prompt's "Open" runs past the card at a 208 px viewer;
+  - a broken PDF's error card is wider than a narrow viewer (222 px in
+    208), clipped on both sides.
+- **From the f4feb68 sync's candidates:** the password card's height and
+  the letter-a-line table were fixed upstream (ef5f7f2's range). Not
+  re-measured: with `#height=` alone, the PDF sat 6 px down.
+- **iPad checks from the ef5f7f2 sync:** its record's list (the index save
+  on a big vault, the owner's table, `#page=N`, two images on a line,
+  "Open" at the narrow width).
 - **iPad checks from the f4feb68 sync:**
   - the owner's "this article" in Live Edit;
   - a password-protected PDF with the sidebars closed, and in landscape;
@@ -336,8 +360,8 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
   Drive vault converted, so the conflict key is asked there; a big vault's
   convert and undo on the device; the sheet under a finger).
 - **Upstream candidates from the 185e950 sync:**
-  - the indexer's cache save stringifies the whole index synchronously,
-    2 s after the last change (a 150–175 ms frame on 5,006 notes);
+  - (done: the indexer's cache save, upstream ef5f7f2 and this port's
+    copy fix, 21–35 ms on 5,006 notes);
   - the sheet's folded 4,001-note list lays out at ~56 ms a frame while it
     fills.
 - **Next:** colon phase 3 (jmarkdown drops the colon forms). The same
@@ -345,8 +369,8 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
 - **iPad checks for the HTML share:** HTML-SHARE.md's list (Diagrams
   shared to Files and opened in Safari, an image over 2 MB, a share opened
   on a Mac).
-- **Upstream candidate from the share:** two image embeds on one line
-  render the first as "!" plus a link (the engine).
+- (Done upstream, 1406ffc: two image embeds on one line drew the first as
+  "!" plus a link.)
 - **iPad checks from the f959799 sync:** its record's checklist (no Proof
   row in a chapter's Book panel; a book with figures prints them).
 - **iPad checks from the 6b6fbbb sync:** its record's checklist
