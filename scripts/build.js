@@ -289,7 +289,7 @@ const rendererPatches = {
 				'');
 			// "TikZ and MetaPost figures in exports" (Clew-app 2cc6d89; the
 			// built-in TeX the default since step C, 3267bf5, and the hint
-			// reworded in 72af6a2) picks what draws figures in desktop's note
+			// reworded in 72af6a2 and 0520b2c) picks what draws figures in desktop's note
 			// and book exports: the installed TeX tools or mp-tikz-wasm. The
 			// iPad has neither an installation nor those exports, so the row
 			// and its hint go.
@@ -301,7 +301,8 @@ const rendererPatches = {
 				+ "\t\t\t\t\t+ 'naming a font it cannot find, or needing a package it lacks (siunitx, for one) — goes '\n"
 				+ "\t\t\t\t\t+ 'to your installation instead, and the export says so. In a vault '\n"
 				+ "\t\t\t\t\t+ `${DEVICE} does not trust, HTML and LaTeX exports always draw figures with the built-in `\n"
-				+ "\t\t\t\t\t+ 'TeX; a PDF via LaTeX is still compiled by your TeX installation.'),\n",
+				+ "\t\t\t\t\t+ 'TeX, and there is no PDF via LaTeX — it would run your TeX installation over the '\n"
+				+ "\t\t\t\t\t+ 'vault\\'s own TeX; the reading-view PDF needs no TeX.'),\n",
 				'');
 			// The daily update check (Clew-app 036befe) asks clew-app.com for
 			// a newer desktop build; the iPad's updates are the App Store's
