@@ -260,9 +260,11 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
 
 - **Push main** (a push to main is a TestFlight build). origin/main is
   9b0b67e, pushed 2026-10-15: the f959799 sync, the HTML share, the
-  185e950 sync and the PDF height. Main moves to the f4feb68 sync's build
-  commit once Clew-boss has verified it. The push is on the owner's word,
-  typed in the Clew-iOS window.
+  185e950 sync and the PDF height. The f4feb68 sync's build commit (the
+  tip of `sync-f4feb68-p3-verify`) goes onto main once Clew-boss has
+  verified it: a note with a table keeps its live edit, and the PDF height
+  is upstream's. The push is on the owner's word, typed in the Clew-iOS
+  window.
 0. **Push `integration`** (a push to main is a TestFlight build), and say
    whether the share extension should follow, after the App Store
    Connect steps in CAPTURE.md. On the device, check:
