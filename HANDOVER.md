@@ -14,6 +14,17 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
 
 ## 1. Where things stand
 
+- **No grip above a block frame in Live Edit (2026-10-15, branch
+  `frame-edge-grip` off c7e1f88; the owner's report from the device).**
+  The short grey bar over every diagram and maths block was this port's
+  own: src/ios/styles/ios.css (06ed5cd) made upstream's frame edge a 24 px
+  handle with a 40×4 px grip. Upstream made that edge an inert 6 px spacer
+  on 2026-10-03, and the desktop never draws a grip. The override is gone,
+  so the edge is upstream's 6 px and each frame sits 18 px higher. A
+  frame's source is its "Edit source" icon (faint but always shown on
+  touch, a 44 pt target). A long-press on the frame's slot still reveals
+  it (ios-ui.js). Checked in the simulator: the icon tap reveals the TikZ
+  source, and a long-press on the mermaid frame's edge reveals its source.
 - **The sync to Clew-app `f4feb68` (2026-10-15) is DONE; every check was
   green in the simulator.** The chain is `sync-f4feb68-p1-vendor` →
   `-p2-build` → `-p3-verify`, off main 9b0b67e. The record is
@@ -298,7 +309,7 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
    - touch-scroll chaining from block frames;
    - memory at the frame cap of 8 on the Diagrams note;
    - IME in concealed words and table cells;
-   - the 24 px frame grip;
+   - a real finger on a frame's "Edit source" icon (the grip above frames is gone, 2026-10-15);
    - a hardware-keyboard Esc leaving an engaged canvas card;
    - backgrounding in the middle of an annotation.
 

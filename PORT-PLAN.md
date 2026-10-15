@@ -591,8 +591,10 @@ shim was simply missing `RENDER_HTML` (added in this sync).
   Source mode keeps the first-tap-places / second-tap-follows rule but
   reads links through `link-at.js` (so `[text](url)`, `\cite{}` and
   `@ref[]` follow too) and stands off live mode's targets, or a note
-  opened twice. The frame edge is a 24 px handle with a visible grip on
-  `.is-ios` (6 px, `:hover`-lit upstream). Rejected: plain tap edits,
+  opened twice. A frame's source is its "Edit source" icon, faint but
+  always shown on touch. (The frame edge was a 24 px handle with a grip
+  here until 2026-10-15; upstream had made the edge an inert 6 px spacer,
+  and the owner read the grip as a stray handle.) Rejected: plain tap edits,
   long-press follows — a tapped link that does not open reads as broken.
 - **Link hover previews default off; the selection bubble defaults off.**
   Touch has no hover, and WebKit's tap-synthesised `mousemove` would arm

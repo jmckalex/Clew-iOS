@@ -258,31 +258,6 @@ body.is-ios clew-preview-pane {
 	max-width: calc(100vw - 16px);
 }
 
-/* A block frame's edge — the strip above the frame that reveals the fence
-   on click — is 6 px and lit only on :hover upstream, which touch never
-   sees. Make it a 24 px handle with a visible grip, so a long-press (the
-   port's ⌥, ios-ui.js) has something to land on and the reader can see
-   that the frame has a source. */
-body.is-ios .le-frame-edge {
-	position: relative;
-	height: 24px;
-	border-radius: 3px;
-}
-body.is-ios .le-frame-edge::after {
-	content: '';
-	position: absolute;
-	left: 50%;
-	top: 50%;
-	width: 40px;
-	height: 4px;
-	margin: -2px 0 0 -20px;
-	border-radius: 2px;
-	background: var(--clew-border);
-}
-body.is-ios .le-frame-edge:active {
-	background: var(--clew-active-item);
-}
-
 /* ---- the live preview pane under a finger ---- */
 /* The pane is fixed, outside the editor's scroller, so a drag that starts
    on it scrolled nothing (upstream's wheel forwarding does not cover touch,
@@ -433,5 +408,9 @@ body.is-ios .conflict-banner span { flex: 1 1 100%; }
 body.is-ios .conflict-banner button { min-height: 44px; }
 
 /* A rendered block's "Edit source" icon (frame-layer.js; upstream shows it
-   faintly on touch, `hover: none`): 26 px drawn, a 44 pt target. */
+   faintly on touch, `hover: none`): 26 px drawn, a 44 pt target. It is the
+   way to a frame's source, as on the desktop. The frame's edge is
+   upstream's 6 px spacer: the grip this port drew on it (a 24 px handle,
+   06ed5cd) outlived its use once upstream made the edge inert, and the
+   owner saw it as a stray handle over every diagram (2026-10-15). */
 body.is-ios .le-frame-reveal::after { content: ''; position: absolute; inset: -9px; }
