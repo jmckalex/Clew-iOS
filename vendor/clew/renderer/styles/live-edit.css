@@ -282,9 +282,21 @@
 .cm-live .cm-widgetBuffer { vertical-align: baseline; height: 0.6em; }
 
 /* ---- tables and images (Tier B) ---- */
-.le-table-wrap { padding: 6px 24px; overflow-x: auto; }
+/* contain: inline-size — the wrap is the column's width whatever the table
+   needs, and scrolls the rest: a table's narrowest width (a long URL, now
+   that cells wrap at words) otherwise widened the whole note past its pane. */
+.le-table-wrap { padding: 6px 24px; overflow-x: auto; contain: inline-size; }
 .le-table { border-collapse: collapse; font-size: 0.95em; }
 .le-table th, .le-table td { border: 1px solid var(--clew-border); padding: 4px 10px; cursor: text; }
+/* Cells wrap at WORDS, as reading view's do. The table sits inside the
+   note's .cm-content, whose .cm-lineWrapping (`word-break: break-word;
+   overflow-wrap: anywhere`) the cells inherited, so a column could be as
+   narrow as one letter — beside a long cell a short one stood "A / h / e /
+   a…" (Clew-iOS, an iPad's column, 2026-10-15). Now a column is at least its
+   longest word, and a table wider than the column scrolls (.le-table-wrap).
+   The cell editor wraps the same, so editing never changes a column. */
+.le-table th, .le-table td,
+.le-table .le-cell-editor .cm-lineWrapping { overflow-wrap: normal; word-break: normal; }
 .le-table th { background: var(--clew-bg-secondary); font-weight: 650; text-align: left; }
 /* An empty cell keeps a line's height, or a blank row (Tab's new one) collapses flat. */
 .le-table th:empty::before, .le-table td:empty::before { content: '\200b'; }

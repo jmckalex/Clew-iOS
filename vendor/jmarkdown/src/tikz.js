@@ -13,7 +13,7 @@ import { configManager } from './config-manager.js';
 import { requirePackage, addPreamble } from './preamble.js';
 import { registerBlockEnvironment } from './begin-end-core.js';
 import { htmlCachePath, compileInRunDir, cacheDir } from './figure-cache.js';
-import { figureEngineWanted } from './figure-engine.js';
+import { figureEngineWanted, figureToolsRefused, refuseFigure } from './figure-engine.js';
 import Mustache from 'mustache';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -65,7 +65,14 @@ function emptyCache(TiKZ_directory) {
 }
 
 // The installed tools: lualatex then dvisvgm, unless the SVG is cached.
+// Never under `Figure engine: wasm`, on any path (figure-engine.js): the figure
+// is refused instead — before the tools' cache too, so `wasm` shows only what
+// the library drew.
 function compileTikzExternal(token, doc, dir, hash) {
+	if (figureToolsRefused()) {
+		token.figureRefused = true;
+		return;
+	}
 	if (fs.existsSync(path.join(dir, `${hash}.svg`))) return;
 	// Compiled in a run folder of its own (figure-cache.js): only
 	// the SVG is kept; the .aux/.dvi/.log, and anything the
@@ -140,7 +147,12 @@ function createTiKZ(marker) {
 				const job = token.figureJob = { kind: 'tikz', doc: file_contents, dir: TiKZ_directory };
 				job.use = (tex) => { token['file name'] = tex; job.done = true; };
 				job.fail = (log) => { token['has_error'] = true; token['error_log'] = log; job.done = true; };
-				job.external = () => { compileTikzExternal(token, file_contents, TiKZ_directory, hash); job.done = true; };
+				// The tools' run; what failed (their log or error), or null when drawn.
+				job.external = () => {
+					compileTikzExternal(token, file_contents, TiKZ_directory, hash);
+					job.done = true;
+					return token['has_error'] ? (token['error_log'] || 'failed') : null;
+				};
 				return token;
 			}
 			compileTikzExternal(token, file_contents, TiKZ_directory, hash);
@@ -159,6 +171,7 @@ function createTiKZ(marker) {
 				// A figure the walk never filled (a parse that was not async):
 				// the installed tools, as before.
 				if (token.figureJob && !token.figureJob.done) token.figureJob.external();
+				if (token.figureRefused) return refuseFigure('TiKZ');
 				if (token['has_error']) {
 					// Create a button that opens the error log
 					const errorLogBase64 = Buffer.from(token['error_log']).toString('base64');

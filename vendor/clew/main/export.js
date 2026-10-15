@@ -47,6 +47,7 @@ import { iconTable } from './callout-files.js';
 import { chooseLatexEngine, engineName, latexmkFlag, firstLatexError } from './latex-engine.js';
 import { identityKey } from './vault-trust.js';
 import { figuresFolder, figuresState, otherOutputs, vaultCacheDir, markUsed, pruneExportCache, explainFiguresWarnings, figureEngineOptions, texRefusalDir } from './export-cache.js';
+import { buildIndex, fontDirs } from './system-fonts.js';
 
 const WORKER_PATH = paths.engineWorker;
 // Clew's own export worker (engine/export-worker.mjs): the engine's worker
@@ -72,8 +73,9 @@ export function figureEngine(trusted) {
 }
 
 // A restricted vault's worker finds refusing stand-ins for the TeX tools
-// first on its PATH (export-cache.js#texRefusalDir), so its figures' TeX never
-// reaches the installed lualatex, even where the engine would fall back to it.
+// first on its PATH (export-cache.js#texRefusalDir): a second guard behind the
+// engine's own (`wasm` never runs the tools since jmarkdown c82d206), so its
+// figures' TeX never reaches the installed lualatex.
 function workerPath(restricted) {
 	const refuse = restricted ? texRefusalDir(path.join(paths.restrictedExport, 'no-tex')) : null;
 	return refuse ? [refuse, toolchainPath()].join(path.delimiter) : toolchainPath();
@@ -88,6 +90,12 @@ function workerPath(restricted) {
  * own worker, exactly as before.
  */
 export function runWorker({ file, options, cwd, callouts = '', vault = null }) {
+	// The font index the export worker hands figures' named families from
+	// (engine/font-families.js) — the preview's, brought up to date first
+	// (its folders' mtimes; ~0.2s once, a read after).
+	if (vault) {
+		try { buildIndex(fontDirs(), paths.systemFontIndex); } catch { /* the worker finds none: the engine's folder search */ }
+	}
 	return new Promise((resolve, reject) => {
 		const child = fork(vault ? EXPORT_WORKER : WORKER_PATH, vault ? [WORKER_PATH] : [], {
 			cwd,
@@ -97,7 +105,7 @@ export function runWorker({ file, options, cwd, callouts = '', vault = null }) {
 			// preview does — a `Callouts` key in the user's own config wins.
 			env: {
 				...process.env, PATH: workerPath(vault?.restricted === true), CLEW_CALLOUTS: callouts,
-				...(vault ? { CLEW_VAULT_ROOT: vault.root, CLEW_VAULT_RESTRICTED: vault.restricted ? '1' : '0' } : {}),
+				...(vault ? { CLEW_VAULT_ROOT: vault.root, CLEW_VAULT_RESTRICTED: vault.restricted ? '1' : '0', CLEW_FONT_INDEX: paths.systemFontIndex } : {}),
 			},
 		});
 		let stderr = '';

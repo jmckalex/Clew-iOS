@@ -154,26 +154,46 @@ export function explainFiguresWarnings(warnings, { restricted }) {
 // What draws an export's TikZ and MetaPost (jmarkdown 21dee42, figure-engine.js:
 // processFile's `figureEngine` / `mpTikzDist`). 'external' is the installed
 // tools (lualatex, dvisvgm, mpost, mptopdf), as always; 'auto' is mp-tikz-wasm
-// — the preview's own build — with the tools for a font it cannot find; 'wasm'
+// — the preview's own build — with the tools for what it cannot draw; 'wasm'
 // the library alone. A TRUSTED vault's exports follow the `exportFigureEngine`
-// setting ('external' until the engine also falls back on a missing package:
-// the bundles lack some, siunitx among them, which the tools draw today). A
+// setting, 'auto' by default since step C (2026-10-11): from jmarkdown
+// c82d206 a figure needing a file the library's bundles lack (siunitx, say)
+// goes to the tools too, as a font it cannot find already did, so a TeX
+// user's figures do not regress; 'external' is the tools alone. A
 // RESTRICTED vault's always get 'wasm', whatever the setting: TeX is a
 // programming language, and the installed lualatex reads any file this user
 // can (measured: `\input{<a file outside the vault>}` in a TikZ node drew that
 // file's text into the exported figure), while the library's TeX sees no disk.
 
 /** The values the `exportFigureEngine` setting takes, its default first. */
-export const FIGURE_ENGINE_SETTINGS = ['external', 'auto'];
+export const FIGURE_ENGINE_SETTINGS = ['auto', 'external'];
+
+/** The mark a choice of the setting leaves beside it in clew-settings.json. */
+export const FIGURE_ENGINE_CHOSEN = 'exportFigureEngineChosen';
+
+/**
+ * clew-settings.json as read, with an `exportFigureEngine` nobody chose
+ * taken out, so the default applies. Every save writes every key
+ * (settings-store.js), so dev.9–11 wrote their default, 'external', into the
+ * file at the first vault opened, and a default changed since would never
+ * reach that user. A value set from the Settings page carries the mark
+ * (SettingsStore#set) and is kept, 'external' included.
+ */
+export function unpinFigureEngine(stored) {
+	if (!stored || typeof stored !== 'object' || stored[FIGURE_ENGINE_CHOSEN] === true || !('exportFigureEngine' in stored)) return stored;
+	const { exportFigureEngine, ...rest } = stored;
+	return rest;
+}
 
 /**
  * The processFile options for an export's figures: `{}` (the installed tools,
  * no option at all) or `{ figureEngine, mpTikzDist }`. `dist` is the staged
  * mp-tikz-wasm (paths.js#mptikzAssets — the build the preview draws with).
+ * Only 'external' asks for the tools alone; anything else is the default.
  */
 export function figureEngineOptions({ trusted, dist, setting }) {
 	if (!trusted) return { figureEngine: 'wasm', mpTikzDist: dist };
-	return setting === 'auto' ? { figureEngine: 'auto', mpTikzDist: dist } : {};
+	return setting === 'external' ? {} : { figureEngine: 'auto', mpTikzDist: dist };
 }
 
 /**
@@ -184,21 +204,23 @@ export const TEX_TOOLS = ['lualatex', 'dvisvgm', 'mpost', 'mptopdf'];
 
 /**
  * A folder of stand-ins for TEX_TOOLS that refuse, put FIRST on a restricted
- * export's PATH. 'wasm' is not enough on its own: when the library will not
- * load, or a figure throws in it, the engine falls back to the installed tools
- * (measured: a dist with no index.js drew the \input above with lualatex).
- * With these on PATH that figure is an error box naming why. Only the engine's
- * worker gets them — compilePdf's latexmk is the user's TeX by nature, and a
- * PDF via LaTeX typesets the document's own TeX, its TikZ included. POSIX
- * only: Windows finds programs by extension (.exe), which a script is not —
- * null there, and the PATH unchanged.
+ * export's PATH. Since jmarkdown c82d206 'wasm' never runs the tools on any
+ * path — a figure the library does not draw is a `jmd-refused` marker — so
+ * these are the SECOND guard: before it, a library that would not load, or a
+ * figure that threw in it, went to the installed tools (measured: a dist with
+ * no index.js drew the \input above with lualatex). Each refusal leaves its
+ * tool's name in `ran.log` beside them, so a run can show none was reached.
+ * Only the engine's worker gets them — compilePdf's latexmk is the user's TeX
+ * by nature, and a PDF via LaTeX typesets the document's own TeX, its TikZ
+ * included. POSIX only: Windows finds programs by extension (.exe), which a
+ * script is not — null there, and the PATH unchanged.
  */
 export function texRefusalDir(dir, platform = process.platform) {
 	if (platform === 'win32') return null;
 	fs.mkdirSync(dir, { recursive: true });
 	for (const tool of TEX_TOOLS) {
 		const file = path.join(dir, tool);
-		fs.writeFileSync(file, `#!/bin/sh\necho "${tool} was not run: in a vault this device does not trust, an export's figures are drawn by Clew's built-in TeX only" >&2\nexit 1\n`);
+		fs.writeFileSync(file, `#!/bin/sh\necho "${tool}" >> "$(dirname "$0")/ran.log"\necho "${tool} was not run: in a vault this device does not trust, an export's figures are drawn by Clew's built-in TeX only" >&2\nexit 1\n`);
 		fs.chmodSync(file, 0o755);
 	}
 	return dir;

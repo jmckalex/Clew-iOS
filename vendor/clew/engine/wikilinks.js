@@ -11,7 +11,7 @@
 // Obsidian-style wikilinks for jmarkdown, loaded into the render worker via
 // the vault's generated .jmarkdown/config.json:
 //
-//     "Extensions": ["wikiembed, wikilink from <dist>/engine/wikilinks.js"]
+//     "Extensions": ["wikiembed, wikiembedImage, wikilink from <dist>/engine/wikilinks.js"]
 //
 // Syntax (Obsidian-compatible):
 //     [[Note]]  [[Note|alias]]  [[Note#Heading]]  [[Note#Heading|alias]]
@@ -185,10 +185,19 @@ function sliceHeading(content, heading) {
 export const wikiembed = {
 	name: 'wikiembed',
 	level: 'block',
-	start(src) { return src.indexOf('![['); },
+	// Only where a line begins: a block embed is a line of its own, and an
+	// index mid-line made marked cut the paragraph THERE — of `![[a.png]]
+	// ![[b.png]]` the first fell through as "!" and a link, the second became
+	// a block; "Alone: ![[a.png]]" lost its image to a block after the text
+	// (2026-10-15, Clew-iOS's HTML share; the export drew both in place).
+	start(src) {
+		const at = /(^|\n)!\[\[/.exec(src);
+		return at ? at.index + at[1].length : undefined;
+	},
 	tokenizer(src) {
-		// Own-line block embeds only; a mid-sentence ![[…]] falls through (the
-		// '!' becomes text and [[…]] renders as an ordinary wikilink).
+		// Own-line block embeds only. Mid-line, an IMAGE is drawn in place
+		// (wikiembedImage, below); anything else falls through (the '!'
+		// becomes text and [[…]] renders as an ordinary wikilink).
 		const match = /^!\[\[([^\[\]|#\n]*)(?:#([^\[\]|\n]+))?(?:\|([^\[\]\n]+))?\]\][ \t]*(?:\n+|$)/.exec(src);
 		if (!match) return;
 		const link = parseLink(match);
@@ -448,4 +457,54 @@ export const wikiembed = {
 	},
 };
 
-export default [wikiembed, wikilink];
+/**
+ * An IMAGE embedded within a line — `![[a.png]] ![[b.png]]`, `See ![[a.png|200]]`
+ * — drawn in place, as an export draws it (the engine's obsidian-links.js)
+ * and live edit's inline image widget does. Images only: a PDF, a note, any
+ * other media is a block of its own line (wikiembed), and mid-line it falls
+ * through to an ordinary link, as before. An embed alone on its line is
+ * still wikiembed's: block extensions run first.
+ */
+export const wikiembedImage = {
+	name: 'wikiembedImage',
+	level: 'inline',
+	start(src) { return src.indexOf('![['); },
+	tokenizer(src) {
+		const match = /^!\[\[([^\[\]|#\n]*)(?:#([^\[\]|\n]+))?(?:\|([^\[\]\n]+))?\]\]/.exec(src);
+		if (!match) return;
+		const link = parseLink(match);
+		if (!link.target) return;
+		const token = { type: 'wikiembedImage', raw: match[0], ...link, failed: null };
+		// A link out of a restricted vault: said in place, never followed.
+		const raw = rawResolveFileTarget(link.target);
+		if (raw !== null && mediaKind(raw) === 'image' && outside(raw)) {
+			token.failed = 'outside';
+			return token;
+		}
+		const rel = resolveFileTarget(link.target);
+		if (!rel || mediaKind(rel) !== 'image') return;
+		// The alias as a block image reads it: a note-embed keyword is not a
+		// caption, and a pure size is not one either.
+		let alias = link.alias;
+		if (alias) {
+			const stripped = parseEmbedModes(alias);
+			if (stripped.state || stripped.chrome) alias = stripped.alias;
+		}
+		const { alt, width, height } = parseMediaAlias(alias);
+		return { ...token, rel, width, height, label: alias ? alt ?? link.target : link.target };
+	},
+	renderer(token) {
+		if (token.failed) {
+			return `<span class="internal-embed unresolved" data-href="${escapeAttr(token.full)}">`
+				+ `${escapeHtml(token.label)} (this link leaves the vault, and a vault you have not trusted is not followed out of itself)</span>`;
+		}
+		if (global.isLatex) {
+			const w = token.width ? `width=${token.width * 0.75}pt` : 'max width=\\linewidth';
+			return `\\includegraphics[${w}]{${path.join(vaultRoot(), token.rel)}}`;
+		}
+		const dims = (token.width ? ` width="${token.width}"` : '') + (token.height ? ` height="${token.height}"` : '');
+		return `<img class="internal-media" src="${sitePath(token.rel)}" alt="${escapeAttr(token.label)}"${dims}>`;
+	},
+};
+
+export default [wikiembed, wikiembedImage, wikilink];

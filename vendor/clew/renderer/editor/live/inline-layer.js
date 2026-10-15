@@ -41,6 +41,7 @@ import { engineCiteText, engineCiteHtml, wantCiteTexts, onCiteTexts, citeSignatu
 import { FullciteWidget } from './widgets/fullcite.js';
 import { localCiteText } from './cite-label.js';
 import { calloutColor } from '#jmarkdown/callout-table.js';
+import { guarded } from './guarded.js';
 
 const HIDE = Decoration.replace({});
 const markCache = new Map();
@@ -72,8 +73,11 @@ function build(view) {
 	/** Ranges replaced whole: nothing inside them is decorated. */
 	const replaced = [];
 
-	// What the engine will number, and what each label resolves to (§5.13).
-	const numbering = numberingFor(doc, config.notePath, config.numbered?.size ? { numbered: config.numbered } : undefined);
+	// What the engine will number, and what each label resolves to (§5.13) —
+	// asked for by the constructs that show a number, so numbers that cannot
+	// be counted cost those and nothing else.
+	let numbering;
+	const numbers = () => (numbering ??= numberingFor(doc, config.notePath, config.numbered?.size ? { numbered: config.numbered } : undefined));
 
 	// Every citation in the note, in order, for the engine's texts: asked for
 	// once per change of the list, whatever is in view (cite-text.js).
@@ -104,22 +108,26 @@ function build(view) {
 	// line (a directive's `[caption]`) is then skipped, never overlapped.
 	lines();
 
-	for (const c of model) {
+	// Each construct under guarded(): one that throws stays source, the rest
+	// of the note drawn (guarded.js).
+	for (const c of model) guarded(c, () => inline(c), out, replaced);
+
+	function inline(c) {
 		if (c.kind === 'image' && c.level === 'inline' && inView(c.from, c.to) && !live.revealed.has(c.id)
 			&& oneLine(c.from, c.to) && !replaced.some((r) => c.from >= r.from && c.to <= r.to)) {
 			widget(c.from, c.to, new ImageWidget(imageSpec(c, config.notePath, false)));
-			continue;
+			return;
 		}
-		if (c.tier !== 'A' || (c.level !== 'inline' && c.kind !== 'blockId')) continue;
-		if (!inView(c.from, c.to) || live.revealed.has(c.id)) continue;
-		if (replaced.some((r) => c.from >= r.from && c.to <= r.to)) continue;
+		if (c.tier !== 'A' || (c.level !== 'inline' && c.kind !== 'blockId')) return;
+		if (!inView(c.from, c.to) || live.revealed.has(c.id)) return;
+		if (replaced.some((r) => c.from >= r.from && c.to <= r.to)) return;
 		// Replacements may not cross a line break here.
-		if (c.hidden.some((h) => !oneLine(h.from, h.to))) continue;
+		if (c.hidden.some((h) => !oneLine(h.from, h.to))) return;
 
 		if (STYLED.has(c.kind)) {
 			c.hidden.forEach(hide);
 			mark(c.from, c.to, `le-${c.kind}`);
-			continue;
+			return;
 		}
 		switch (c.kind) {
 			case 'escape':
@@ -227,7 +235,7 @@ function build(view) {
 				}));
 				return;
 			case 'label': {
-				const target = numbering.labels.get(content);
+				const target = numbers().labels.get(content);
 				const says = target?.status === 'ok' && target.number
 					? typedRefText(target.type, target.number, true) : 'no number (a reference prints ??)';
 				widget(c.from, c.to, new ChipWidget({ cls: 'le-label', text: `⚓ ${content}`, title: `label ${content} — ${says}` }));
@@ -246,7 +254,7 @@ function build(view) {
 				if (!c.content) break;
 				// The number the engine will print (numbering.js); a click
 				// jumps to the label (events.js), ⌥-click edits.
-				const shown = refDisplay(numbering, content, c.name);
+				const shown = refDisplay(numbers(), content, c.name);
 				widget(c.from, c.to, new ChipWidget({
 					cls: `le-ref le-ref-${shown.state}`, text: shown.text, title: shown.tip,
 					reveal: false, data: { leRef: content },
@@ -283,16 +291,18 @@ function build(view) {
 			const quoted = /^(?:[ \t]*>)+[ \t]?/.exec(line.text)?.[0].length ?? 0;
 			return countColumn(line.text.slice(quoted, c.listMark.from - line.from), state.tabSize);
 		};
-		for (const c of model) {
-			if (c.tier !== 'A' || !inView(c.lineFrom, c.lineTo)) continue;
-			if (inNote(c.from, c.to)) continue; // inside a concealed note
+		for (const c of model) guarded(c, () => lineConstruct(c), out, replaced);
+
+		function lineConstruct(c) {
+			if (c.tier !== 'A' || !inView(c.lineFrom, c.lineTo)) return;
+			if (inNote(c.from, c.to)) return; // inside a concealed note
 			const hidden = !live.revealed.has(c.id);
 			switch (c.kind) {
 				case 'heading': {
 					lineClass(c.from, `le-h le-h${c.depth}`);
 					if (hidden) c.hidden.forEach(hide);
 					// `Headings: numeric`: the number the engine prefixes.
-					const numbered = hidden && numbering.headingsNumeric && numbering.lines.get(doc.lineAt(c.from).number);
+					const numbered = hidden && numbers().headingsNumeric && numbers().lines.get(doc.lineAt(c.from).number);
 					if (numbered && c.hidden[0]) {
 						out.push(Decoration.widget({
 							widget: new ChipWidget({ cls: 'le-heading-number', text: `${numbered.number}.`, reveal: false }), side: 1,
@@ -384,7 +394,7 @@ function build(view) {
 					if (!hidden) break;
 					const caption = c.content ? doc.sliceString(c.content.start ?? c.content.from, c.content.end ?? c.content.to) : '';
 					const attrs = c.attrs ? doc.sliceString(c.attrs.start ?? c.attrs.from, c.attrs.end ?? c.attrs.to) : '';
-					const entry = numbering.lines.get(doc.lineAt(c.openLine.from).number);
+					const entry = numbers().lines.get(doc.lineAt(c.openLine.from).number);
 					widget(c.openLine.from, c.openLine.to, new EnvHeadWidget(name, caption, attrs,
 						c.texOnly ? 'LaTeX only' : c.htmlOnly ? 'HTML only' : '', entry ? headText(entry) : ''));
 					if (c.closeLine && c.closeLine.to > c.closeLine.from) widget(c.closeLine.from, c.closeLine.to, new EnvFootWidget());
@@ -408,6 +418,10 @@ function build(view) {
 		}
 	}
 }
+
+/** The layer's decorations for a view: build(), for tests (a view here is
+ *  `{ state, visibleRanges }`). */
+export const inlineDecorations = build;
 
 /** Rebuild without a document change: what a link resolves to, or a
  *  citation's label, changed outside the editor. */

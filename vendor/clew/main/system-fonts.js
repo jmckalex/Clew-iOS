@@ -39,8 +39,10 @@ export function fontDirs(platform = process.platform, env = process.env) {
 }
 
 const FONT_EXT = /\.(ttf|otf|ttc|otc)$/i;
-/** A family's files past this many bytes, together, are not handed over. */
-export const FAMILY_LIMIT = 64 * 1024 * 1024;
+// What a family is given — its files, whole; none unknown or past the cap —
+// is one rule for the preview and an export's worker, which loads it from
+// src/engine (font-families.js).
+export { FAMILY_LIMIT, familyFiles } from '../engine/font-families.js';
 
 /** Read `length` bytes at `position` of an open file. */
 function readAt(fd, position, length) {
@@ -149,14 +151,4 @@ export function buildIndex(dirs, cacheFile = null) {
 		} catch { /* a cache, nothing more */ }
 	}
 	return families;
-}
-
-/**
- * The files to hand over for a family name, as the index has them — none
- * when the family is unknown, or larger together than FAMILY_LIMIT.
- */
-export function familyFiles(index, family) {
-	const files = (index.get(String(family).toLowerCase()) ?? []).filter((f) => fs.existsSync(f));
-	const bytes = files.reduce((n, f) => n + fs.statSync(f).size, 0);
-	return bytes > FAMILY_LIMIT ? [] : files;
 }

@@ -7,7 +7,7 @@
 // in pdf-core.js, shared with the standalone viewer page that the file tab
 // and canvas nodes use.
 import { createViewer } from './pdf-core.js';
-import { sizePdfHost, fitPdfToPage, onePageHeight } from './pdf-size.js';
+import { sizePdfHost, fitPdfToPage, onePageHeight, pdfPageOption, pageTop, MESSAGE_CARD } from './pdf-size.js';
 import { parentOrigin, postTo } from '../shared/message-guard.js';
 
 const CSS = `
@@ -53,6 +53,12 @@ const CSS = `
 }
 `;
 
+// A live-edit block frame (protocol.js marks its <html>) is the text column
+// itself, so ⟷ could never widen the box past it — it made it 6px NARROWER
+// (measured: 656 → 650; a #width=480 box only to the column's 650). No ⟷
+// there; reading view keeps it, where it reaches 96vw (704 → 1243).
+const IN_BLOCK = document.documentElement.dataset.clewBlock === '1';
+
 function ensureStyles() {
 	if (document.getElementById('clew-pdf-inline-css')) return;
 	const style = document.createElement('style');
@@ -76,11 +82,17 @@ window.addEventListener('message', (event) => {
 });
 
 // Scenarios: how this document's viewers are sized (smoke/pdf-size-scenario.js)
-// — the same sender rule. `press: true` clicks each viewer's ⟷ first.
+// — the same sender rule. `press: true` clicks each viewer's ⟷ first;
+// `scrollTo: y` scrolls each as a reader would.
 window.addEventListener('message', (event) => {
 	const msg = event.data;
 	if (event.source !== window.parent || msg?.source !== 'clew-preview-host' || msg.type !== 'test-pdf-size') return;
 	if (msg.press) for (const button of document.querySelectorAll('.clew-pdf-wide')) button.click();
+	if (typeof msg.scrollTo === 'number') {
+		for (const v of viewers) {
+			v.handle?.container?.registry?.then((r) => r.getPlugin('viewport')?.provides()?.scrollTo({ x: 0, y: msg.scrollTo, behavior: 'instant' }));
+		}
+	}
 	Promise.all([...document.querySelectorAll('.clew-pdf-inline')].map(describeSize))
 		.then((sizes) => postTo(window.parent, { source: 'clew-preview', type: 'test-pdf-sized', id: msg.id, sizes }, parentOrigin()));
 });
@@ -104,6 +116,7 @@ async function describeSize(host) {
 		column: box?.parentElement ? contentWidth(box.parentElement) : 0,
 		title: box?.querySelector('.embed-title a')?.textContent ?? null,
 		wide: host.hasAttribute('data-wide'),
+		button: Boolean(box?.querySelector('.clew-pdf-wide')),   // ⟷ (none in a live-edit block)
 		failed: Boolean(host.querySelector(':scope > .clew-pdf-message')),
 		frame: innerHeight,
 	};
@@ -119,13 +132,26 @@ async function describeSize(host) {
 			contentWidth: metrics.scrollWidth, contentHeight: metrics.scrollHeight,
 		};
 		out.status = documents.getDocumentState(documents.getActiveDocumentId())?.status;
+		if (out.status === 'error') {
+			// EmbedPDF's card: whole inside its area, or clipped
+			const card = host.querySelector('*')?.shadowRoot?.querySelector(MESSAGE_CARD);
+			const c = card?.getBoundingClientRect();
+			const a = card?.parentElement?.getBoundingClientRect();
+			out.card = c && { height: Math.round(c.height), fits: c.top >= a.top - 0.5 && c.bottom <= a.bottom + 0.5 && c.right <= a.right + 0.5 };
+		}
 		if (out.status !== 'loaded') return out;
 		const spreads = scroll.forDocument(documents.getActiveDocumentId()).getSpreadPagesWithRotatedSize();
 		const zoom = registry.getPlugin('zoom').provides().getState();
+		const wanted = pdfPageOption(box?.querySelector('.embed-title a[data-href]')?.dataset.href);
+		const count = spreads.reduce((n, spread) => n + spread.length, 0);
 		Object.assign(out, {
 			zoom: zoom?.zoomLevel,
 			scale: zoom?.currentZoomLevel,
 			pages: spreads.length,
+			// #page=N: the page the link names, the one shown, and its top
+			wanted,
+			current: scroll.getCurrentPage?.(),
+			wantedTop: pageTop({ spreads, page: Math.min(Math.max(wanted ?? 1, 1), count), scale: zoom?.currentZoomLevel, pageGap: scroll.getPageGap?.() ?? 0 }),
 			onePage: onePageHeight({ spreads, pageGap: scroll.getPageGap?.() ?? 0, viewportGap: viewport.getViewportGap?.() ?? 0, width: metrics.clientWidth }),
 			widest: Math.max(...spreads.flat().map((p) => p.rotatedSize.width)),
 			viewportGap: viewport.getViewportGap?.() ?? 0,
@@ -203,7 +229,7 @@ function ensureChrome(host) {
 	if (!titleBar) return;
 
 	// Rightmost first: both controls float right, so DOM order is right-to-left.
-	if (!titleBar.querySelector('.clew-pdf-wide')) {
+	if (!IN_BLOCK && !titleBar.querySelector('.clew-pdf-wide')) {
 		const button = document.createElement('button');
 		button.className = 'clew-pdf-wide';
 		button.type = 'button';

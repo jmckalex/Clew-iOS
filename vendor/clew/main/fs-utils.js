@@ -382,9 +382,13 @@ export function writeFileAtomic(file, data) {
  * writeFileAtomic, off the main thread: the same temp file, fsync and rename,
  * through fs.promises — for a writer of many files at once ("Convert this
  * vault", colon-conversion.js), where a synchronous fsync each (~6 ms on
- * APFS, measured) held main for half a minute over 4,000 notes.
+ * APFS, measured) held main for half a minute over 4,000 notes; and for the
+ * index cache (indexer.js#saveCache), whose `stale()`, asked just before the
+ * rename, drops a write a newer one has made pointless (the temp removed).
+ * One write at a time per file: the temp file's name is the file's.
+ * @returns {Promise<boolean>} whether it was written
  */
-export async function writeFileAtomicAsync(file, data) {
+export async function writeFileAtomicAsync(file, data, stale = () => false) {
 	let target = file;
 	try {
 		target = await fs.promises.realpath(file);
@@ -406,5 +410,10 @@ export async function writeFileAtomicAsync(file, data) {
 		await fs.promises.rm(temp, { force: true });
 		throw err;
 	}
+	if (stale()) {
+		await fs.promises.rm(temp, { force: true });
+		return false;
+	}
 	await fs.promises.rename(temp, target);
+	return true;
 }

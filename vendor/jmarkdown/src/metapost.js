@@ -33,7 +33,7 @@ import { registerBlockEnvironment } from './begin-end-core.js';
 import { addWarning } from './warnings.js';
 import { escapeLatexPath } from './latex-graphics.js';
 import { texCachePath, htmlCachePath, compileInRunDir, cacheDir } from './figure-cache.js';
-import { figureJobFor } from './figure-engine.js';
+import { figureJobFor, figureToolsRefused, refuseFigure } from './figure-engine.js';
 
 const MP_DIR_NAME = 'MetaPost';
 
@@ -131,6 +131,8 @@ function renderMetapostHTML(source, attrs, token) {
 		addWarning('MetaPost diagram failed to compile (mp-tikz-wasm) — see the inline error box');
 		return metapostErrorHTML(job.result.error);
 	}
+	// Never the tools under `Figure engine: wasm`, on any path (figure-engine.js).
+	if (figureToolsRefused()) return refuseFigure('metapost');
 	// With a job, `empty-cache` emptied the folder before any figure was filled.
 	if (!job && attrs?.['empty-cache']) emptyCache(dir);
 
@@ -197,6 +199,7 @@ function renderMetapostLatex(source, attrs, token) {
 		return '';
 	}
 	if (job?.result?.files) return latexIncludes(dir, job.result.files);
+	if (figureToolsRefused()) return refuseFigure('metapost');
 	if (!job && attrs?.['empty-cache']) emptyCache(dir);
 
 	const body = wrapMetapost(source);

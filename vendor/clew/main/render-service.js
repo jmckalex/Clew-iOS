@@ -267,7 +267,7 @@ export class RenderService {
 			'Run note code': this.#noteCode,
 			'Template': path.join(engineAssets, 'clew-template.html'),
 			'Extensions': [
-				`wikiembed, wikilink from ${path.join(engineAssets, 'wikilinks.js')}`,
+				`wikiembed, wikiembedImage, wikilink from ${path.join(engineAssets, 'wikilinks.js')}`,
 				`mermaidFence, leafletFence from ${path.join(engineAssets, 'obsidian-fences.js')}`,
 				// TikZ, MetaPost, LaTeX and plain TeX typeset by wasm in the
 				// preview, so a figure needs no TeX installation: the ```tikz /

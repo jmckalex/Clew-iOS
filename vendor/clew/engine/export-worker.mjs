@@ -38,11 +38,20 @@
 //   resolveLink() — nothing: an export has no page to point a note's link at,
 //     so a [[link]] prints as its text (the alias, or "Note > Heading").
 //
+// And the engine's figureFonts (jmarkdown 97caa3e): a font family a TikZ or
+// MetaPost figure NAMES is given this machine's files for it as the preview
+// gives them (font-families.js, over the index main built: CLEW_FONT_INDEX) —
+// whole families, none past the cap or for a family the machine lacks, which
+// the engine takes as final. Fonts only, never a tool: a restricted vault's
+// exports have it too. No index to read: no option, the engine's search of
+// the font folders by file name, as before.
+//
 // argv[2] is the engine's watch-worker.js; its folder holds index.js.
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveFileTarget } from './vault-files.js';
+import { familyFiles, readFontIndex } from './font-families.js';
 
 const engineDir = path.dirname(process.argv[2]);
 const load = (name) => import(pathToFileURL(path.join(engineDir, name)).href);
@@ -50,6 +59,8 @@ const { processFile } = await load('index.js');
 const { getWarnings } = await load('warnings.js');
 
 let building = null;   // the build's message: its file and options
+const fontIndex = process.env.CLEW_FONT_INDEX ? readFontIndex(process.env.CLEW_FONT_INDEX) : null;
+const figureFonts = fontIndex ? { figureFonts: (family) => familyFiles(fontIndex, family) } : {};
 
 const resolveEmbed = (name, { file } = {}) => {
 	const rel = resolveFileTarget(String(name));
@@ -86,7 +97,7 @@ process.once('message', async (msg) => {
 	if (!msg || msg.type !== 'build') return;
 	building = msg;
 	try {
-		const options = { ...msg.options, obsidianLinks: { resolveEmbed, resolveLink: () => null } };
+		const options = { ...msg.options, obsidianLinks: { resolveEmbed, resolveLink: () => null }, ...figureFonts };
 		const { outFile, bookMap = null, latexFiles = null } = await processFile(msg.file, options);
 		if (process.send) process.send({ type: 'done', output: outFile, warnings: getWarnings(), bookMap, latexFiles });
 	} catch (err) {

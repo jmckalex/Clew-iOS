@@ -38,6 +38,7 @@ import { activeCellOf } from './active-cell.js';
 import { numberingFor } from './numbering-source.js';
 import { mathEnvironmentTex } from '../jmd/math-segments.js';
 import { ChipWidget } from './widgets/chip.js';
+import { guarded } from './guarded.js';
 
 /** Toggle a foldable callout: `{ id, folded }`. */
 export const setCalloutFold = StateEffect.define();
@@ -62,30 +63,6 @@ export function calloutFolded(state, callout) {
 	return toggled ?? callout.fold === '-';
 }
 
-// What failed to draw and has been said (kind + message): a construct that
-// throws stays source on every rebuild, and is reported once.
-const warned = new Set();
-
-/**
- * Draw one construct's decorations into `out`. A throw leaves THAT construct
- * as source — anything it had pushed is taken back — and the rest of the
- * note live: a throw that escapes build() is the field's create failing,
- * and live edit is then lost for the whole note (a table's widget did that,
- * 8619a67 → 2026-10-15: raw bold, images as text, every callout as source).
- */
-function guarded(out, c, draw) {
-	const before = out.length;
-	try {
-		draw();
-	} catch (err) {
-		out.length = before;
-		const key = `${c.kind}\u0000${err?.message ?? err}`;
-		if (warned.has(key)) return;
-		warned.add(key);
-		console.warn(`[clew live edit] a ${c.kind} could not be drawn; it shows as source:`, err);
-	}
-}
-
 function build(state) {
 	const live = state.field(liveStateField);
 	const { model, config } = live;
@@ -106,14 +83,14 @@ function build(state) {
 	// why this badge is here and a one-line note's is in the inline layer.
 	// Nothing inside a concealed note gets a block of its own.
 	const notes = model.filter((c) => c.kind === 'footnote' && c.multiline && !live.revealed.has(c.id));
-	for (const c of notes) guarded(out, c, () => {
+	for (const c of notes) guarded(c, () => {
 		const body = c.body ? text(c.body.from, c.body.to).trim() : '';
 		const paragraphs = body.split(/\n[ \t]*\n/);
 		const first = paragraphs[0].replace(/\s+/g, ' ').trim();
 		out.push(Decoration.replace({
 			widget: new ChipWidget({ cls: 'le-fn le-fn-long', tag: 'sup', text: String(c.number), title: paragraphs.length > 1 ? `${first}…` : first }),
 		}).range(c.from, c.to));
-	});
+	}, out);
 	const inNote = (c) => notes.some((n) => c.from >= n.from && c.to <= n.to && n !== c);
 	const block = (c, widget) => {
 		if (inNote(c)) return;
@@ -138,10 +115,10 @@ function build(state) {
 		ordinal.set(kind, n + 1);
 		if (live.revealed.has(c.id)) continue;
 		const measured = heights.get(c.id) ?? heights.get(`${kind}#${n}`);
-		guarded(out, c, () => block(c, new FramePlaceholder(c.id, kind, measured ?? defaultHeight(kind), measured !== undefined)));
+		guarded(c, () => block(c, new FramePlaceholder(c.id, kind, measured ?? defaultHeight(kind), measured !== undefined)), out);
 	}
 
-	for (const c of model) guarded(out, c, () => draw(c));
+	for (const c of model) guarded(c, () => draw(c), out);
 
 	function draw(c) {
 		if (c.tier === 'B' && c.level === 'block' && !live.revealed.has(c.id)) {
@@ -187,11 +164,11 @@ function build(state) {
 	// A kanban board note: say where the board is (plan §5.5).
 	const front = model.find((c) => c.kind === 'frontmatter');
 	if (front && /(^|\n)kanban-plugin\s*:/.test(text(front.from, front.to))) {
-		guarded(out, front, () => out.push(Decoration.widget({
+		guarded(front, () => out.push(Decoration.widget({
 			widget: new BannerWidget('This note is a Kanban board — boards render in reading mode.',
 				{ label: 'Reading mode', command: 'workspace:mode-reading' }),
 			block: true, side: -1,
-		}).range(0)));
+		}).range(0)), out);
 	}
 	return Decoration.set(out, true);
 }

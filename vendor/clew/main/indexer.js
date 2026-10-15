@@ -18,7 +18,7 @@ import { extractNoteMetadata, extractDrawingMetadata } from '../shared/note-meta
 import { masterIndexEntry } from '../shared/book.js';
 import { isExcalidrawPath } from '../shared/excalidraw-file.js';
 import { CH, NOTE_EXTENSIONS } from '../shared/channels.js';
-import { direntKind, shouldRecurse, walkGuard, writeFileAtomic } from './fs-utils.js';
+import { direntKind, shouldRecurse, walkGuard, writeFileAtomicAsync } from './fs-utils.js';
 import { insideByRealpath } from '../engine/vault-bounds.js';
 import { compileExcludes } from './vault-excludes.js';
 
@@ -71,6 +71,7 @@ export class Indexer {
 
 	closeVault() {
 		clearTimeout(this.#saveTimer);
+		this.#saveGen += 1;   // a save under way is for a vault no longer open
 		this.root = null;
 		this.notes.clear();
 		this.appFolders.clear();
@@ -251,18 +252,64 @@ export class Indexer {
 		}
 	}
 
+	// The cache is saved 2s after the last change. Off main's thread as far as
+	// JavaScript allows: the JSON built in slices of a few milliseconds
+	// (indexCacheJson), written, fsynced and renamed on libuv's threads
+	// (writeFileAtomicAsync). Until 2026-10-15 it was one synchronous
+	// stringify, write and fsync of the whole index — 5.4MB on 5,000 notes, a
+	// stall of main here and a 150–175ms frame on the iPad, where Clew-iOS runs
+	// this file in its page. A change bumps the generation, so a save under
+	// way for an older index stops between slices or before its rename; saves
+	// run one at a time, the newest wins.
+	#saveGen = 0;
+	#saving = Promise.resolve();
+
 	#persistSoon() {
+		this.#saveGen += 1;
 		clearTimeout(this.#saveTimer);
-		this.#saveTimer = setTimeout(() => {
-			if (!this.root) return;
-			try {
-				writeFileAtomic(this.#cacheFile(),
-					JSON.stringify({ version: CACHE_VERSION, ...this.snapshot() }));
-			} catch (err) {
-				console.error('Index cache save failed:', err);
-			}
-		}, 2000);
+		this.#saveTimer = setTimeout(() => this.saveCache(), 2000);
 	}
+
+	/** Save the cache now (resolves when written, or superseded). */
+	saveCache() {
+		clearTimeout(this.#saveTimer);
+		const gen = this.#saveGen;
+		const stale = () => gen !== this.#saveGen || !this.root;
+		this.#saving = this.#saving.then(async () => {
+			if (stale()) return;
+			const file = this.#cacheFile();
+			const t0 = performance.now();
+			const json = await indexCacheJson(CACHE_VERSION, this.notes, stale);
+			if (json === null) return;
+			const t1 = performance.now();
+			const written = await writeFileAtomicAsync(file, json, stale);
+			if (written && process.env.CLEW_SMOKE_INDEX_SAVE) {
+				console.log(`smoke-index-save: notes=${this.notes.size} bytes=${json.length} build=${Math.round(t1 - t0)}ms write=${Math.round(performance.now() - t1)}ms`);
+			}
+		}).catch((err) => console.error('Index cache save failed:', err));
+		return this.#saving;
+	}
+}
+
+/**
+ * The cache file's text — exactly `JSON.stringify({ version, notes:
+ * Object.fromEntries(notes) })` — built an entry at a time, yielding to the
+ * event loop every `budget` ms (setImmediate: IPC and I/O run between). null
+ * once `stale()` says a newer index has made it pointless.
+ */
+export async function indexCacheJson(version, notes, stale = () => false, budget = 8) {
+	const entries = [...notes];   // the entries as they are now; a change bumps stale()
+	const parts = [];
+	let t0 = performance.now();
+	for (const [rel, entry] of entries) {
+		parts.push(`${JSON.stringify(rel)}:${JSON.stringify(entry)}`);
+		if (performance.now() - t0 >= budget) {
+			await new Promise((resolve) => setImmediate(resolve));
+			if (stale()) return null;
+			t0 = performance.now();
+		}
+	}
+	return `{"version":${JSON.stringify(version)},"notes":{${parts.join(',')}}}`;
 }
 
 export const indexer = new Indexer();

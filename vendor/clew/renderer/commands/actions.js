@@ -183,9 +183,10 @@ export async function openWikilink(target, { newTab = false, mode } = {}) {
 				// A PDF never replaces the tab the link was in — its own tab,
 				// wherever it is open, else a new one, in the other pane of a
 				// split (tree.js#openFileBeside); `newTab` (⌘-click) keeps it in
-				// this pane. `[[paper.pdf#page=12]]` (§5.15): there.
+				// this pane. `[[paper.pdf#page=12]]` (§5.15): there — and an
+				// embed's title, `#page=12&height=600` (preview-client/pdf-size.js).
 				const tab = workspaceStore.openFileBeside(filePath, { here: newTab });
-				const page = /^page=(\d+)$/.exec(heading ?? '')?.[1];
+				const page = /(?:^|&)\s*page\s*=\s*(\d+)\s*(?:&|$)/i.exec(heading ?? '')?.[1];
 				if (page && tab) showPdfPage(tab.id, Number(page));
 			} else workspaceStore.openFile(filePath, { newTab });
 			return;

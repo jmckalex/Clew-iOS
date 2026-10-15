@@ -35,7 +35,7 @@ import { escapedCharacters } from './escapes.js';
 import { latexLint, resetLatexLint } from './latex-lint.js';
 import { prepareBook, resetBook, getBook, bookExtension, bookLayout, bookLatexLayout } from './book.js';
 import { writeLatexInclude, unbracket } from './book-latex.js';
-import { figureEngineWanted, withFigureEngine } from './figure-engine.js';
+import { figureEngineWanted, withFigureEngine, setFigureFonts } from './figure-engine.js';
 import { getBookMap, warnNoLatexBookMap } from './book-map.js';
 import { writeBookPages } from './book-pages.js';
 import { bibliographyFiles } from './bibliographies.js';
@@ -126,6 +126,10 @@ if (options.copyFigures != null) configManager.set('Copy figures', options.copyF
 // over the config files' for this build. Unset, the installed tools, as always.
 if (options.figureEngine) configManager.set('Figure engine', String(options.figureEngine));
 if (options.mpTikzDist) configManager.set('MP-TikZ dist', path.resolve(process.cwd(), String(options.mpTikzDist)));
+// A host's own font index for those figures (figure-engine.js): processFile's
+// `figureFonts` alone — no config key, no header, no CLI flag. Absent, the
+// system's font folders are searched by file name, as always.
+setFigureFonts(options.figureFonts);
 // The book map (book-map.js): processFile's `bookMap`, the CLI's --book-map.
 // Off unless asked; an HTML build's (LaTeX numbers its own book).
 if (options.bookMap === true || String(options.bookMap).toLowerCase() === 'true') {

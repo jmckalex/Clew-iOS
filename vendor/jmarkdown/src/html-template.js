@@ -7,6 +7,26 @@ import { custom_elements } from './metadata-header.js';
 import { tabbingPageScript } from './tabbing-page.js';
 import { runtimeBibliography } from './bibliographies.js';
 
+// A refusal marker (`jmd-refused`: note code a host switched off, note-code.js;
+// a figure strict `wasm` did not draw, figure-engine.js) is quietly set apart,
+// so it does not read as stray prose. Added to a page that has one only: the
+// stylesheet is in every page's <style>, and every other page stays exactly as
+// it was.
+const REFUSAL_CSS = `
+.jmd-refused {
+	border: 1px dashed #b0b0b0;
+	border-radius: 4px;
+	color: #777;
+	font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+	font-size: 0.85em;
+	padding: 0 0.4em;
+}
+div.jmd-refused {
+	padding: 10px 15px;
+	margin: 10px 0;
+}
+`;
+
 export function processTemplate(content) {
 	const default_template = fs.readFileSync(path.join(configManager.get('Jmarkdown app directory'), 'default-template.html.mustache'), 'utf8');
 	const biblify_template = fs.readFileSync(path.join(configManager.get('Jmarkdown app directory'), 'Biblify.js.mustache'), 'utf8');
@@ -15,7 +35,7 @@ export function processTemplate(content) {
 	let config = { ...configManager.getConfigForMustache() };
 	config = replaceSpacesInKeys(config);
 	config['Highlight_src'] = Mustache.render(config['Highlight_src'], config);
-	config['Jmarkdown_css'] = jmarkdown_css;
+	config['Jmarkdown_css'] = content.includes('class="jmd-error jmd-refused"') ? jmarkdown_css + REFUSAL_CSS : jmarkdown_css;
 	config['Custom_elements'] = custom_elements;
 	config['Content'] = content;
 	// The runtime Biblify client reads ONE file: with several bibliographies

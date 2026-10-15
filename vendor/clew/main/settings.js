@@ -11,9 +11,8 @@
 // App-level settings persisted in Electron's userData directory:
 // recent vaults, last vault, theme. Vault-level state lives in <vault>/.clew/.
 import { app } from 'electron';
-import fs from 'node:fs';
 import path from 'node:path';
-import { writeFileAtomic } from './fs-utils.js';
+import { SettingsStore } from './settings-store.js';
 
 const DEFAULTS = {
 	recentVaults: [],
@@ -60,11 +59,14 @@ const DEFAULTS = {
 	// LuaLaTeX), or 'pdflatex' | 'lualatex' | 'xelatex' for what it cannot see.
 	latexEngine: 'auto',
 	// What draws TikZ and MetaPost in a TRUSTED vault's note and book exports
-	// (export-cache.js#figureEngineOptions): 'external' — the installed TeX
-	// tools — or 'auto' — mp-tikz-wasm, the preview's own build, with the
-	// tools for a font it cannot find. A restricted vault's always use
-	// mp-tikz-wasm alone, whatever this says.
-	exportFigureEngine: 'external',
+	// (export-cache.js#figureEngineOptions): 'auto' — mp-tikz-wasm, the
+	// preview's own build, with the installed TeX tools for a figure it cannot
+	// draw (a font it cannot find, a file its bundles lack) — or 'external',
+	// the installed tools alone. A restricted vault's always use mp-tikz-wasm
+	// alone, whatever this says. Read only when the user CHOSE it
+	// (export-cache.js#unpinFigureEngine): dev.9–11 wrote the then-default
+	// 'external' into every settings file at the first vault opened.
+	exportFigureEngine: 'auto',
 	// The daily update check (main/updater.js): 'on' | 'off'; and a version
 	// the user chose to skip, which is not told again.
 	updateCheck: 'on',
@@ -86,62 +88,5 @@ const DEFAULTS = {
 	shellFont: '',
 };
 
-class Settings {
-	#data = { ...DEFAULTS };
-	#file = null;
-
-	load() {
-		this.#file = path.join(app.getPath('userData'), 'clew-settings.json');
-		try {
-			this.#data = { ...DEFAULTS, ...JSON.parse(fs.readFileSync(this.#file, 'utf8')) };
-		} catch {
-			this.#data = { ...DEFAULTS };
-		}
-	}
-
-	get(key) {
-		return key === undefined ? { ...this.#data } : this.#data[key];
-	}
-
-	set(key, value) {
-		this.#data[key] = value;
-		this.#save();
-	}
-
-	addOpenVault(vaultPath) {
-		const list = this.#data.openVaults.filter((p) => p !== vaultPath);
-		list.push(vaultPath);
-		this.#data.openVaults = list;
-		this.#save();
-	}
-
-	removeOpenVault(vaultPath) {
-		this.#data.openVaults = this.#data.openVaults.filter((p) => p !== vaultPath);
-		this.#save();
-	}
-
-	rememberVault(vaultPath) {
-		const recent = this.#data.recentVaults.filter((p) => p !== vaultPath);
-		recent.unshift(vaultPath);
-		this.#data.recentVaults = recent.slice(0, 10);
-		this.#data.lastVault = vaultPath;
-		this.#save();
-	}
-
-	#save() {
-		// Smoke runs never persist: everything still works in memory, but
-		// nothing a scenario does — opening a vault (rememberVault!),
-		// flipping the theme — can leak into the user's real settings.
-		// The 5k-note stress vault turning up in the owner's own launch
-		// (via the lastVault fallback) is how this line was earned.
-		if (process.env.CLEW_SMOKE) return;
-		try {
-			fs.mkdirSync(path.dirname(this.#file), { recursive: true });
-			writeFileAtomic(this.#file, JSON.stringify(this.#data, null, 2));
-		} catch (err) {
-			console.error('Failed to save settings:', err);
-		}
-	}
-}
-
-export const settings = new Settings();
+// The file at userData; settings-store.js reads and writes it.
+export const settings = new SettingsStore(DEFAULTS, () => path.join(app.getPath('userData'), 'clew-settings.json'));
