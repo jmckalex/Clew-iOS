@@ -107,6 +107,11 @@ async function exportActiveNote(format) {
 	editorPool.flush(ctx.activeTab.id);
 	try {
 		const result = await ipc.invoke(CH.EXPORT_NOTE, { path: ctx.notePath, format });
+		// A PDF via LaTeX in a vault this device does not trust: said, not built.
+		if (result?.refused) {
+			notice(result.refused, 12000);
+			return;
+		}
 		if (result?.output) console.log(`Exported to ${result.output}`);
 		// What the build said (the LaTeX-export lint, among others), grouped;
 		// the status bar's ⚠ lists them.

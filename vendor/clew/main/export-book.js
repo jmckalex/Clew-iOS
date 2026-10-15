@@ -33,7 +33,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { readMaster, laterNotice, placeWarnings } from '../shared/book.js';
-import { runWorker, compilePdf, configuredBibliographies, restrictedExportDir, figureCache, clearFigures, figureEngine } from './export.js';
+import { runWorker, compilePdf, configuredBibliographies, restrictedExportDir, figureCache, clearFigures, figureEngine, DEVICE_WORD } from './export.js';
+import { latexPdfRefusal } from './latex-engine.js';
 import { figuresFolder, explainFiguresWarnings } from './export-cache.js';
 import { bibliographyDirs } from './citation-header.js';
 import { calloutsEnv } from './callout-types.js';
@@ -61,6 +62,9 @@ const FORMATS = { html: 'html', latex: 'tex', pdf: 'pdf', print: 'pdf', proof: '
  */
 export async function exportBook({ vaults, indexer, masterRel, format, trusted = false, renderService = null, sessionId = null, callerToken = null, chapter = null, bookMap = false }) {
 	if (!FORMATS[format]) throw new Error(`A book is built as HTML, LaTeX or PDF, not "${format}"`);
+	// No PDF via LaTeX — the book's or a proof — in a vault this device does
+	// not trust (latex-engine.js#latexPdfRefusal): nothing built, no build/.
+	if ((format === 'pdf' || format === 'proof') && !trusted) return { refused: latexPdfRefusal(format === 'proof' ? 'proof' : 'book', DEVICE_WORD) };
 	const masterAbs = vaults.resolve(masterRel);
 	const masterText = fs.readFileSync(masterAbs, 'utf8');
 	const master = readMaster(masterText);

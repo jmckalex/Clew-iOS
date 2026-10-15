@@ -222,8 +222,12 @@ button {
 .clew-colon-group h3 { margin: 0 0 4px; font-size: 14px; }
 .clew-colon-pick-all, .clew-colon-pick { white-space: nowrap; cursor: pointer; }
 .clew-colon-list > summary { cursor: pointer; color: var(--clew-text-muted); margin: 2px 0; }
-/* Thousands of folds: off-screen ones are neither laid out nor painted. */
-.clew-colon-note { margin: 2px 0; content-visibility: auto; contain-intrinsic-size: auto 22px; }
+/* No content-visibility on the folds (it was here from fcc7faf to
+   2026-10-15): with the folds in a div of their own it bought the 4,001-note
+   fill ~70 ms in Chromium but cost every scroll (12–14 frames over 16.7 ms
+   against none), and in WebKit it hid an off-screen fold from find
+   (smoke/colon-list-scenario.js, Clew-iOS). */
+.clew-colon-note { margin: 2px 0; }
 .clew-colon-note > summary { cursor: pointer; display: flex; gap: 10px; padding: 2px 0; }
 .clew-colon-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .clew-colon-count { color: var(--clew-text-faint); white-space: nowrap; }

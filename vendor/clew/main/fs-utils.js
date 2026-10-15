@@ -417,3 +417,18 @@ export async function writeFileAtomicAsync(file, data, stale = () => false) {
 	await fs.promises.rename(temp, target);
 	return true;
 }
+
+/**
+ * A search path's folders that name only themselves: absolute ones, each
+ * once, in order. To a shell an EMPTY entry — a leading, trailing or doubled
+ * delimiter, the usual leftover of a terminal's PATH — is the working folder,
+ * as `.` is, and any relative entry is read against it; a PDF via LaTeX runs
+ * its tools with the working folder in the vault (a book's build/), where a
+ * planted `biber` or `pdflatex` would then be the one found (2026-10-15).
+ *
+ * @param {string|undefined} value  e.g. process.env.PATH
+ */
+export function absoluteSearchPath(value, { delimiter = path.delimiter, isAbsolute = path.isAbsolute } = {}) {
+	const seen = new Set();
+	return String(value ?? '').split(delimiter).filter((dir) => dir && isAbsolute(dir) && !seen.has(dir) && seen.add(dir));
+}

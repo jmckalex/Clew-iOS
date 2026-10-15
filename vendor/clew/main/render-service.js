@@ -27,7 +27,7 @@ import { readNoteFonts } from './note-fonts.js';
 import { settings } from './settings.js';
 import { engineExtensionEntries } from './plugins.js';
 import { inlineScriptHashes } from './preview-csp.js';
-import { writeFileAtomic } from './fs-utils.js';
+import { writeFileAtomic, absoluteSearchPath } from './fs-utils.js';
 import { isDependentFragment } from '../shared/fragment-deps.js';
 import { citationHeader, bookCitationHeader, noteBibFiles } from './citation-header.js';
 import { refusedNames } from '../shared/refused-names.js';
@@ -41,12 +41,14 @@ const REBUILD_DEBOUNCE_MS = 300;
 // TikZ/MetaPost/mermaid-cli shell out to latex/dvisvgm/mpost by name; a
 // dock-launched app's PATH lacks the usual tool locations, so append them.
 // (Windows installers put TeX on PATH themselves; the delimiter there is
-// ';' and the Unix directories don't apply.)
+// ';' and the Unix directories don't apply.) Only absolute folders are kept
+// (fs-utils.js#absoluteSearchPath): an empty or relative entry is the working
+// folder to a shell, which for a book's PDF is the vault's build/.
 export function toolchainPath() {
 	const extras = process.platform === 'win32'
 		? []
 		: ['/Library/TeX/texbin', '/opt/homebrew/bin', '/usr/local/bin'];
-	const current = (process.env.PATH ?? '').split(path.delimiter);
+	const current = absoluteSearchPath(process.env.PATH);
 	const dirs = [...current, ...extras.filter((dir) => !current.includes(dir))];
 	// CLEW_SMOKE_NO_TEX (scenarios only): a machine with no TeX installed —
 	// every folder holding a TeX program is left off, so exports, figures and

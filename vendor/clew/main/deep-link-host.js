@@ -284,6 +284,7 @@ async function cliRequest(req) {
 			win: s.win, vaults: s.vaults, sessionId: s.id, callerToken: s.callerToken,
 			relPath: at.note, format, outFile, trusted: s.trusted,
 		});
+		if (result?.refused) return { ok: false, error: result.refused };
 		// Into the vault, it shows in the explorer at once (as the menu's).
 		if (result?.output) s.vaults.refreshIfInside(result.output);
 		const warnings = result?.warnings?.length ? ` (${result.warnings.length} warning${result.warnings.length === 1 ? '' : 's'})` : '';

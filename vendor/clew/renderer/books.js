@@ -168,6 +168,11 @@ export async function buildBook(master, format, { chapter = null } = {}) {
 	notice(chapter ? `Proofing “${chapterName}” of ${name}…` : `Building ${name} as ${FORMAT_WORDS[format]}…`, 2500);
 	try {
 		const result = await ipc.invoke(CH.EXPORT_BOOK, { master, format, ...(chapter ? { chapter } : {}) });
+		// A PDF via LaTeX in a vault this device does not trust: said, not built.
+		if (result?.refused) {
+			notice(result.refused, 12000);
+			return result;
+		}
 		workspaceStore.setRecentBook(master);
 		const warnings = Array.isArray(result?.warnings) ? result.warnings : [];
 		bookBuilds.set(master, { format, output: result.outputRel ?? result.output, warnings, at: Date.now() });

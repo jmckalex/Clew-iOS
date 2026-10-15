@@ -44,7 +44,7 @@ import { printNoteToPdf } from './print-pdf.js';
 import { settings } from './settings.js';
 import { calloutsEnv } from './callout-types.js';
 import { iconTable } from './callout-files.js';
-import { chooseLatexEngine, engineName, latexmkFlag, firstLatexError } from './latex-engine.js';
+import { chooseLatexEngine, engineName, latexmkCommand, latexPdfRefusal, firstLatexError } from './latex-engine.js';
 import { identityKey } from './vault-trust.js';
 import { figuresFolder, figuresState, otherOutputs, vaultCacheDir, markUsed, pruneExportCache, explainFiguresWarnings, figureEngineOptions, texRefusalDir } from './export-cache.js';
 import { buildIndex, fontDirs } from './system-fonts.js';
@@ -193,6 +193,9 @@ export async function clearFigures(vaults, output) {
 }
 
 const TEX_DIRS = ['/Library/TeX/texbin', '/usr/local/bin', '/opt/homebrew/bin'];
+// The device word the window says (renderer/lib/device-name.js): a desktop
+// page has no host name, so its platform's.
+export const DEVICE_WORD = process.platform === 'darwin' ? 'this Mac' : 'this computer';
 // CLEW_SMOKE_NO_TEX (scenarios only; render-service.js#toolchainPath): none here either.
 const findTex = (name) => (process.env.CLEW_SMOKE && process.env.CLEW_SMOKE_NO_TEX ? null
 	: TEX_DIRS.map((dir) => path.join(dir, name)).find((p) => fs.existsSync(p)) ?? null);
@@ -219,10 +222,13 @@ export function compilePdf(texFile, noteDir, bibDirs = [noteDir]) {
 	// place otherwise found its rewritten .tex up to date, ran nothing, and
 	// left the last PDF — which the freshness check below rightly refused
 	// ("no PDF was produced", measured 2026-10-05). One extra pass, no
-	// parsing of latexmk's messages.
-	const args = latexmk
-		? [latexmkFlag(engine), '-g', '-interaction=nonstopmode', '-quiet', path.basename(texFile)]
-		: ['-interaction=nonstopmode', path.basename(texFile)];
+	// parsing of latexmk's messages. Its configuration and biber's are the
+	// user's own, never a file in the folder it runs in (latex-engine.js#
+	// latexmkCommand: a book's runs in the vault's build/).
+	const isFile = (p) => { try { return fs.statSync(p).isFile(); } catch { return false; } };
+	const command = latexmk
+		? latexmkCommand({ engine, texFile: path.basename(texFile), env: process.env, isFile })
+		: { args: ['-interaction=nonstopmode', path.basename(texFile)], env: {} };
 	const pdf = texFile.replace(/\.tex$/, '.pdf');
 	const started = Date.now();
 	return new Promise((resolve, reject) => {
@@ -231,8 +237,8 @@ export function compilePdf(texFile, noteDir, bibDirs = [noteDir]) {
 		// file by its basename (jmarkdown 909af7a: the note's AND the
 		// configured ones).
 		const searchPath = (dirs, name) => `${dirs.join(path.delimiter)}${path.delimiter}${process.env[name] ?? ''}`;
-		const env = { ...process.env, PATH: toolchainPath(), BIBINPUTS: searchPath(bibDirs, 'BIBINPUTS'), TEXINPUTS: searchPath([noteDir], 'TEXINPUTS') };
-		execFile(tex, args, { cwd: path.dirname(texFile), timeout: 180000, env }, (err) => {
+		const env = { ...process.env, ...command.env, PATH: toolchainPath(), BIBINPUTS: searchPath(bibDirs, 'BIBINPUTS'), TEXINPUTS: searchPath([noteDir], 'TEXINPUTS') };
+		execFile(tex, command.args, { cwd: path.dirname(texFile), timeout: 180000, env }, (err) => {
 			// A non-zero exit can be warnings only: accept a PDF THIS run wrote —
 			// never one an earlier export left at the same path.
 			const fresh = fs.existsSync(pdf) && fs.statSync(pdf).mtimeMs >= started - 1000;
@@ -259,6 +265,9 @@ export function compilePdf(texFile, noteDir, bibDirs = [noteDir]) {
  * Prompts for a destination; returns { output } or { canceled: true }.
  */
 export async function exportNote({ win, vaults, sessionId, callerToken = null, relPath, format, outFile, trusted = false }) {
+	// No PDF via LaTeX in a vault this device does not trust (latex-engine.js#
+	// latexPdfRefusal): refused before the save dialog, nothing built.
+	if (format === 'pdf' && !trusted) return { refused: latexPdfRefusal('note', DEVICE_WORD) };
 	const abs = vaults.resolve(relPath);
 	const cwd = trusted ? path.dirname(abs) : restrictedExportDir();
 	// Exports honor the vault's standard-syntax choice, like previews do.

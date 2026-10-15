@@ -18,6 +18,7 @@ import './pdf-pen.js';
 import { topOrigin, postTo } from '../shared/message-guard.js';
 import { bandNumbers, edgeRuns, textPageOffset, usefulPageLabels } from '../shared/pdf-quote.js';
 import { installQuietNavigator } from './pdf-quiet-nav.js';
+import { installCardFit } from './pdf-card-fit.js';
 
 const EMBEDPDF_ASSETS = '/__clew_assets__/embedpdf';
 const SAVE_DEBOUNCE_MS = 2500;
@@ -236,6 +237,7 @@ export async function createViewer({ target, src, onStatus = () => {}, readonly 
 			this.unlisten?.();
 			this.unquote?.();
 			this.unquiet?.();
+			this.uncard?.();
 			liveHandles.delete(this);
 			viewerHandles.delete(this);
 			const pending = this.flush?.();
@@ -290,6 +292,8 @@ export async function createViewer({ target, src, onStatus = () => {}, readonly 
 	const registry = await container.registry;
 	// The page navigator shows when asked for, not on every scroll.
 	handle.unquiet = installQuietNavigator(container);
+	// Its card for a PDF it cannot open stays whole in a narrow viewer.
+	handle.uncard = installCardFit(container);
 	const docManager = registry.getPlugin('document-manager')?.provides();
 	if (!docManager) throw new Error('document-manager plugin unavailable');
 	// Buffer, not URL: third-party URL loaders allowlist http(s)/blob and read

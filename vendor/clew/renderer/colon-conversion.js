@@ -165,14 +165,21 @@ async function review(sheet, report, { again = false } = {}) {
 		draining = queue.length > 0;
 		if (draining) requestAnimationFrame(drain);
 	};
+	// The folds go into a div of their own, never straight into the
+	// <details>: in WebKit, once a <details> holding thousands of children
+	// has been laid out, each append into it cost 6–9 ms and the relayout
+	// 20–42 ms, so the 4,001-note list filled one fold a frame for a minute
+	// (Clew-iOS, 2026-10-15: 0.13 ms and 1.0 ms into a div inside it; the
+	// whole fill 168 ms).
 	const noteList = (count, folds) => {
 		const list = h('details', 'clew-colon-list');
-		list.append(h('summary', null, plural(count, 'note')));
+		const rows = h('div', 'clew-colon-rows');
+		list.append(h('summary', null, plural(count, 'note')), rows);
 		let filled = false;
 		const fill = () => {
 			if (filled) return;
 			filled = true;
-			for (const fold of folds) queue.push(() => list.append(fold()));
+			for (const fold of folds) queue.push(() => rows.append(fold()));
 			if (!draining) drain();
 		};
 		if (count <= OPEN_LIMIT) { list.open = true; fill(); }

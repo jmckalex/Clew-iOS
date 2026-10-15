@@ -7,6 +7,7 @@
 // in pdf-core.js, shared with the standalone viewer page that the file tab
 // and canvas nodes use.
 import { createViewer } from './pdf-core.js';
+import { cardFit } from './pdf-card-fit.js';
 import { sizePdfHost, fitPdfToPage, onePageHeight, pdfPageOption, pageTop, MESSAGE_CARD } from './pdf-size.js';
 import { parentOrigin, postTo } from '../shared/message-guard.js';
 
@@ -133,11 +134,10 @@ async function describeSize(host) {
 		};
 		out.status = documents.getDocumentState(documents.getActiveDocumentId())?.status;
 		if (out.status === 'error') {
-			// EmbedPDF's card: whole inside its area, or clipped
+			// EmbedPDF's card: seen whole — it, its area and everything in it —
+			// or clipped (pdf-card-fit.js#cardFit)
 			const card = host.querySelector('*')?.shadowRoot?.querySelector(MESSAGE_CARD);
-			const c = card?.getBoundingClientRect();
-			const a = card?.parentElement?.getBoundingClientRect();
-			out.card = c && { height: Math.round(c.height), fits: c.top >= a.top - 0.5 && c.bottom <= a.bottom + 0.5 && c.right <= a.right + 0.5 };
+			out.card = card && { height: Math.round(card.getBoundingClientRect().height), ...cardFit(card, host) };
 		}
 		if (out.status !== 'loaded') return out;
 		const spreads = scroll.forDocument(documents.getActiveDocumentId()).getSpreadPagesWithRotatedSize();

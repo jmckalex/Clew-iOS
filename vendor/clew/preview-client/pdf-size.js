@@ -180,7 +180,8 @@ export const MESSAGE_CARD = '.items-center.justify-center > .max-w-sm';
 /**
  * How tall `host` must be to show that card whole: its toolbar, the card,
  * the area's padding. Measured — the card grows as the viewer narrows (the
- * password prompt 388px at 704 wide, 428 at 277, 516 on an iPad's 208: its
+ * password prompt 388px at 704 wide, 389 at 297, 430 on an iPad's 208 — 516
+ * there before pdf-card-fit.js narrowed its padding: its
  * lock clipped and its buttons cut off at a fixed height). null before the
  * card is drawn.
  */
