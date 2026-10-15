@@ -1,15 +1,17 @@
 // The note-embed PDF surface.
 //
 // Upgrades the engine's <embed class="pdf-embed"> (from ![[paper.pdf]]) into a
-// live EmbedPDF viewer at reading height: read, search, zoom and annotate in
-// place, with annotations saved back into the vault's own file. The viewer
-// itself lives in pdf-core.js, shared with the standalone viewer page that
-// the file tab and canvas nodes use.
+// live EmbedPDF viewer one page tall at the width it has, or as the link's
+// sizes say (pdf-size.js): read, search, zoom and annotate in place, with
+// annotations saved back into the vault's own file. The viewer itself lives
+// in pdf-core.js, shared with the standalone viewer page that the file tab
+// and canvas nodes use.
 import { createViewer } from './pdf-core.js';
+import { sizePdfHost, fitPdfToPage, onePageHeight } from './pdf-size.js';
 import { parentOrigin, postTo } from '../shared/message-guard.js';
 
 const CSS = `
-.clew-pdf-inline { height: 70vh; position: relative; border-radius: 4px; overflow: hidden; }
+.clew-pdf-inline { position: relative; border-radius: 4px; overflow: hidden; }
 .clew-pdf-message { padding: 24px; text-align: center; opacity: 0.8; }
 
 /* The engine's own <embed> is re-inserted by every morph (the incoming HTML
@@ -40,14 +42,15 @@ const CSS = `
    Breaking the box out to the window width gives them somewhere to sit. The
    flag lives on the host element, which carries data-clew-keep and therefore
    survives a re-render — put it on the engine-rendered box instead and the
-   next morph would strip it. */
+   next morph would strip it. Its width beats a #width= the link sets
+   (pdf-size.js puts that on the box itself, hence !important), and its
+   height is one page at that width, like any other's. */
 .pdf-embed-box:has(.clew-pdf-inline[data-wide]) {
-	width: 96vw;
-	max-width: 96vw;
+	width: 96vw !important;
+	max-width: 96vw !important;
 	margin-left: calc(50% - 48vw);
 	margin-right: calc(50% - 48vw);
 }
-.clew-pdf-inline[data-wide] { height: 88vh; }
 `;
 
 function ensureStyles() {
@@ -71,6 +74,67 @@ window.addEventListener('message', (event) => {
 	(inst ? inst.handle.createAnnotations(msg.specs ?? []) : Promise.resolve(-1))
 		.then((made) => postTo(window.parent, { source: 'clew-preview', type: 'test-created', made }, parentOrigin()));
 });
+
+// Scenarios: how this document's viewers are sized (smoke/pdf-size-scenario.js)
+// — the same sender rule. `press: true` clicks each viewer's ⟷ first.
+window.addEventListener('message', (event) => {
+	const msg = event.data;
+	if (event.source !== window.parent || msg?.source !== 'clew-preview-host' || msg.type !== 'test-pdf-size') return;
+	if (msg.press) for (const button of document.querySelectorAll('.clew-pdf-wide')) button.click();
+	Promise.all([...document.querySelectorAll('.clew-pdf-inline')].map(describeSize))
+		.then((sizes) => postTo(window.parent, { source: 'clew-preview', type: 'test-pdf-sized', id: msg.id, sizes }, parentOrigin()));
+});
+
+const contentWidth = (el) => {
+	const style = getComputedStyle(el);
+	return Math.round(el.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight));
+};
+const hostIds = new WeakMap();   // which viewer this is, across asks
+let hostCount = 0;
+
+async function describeSize(host) {
+	const box = host.closest('.pdf-embed-box');
+	if (!hostIds.has(host)) hostIds.set(host, ++hostCount);
+	const out = {
+		viewer: hostIds.get(host),
+		host: host.offsetHeight,
+		box: Math.round(box?.getBoundingClientRect().width ?? 0),
+		// what a #width= percentage is of, and what it sets: content widths
+		boxContent: box ? contentWidth(box) : 0,
+		column: box?.parentElement ? contentWidth(box.parentElement) : 0,
+		title: box?.querySelector('.embed-title a')?.textContent ?? null,
+		wide: host.hasAttribute('data-wide'),
+		failed: Boolean(host.querySelector(':scope > .clew-pdf-message')),
+		frame: innerHeight,
+	};
+	try {
+		const registry = await [...viewers].find((v) => v.host === host)?.handle?.container?.registry;
+		if (!registry) return out;
+		const viewport = registry.getPlugin('viewport').provides();
+		const scroll = registry.getPlugin('scroll').provides();
+		const documents = registry.getPlugin('document-manager').provides();
+		const metrics = viewport.getMetrics();
+		out.viewport = {
+			width: metrics.clientWidth, height: metrics.clientHeight, top: metrics.scrollTop,
+			contentWidth: metrics.scrollWidth, contentHeight: metrics.scrollHeight,
+		};
+		out.status = documents.getDocumentState(documents.getActiveDocumentId())?.status;
+		if (out.status !== 'loaded') return out;
+		const spreads = scroll.forDocument(documents.getActiveDocumentId()).getSpreadPagesWithRotatedSize();
+		const zoom = registry.getPlugin('zoom').provides().getState();
+		Object.assign(out, {
+			zoom: zoom?.zoomLevel,
+			scale: zoom?.currentZoomLevel,
+			pages: spreads.length,
+			onePage: onePageHeight({ spreads, pageGap: scroll.getPageGap?.() ?? 0, viewportGap: viewport.getViewportGap?.() ?? 0, width: metrics.clientWidth }),
+			widest: Math.max(...spreads.flat().map((p) => p.rotatedSize.width)),
+			viewportGap: viewport.getViewportGap?.() ?? 0,
+		});
+	} catch (err) {
+		out.error = String(err?.message ?? err);
+	}
+	return out;
+}
 
 function reapDetached() {
 	for (const inst of viewers) {
@@ -125,7 +189,12 @@ export function initPdfEmbeds() {
 	}
 	// The title bar is engine-rendered, so a morph resets it to plain markup
 	// and takes our controls with it. Put them back.
-	for (const host of document.querySelectorAll('.clew-pdf-inline')) ensureChrome(host);
+	// The link's sizes may have changed with it, and the engine's box lost the
+	// width set on it.
+	for (const host of document.querySelectorAll('.clew-pdf-inline')) {
+		ensureChrome(host);
+		sizePdfHost(host);
+	}
 }
 
 /** Status chip + expand-to-width toggle in the embed's title bar. */
@@ -186,6 +255,7 @@ function mount(embed) {
 	// unsaved annotations), so it must survive morphdom rather than be rebuilt.
 	host.setAttribute('data-clew-keep', '');
 	embed.replaceWith(host);
+	sizePdfHost(host);
 	ensureChrome(host);
 
 	// A note may hold several PDFs and each viewer is its own Pdfium engine,
@@ -204,6 +274,7 @@ async function build(host, src) {
 	const onStatus = statusFor(host);
 	try {
 		inst.handle = await createViewer({ target: host, src, onStatus });
+		fitPdfToPage(host, inst.handle);
 	} catch (err) {
 		console.warn('[clew pdf] inline viewer failed:', err);
 		window.__clewPdfError = String(err?.message ?? err);
@@ -212,5 +283,6 @@ async function build(host, src) {
 		message.className = 'clew-pdf-message';
 		message.textContent = `PDF viewer failed: ${err?.message ?? err}`;
 		host.replaceChildren(message);
+		sizePdfHost(host);
 	}
 }

@@ -10,14 +10,16 @@
 	identically to `:::abstract`.  abstract/feedback delegate to these; the
 	trivial :::TeX / :::HTML bodies are mirrored here for begin-end's use.
 
-	Note: renderAbstract now branches — LaTeX gets the standard `abstract`
+	Note: renderAbstract branches — LaTeX gets the standard `abstract`
 	environment (so it compiles), HTML keeps the labelled div. renderFeedback
-	still has no LaTeX branch (no standard LaTeX env; it emits HTML in both modes,
-	deferred). Because the directive and @begin(name) forms share these bodies,
-	the branch keeps them in parity automatically.
+	branches too: LaTeX has no feedback environment, so it gets what the HTML
+	shows, a bold "Feedback" line over the body (it used to be given the HTML,
+	tags and all). Because the directive and @begin(name) forms share these
+	bodies, the branch keeps them in parity automatically.
 */
-import { requirePackage } from './preamble.js';
+import { requirePackage, addPreamble } from './preamble.js';
 import { registerBlockEnvironment } from './begin-end-core.js';
+import { escapeLatexText } from './latex-escape.js';
 
 export function renderAbstract(inner) {
 	if (global.isLatex) return `\\begin{abstract}\n${inner.trim()}\n\\end{abstract}\n\n`;
@@ -25,6 +27,12 @@ export function renderAbstract(inner) {
 }
 
 export function renderFeedback(innerHtml) {
+	// LaTeX: the label, kept with the body's first line, then the body. Plain
+	// kernel commands, so a --fragment compiles in any document. The body is
+	// trimmed, as the abstract's is, so :::feedback and @begin(feedback) agree.
+	if (global.isLatex) {
+		return `\\par\\medskip\\noindent\\textbf{Feedback}\\par\\nopagebreak\n${innerHtml.trim()}\n\\par\\medskip\n\n`;
+	}
 	return `<p class='feedback'>Feedback</p><section class="feedback">${innerHtml}</section>`;
 }
 
@@ -38,6 +46,64 @@ export function renderHTMLEnv(innerHtml) {
 	return global.isLatex ? '' : innerHtml;
 }
 
+/*
+	The title-page directives — title, subtitle, author, institution, date, and
+	today inside them — in LaTeX. They used to receive their HTML, `<div
+	class="title">…</div>` and so on. Each is now a line of its own, left-aligned
+	and sized as the stylesheet sizes it (title bold and large, author and date
+	a step up, subtitle and institution as body text), in kernel commands only,
+	so a --fragment compiles anywhere. The content is what the HTML shows:
+	inline markdown where the directive parses it, the bracket as written where
+	it does not (escapeLatexText, as prose is escaped), an institution's line
+	breaks as \\, and today's date as the same text.
+
+	A document's `Title`/`Author`/`Date` header keys give \maketitle in a full
+	LaTeX document, except when the body prints its own title (bodyPrintsTitle,
+	below).
+*/
+const titlePageLatex = {
+	title:       (content) => {
+		const line = `{\\noindent\\LARGE\\bfseries ${content.trim()}\\par}`;
+		latexTitles.add(line);
+		return `${line}\n\n`;
+	},
+	subtitle:    (content) => `{\\noindent ${content.trim()}\\par}\n\n`,
+	author:      (content) => `{\\noindent\\large ${content.trim()}\\par}\n\n`,
+	institution: (content) => `{\\noindent ${content.trim()}\\par}\n\n`,
+	// The date closes the block in nearly every document: the gap after it is
+	// the margin the next paragraph has in the HTML.
+	date:        (content) => `{\\noindent\\large ${content.trim()}\\par}\\medskip\n\n`
+};
+
+/*
+	Whether a full LaTeX document's body prints its own title — a `@title+`,
+	`::title` or any other form of the title directive — so that \maketitle
+	would give it two. The HTML shows a `Title` header only in the page's
+	<title>, so such a document shows one title there; latex-template.js asks
+	this and, when it is so, leaves out \maketitle (the owner, 2026-10-11:
+	"match the HTML").
+
+	Asked of the finished body, not answered by a flag: a title rendered and
+	then dropped (inside @begin(HTML), say) is not in the body, and nor is a
+	title from an earlier build in the same process. The lines are forgotten
+	once asked.
+*/
+const latexTitles = new Set();
+
+export function bodyPrintsTitle(body) {
+	const found = [...latexTitles].some((line) => body.includes(line));
+	latexTitles.clear();
+	return found;
+}
+
+// The date `today` prints: "11 October 2026".
+function todayText() {
+	const months = ['January', 'February', 'March', 'April', 'May', 'June',
+		'July', 'August', 'September', 'October', 'November', 'December'];
+	const today = new Date();
+	return `${today.getDate()} ${months[today.getMonth()]} ${today.getFullYear()}`;
+}
+
 const additionalDirectives = [
 	{
 		'level': 'block',
@@ -45,6 +111,7 @@ const additionalDirectives = [
 		label: "title",
 		renderer(token) {
 			if (token.meta.name === "title") {
+				if (global.isLatex) return titlePageLatex.title(this.parser.parseInline(token.tokens));
 				let html = marked.parser(token.tokens);
 				html = html.replace(/<\/?p>/g, '');
 				return `<div class="title">${html}</div>`;
@@ -58,6 +125,7 @@ const additionalDirectives = [
 		label: "subtitle",
 		renderer(token) {
 			if (token.meta.name === "subtitle") {
+				if (global.isLatex) return titlePageLatex.subtitle(this.parser.parseInline(token.tokens));
 				let html = marked.parser(token.tokens);
 				html = html.replace(/<\/?p>/g, '');
 				return `<div class="subtitle">${html}</div>`;
@@ -71,6 +139,7 @@ const additionalDirectives = [
 		label: "author",
 		renderer(token) {
 			if (token.meta.name === "author") {
+				if (global.isLatex) return titlePageLatex.author(escapeLatexText(token.text));
 				return `<div class="author">${token.text}</div>`;
 			}
 			return false;
@@ -87,6 +156,10 @@ const additionalDirectives = [
 		},
 		renderer(token) {
 			if (token.meta.name === "institution") {
+				// The tokenizer made each line break a <br>, which LaTeX writes \\.
+				if (global.isLatex) {
+					return titlePageLatex.institution(this.parser.parseInline(token.tokens).replaceAll('<br>', '\\\\'));
+				}
 				let html = marked.parser(token.tokens);
 				html = html.replace(/<\/?p>/g, '');
 				return `<div class="institution">${html}</div>`;
@@ -101,6 +174,7 @@ const additionalDirectives = [
 		renderer(token) {
 			if (token.meta.name === "date") {
 				const content = this.parser.parseInline(token.tokens);
+				if (global.isLatex) return titlePageLatex.date(content);
 				return `<div class="date">${content}</div>`;
 				// return `<div class="date">${token.text}</div>`;
 			}
@@ -113,14 +187,8 @@ const additionalDirectives = [
 		label: "today",
 		renderer(token) {
 			if (token.meta.name === "today") {
-			    const months = ["January", "February", "March", "April", "May", "June", 
-			                   "July", "August", "September", "October", "November", "December"];
-			    const today = new Date();
-			    const day = String(today.getDate());
-			    const month = months[today.getMonth()];
-			    const year = today.getFullYear();
-			    const date = `${day} ${month} ${year}`;
-				return `<span class="date">${date}</span>`;
+				if (global.isLatex) return todayText();
+				return `<span class="date">${todayText()}</span>`;
 			}
 			return false;
 		}
@@ -376,6 +444,19 @@ export const titleBox = {
 		},
 		renderer(token) {
 			if (token.meta.name === "title-box") {
+				// LaTeX: a tcolorbox with the title in its title bar — the box the
+				// stylesheet draws (a coloured title bar over a bordered body) —
+				// breakable, so a long body runs onto the next page. The same
+				// tcolorbox libraries as the callouts, so the preamble line is one.
+				// It used to receive the HTML divs.
+				if (global.isLatex) {
+					requirePackage('tcolorbox');
+					addPreamble('\\tcbuselibrary{skins,breakable}');
+					const title = this.parser.parse(token['title']).trim();
+					const body = this.parser.parse(token['body']).trim();
+					const options = title ? `breakable, title={${title}}` : 'breakable';
+					return `\\begin{tcolorbox}[${options}]\n${body}\n\\end{tcolorbox}\n\n`;
+				}
 				const title = this.parser.parse(token['title']);
 				const body = this.parser.parse(token['body']);
 				return `<div class="title-box"><div class='title'>${title}</div><div class='body'>${body}</div></div>`;
@@ -418,24 +499,32 @@ const pass_through = {
 	block <div>s) except @today, which is inline (a <span>, used bare). Output matches
 	the colon twins: title/subtitle/date use the parsed inner (inline-parsed here — the
 	<p>-stripped equivalent of the originals' block parse); author uses the raw bracket
-	text; institution turns newlines into <br>; today regenerates the date. Like the
-	colon originals none of these branch on global.isLatex (the metadata header +
-	\maketitle is the real LaTeX title path), so the html renderer serves both formats.
+	text; institution turns newlines into <br>; today regenerates the date. LaTeX, as
+	the colon twins print it (titlePageLatex, above).
 */
-registerBlockEnvironment('title',     { html: (ctx) => `<div class="title">${ctx.inner}</div>` });
-registerBlockEnvironment('subtitle',  { html: (ctx) => `<div class="subtitle">${ctx.inner}</div>` });
-registerBlockEnvironment('author',    { html: (ctx) => `<div class="author">${ctx.text}</div>` });
-registerBlockEnvironment('institution', {
-	html: (ctx) => `<div class="institution">${ctx.text.trim().replaceAll('\n', '<br>')}</div>`
+registerBlockEnvironment('title', {
+	html: (ctx) => `<div class="title">${ctx.inner}</div>`,
+	latex: (ctx) => titlePageLatex.title(ctx.inner)
 });
-registerBlockEnvironment('date',      { html: (ctx) => `<div class="date">${ctx.inner}</div>` });
+registerBlockEnvironment('subtitle', {
+	html: (ctx) => `<div class="subtitle">${ctx.inner}</div>`,
+	latex: (ctx) => titlePageLatex.subtitle(ctx.inner)
+});
+registerBlockEnvironment('author', {
+	html: (ctx) => `<div class="author">${ctx.text}</div>`,
+	latex: (ctx) => titlePageLatex.author(escapeLatexText(ctx.text))
+});
+registerBlockEnvironment('institution', {
+	html: (ctx) => `<div class="institution">${ctx.text.trim().replaceAll('\n', '<br>')}</div>`,
+	latex: (ctx) => titlePageLatex.institution(escapeLatexText(ctx.text.trim()).replaceAll('\n', '\\\\'))
+});
+registerBlockEnvironment('date', {
+	html: (ctx) => `<div class="date">${ctx.inner}</div>`,
+	latex: (ctx) => titlePageLatex.date(ctx.inner)
+});
 registerBlockEnvironment('today', {
-	html: () => {
-		const months = ['January', 'February', 'March', 'April', 'May', 'June',
-			'July', 'August', 'September', 'October', 'November', 'December'];
-		const today = new Date();
-		return `<span class="date">${today.getDate()} ${months[today.getMonth()]} ${today.getFullYear()}</span>`;
-	}
+	html: () => `<span class="date">${todayText()}</span>`,
+	latex: () => todayText()
 });
 registerBlockEnvironment('title-box', {
 	mode: 'custom',

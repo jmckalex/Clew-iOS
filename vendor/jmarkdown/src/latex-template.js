@@ -3,7 +3,8 @@
 
 	processLatexTemplate() wraps the rendered body in a complete, compilable
 	document: \documentclass + an assembled preamble + frontmatter (\maketitle
-	from Title/Author/Date) + the body + \end{document}. The --fragment path in
+	from Title/Author/Date, unless the body prints its own title) + the body +
+	\end{document}. The --fragment path in
 	index.js bypasses this and emits the body alone.
 
 	All substitutions in the .tex template use TRIPLE braces ({{{ }}}): Mustache
@@ -20,6 +21,7 @@ import { assemblePreamble, requirePackage, addPreamble, addLatePreamble, require
 import { checkMathPackages } from './latex-lint.js';
 import { getBook, bookPreamble, warnPreambleClashes } from './book.js';
 import { escapeLatexText } from './latex-escape.js';
+import { bodyPrintsTitle } from './additional-directives.js';
 
 // Metadata values arrive as single-element arrays (from the metadata-header
 // parser) or as strings (from config files / DEFAULT_CONFIG). Coerce to a
@@ -127,13 +129,17 @@ export function processLatexTemplate(content) {
 
 	const preamble = assemblePreamble({ engine, userPackages, userPreamble });
 
-	// Frontmatter — no Title → no \maketitle.
+	// Frontmatter — no Title → no \maketitle. A body that prints its own title
+	// (`@title+`, additional-directives.js) gets no \maketitle either, as the
+	// HTML shows that one title alone (the owner, 2026-10-11); \title, \author
+	// and \date stay, for the PDF's metadata and a header that names the title.
+	const ownTitle = bodyPrintsTitle(content);
 	let frontmatter = '';
 	if (title) {
 		frontmatter += `\\title{${title}}\n`;
 		if (author) frontmatter += `\\author{${author}}\n`;
 		if (date) frontmatter += `\\date{${date}}\n`;
-		frontmatter += '\\maketitle\n\n';
+		frontmatter += ownTitle ? '\n' : '\\maketitle\n\n';
 	}
 
 	const view = {

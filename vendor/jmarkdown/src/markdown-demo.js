@@ -30,6 +30,20 @@ function createMarkdownDemo(marker) {
 				// create a parse error.
 				const code = t.join('\n');
 				const lang = token?.attrs?.type ?? "markdown";
+
+				// LaTeX: the two panes one above the other, with the HTML's labels —
+				// the code as the LaTeX renderer prints any fenced block (minted, in
+				// the {type=…} language, `text` where minted has no lexer for it),
+				// then its output. Side by side would put the output in a minipage,
+				// where a float or a long listing cannot go. It used to receive the
+				// HTML panes, tags and all.
+				if (global.isLatex) {
+					const listing = this.parser.renderer.code({ type: 'code', raw: code, text: code, lang });
+					const output = this.parser.parse(token.tokens).trim();
+					return `\\par\\medskip\\noindent\\textbf{Markdown code}\\par\\nopagebreak\n${listing}` +
+						`\\noindent\\textbf{Markdown output}\\par\\nopagebreak\n${output}\n\\par\\medskip\n\n`;
+				}
+
 				const highlightedCode = hljs.highlight(code, {language: lang}).value;
 
 				const right = this.parser.parse(token.tokens);

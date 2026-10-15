@@ -62,6 +62,30 @@ export function calloutFolded(state, callout) {
 	return toggled ?? callout.fold === '-';
 }
 
+// What failed to draw and has been said (kind + message): a construct that
+// throws stays source on every rebuild, and is reported once.
+const warned = new Set();
+
+/**
+ * Draw one construct's decorations into `out`. A throw leaves THAT construct
+ * as source — anything it had pushed is taken back — and the rest of the
+ * note live: a throw that escapes build() is the field's create failing,
+ * and live edit is then lost for the whole note (a table's widget did that,
+ * 8619a67 → 2026-10-15: raw bold, images as text, every callout as source).
+ */
+function guarded(out, c, draw) {
+	const before = out.length;
+	try {
+		draw();
+	} catch (err) {
+		out.length = before;
+		const key = `${c.kind}\u0000${err?.message ?? err}`;
+		if (warned.has(key)) return;
+		warned.add(key);
+		console.warn(`[clew live edit] a ${c.kind} could not be drawn; it shows as source:`, err);
+	}
+}
+
 function build(state) {
 	const live = state.field(liveStateField);
 	const { model, config } = live;
@@ -69,8 +93,11 @@ function build(state) {
 	const out = [];
 	const sel = state.selection.ranges;
 	const text = (a, b) => doc.sliceString(a, b);
-	// The note's numbers — its BOOK's when it is a chapter (book-map.js).
-	const numbering = numberingFor(doc, config.notePath, config.numbered?.size ? { numbered: config.numbered } : undefined);
+	// The note's numbers — its BOOK's when it is a chapter (book-map.js) —
+	// asked for by the constructs that show one (tables, numbered equations),
+	// so a book that cannot be counted costs those and nothing else.
+	let numbering;
+	const numbers = () => (numbering ??= numberingFor(doc, config.notePath, config.numbered?.size ? { numbered: config.numbered } : undefined));
 
 	// A concealed MULTI-LINE footnote (§5.2 as corrected): an INLINE
 	// replacement across its line breaks — not a block — so the note collapses
@@ -79,14 +106,14 @@ function build(state) {
 	// why this badge is here and a one-line note's is in the inline layer.
 	// Nothing inside a concealed note gets a block of its own.
 	const notes = model.filter((c) => c.kind === 'footnote' && c.multiline && !live.revealed.has(c.id));
-	for (const c of notes) {
+	for (const c of notes) guarded(out, c, () => {
 		const body = c.body ? text(c.body.from, c.body.to).trim() : '';
 		const paragraphs = body.split(/\n[ \t]*\n/);
 		const first = paragraphs[0].replace(/\s+/g, ' ').trim();
 		out.push(Decoration.replace({
 			widget: new ChipWidget({ cls: 'le-fn le-fn-long', tag: 'sup', text: String(c.number), title: paragraphs.length > 1 ? `${first}…` : first }),
 		}).range(c.from, c.to));
-	}
+	});
 	const inNote = (c) => notes.some((n) => c.from >= n.from && c.to <= n.to && n !== c);
 	const block = (c, widget) => {
 		if (inNote(c)) return;
@@ -111,24 +138,26 @@ function build(state) {
 		ordinal.set(kind, n + 1);
 		if (live.revealed.has(c.id)) continue;
 		const measured = heights.get(c.id) ?? heights.get(`${kind}#${n}`);
-		block(c, new FramePlaceholder(c.id, kind, measured ?? defaultHeight(kind), measured !== undefined));
+		guarded(out, c, () => block(c, new FramePlaceholder(c.id, kind, measured ?? defaultHeight(kind), measured !== undefined)));
 	}
 
-	for (const c of model) {
+	for (const c of model) guarded(out, c, () => draw(c));
+
+	function draw(c) {
 		if (c.tier === 'B' && c.level === 'block' && !live.revealed.has(c.id)) {
-			if (c.kind === 'table') block(c, tableWidget(state, c, model));
+			if (c.kind === 'table') block(c, tableWidget(state, c, model, numbers()));
 			else if (c.kind === 'image') block(c, new ImageWidget(imageSpec(c, config.notePath, true)));
-			continue;
+			return;
 		}
-		if (c.tier !== 'A') continue;
+		if (c.tier !== 'A') return;
 		if (c.kind === 'callout' && c.fold && c.body && calloutFolded(state, c)) {
 			// A folded body hides, unless the cursor is in it (arrow keys can
 			// still walk in; the lines then show rather than trap the caret).
 			const inside = sel.some((r) => r.to >= c.body.from && r.from <= c.body.to);
 			if (!inside && !inNote(c)) out.push(Decoration.replace({ block: true }).range(c.body.from, c.body.to));
-			continue;
+			return;
 		}
-		if (c.level !== 'block' || live.revealed.has(c.id)) continue;
+		if (c.level !== 'block' || live.revealed.has(c.id)) return;
 		switch (c.kind) {
 			case 'hr':
 				block(c, new HrWidget());
@@ -140,7 +169,7 @@ function build(state) {
 					: text(c.body.from, c.body.to);
 				// `@begin(equation)` is numbered; `$$…$$` is not (numbering.js).
 				const tag = c.env === 'equation' && c.environment
-					? numbering.lines.get(doc.lineAt(c.from).number)?.number ?? '' : '';
+					? numbers().lines.get(doc.lineAt(c.from).number)?.number ?? '' : '';
 				block(c, new MathWidget(tex, true, text(c.from, c.to), true, tag));
 				break;
 			}
@@ -158,11 +187,11 @@ function build(state) {
 	// A kanban board note: say where the board is (plan §5.5).
 	const front = model.find((c) => c.kind === 'frontmatter');
 	if (front && /(^|\n)kanban-plugin\s*:/.test(text(front.from, front.to))) {
-		out.push(Decoration.widget({
+		guarded(out, front, () => out.push(Decoration.widget({
 			widget: new BannerWidget('This note is a Kanban board — boards render in reading mode.',
 				{ label: 'Reading mode', command: 'workspace:mode-reading' }),
 			block: true, side: -1,
-		}).range(0));
+		}).range(0)));
 	}
 	return Decoration.set(out, true);
 }
@@ -186,10 +215,12 @@ export const blockField = StateField.define({
  * A table construct's widget. Cells come from the table's TEXT
  * (live/table-cell-model.js#cellRanges — lezer has no node for an empty
  * cell, and an empty cell must be editable); each cell's inline markdown is
- * tokenised from the model. An extended table (colspan/rowspan/widths) or a
- * very large one is drawn but edited as source (§5.5c).
+ * tokenised from the model, its references against `numbering` — the
+ * note's, or its BOOK's (numbering-source.js). An extended table
+ * (colspan/rowspan/widths) or a very large one is drawn but edited as
+ * source (§5.5c).
  */
-function tableWidget(state, c, model) {
+function tableWidget(state, c, model, numbering) {
 	const doc = state.doc;
 	const first = doc.lineAt(c.from).number;
 	const last = doc.lineAt(c.to).number;

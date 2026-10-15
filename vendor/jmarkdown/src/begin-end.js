@@ -17,10 +17,9 @@
 
 	Parity notes:
 	  • abstract / feedback share their render bodies with the directives in
-	    additional-directives.js (no drift), and have *no* LaTeX branch — like the
-	    directives, they emit their HTML in both output formats, by design.  With
-	    only an `html` renderer they fall back to HTML in LaTeX mode, which is
-	    exactly that behaviour.
+	    additional-directives.js (no drift). Those bodies branch on global.isLatex
+	    themselves (abstract → the standard environment, feedback → a bold label
+	    over the body), so the `html` renderer serves both output formats.
 	  • TeX (verbatim, LaTeX-only) and HTML (markdown, HTML-only) are output-format
 	    gated; here that is expressed directly as separate html/latex renderers —
 	    the dual-output design the core was built for.  Their one-line bodies
