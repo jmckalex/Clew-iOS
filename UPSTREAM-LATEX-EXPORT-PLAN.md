@@ -355,6 +355,16 @@ this plan cherry-picked onto its build commit 527a245).
     header), to sit beside the .tex. Never the export's own figures, a
     path out of the vault, a URL, or a commented line. A name the vault
     lacks becomes a warning.
+  - **Only what a document is for (Clew-boss's review, the fix on
+    `latex-p2b-share-images`):** a note's `\includegraphics{.git/config}`
+    would have put that file in the zip. Now an `\includegraphics` carries
+    only an image graphicx typesets (.pdf, .png, .jpg, .jpeg, .jbig2,
+    .jb2, .eps, .mps, as written or found by the extension search). No
+    path with a dot-segment is carried, graphics or .bib (`.git/`,
+    `.obsidian/`, `.clew/`, `.trash/`, a hidden file). Either is a warning
+    that the share does not carry it; neither is "missing".
+    ExportJobs.share refuses dot-segments too, so the rule holds even if
+    the app page were wrong.
   - FSBridge `exportShare` → `ExportJobs.share`. Nothing named and only
     the .tex written: the .tex alone. Otherwise the outputs are moved
     into `<job folder>/.share/<note name>/`, and each vault file is copied
@@ -399,7 +409,14 @@ this plan cherry-picked onto its build commit 527a245).
   removes the folder. A tap is not something the kit does; the next
   export and the launch remove it in any case. That is a device check.
 - **For upstream (wording):** the Mermaid warning says "install
-  @mermaid-js/mermaid-cli", which no iPad user can do.
+  @mermaid-js/mermaid-cli", which no iPad user can do. Clew-boss: this
+  belongs in Clew's warning layer (as explainFiguresWarnings), not in
+  jmarkdown.
+- **For upstream (small):** jmarkdown embeds SVG, GIF, WebP, BMP and AVIF
+  images as `\includegraphics` (obsidian-links.js#IMAGE), which neither
+  pdfLaTeX nor LuaLaTeX typesets ("Unknown graphics extension"). The
+  iPad's share refuses those files with a warning. The engine could warn
+  at export time, or convert them.
 
 **L3 `latex-p3-verify`:** the record and the simulator (§5).
 

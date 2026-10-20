@@ -224,11 +224,13 @@ final class ExportJobs {
 		}
 		let realStage = stage.resolvingSymlinksInPath().path
 		var skipped: [String] = []
-		// One vault file into the stage at `at`: a safe path, never over what
-		// is there (an output, or a file placed already), inside by real path.
+		// One vault file into the stage at `at`: a safe path, nothing hidden
+		// (the app page refuses those too: export-references.js), never over
+		// what is there (an output, or a file placed already), inside by real
+		// path.
 		func place(_ rel: String, at: String) throws {
-			let dest = stage.appendingPathComponent(at)
-			guard Self.isSafeRelativePath(rel), Self.isSafeRelativePath(at), !fm.fileExists(atPath: dest.path) else {
+			let dest = Self.isHiddenPath(rel) || Self.isHiddenPath(at) ? nil : stage.appendingPathComponent(at)
+			guard let dest, Self.isSafeRelativePath(rel), Self.isSafeRelativePath(at), !fm.fileExists(atPath: dest.path) else {
 				return skipped.append(at)
 			}
 			let dir = dest.deletingLastPathComponent()
@@ -265,6 +267,12 @@ final class ExportJobs {
 
 	private static func size(of url: URL) -> Int {
 		((try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? NSNumber)?.intValue ?? 0
+	}
+
+	/// A path through a hidden folder or to a hidden file (`.git/config`,
+	/// `.obsidian/…`, `.clew/…`): never copied into a share.
+	static func isHiddenPath(_ rel: String) -> Bool {
+		rel.split(separator: "/").contains { $0.hasPrefix(".") }
 	}
 
 	/// A note's name as a file's: no folder separators or colons, no leading

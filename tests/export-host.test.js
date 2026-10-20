@@ -100,8 +100,50 @@ test('texReferences: what the .tex names and the vault has, at vault paths; bibl
 		{ rel: 'Library/refs.bib', as: 'Library/refs.bib' },       // a path the .tex names, at that path
 	]);
 	assert.deepEqual(refs.missing, ['Attachments/gone.png', 'nothere.bib']);
-	assert.deepEqual(texReferences({ tex: '\\documentclass{article}', base: 'N', exists }), { files: [], bibs: [], missing: [] });
+	assert.deepEqual(refs.refused, []);
+	assert.deepEqual(texReferences({ tex: '\\documentclass{article}', base: 'N', exists }), { files: [], bibs: [], missing: [], refused: [] });
 	assert.deepEqual(texReferences({ tex: '\\bibliography{../up}', base: 'N', exists: () => true, bibFiles: [] }).missing, ['../up.bib'], 'never a path out');
+});
+
+test('texReferences carries images graphicx typesets and .bib files, never a hidden folder\'s or a hidden file (Clew-boss\'s review of L2)', () => {
+	const vault = new Set(['.git/config', '.obsidian/workspace.json', '.clew/vault-settings.json', '.trash/old.png', 'Attachments/.secret.png',
+		'Attachments/a.png', 'Attachments/b.svg', 'Attachments/c.gif', 'Attachments/d.webp', 'Notes/x.md', 'notes.txt', '.git/refs.bib', 'Library/refs.bib',
+		'Attachments/e.JPG', 'Attachments/f.eps']);
+	const exists = (r) => vault.has(r);
+	const tex = [
+		'\\includegraphics{.git/config}',
+		'\\includegraphics{.obsidian/workspace.json}',
+		'\\includegraphics{.clew/vault-settings.json}',
+		'\\includegraphics{.trash/old.png}',
+		'\\includegraphics{Attachments/.secret.png}',
+		'\\includegraphics{Attachments/a.png}',
+		'\\includegraphics{Attachments/b.svg}',
+		'\\includegraphics{Attachments/c.gif}',
+		'\\includegraphics{Attachments/d.webp}',
+		'\\includegraphics{Notes/x.md}',
+		'\\includegraphics{notes.txt}',
+		'\\includegraphics{Attachments/e.JPG}',
+		'\\includegraphics{Attachments/f}',              // the extension search finds f.eps
+		'\\bibliography{refs}',
+		'\\addbibresource{.git/refs.bib}',
+	].join('\n');
+	const refs = texReferences({ tex, base: 'N', exists, bibFiles: ['.git/refs.bib', 'Library/refs.bib'] });
+	assert.deepEqual(refs.files, ['Attachments/a.png', 'Attachments/e.JPG', 'Attachments/f.eps'], 'images graphicx typesets, whatever the case of the extension');
+	assert.deepEqual(refs.refused, [
+		{ rel: '.clew/vault-settings.json', why: 'hidden' },
+		{ rel: '.git/config', why: 'hidden' },
+		{ rel: '.git/refs.bib', why: 'hidden' },
+		{ rel: '.obsidian/workspace.json', why: 'hidden' },
+		{ rel: '.trash/old.png', why: 'hidden' },
+		{ rel: 'Attachments/.secret.png', why: 'hidden' },
+		{ rel: 'Attachments/b.svg', why: 'not-image' },
+		{ rel: 'Attachments/c.gif', why: 'not-image' },
+		{ rel: 'Attachments/d.webp', why: 'not-image' },
+		{ rel: 'Notes/x.md', why: 'not-image' },
+		{ rel: 'notes.txt', why: 'not-image' },
+	], 'each said as not shared');
+	assert.deepEqual(refs.bibs, [], 'a hidden folder\'s .bib is not carried, whether named by name or by path: the build\'s first refs.bib is the hidden one, and it is refused');
+	assert.deepEqual(refs.missing, [], 'nothing refused is reported as missing');
 });
 
 test('the export worker bundle carries the figure engine\'s library-by-URL patch (scripts/build.js)', () => {
@@ -142,7 +184,7 @@ test('the export worker under Node: Features/Diagrams.md as LaTeX, its MetaPost 
 			assert.ok(tex.includes(`\\includegraphics[max width=\\linewidth]{${figures[0].rel}}`), `${label}: the .tex refers to it beside itself`);
 			assert.match(tex, /\\begin\{tikzpicture\}/, `${label}: TikZ stays native TeX`);
 			assert.ok(!summary.warnings.some((w) => /mp-tikz-wasm would not load|metapost not drawn/.test(w)), `${label}: the library loaded`);
-			assert.deepEqual(summary.references, { files: [], bibs: [], missing: [] }, `${label}: nothing of the vault's to carry; its own figures are its own`);
+			assert.deepEqual(summary.references, { files: [], bibs: [], missing: [], refused: [] }, `${label}: nothing of the vault's to carry; its own figures are its own`);
 		} finally {
 			fs.rmSync(out, { recursive: true, force: true });
 		}

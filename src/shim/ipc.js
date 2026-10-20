@@ -1103,6 +1103,9 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 				const warnings = [
 					...explainFiguresWarnings(done.warnings ?? [], { restricted: done.trusted !== true }),
 					...(shared.missing ?? []).map((name) => `${name} is named by the .tex but is not in this vault, so the share does not carry it`),
+					...(shared.refused ?? []).map(({ rel, why }) => (why === 'hidden'
+						? `${rel} is named by the .tex but is in a hidden folder or is a hidden file, so the share does not carry it`
+						: `${rel} is named by the .tex but is not an image TeX can typeset (PDF, PNG, JPEG or EPS), so the share does not carry it`)),
 				];
 				return { shared: true, output: shared.name, warnings };
 			}

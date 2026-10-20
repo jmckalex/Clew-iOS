@@ -152,6 +152,8 @@ try! fm.createDirectory(at: vault.appendingPathComponent("Attachments"), withInt
 try! fm.createDirectory(at: vault.appendingPathComponent("Library"), withIntermediateDirectories: true)
 try! Data("PNG".utf8).write(to: vault.appendingPathComponent("Attachments/x y.png"))
 try! Data("@book{a,}".utf8).write(to: vault.appendingPathComponent("Library/refs.bib"))
+try! fm.createDirectory(at: vault.appendingPathComponent(".git"), withIntermediateDirectories: true)
+try! Data("[remote]".utf8).write(to: vault.appendingPathComponent(".git/config.png"))
 var asked: [String] = []
 let copyFromVault = { (rel: String, dest: URL) throws -> Bool in
 	asked.append(rel)
@@ -167,14 +169,18 @@ try! jobs.write(token: s2, rel: "My Note-figures/MetaPost/f-1.pdf", data: Data("
 let d2 = try! jobs.finish(token: s2, body: answer(["My Note-figures/MetaPost/f-1.pdf", "My Note.tex"], "My Note.tex"))
 let f2 = jobs.finishedFolder(named: d2.folder.lastPathComponent)!
 let zipped = try! ExportJobs.share(in: f2, name: "My Note", output: "My Note.tex",
-	include: ["Attachments/x y.png", "../escape.png", "My Note-figures/MetaPost/f-1.pdf", "Attachments/missing.png"],
-	bibs: [(rel: "Library/refs.bib", as: "refs.bib"), (rel: "Library/refs.bib", as: "run.sh"), (rel: "Library/refs.bib", as: "../up.bib")],
+	include: ["Attachments/x y.png", "../escape.png", "My Note-figures/MetaPost/f-1.pdf", "Attachments/missing.png", ".git/config.png"],
+	bibs: [(rel: "Library/refs.bib", as: "refs.bib"), (rel: "Library/refs.bib", as: "run.sh"), (rel: "Library/refs.bib", as: "../up.bib"),
+		(rel: ".git/config.png", as: "hidden.bib")],
 	copy: copyFromVault)
 check(zipped.kind == "zip" && zipped.url.lastPathComponent == "My Note.zip" && zipped.bytes > 0, "a zip named for the note")
 check(zipped.entries == 4, "the .tex, its figure, the image and the bibliography (\(zipped.entries))")
-check(Set(zipped.skipped) == ["../escape.png", "My Note-figures/MetaPost/f-1.pdf", "Attachments/missing.png", "run.sh", "../up.bib"],
-	"skipped: an escape, an output's own path, a file the vault lacks, a bibliography not named .bib, one outside (\(zipped.skipped))")
-check(!asked.contains("../escape.png") && !asked.contains("My Note-figures/MetaPost/f-1.pdf"), "nothing unsafe or taken is asked for")
+check(Set(zipped.skipped) == ["../escape.png", "My Note-figures/MetaPost/f-1.pdf", "Attachments/missing.png", ".git/config.png", "run.sh", "../up.bib", "hidden.bib"],
+	"skipped: an escape, an output's own path, a file the vault lacks, a hidden folder's file (by either name), a bibliography not named .bib, one outside (\(zipped.skipped))")
+check(!asked.contains("../escape.png") && !asked.contains("My Note-figures/MetaPost/f-1.pdf") && !asked.contains(".git/config.png"),
+	"nothing unsafe, taken or hidden is asked for")
+check(ExportJobs.isHiddenPath(".git/config") && ExportJobs.isHiddenPath("a/.obsidian/x.png") && ExportJobs.isHiddenPath("a/.env")
+	&& !ExportJobs.isHiddenPath("Attachments/x.png") && !ExportJobs.isHiddenPath("a.b/c.png"), "hidden: any segment with a leading dot")
 let list = Process()
 list.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
 list.arguments = ["-Z1", zipped.url.path]

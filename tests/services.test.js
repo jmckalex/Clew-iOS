@@ -927,6 +927,8 @@ test('the export host (UPSTREAM-LATEX-EXPORT-PLAN.md L1, L2): one LaTeX build ov
 		'\\includegraphics{../outside.png}',
 		'\\includegraphics{Attachments/nothere.png}',
 		'% \\includegraphics{Attachments/commented.png}',
+		'\\includegraphics{.clew/vault-settings.json}',
+		'\\includegraphics{Welcome.md}',
 		'\\bibliography{refs}',
 	].join('\n');
 	const shareMark = fakeBridge.calls.length;
@@ -937,13 +939,15 @@ test('the export host (UPSTREAM-LATEX-EXPORT-PLAN.md L1, L2): one LaTeX build ov
 	assert.deepEqual(share, {
 		folder: `clew-export-${'a'.repeat(32)}`, name: 'Links and Embeds', output: 'X.tex',
 		include: ['Attachments/Paper.pdf'], bibs: [{ rel: 'Features/refs.bib', as: 'refs.bib' }],
-	}, 'the vault file it names, at its path; the vault\'s bibliography beside it; never its own figures, a path out, or a comment');
+	}, 'the vault file it names, at its path; the vault\'s bibliography beside it; never its own figures, a path out, a comment, a hidden file or a note');
 	assert.equal(result.shared, true);
 	assert.equal(result.output, 'Links and Embeds.zip');
 	assert.deepEqual(result.warnings, [
 		'code: one warning',
 		'Attachments/nothere.png is named by the .tex but is not in this vault, so the share does not carry it',
-	], 'the build\'s warnings, and what the share lacks');
+		'.clew/vault-settings.json is named by the .tex but is in a hidden folder or is a hidden file, so the share does not carry it',
+		'Welcome.md is named by the .tex but is not an image TeX can typeset (PDF, PNG, JPEG or EPS), so the share does not carry it',
+	], 'the build\'s warnings, what the share lacks, and what it will not carry');
 
 	// A share that fails leaves no folder.
 	fakeShareFails = true;

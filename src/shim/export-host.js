@@ -70,7 +70,8 @@ export function createExportHost({ renderService, bridgeCall, vaultRoot, setting
 		},
 		/**
 		 * What run()'s .tex names, and native's share of it: `{ kind: 'tex' |
-		 * 'zip', name, bytes, entries }`, with the names the vault lacks.
+		 * 'zip', name, bytes, entries }`, with the names the vault lacks and
+		 * those it has but the share does not carry.
 		 */
 		async share(done, noteRel) {
 			const refs = texReferences({
@@ -81,7 +82,7 @@ export function createExportHost({ renderService, bridgeCall, vaultRoot, setting
 			const shared = await bridgeCall('exportShare', {
 				folder: done.folder, name: done.base, output: done.output, include: refs.files, bibs: refs.bibs,
 			});
-			return { ...shared, missing: refs.missing };
+			return { ...shared, missing: refs.missing, refused: refs.refused };
 		},
 		discard(folder) {
 			return bridgeCall('exportDiscard', { folder });
