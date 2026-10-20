@@ -130,5 +130,66 @@ try! jobs.write(token: t8, rel: "one.bin", data: big)
 check(fails("past the size limit") { try jobs.write(token: t8, rel: "two.bin", data: big) } != nil, "the size is bounded")
 jobs.abandon()
 
+// MARK: - The share (L2)
+
+check(ExportJobs.shareName("a/b:c") == "a-b-c" && ExportJobs.shareName("..x") == "x" && ExportJobs.shareName(" ") == "Export",
+	"a note's name as a file's")
+// The .tex alone: nothing else written, nothing named.
+let s1 = try! jobs.begin(job: job)
+_ = try! jobs.takeJob(token: s1)
+try! jobs.write(token: s1, rel: "Note.tex", data: Data("\\documentclass{article}".utf8))
+check(jobs.finishedFolder(named: jobs.folder!.lastPathComponent) == nil, "a running job's folder is not one to share")
+let d1 = try! jobs.finish(token: s1, body: answer(["Note.tex"], "Note.tex"))
+let f1 = jobs.finishedFolder(named: d1.folder.lastPathComponent)!
+let alone = try! ExportJobs.share(in: f1, name: "Note", output: "Note.tex", include: [], bibs: []) { _, _ in false }
+check(alone.kind == "tex" && alone.url.lastPathComponent == "Note.tex" && alone.bytes == 23 && alone.entries == 1, "the .tex alone")
+check(fails("an output that is not a .tex") { _ = try ExportJobs.share(in: f1, name: "Note", output: "../Note.tex", include: [], bibs: []) { _, _ in false } } != nil,
+	"the output must be the folder's own .tex")
+
+// A zip: the outputs, the vault files and bibliographies the .tex names.
+let vault = scratch.appendingPathComponent("vault", isDirectory: true)
+try! fm.createDirectory(at: vault.appendingPathComponent("Attachments"), withIntermediateDirectories: true)
+try! fm.createDirectory(at: vault.appendingPathComponent("Library"), withIntermediateDirectories: true)
+try! Data("PNG".utf8).write(to: vault.appendingPathComponent("Attachments/x y.png"))
+try! Data("@book{a,}".utf8).write(to: vault.appendingPathComponent("Library/refs.bib"))
+var asked: [String] = []
+let copyFromVault = { (rel: String, dest: URL) throws -> Bool in
+	asked.append(rel)
+	let source = vault.appendingPathComponent(rel)
+	guard fm.fileExists(atPath: source.path) else { return false }
+	try fm.copyItem(at: source, to: dest)
+	return true
+}
+let s2 = try! jobs.begin(job: job)
+_ = try! jobs.takeJob(token: s2)
+try! jobs.write(token: s2, rel: "My Note.tex", data: Data("tex".utf8))
+try! jobs.write(token: s2, rel: "My Note-figures/MetaPost/f-1.pdf", data: Data("%PDF".utf8))
+let d2 = try! jobs.finish(token: s2, body: answer(["My Note-figures/MetaPost/f-1.pdf", "My Note.tex"], "My Note.tex"))
+let f2 = jobs.finishedFolder(named: d2.folder.lastPathComponent)!
+let zipped = try! ExportJobs.share(in: f2, name: "My Note", output: "My Note.tex",
+	include: ["Attachments/x y.png", "../escape.png", "My Note-figures/MetaPost/f-1.pdf", "Attachments/missing.png"],
+	bibs: [(rel: "Library/refs.bib", as: "refs.bib"), (rel: "Library/refs.bib", as: "run.sh"), (rel: "Library/refs.bib", as: "../up.bib")],
+	copy: copyFromVault)
+check(zipped.kind == "zip" && zipped.url.lastPathComponent == "My Note.zip" && zipped.bytes > 0, "a zip named for the note")
+check(zipped.entries == 4, "the .tex, its figure, the image and the bibliography (\(zipped.entries))")
+check(Set(zipped.skipped) == ["../escape.png", "My Note-figures/MetaPost/f-1.pdf", "Attachments/missing.png", "run.sh", "../up.bib"],
+	"skipped: an escape, an output's own path, a file the vault lacks, a bibliography not named .bib, one outside (\(zipped.skipped))")
+check(!asked.contains("../escape.png") && !asked.contains("My Note-figures/MetaPost/f-1.pdf"), "nothing unsafe or taken is asked for")
+let list = Process()
+list.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
+list.arguments = ["-Z1", zipped.url.path]
+let pipe = Pipe()
+list.standardOutput = pipe
+try! list.run()
+list.waitUntilExit()
+let names = Set(String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+	.split(separator: "\n").map(String.init).filter { !$0.hasSuffix("/") })
+check(names == ["My Note/My Note.tex", "My Note/My Note-figures/MetaPost/f-1.pdf", "My Note/Attachments/x y.png", "My Note/refs.bib"],
+	"the zip's one folder holds the .tex, its figures, the image at its vault path and the .bib beside the .tex (\(names.sorted()))")
+check(!fm.fileExists(atPath: scratch.appendingPathComponent("escape.png").path) && !fm.fileExists(atPath: scratch.appendingPathComponent("up.bib").path),
+	"nothing written outside")
+check(jobs.discard(folderName: d2.folder.lastPathComponent) && !fm.fileExists(atPath: zipped.url.path), "the share's folder is discarded whole")
+check(jobs.finishedFolder(named: d2.folder.lastPathComponent) == nil, "and is no longer one to share")
+
 print("ExportJobs: \(passed) passed, \(failed) failed")
 exit(failed == 0 ? 0 : 1)

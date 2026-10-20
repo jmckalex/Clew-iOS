@@ -89,6 +89,8 @@ const secretScope = (p) => {
 	if (p.vault !== 'documents:test' || !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(p.app ?? '')) throw new Error('badPayload');
 };
 let fakeSnapshot = null;
+let fakeExportTex = null;
+let fakeShareFails = false;
 const fakeBridge = {
 	calls: [],
 	async call(method, params) {
@@ -115,8 +117,14 @@ const fakeBridge = {
 			case 'printPdf':
 				return { bytes: 1234 };
 			case 'exportRun':
-				// What ExportHost.swift answers once the host page said done.
-				return { folder: `clew-export-${'a'.repeat(32)}`, output: 'X.tex', files: [{ rel: 'X.tex', bytes: 3 }], warnings: [], ms: 1 };
+				// What ExportHost.swift answers once the host page said done, with
+				// the .tex (a test may set what the build "wrote").
+				return { folder: `clew-export-${'a'.repeat(32)}`, output: 'X.tex', files: [{ rel: 'X.tex', bytes: 3 }],
+					warnings: ['code: one warning'], ms: 1, tex: fakeExportTex ?? '\\documentclass{article}' };
+			case 'exportShare':
+				// What FSBridge.swift answers once the share sheet is up.
+				if (fakeShareFails) throw new Error('the zip could not be made');
+				return { kind: 'zip', name: `${params.name}.zip`, bytes: 100, entries: 1 + params.include.length + params.bibs.length, skipped: [] };
 			case 'exportDiscard':
 				return { removed: true };
 			case 'snapshotHtml':
@@ -860,18 +868,27 @@ test('open externally: planOpen over the mirror, then Quick Look; refusals by na
 	assert.equal(quickLooks, 2, 'exactly the two permitted opens reached the bridge');
 });
 
-test('the export host (UPSTREAM-LATEX-EXPORT-PLAN.md L1): one LaTeX build over the vault as the render worker sees it, under the vault\'s own config; native runs it', async () => {
+test('the export host (UPSTREAM-LATEX-EXPORT-PLAN.md L1, L2): one LaTeX build over the vault as the render worker sees it, under the vault\'s own config, on desktop\'s decisions; native runs it', async () => {
+	// A `<base>-figures/` folder at the output's place (a desktop export,
+	// synced): never in the worker's vfs.
+	fs.mkdirSync(path.join(vaultDir, 'Links and Embeds-figures'), { recursive: true });
+	fs.writeFileSync(path.join(vaultDir, 'Links and Embeds-figures', 'stale.md'), 'stale');
 	await clew.invoke('clew:vault-open-path', { path: vaultDir });
 	const rel = 'Guide/Links and Embeds.md';
 	const job = await services.exportHost.job(rel);
+	assert.equal(job.base, 'Links and Embeds');
 	assert.equal(job.build.file, `/vault/${rel}`);
 	assert.deepEqual(job.build.options, {
 		to: 'latex', output: '/vault/Links and Embeds.tex', normalSyntax: false, bibliography: [],
 		cacheDir: '/export/cache', copyFigures: true, figureEngine: 'wasm', mpTikzDist: '/export/mptikz',
-	}, 'at the vault\'s root, figures copied beside it, drawn by mp-tikz-wasm alone');
+	}, 'at the vault\'s root, figures copied beside it, drawn by mp-tikz-wasm alone (export-config.js#noteExportOptions)');
+	assert.deepEqual(job.build.latexStyle, { locale: Intl.DateTimeFormat().resolvedOptions().locale, platform: 'ios' },
+		'Clew\'s style by default (latexStyleWanted), for a platform with no emoji face');
+	assert.equal(job.build.biblify, null, 'no vault bibliography, no Biblify');
 	assert.equal(typeof job.init.files[`/vault/${rel}`]?.data, 'string', 'the note is in the snapshot');
 	assert.equal(typeof job.init.files['/engine/default-template.tex.mustache'], 'string', 'and the LaTeX template');
 	assert.ok(!Object.keys(job.init.files).some((p) => p.startsWith('/vault/.clew/')), 'nothing of .clew: not the preview\'s generated config, nor plugin code');
+	assert.ok(!Object.keys(job.init.files).some((p) => p.startsWith('/vault/Links and Embeds-figures/')), 'nor the vault\'s own folder at the figures\' place');
 	assert.equal(job.init.env.CLEW_VAULT_ROOT, '/vault');
 	const trusted = services.renderService.access.trusted === true;
 	if (trusted) {
@@ -883,19 +900,63 @@ test('the export host (UPSTREAM-LATEX-EXPORT-PLAN.md L1): one LaTeX build over t
 	await assert.rejects(services.exportHost.job(rel, 'pdf'), /not an export the export host makes/);
 	await assert.rejects(services.exportHost.job('../outside.md'), /not a note in this vault/);
 
+	// The settings the job reads: the style off, the vault's bibliography on.
+	await clew.invoke('clew:settings-set', { key: 'latexExportStyle', value: 'none' });
+	await clew.invoke('clew:vault-settings-set', { key: 'bibliography', value: 'Features/refs.bib' });
+	const job2 = await services.exportHost.job(rel);
+	assert.equal(job2.build.latexStyle, null, '`none`: the user\'s jmarkdown configuration only');
+	assert.deepEqual(job2.build.options.bibliography, ['/vault/Features/refs.bib'], 'the vault\'s bibliography, for this build');
+	assert.deepEqual(job2.build.biblify, { bibliography: '/vault/Features/refs.bib', resolve: true }, 'vaultBiblify\'s object, for configureExportBuild');
+	await clew.invoke('clew:settings-set', { key: 'latexExportStyle', value: 'clew' });
+
 	const mark = fakeBridge.calls.length;
 	const answer = await services.exportHost.run(rel);
 	const [, params] = fakeBridge.calls.slice(mark).find(([m]) => m === 'exportRun') ?? [];
 	assert.equal(typeof params?.job, 'string', 'the job goes to native as one string');
-	assert.deepEqual(JSON.parse(params.job).build, job.build);
+	assert.deepEqual(JSON.parse(params.job).build, (await services.exportHost.job(rel)).build);
 	assert.equal(answer.folder, `clew-export-${'a'.repeat(32)}`);
 	await services.exportHost.discard(answer.folder);
 	assert.deepEqual(fakeBridge.calls.at(-1), ['exportDiscard', { folder: answer.folder }]);
 
-	// No command uses it yet: a note's LaTeX and PDF still refuse (L2, P2).
-	for (const format of ['latex', 'pdf']) {
-		await assert.rejects(clew.invoke('clew:export-note', { path: rel, format }), /needs a LaTeX toolchain/);
-	}
+	// "Export as LaTeX" (L2): the build, then the share of what its .tex names
+	// and the vault has, decided here from the mirror.
+	fakeExportTex = [
+		'\\documentclass{article}',
+		'\\includegraphics[max width=\\linewidth]{Attachments/Paper.pdf}',
+		'\\includegraphics{Links and Embeds-figures/MetaPost/f-1.pdf}',
+		'\\includegraphics{../outside.png}',
+		'\\includegraphics{Attachments/nothere.png}',
+		'% \\includegraphics{Attachments/commented.png}',
+		'\\bibliography{refs}',
+	].join('\n');
+	const shareMark = fakeBridge.calls.length;
+	const result = await clew.invoke('clew:export-note', { path: rel, format: 'latex' });
+	const calls = fakeBridge.calls.slice(shareMark).map(([m]) => m);
+	assert.deepEqual(calls.filter((m) => m.startsWith('export')), ['exportRun', 'exportShare'], 'run, then share; the folder goes with the sheet');
+	const [, share] = fakeBridge.calls.slice(shareMark).find(([m]) => m === 'exportShare');
+	assert.deepEqual(share, {
+		folder: `clew-export-${'a'.repeat(32)}`, name: 'Links and Embeds', output: 'X.tex',
+		include: ['Attachments/Paper.pdf'], bibs: [{ rel: 'Features/refs.bib', as: 'refs.bib' }],
+	}, 'the vault file it names, at its path; the vault\'s bibliography beside it; never its own figures, a path out, or a comment');
+	assert.equal(result.shared, true);
+	assert.equal(result.output, 'Links and Embeds.zip');
+	assert.deepEqual(result.warnings, [
+		'code: one warning',
+		'Attachments/nothere.png is named by the .tex but is not in this vault, so the share does not carry it',
+	], 'the build\'s warnings, and what the share lacks');
+
+	// A share that fails leaves no folder.
+	fakeShareFails = true;
+	await assert.rejects(clew.invoke('clew:export-note', { path: rel, format: 'latex' }), /the zip could not be made/);
+	assert.deepEqual(fakeBridge.calls.at(-1), ['exportDiscard', { folder: `clew-export-${'a'.repeat(32)}` }]);
+	fakeShareFails = false;
+	fakeExportTex = null;
+	await clew.invoke('clew:vault-settings-set', { key: 'bibliography', value: '' });
+	fs.rmSync(path.join(vaultDir, 'Links and Embeds-figures'), { recursive: true, force: true });
+
+	// PDF via LaTeX still refuses (P2).
+	await assert.rejects(clew.invoke('clew:export-note', { path: rel, format: 'pdf' }), /needs a LaTeX toolchain/);
+	await assert.rejects(clew.invoke('clew:export-note', { path: '../outside.md', format: 'latex' }), /escapes/i);
 });
 
 test('export as PDF (reading view): the bridge prints this session\'s own preview document with upstream\'s ready probe', async () => {

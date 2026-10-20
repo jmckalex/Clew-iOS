@@ -61,15 +61,17 @@ const DEFAULTS = {
 	// Custom callout types, this device's (Settings → Callouts; a vault's own
 	// are in its vault-settings.json). Resolved by the shim (ipc.js).
 	callouts: [],
-	// Desktop-only, kept so a settings object reads the same everywhere: no
-	// LaTeX toolchain (the row is dropped, scripts/build.js), no CJK font
-	// download (its section is dropped), no shell (stubbed), and no note or
-	// book export that draws figures with TeX (exportFigureEngine, Clew-app
-	// 2cc6d89: the installed tools or mp-tikz-wasm, the latter the default
-	// since step C, 3267bf5; its row is dropped), nor Clew's style for those
-	// LaTeX exports (latexExportStyle, Clew-app 3bfc0b6; its row is dropped).
-	latexEngine: 'auto',
+	// Clew's style for a note's LaTeX export (latexExportStyle, Clew-app
+	// 3bfc0b6), which the iPad's export applies too (export-job.js; its row
+	// is upstream's, said for the iPad by scripts/build.js).
 	latexExportStyle: 'clew',
+	// Desktop-only, kept so a settings object reads the same everywhere: no
+	// LaTeX toolchain (the row is dropped, scripts/build.js; `auto` is what
+	// latexStyleWanted reads), no CJK font download (its section is
+	// dropped), no shell (stubbed), and no export that draws figures with
+	// installed TeX tools (exportFigureEngine, Clew-app 2cc6d89: the iPad's
+	// are always mp-tikz-wasm; its row is dropped).
+	latexEngine: 'auto',
 	exportFigureEngine: 'auto',
 	pdfCjkFonts: false,
 	shellFont: '',

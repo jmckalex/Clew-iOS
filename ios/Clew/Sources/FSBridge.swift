@@ -243,7 +243,9 @@ final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 			// the job is the JSON string the app page built
 			// (src/shim/export-job.js), run in the host's own web view; the
 			// answer names the folder its outputs were written into, kept
-			// until exportDiscard or the next export.
+			// until exportShare's sheet closes, exportDiscard, or the next
+			// export; and carries the .tex, from which the app page decides
+			// what the share needs beside it (export-references.js).
 			guard let job = params["job"] as? String, !job.isEmpty else { throw ClewError.badPayload }
 			guard let webView, let window = webView.window,
 				let handler = webView.configuration.urlSchemeHandler(forURLScheme: "clew-preview") else {
@@ -252,12 +254,16 @@ final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 			exportHost.run(job: Data(job.utf8), schemeHandler: handler, in: window) { result in
 				switch result {
 				case .success(let done):
+					let tex = done.output.lowercased().hasSuffix(".tex") && (done.files[done.output] ?? 0) <= 16 * 1024 * 1024
+						? (try? Data(contentsOf: done.folder.appendingPathComponent(done.output))).map { String(decoding: $0, as: UTF8.self) }
+						: nil
 					reply([
 						"folder": done.folder.lastPathComponent,
 						"output": done.output,
 						"files": done.files.keys.sorted().map { ["rel": $0, "bytes": done.files[$0] ?? 0] },
 						"warnings": done.warnings,
 						"ms": done.ms,
+						"tex": tex ?? "",
 					], nil)
 				case .failure(let error):
 					reply(nil, error.localizedDescription)
@@ -267,6 +273,42 @@ final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 		case "exportDiscard":
 			guard let folder = params["folder"] as? String else { throw ClewError.badPayload }
 			reply(["removed": exportHost.jobs.discard(folderName: folder)], nil)
+
+		case "exportShare":
+			// A finished export into the share sheet (L2): the .tex alone, or a
+			// zip of it, its figures, and the vault files and bibliographies
+			// the app page read from the .tex (ExportJobs.share). Each is
+			// clamped to the vault here and read coordinated (an iCloud vault's
+			// evicted file is downloaded first). The folder goes when the sheet
+			// closes.
+			guard let folder = params["folder"] as? String, let name = params["name"] as? String,
+				let output = params["output"] as? String else { throw ClewError.badPayload }
+			let include = params["include"] as? [String] ?? []
+			let bibs = (params["bibs"] as? [[String: Any]] ?? []).compactMap { bib -> (rel: String, as: String)? in
+				guard let rel = bib["rel"] as? String, let named = bib["as"] as? String else { return nil }
+				return (rel: rel, as: named)
+			}
+			guard let webView, webView.window != nil else { return reply(nil, "no window to share from") }
+			let jobs = exportHost.jobs
+			guard let folderURL = jobs.finishedFolder(named: folder) else { throw ExportJobs.Failure.noSuchFolder }
+			performIO(reply) {
+				let shared = try ExportJobs.share(in: folderURL, name: name, output: output, include: include, bibs: bibs) { rel, dest in
+					guard let source = self.vaults.materialize(rel: rel, timeout: 15) else { return false }
+					var coordinationError: NSError?
+					var copied = false
+					NSFileCoordinator().coordinate(readingItemAt: source, options: [], error: &coordinationError) { url in
+						copied = (try? FileManager.default.copyItem(at: url, to: dest)) != nil
+					}
+					return copied
+				}
+				DispatchQueue.main.async {
+					self.shareURL(shared.url, from: webView) { jobs.discard(folderName: folder) }
+				}
+				return [
+					"kind": shared.kind, "name": shared.url.lastPathComponent, "bytes": shared.bytes,
+					"entries": shared.entries, "skipped": shared.skipped,
+				]
+			}
 
 		case "shareBase64":
 			guard let name = params["name"] as? String, let base64 = params["base64"] as? String,
@@ -604,8 +646,16 @@ final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 		let sanitized = name.replacingOccurrences(of: "/", with: "-")
 		let url = FileManager.default.temporaryDirectory.appendingPathComponent(sanitized)
 		try? data.write(to: url)
+		shareURL(url, from: webView)
+	}
+
+	/// The share sheet for a file there already; `closed` runs when it is
+	/// dismissed, shared or not.
+	private func shareURL(_ url: URL, from webView: WKWebView?, closed: (() -> Void)? = nil) {
+		let sanitized = url.lastPathComponent
 		let controller = UIActivityViewController(activityItems: [url], applicationActivities: nil)
-		guard let webView, let root = webView.window?.rootViewController else { return }
+		controller.completionWithItemsHandler = { _, _, _, _ in closed?() }
+		guard let webView, let root = webView.window?.rootViewController else { closed?(); return }
 		// On iPad the share sheet is a popover and needs somewhere to point:
 		// anchored to the WHOLE web view (the old sourceView-only setup) it had
 		// nowhere to go and was never shown — measured. A point in the middle

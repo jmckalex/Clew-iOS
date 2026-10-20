@@ -38,8 +38,11 @@ test('the exports\' figure-engine setting (Clew-app 2cc6d89) has no Settings row
 	assert.ok(!bundle.includes('Your TeX installation') && !bundle.includes('built-in TeX'), 'nor its choices');
 });
 
-test('Clew\'s LaTeX export style (Clew-app 3bfc0b6, 41f8713) has no Settings row', () => {
-	// (The key itself stays in the shim's defaults, src/shim/settings.js.)
-	assert.ok(!bundle.includes('Style of LaTeX and PDF via LaTeX exports'));
-	assert.ok(!bundle.includes('Clew (EB Garamond)') && !bundle.includes('Your jmarkdown configuration only'), 'nor its choices');
+test('Clew\'s LaTeX export style (Clew-app 3bfc0b6, 41f8713) has its Settings row, said for the iPad (UPSTREAM-LATEX-EXPORT-PLAN.md L2)', () => {
+	assert.ok(bundle.includes('Style of LaTeX and PDF via LaTeX exports'), 'the row is back: the iPad\'s LaTeX export applies the style');
+	assert.ok(bundle.includes('Clew (EB Garamond)') && bundle.includes('Your jmarkdown configuration only'), 'with its choices');
+	assert.ok(!bundle.includes('your Mac\'s region'), 'the region is this device\'s, not a Mac\'s');
+	assert.ok(bundle.includes("s region uses it), with smart quotes"), 'the hint\'s sentence is kept');
+	assert.ok(!bundle.includes('with pdfLaTeX chosen above') && bundle.includes('a note whose header asks for pdfLaTeX is left without it'),
+		'no engine row above it here: a header\'s pdfLaTeX is what leaves the style out');
 });

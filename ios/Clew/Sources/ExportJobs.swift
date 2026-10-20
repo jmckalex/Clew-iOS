@@ -9,7 +9,12 @@
 //   - the page's last word must name exactly the files it wrote;
 //   - a job that fails, times out or is cancelled leaves nothing behind, and
 //     a finished one's folder lives until its caller discards it, or the
-//     next job begins.
+//     next job begins;
+//   - a finished job's share (L2) is staged inside its folder: the outputs
+//     moved under a folder named for the note, the vault files and
+//     bibliographies the .tex names copied in beside them (each at a path
+//     inside the stage, never over an output), then the .tex alone or the
+//     stage zipped.
 //
 // ExportHost.swift drives it from the web view; SchemeHandler.swift routes
 // the host page's requests to it.
@@ -24,6 +29,7 @@ final class ExportJobs {
 		case duplicate(String)
 		case tooMuch(String)
 		case malformed(String)
+		case noSuchFolder
 		/// The page's own report of a failed export.
 		case reported(String)
 
@@ -36,6 +42,7 @@ final class ExportJobs {
 			case .duplicate(let rel): return "An export output was written twice: \(rel)"
 			case .tooMuch(let what): return "The export wrote too much (\(what))"
 			case .malformed(let why): return "The export's answer is malformed: \(why)"
+			case .noSuchFolder: return "That export is no longer there to share"
 			case .reported(let message): return message
 			}
 		}
@@ -158,13 +165,116 @@ final class ExportJobs {
 	/// store makes is ever named here.
 	@discardableResult
 	func discard(folderName: String) -> Bool {
+		guard let dir = finishedFolder(named: folderName) else { return false }
+		return (try? FileManager.default.removeItem(at: dir)) != nil
+	}
+
+	/// A finished job's folder by its name: one this store makes, there, and
+	/// not the running job's.
+	func finishedFolder(named folderName: String) -> URL? {
 		guard folderName.hasPrefix(Self.folderPrefix),
 			folderName.dropFirst(Self.folderPrefix.count).allSatisfy(\.isHexDigit),
 			folderName.count == Self.folderPrefix.count + 32,
-			folder?.lastPathComponent != folderName || token == nil else { return false }
+			folder?.lastPathComponent != folderName || token == nil else { return nil }
 		let dir = root.appendingPathComponent(folderName, isDirectory: true)
-		guard FileManager.default.fileExists(atPath: dir.path) else { return false }
-		return (try? FileManager.default.removeItem(at: dir)) != nil
+		var isDir: ObjCBool = false
+		guard FileManager.default.fileExists(atPath: dir.path, isDirectory: &isDir), isDir.boolValue else { return nil }
+		return dir
+	}
+
+	// MARK: - The share (L2)
+
+	struct Shared: Equatable {
+		/// The file to share: the .tex, or `<name>.zip`.
+		let url: URL
+		let kind: String
+		let bytes: Int
+		/// Files in it.
+		let entries: Int
+		/// Named vault paths not carried: not in the vault, or a path an
+		/// output already has.
+		let skipped: [String]
+	}
+
+	/// A finished job's outputs (`folder`, finishedFolder's answer), shared
+	/// as `name`: the .tex alone when that is all there is, else a zip of a
+	/// folder `name` holding the outputs, the vault files `include` names at
+	/// their paths, and each bibliography in `bibs` at its `as` (beside the
+	/// .tex). `copy(rel, to)` copies the vault file `rel` to `to` and says
+	/// whether it could: the caller clamps `rel` to the vault
+	/// (VaultStore.resolve) and reads it coordinated. Static, and touching
+	/// nothing but the folder, so it runs off the main thread.
+	static func share(in folder: URL, name: String, output: String, include: [String],
+		bibs: [(rel: String, as: String)], copy: (String, URL) throws -> Bool) throws -> Shared {
+		let fm = FileManager.default
+		let name = Self.shareName(name)
+		guard Self.isSafeRelativePath(output), !output.contains("/"), output.lowercased().hasSuffix(".tex"),
+			fm.fileExists(atPath: folder.appendingPathComponent(output).path) else {
+			throw Failure.malformed("no .tex named \(output)")
+		}
+		let outputs = try fm.contentsOfDirectory(atPath: folder.path).filter { !$0.hasPrefix(".") }
+		if include.isEmpty && bibs.isEmpty && outputs == [output] {
+			let url = folder.appendingPathComponent(output)
+			return Shared(url: url, kind: "tex", bytes: Self.size(of: url), entries: 1, skipped: [])
+		}
+		let stage = folder.appendingPathComponent(".share", isDirectory: true).appendingPathComponent(name, isDirectory: true)
+		try fm.createDirectory(at: stage, withIntermediateDirectories: true)
+		for entry in outputs {
+			try fm.moveItem(at: folder.appendingPathComponent(entry), to: stage.appendingPathComponent(entry))
+		}
+		let realStage = stage.resolvingSymlinksInPath().path
+		var skipped: [String] = []
+		// One vault file into the stage at `at`: a safe path, never over what
+		// is there (an output, or a file placed already), inside by real path.
+		func place(_ rel: String, at: String) throws {
+			let dest = stage.appendingPathComponent(at)
+			guard Self.isSafeRelativePath(rel), Self.isSafeRelativePath(at), !fm.fileExists(atPath: dest.path) else {
+				return skipped.append(at)
+			}
+			let dir = dest.deletingLastPathComponent()
+			try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+			let realDir = dir.resolvingSymlinksInPath().path
+			guard realDir == realStage || realDir.hasPrefix(realStage + "/") else { return skipped.append(at) }
+			if try !copy(rel, dest) { skipped.append(at) }
+		}
+		for rel in include { try place(rel, at: rel) }
+		for bib in bibs {
+			if bib.as.lowercased().hasSuffix(".bib") { try place(bib.rel, at: bib.as) } else { skipped.append(bib.as) }
+		}
+		var entries = 0
+		var total = 0
+		for case let url as URL in fm.enumerator(at: stage, includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey]) ?? NSEnumerator() {
+			let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+			guard values?.isRegularFile == true else { continue }
+			entries += 1
+			total += values?.fileSize ?? 0
+		}
+		guard entries <= Self.maxFiles else { throw Failure.tooMuch("more than \(Self.maxFiles) files") }
+		guard total <= Self.maxBytes else { throw Failure.tooMuch("more than \(Self.maxBytes / 1024 / 1024) MB") }
+		let zip = folder.appendingPathComponent(name + ".zip")
+		var coordinationError: NSError?
+		var zipError: Error?
+		// The system's own archive of a folder (a zip whose one top folder is
+		// the stage's name), handed over for the block's length only.
+		NSFileCoordinator().coordinate(readingItemAt: stage, options: .forUploading, error: &coordinationError) { archive in
+			do { try fm.copyItem(at: archive, to: zip) } catch { zipError = error }
+		}
+		if let error = coordinationError ?? zipError { throw error }
+		return Shared(url: zip, kind: "zip", bytes: Self.size(of: zip), entries: entries, skipped: skipped)
+	}
+
+	private static func size(of url: URL) -> Int {
+		((try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? NSNumber)?.intValue ?? 0
+	}
+
+	/// A note's name as a file's: no folder separators or colons, no leading
+	/// dot, never empty, at most 200 characters.
+	static func shareName(_ name: String) -> String {
+		var out = name.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
+			.replacingOccurrences(of: "\0", with: "")
+		while out.hasPrefix(".") { out.removeFirst() }
+		out = String(out.prefix(200)).trimmingCharacters(in: .whitespaces)
+		return out.isEmpty ? "Export" : out
 	}
 
 	/// Every job folder under the root removed (a launch; before a new job).

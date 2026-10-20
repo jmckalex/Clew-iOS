@@ -1,8 +1,10 @@
-// The export host's JS halves (UPSTREAM-LATEX-EXPORT-PLAN.md §3, L1): the
-// job the app page builds (src/shim/export-job.js), the outputs the worker
-// hands back (src/export/outputs.js), and the export worker itself, run under
-// Node by tools/export-note.mjs over the demo vault with the staged
-// mp-tikz-wasm: a MetaPost figure in a .tex is a PDF beside it.
+// The export host's JS halves (UPSTREAM-LATEX-EXPORT-PLAN.md §3, L1 and L2):
+// the job the app page builds (src/shim/export-job.js), the outputs the
+// worker hands back (src/export/outputs.js), what a .tex needs beside it in
+// the share (src/shim/export-references.js), and the export worker itself,
+// run under Node by tools/export-note.mjs over the demo vault with the staged
+// mp-tikz-wasm: a MetaPost figure in a .tex is a PDF beside it, an image
+// embed an \includegraphics of its vault path, Clew's style in the preamble.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -12,6 +14,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { exportJob, EXPORT_RESTRICTED_CWD } from '../src/shim/export-job.js';
 import { exportOutputs, isSafeExportPath } from '../src/export/outputs.js';
+import { texReferences } from '../src/shim/export-references.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
@@ -48,6 +51,17 @@ test('exportJob: one LaTeX build at the vault\'s root; a trusted vault from the 
 	assert.equal(trusted.build.options.figureEngine, 'wasm', 'never the TeX tools: the iPad has none');
 	assert.equal(trusted.build.options.copyFigures, true);
 	assert.notEqual(trusted.init.files, files, 'the caller\'s snapshot is not changed');
+	assert.equal(trusted.base, 'A');
+	assert.deepEqual(trusted.build.latexStyle, { locale: '', platform: 'ios' }, 'Clew\'s style unless a setting says not (latexStyleWanted)');
+	assert.deepEqual(trusted.build.biblify, { bibliography: '/vault/refs.bib', resolve: true }, 'the vault\'s Biblify (vaultBiblify)');
+	const styled = (settings) => exportJob({ noteRel: 'A.md', format: 'latex', files, env, trusted: true, settings, locale: 'en-US' }).build.latexStyle;
+	assert.deepEqual(styled({ latexExportStyle: 'clew', latexEngine: 'auto' }), { locale: 'en-US', platform: 'ios' });
+	assert.equal(styled({ latexExportStyle: 'none' }), null, 'the user\'s configuration only');
+	assert.equal(styled({ latexEngine: 'pdflatex' }), null, 'never with pdfLaTeX forced');
+	const stale = exportJob({ noteRel: 'Notes/A.md', format: 'latex', env, trusted: true,
+		files: { ...files, '/vault/A-figures/old.pdf': '', '/vault/A-figures/.jmarkdown-figures': 'x', '/vault/A-figuresX.md': 'kept', '/vault/Notes/A-figures/k.pdf': '' } });
+	assert.deepEqual(Object.keys(stale.init.files).filter((p) => p.includes('-figures')).sort(), ['/vault/A-figuresX.md', '/vault/Notes/A-figures/k.pdf'],
+		'the vault\'s folder at the output\'s figures place stays out of the vfs, and nothing else');
 
 	const restricted = exportJob({ noteRel: 'Notes/A.md', format: 'latex', files, env, trusted: false });
 	assert.equal(restricted.init.cwd, EXPORT_RESTRICTED_CWD);
@@ -61,6 +75,35 @@ test('exportJob: one LaTeX build at the vault\'s root; a trusted vault from the 
 	}
 });
 
+test('texReferences: what the .tex names and the vault has, at vault paths; bibliographies beside the .tex by the names it uses', () => {
+	const vault = new Set(['Attachments/a b.png', 'Attachments/fig.pdf', 'Library/refs.bib', 'Notes/refs.bib', 'Notes/extra.bib', 'Sub/x.jpg']);
+	const exists = (r) => vault.has(r);
+	const tex = [
+		'\\includegraphics[max width=\\linewidth]{Attachments/a b.png}',
+		'\\includegraphics{Attachments/fig}',                  // graphicx's own extension search
+		'\\includegraphics{"Sub/./x.jpg"}',
+		'\\includegraphics{Note-figures/MetaPost/h-1.pdf}',    // the export's own
+		'\\includegraphics{../escape.png}',
+		'\\includegraphics{/etc/passwd}',
+		'\\includegraphics{https://example.com/x.png}',
+		'\\includegraphics{Attachments/gone.png}',
+		'% \\includegraphics{Attachments/commented.png}',
+		'100\\% \\includegraphics{Attachments/a b.png}',      // an escaped % is not a comment
+		'\\bibliography{refs, extra,nothere}',
+		'\\addbibresource{Library/refs.bib}',
+	].join('\n');
+	const refs = texReferences({ tex, base: 'Note', exists, bibFiles: ['Library/refs.bib', 'Notes/refs.bib', 'Notes/extra.bib'] });
+	assert.deepEqual(refs.files, ['Attachments/a b.png', 'Attachments/fig.pdf', 'Sub/x.jpg']);
+	assert.deepEqual(refs.bibs, [
+		{ rel: 'Library/refs.bib', as: 'refs.bib' },               // the build's first of that name
+		{ rel: 'Notes/extra.bib', as: 'extra.bib' },
+		{ rel: 'Library/refs.bib', as: 'Library/refs.bib' },       // a path the .tex names, at that path
+	]);
+	assert.deepEqual(refs.missing, ['Attachments/gone.png', 'nothere.bib']);
+	assert.deepEqual(texReferences({ tex: '\\documentclass{article}', base: 'N', exists }), { files: [], bibs: [], missing: [] });
+	assert.deepEqual(texReferences({ tex: '\\bibliography{../up}', base: 'N', exists: () => true, bibFiles: [] }).missing, ['../up.bib'], 'never a path out');
+});
+
 test('the export worker bundle carries the figure engine\'s library-by-URL patch (scripts/build.js)', () => {
 	const bundle = path.join(root, 'dist', 'export-worker.js');
 	assert.ok(fs.existsSync(bundle), 'run scripts/build.js first');
@@ -68,6 +111,19 @@ test('the export worker bundle carries the figure engine\'s library-by-URL patch
 });
 
 const staged = fs.existsSync(path.join(root, 'mptikz-assets', 'index.js'));
+const exportNote = (vault, note, ...flags) => {
+	const out = fs.mkdtempSync(path.join(os.tmpdir(), 'clew-export-test-'));
+	try {
+		const summary = JSON.parse(execFileSync(process.execPath, [path.join(root, 'tools', 'export-note.mjs'), vault, note, out, ...flags],
+			{ encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
+		const tex = fs.readFileSync(path.join(out, summary.output), 'utf8');
+		const read = (rel) => fs.readFileSync(path.join(out, rel));
+		return { summary, tex, read };
+	} finally {
+		fs.rmSync(out, { recursive: true, force: true });
+	}
+};
+
 test('the export worker under Node: Features/Diagrams.md as LaTeX, its MetaPost figure a PDF in Diagrams-figures/', { skip: !staged && 'mptikz-assets/ is not staged' }, () => {
 	for (const flags of [[], ['--restricted']]) {
 		const out = fs.mkdtempSync(path.join(os.tmpdir(), 'clew-export-test-'));
@@ -86,8 +142,41 @@ test('the export worker under Node: Features/Diagrams.md as LaTeX, its MetaPost 
 			assert.ok(tex.includes(`\\includegraphics[max width=\\linewidth]{${figures[0].rel}}`), `${label}: the .tex refers to it beside itself`);
 			assert.match(tex, /\\begin\{tikzpicture\}/, `${label}: TikZ stays native TeX`);
 			assert.ok(!summary.warnings.some((w) => /mp-tikz-wasm would not load|metapost not drawn/.test(w)), `${label}: the library loaded`);
+			assert.deepEqual(summary.references, { files: [], bibs: [], missing: [] }, `${label}: nothing of the vault's to carry; its own figures are its own`);
 		} finally {
 			fs.rmSync(out, { recursive: true, force: true });
 		}
+	}
+});
+
+test('the export worker under Node (L2): image embeds as their vault paths, the bibliography by name, Clew\'s style and the fenced header', { skip: !staged && 'mptikz-assets/ is not staged' }, () => {
+	const seed = path.join(root, 'seed-vault');
+	const media = exportNote(seed, 'Features/Media Gallery.md');
+	assert.ok(media.tex.includes('\\includegraphics[width=\\textwidth]{Attachments/Waterhouse - Ariadne.jpg}'),
+		'an embed resolved across the vault, pointed from the .tex at the vault\'s root (exportEmbedPath)');
+	assert.deepEqual(media.summary.references.files, ['Attachments/Burne-Jones - Theseus and the Minotaur.jpg', 'Attachments/NASA - Earthrise.jpg', 'Attachments/Waterhouse - Ariadne.jpg']);
+	assert.ok(media.summary.warnings.some((w) => /webm.*only images can be embedded/.test(w)), 'a film is not an image: the engine says so');
+	assert.match(media.tex, /\\IfFontExistsTF\{EBGaramond-Regular\.otf\}/, 'Clew\'s style (configureExportBuild)');
+	assert.match(media.tex, /\[british\]\{babel\}/, 'in the locale\'s language');
+	assert.doesNotMatch(media.tex, /Apple Color Emoji|Noto Color Emoji|Segoe UI Emoji/, 'the `ios` platform names no emoji face');
+	const plain = exportNote(seed, 'Features/Media Gallery.md', '--style=none');
+	assert.doesNotMatch(plain.tex, /EBGaramond|Clew's export style/, '`none`: the user\'s configuration alone');
+	const restricted = exportNote(seed, 'Features/Media Gallery.md', '--restricted');
+	assert.deepEqual(restricted.summary.references.files, media.summary.references.files, 'a restricted vault\'s embeds resolve inside it alike');
+
+	const cites = exportNote(seed, 'Features/Citations.md');
+	assert.match(cites.tex, /\\bibliography\{refs\}/);
+	assert.deepEqual(cites.summary.references.bibs, [{ rel: 'Features/refs.bib', as: 'refs.bib' }], 'the note\'s own .bib, beside the .tex');
+
+	// `Header style: fenced` (cdde7df): a first line that looks like a key is
+	// the note's text, not a header that swallows it.
+	const vault = fs.mkdtempSync(path.join(os.tmpdir(), 'clew-export-vault-'));
+	try {
+		fs.writeFileSync(path.join(vault, 'Bare.md'), 'Note: remember this.\n\nThe body follows.\n');
+		const bare = exportNote(vault, 'Bare.md');
+		assert.match(bare.tex, /Note: remember this\./);
+		assert.match(bare.tex, /The body follows\./, 'not exported empty');
+	} finally {
+		fs.rmSync(vault, { recursive: true, force: true });
 	}
 });

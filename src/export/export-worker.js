@@ -16,12 +16,19 @@
 // Like desktop's engine/export-worker.mjs, the engine reads the vault's own
 // jmarkdown configuration (the build's cwd), never the preview's generated
 // one; a restricted vault's cwd holds `Run note code: false` alone, as
-// desktop's restrictedExportDir().
+// desktop's restrictedExportDir(). And as that worker does (L2), it hands
+// the engine its Obsidian links — an image embed resolved as the preview
+// resolves one (vault-files.js#resolveFileTarget, clamped in a restricted
+// vault), pointed from the file the export writes
+// (export-config.js#exportEmbedPath); a [[link]] prints as its text — and
+// sets Clew's configuration for the build on the engine's own configManager
+// (export-config.js#configureExportBuild: the fenced header, LaTeX's own
+// title, Clew's LaTeX style when the job says so).
 //
 // Protocol (postMessage):
 //   → {type:'init', files, env, cwd}                      as the render worker
 //   ← {type:'ready'}
-//   → {type:'build', file, options, mptikzUrl}
+//   → {type:'build', file, options, latexStyle, biblify, mptikzUrl}
 //   ← {type:'done', output, warnings, outputs:[{rel, data}]} | {type:'error', message, stack}
 
 import '../worker/shims/globals.js';
@@ -29,6 +36,8 @@ import '../worker/shims/require-registry.js';
 import { vfs } from '../worker/shims/vfs.js';
 import { applyCustomCallouts } from '../../vendor/jmarkdown/src/callout-table.js';
 import { getWarnings } from '../../vendor/jmarkdown/src/warnings.js';
+import { configureExportBuild, exportEmbedPath } from '../../vendor/clew/engine/export-config.js';
+import { resolveFileTarget } from '../../vendor/clew/engine/vault-files.js';
 import { exportOutputs } from './outputs.js';
 
 // mp-tikz-wasm decides where it runs from the GLOBAL `process`: Node when it
@@ -63,6 +72,7 @@ globalThis.__jmdImportSource = (p) => {
 };
 
 let enginePromise = null;
+let configPromise = null;
 
 async function init({ files, env, cwd }) {
 	vfs.reset();
@@ -76,16 +86,31 @@ async function init({ files, env, cwd }) {
 	process.chdir(cwd);
 	enginePromise = import('../../vendor/jmarkdown/src/index.js');
 	await enginePromise;
+	// The engine's own configuration (the module index.js loaded, so the
+	// user's config files are read already): configureExportBuild sets on it.
+	configPromise = import('../../vendor/jmarkdown/src/config-manager.js');
+	await configPromise;
 	self.postMessage({ type: 'ready' });
 }
 
-async function build({ file, options, mptikzUrl }) {
+async function build({ file, options, latexStyle = null, biblify = null, mptikzUrl }) {
 	try {
 		// Read by the figure engine's library import (the build's patch of
 		// figure-engine.js#instance): the app's mp-tikz-wasm, by URL.
 		globalThis.__clewMpTikzUrl = mptikzUrl ?? null;
 		const { processFile } = await enginePromise;
-		const { outFile } = await processFile(file, options);
+		const { configManager, DEFAULT_CONFIG } = await configPromise;
+		// An image embed resolved as the preview resolves one, then pointed
+		// from the file this export writes. The vfs has no links, so no
+		// realpath is handed in.
+		const resolveEmbed = (name, { file: from } = {}) => {
+			const rel = resolveFileTarget(String(name));
+			if (!rel) return null;
+			const { output, to, chapters } = options;
+			return exportEmbedPath({ abs: `${process.env.CLEW_VAULT_ROOT}/${rel}`, output, to, chapters, file: from });
+		};
+		configureExportBuild(configManager, { to: options.to, latexStyle, biblify, defaults: DEFAULT_CONFIG });
+		const { outFile } = await processFile(file, { ...options, obsidianLinks: { resolveEmbed, resolveLink: () => null } });
 		const outputs = exportOutputs(vfs.writes, outFile);
 		// Each figure's bytes are its own buffer (the fs shim copies on write);
 		// a Set all the same, since a buffer listed twice cannot be transferred.

@@ -2,20 +2,23 @@
 // drives the render worker: snapshot a real vault directory, build the SAME
 // job the app builds (src/shim/export-job.js), run it with mp-tikz-wasm from
 // the staged mptikz-assets/, and write the outputs into a folder. Prints a
-// JSON summary: { output, files: [{ rel, bytes }], warnings }. Used by
-// tests/export-host.test.js (spawned as a child process: the bundle installs
-// its own `process` global) and handy as a dev CLI:
+// JSON summary: { output, files: [{ rel, bytes }], warnings, references }
+// (references: what the share would carry beside the .tex,
+// src/shim/export-references.js). Used by tests/export-host.test.js (spawned
+// as a child process: the bundle installs its own `process` global) and
+// handy as a dev CLI:
 //
-//   node tools/export-note.mjs <vault-dir> <note-rel-path> <out-dir> [--restricted]
+//   node tools/export-note.mjs <vault-dir> <note-rel-path> <out-dir> [--restricted] [--style=none]
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { engineEnv, isTextPath, ENGINE_CSL_FILES } from '../src/shim/engine-config.js';
 import { exportJob } from '../src/shim/export-job.js';
+import { texReferences } from '../src/shim/export-references.js';
 
 const [vaultDir, noteRel, outDir, ...flags] = process.argv.slice(2);
 if (!vaultDir || !noteRel || !outDir) {
-	console.error('usage: node tools/export-note.mjs <vault-dir> <note-rel-path> <out-dir> [--restricted]');
+	console.error('usage: node tools/export-note.mjs <vault-dir> <note-rel-path> <out-dir> [--restricted] [--style=none]');
 	process.exit(2);
 }
 const trusted = !flags.includes('--restricted');
@@ -55,9 +58,11 @@ for (const name of ENGINE_CSL_FILES) {
 }
 
 const access = { trusted, plugins: [], dataviewJs: false };
+const style = flags.find((f) => f.startsWith('--style='))?.slice('--style='.length) ?? 'clew';
 const job = exportJob({
 	noteRel, format: 'latex', files, trusted, vaultOptions,
 	env: engineEnv({ vaultRoot: '/vault', sessionId: 's1', vaultOptions, access }),
+	settings: { latexExportStyle: style, latexEngine: 'auto' }, locale: 'en-GB',
 });
 
 // ---- emulate the Worker global surface -----------------------------------
@@ -94,10 +99,20 @@ for (const { rel, data } of result.outputs) {
 	fs.mkdirSync(path.dirname(path.join(outDir, rel)), { recursive: true });
 	fs.writeFileSync(path.join(outDir, rel), data);
 }
+const tex = result.outputs.find((o) => o.rel === path.basename(result.output))?.data;
+// The bibliographies a build could use, as the app lists them
+// (export-host.js#bibFilesFor), less the vault's jmarkdown config's.
+const header = /^Bibliography:\s*(.+)$/mi.exec(files[`/vault/${noteRel}`] ?? '')?.[1];
+const noteDir = path.posix.dirname(noteRel);
+const bibFiles = [
+	...(vaultOptions.bibliography ? [vaultOptions.bibliography] : []),
+	...(header ? header.split(',').map((b) => path.posix.normalize(path.posix.join(noteDir, b.trim()))) : []),
+];
 const summary = {
 	output: path.basename(result.output),
 	files: result.outputs.map(({ rel, data }) => ({ rel, bytes: typeof data === 'string' ? new TextEncoder().encode(data).byteLength : data.byteLength })),
 	warnings: result.warnings,
+	references: texReferences({ tex: typeof tex === 'string' ? tex : '', base: job.base, exists: (r) => `/vault/${r}` in files, bibFiles }),
 };
 fs.writeFileSync(1, JSON.stringify(summary) + '\n');
 realExit(0);

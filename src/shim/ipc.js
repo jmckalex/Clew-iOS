@@ -38,6 +38,7 @@ import { ARM_SCRIPT, BOOK_ARM_SCRIPT, READY_PROBE, LIGHT_THEME_SCRIPT, PAPER_SIZ
 import { SNAPSHOT_SCRIPT, SHARE_IMAGE_MAX, SHARE_IMAGES_MAX, shareLeaks } from './html-share.js';
 import { createColonConversion } from './colon-conversion.js';
 import { createExportHost } from './export-host.js';
+import { explainFiguresWarnings } from '../../vendor/clew/shared/export-figures.js';
 import { readMaster, laterNotice, placeWarnings } from '../../vendor/clew/shared/book.js';
 
 /**
@@ -82,6 +83,9 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 	const renderService = new RenderService({ workerFactory, assetLoader });
 	const kvStore = new KvStore();
 	const searchService = new SearchService({ vaults, indexer });
+	// The export host (UPSTREAM-LATEX-EXPORT-PLAN.md §3): a note's LaTeX
+	// export (EXPORT_NOTE `latex`); PDF via LaTeX still refuses until P2.
+	const exportHost = createExportHost({ renderService, bridgeCall, vaultRoot: VAULT_ROOT, settings });
 
 	vaults.send = send;
 	indexer.send = send;
@@ -1081,6 +1085,27 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 				});
 				return { shared: true };
 			}
+			if (format === 'latex') {
+				// "Export as LaTeX" (UPSTREAM-LATEX-EXPORT-PLAN.md §3, L2): desktop's
+				// build in the export host (export-host.js, ExportHost.swift), then
+				// the share sheet — the .tex alone, or a zip of the .tex, its
+				// figures and the vault files and bibliographies it names. The
+				// warnings are desktop's, worded by its shared module.
+				vaults.resolve(path);
+				const done = await exportHost.run(path, 'latex');
+				let shared;
+				try {
+					shared = await exportHost.share(done, path);
+				} catch (err) {
+					await exportHost.discard(done.folder).catch(() => {});
+					throw err;
+				}
+				const warnings = [
+					...explainFiguresWarnings(done.warnings ?? [], { restricted: done.trusted !== true }),
+					...(shared.missing ?? []).map((name) => `${name} is named by the .tex but is not in this vault, so the share does not carry it`),
+				];
+				return { shared: true, output: shared.name, warnings };
+			}
 			if (format !== 'html') {
 				throw new Error(`${format} export needs a LaTeX toolchain and is not available on iOS`);
 			}
@@ -1257,9 +1282,6 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 		takeQuickAction: () => bridgeCall('takeQuickAction').then((r) => r?.action ?? null),
 	};
 
-	// The export host (UPSTREAM-LATEX-EXPORT-PLAN.md §3, L1): no command uses
-	// it yet; EXPORT_NOTE's `latex` and `pdf` still refuse until L2 and P2.
-	const exportHost = createExportHost({ renderService, bridgeCall, vaultRoot: VAULT_ROOT });
 
 	return { clew, native, send, vaultSwitch, ui, conflicts, capture, services: { vaults, indexer, renderService, kvStore, searchService, settings, exportHost } };
 }
