@@ -22,6 +22,9 @@ import WebKit
 final class SchemeHandler: NSObject, WKURLSchemeHandler {
 	private let vaults: VaultStore
 	weak var webView: WKWebView?
+	/// The export host (ExportHost.swift): its page's /__clew_export__/
+	/// requests are its own to answer, for its own web view only.
+	weak var exportHost: ExportHost?
 	private var stoppedTasks = Set<ObjectIdentifier>()
 
 	init(vaults: VaultStore) {
@@ -83,7 +86,7 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 		case "clew-app":
 			serveAppFile(task, url: url)
 		case "clew-preview":
-			servePreview(task, url: url)
+			servePreview(task, url: url, from: webView)
 		case "clew-frame":
 			serveAppFrame(task, url: url)
 		default:
@@ -184,12 +187,23 @@ final class SchemeHandler: NSObject, WKURLSchemeHandler {
 
 	// MARK: - clew-preview (rendered notes, vault files, iframe assets)
 
-	private func servePreview(_ task: WKURLSchemeTask, url: URL) {
+	private func servePreview(_ task: WKURLSchemeTask, url: URL, from requester: WKWebView) {
 		let pathname = url.path.removingPercentEncoding ?? url.path
 		let rel = pathname.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
 		#if DEBUG
 		if rel == "__clew_probe__" { return probe(task, url: url, origin: "preview") }
 		#endif
+
+		// The export host's page, job and outputs (UPSTREAM-LATEX-EXPORT-PLAN.md
+		// §3): answered by the host, and only to its own web view.
+		if rel.hasPrefix("__clew_export__/") {
+			guard let exportHost else { return fail(task, "Not found", status: 404) }
+			return exportHost.serve(task, rel: String(rel.dropFirst("__clew_export__/".count)), url: url, from: requester) {
+				[weak self] task, status, data, headers in
+				guard let self, !self.isStopped(task) else { return }
+				self.respond(task, status: status, data: data, headers: headers)
+			}
+		}
 
 		if rel.hasPrefix("__clew_assets__/") {
 			let rest = String(rel.dropFirst("__clew_assets__/".count))

@@ -117,6 +117,64 @@ export async function buildEngineWorker({ minify = true } = {}) {
 	return result;
 }
 
+// ---- the export host (UPSTREAM-LATEX-EXPORT-PLAN.md §3, L1) ---------------
+
+// Its worker is the render worker's engine with the figure engine on, `wasm`
+// only, so a MetaPost figure in a .tex is a PDF. figure-engine.js imports
+// the library from a dist FOLDER by file URL (`MP-TikZ dist`); here it is the
+// app's own copy, by the URL the build message names. (Upstream candidate:
+// jmarkdown J1, a library the host supplies, which retires this patch.)
+const exportEnginePatches = {
+	name: 'clew-export-engine-patches',
+	setup(builder) {
+		builder.onLoad({ filter: /vendor\/jmarkdown\/src\/figure-engine\.js$/ }, (args) => ({
+			contents: patched('figure-engine.js', fs.readFileSync(args.path, 'utf8'),
+				"lib ??= await import(pathToFileURL(path.join(distDir(), 'index.js')).href);",
+				"lib ??= await import(globalThis.__clewMpTikzUrl ?? pathToFileURL(path.join(distDir(), 'index.js')).href);"),
+			loader: 'js',
+		}));
+	},
+};
+
+export async function buildExportWorker({ minify = true } = {}) {
+	return build({
+		entryPoints: [path.join(root, 'src', 'export', 'export-worker.js')],
+		bundle: true,
+		platform: 'browser',
+		format: 'esm',
+		target: 'safari16',
+		outfile: path.join(dist, 'export-worker.js'),
+		alias: builtinAlias,
+		inject: [path.join(shims, 'globals.js')],
+		// As the render worker: the engine's app directory is /engine in the vfs.
+		define: {
+			'process.env.NODE_ENV': '"production"',
+			'import.meta.url': '"file:///engine/export-worker.js"',
+		},
+		plugins: [enginePatches, exportEnginePatches],
+		minify,
+		sourcemap: false,
+		logLevel: 'warning',
+		metafile: true,
+	});
+}
+
+/** The host page's script: plain browser code, no engine. */
+export async function buildExportHost({ minify = true } = {}) {
+	return build({
+		entryPoints: [path.join(root, 'src', 'export', 'host.js')],
+		bundle: true,
+		platform: 'browser',
+		format: 'esm',
+		target: 'safari16',
+		outfile: path.join(dist, 'webroot', 'export', 'host.js'),
+		minify,
+		sourcemap: false,
+		logLevel: 'warning',
+		metafile: true,
+	});
+}
+
 // ---- the app bundle + webroot ---------------------------------------------
 
 const webroot = path.join(dist, 'webroot');
@@ -655,6 +713,11 @@ export function stageStatic() {
 		copy(path.join(root, 'vendor', 'jmarkdown', 'src', 'csl', name), path.join(webroot, 'engine', 'csl', name));
 	}
 	copy(path.join(dist, 'engine-worker.js'), path.join(webroot, 'engine-worker.js'));
+	// The export host: its page and its worker (buildExportHost writes host.js
+	// beside them). Served only to the export host's own web view, under
+	// /__clew_export__/ (SchemeHandler.swift).
+	copy(path.join(root, 'src', 'export', 'host.html'), path.join(webroot, 'export', 'host.html'));
+	copy(path.join(dist, 'export-worker.js'), path.join(webroot, 'export', 'export-worker.js'));
 	// Preview iframe assets, laid out like the desktop packaged app
 	// (protocol.js assetRoots → Swift scheme handler).
 	copy(path.join(root, 'vendor', 'clew', 'engine'), path.join(webroot, 'engine-assets'));
@@ -753,7 +816,9 @@ if (isMain) {
 	fs.mkdirSync(dist, { recursive: true });
 	const outputs = [];
 	outputs.push(await buildEngineWorker({ minify }));
+	outputs.push(await buildExportWorker({ minify }));
 	stageStatic();
+	outputs.push(await buildExportHost({ minify }));
 	outputs.push(await buildExcalidrawPage({ minify }));
 	outputs.push(await buildAppBundle({ minify }));
 	outputs.push(...await buildPreviewClients({ minify }));

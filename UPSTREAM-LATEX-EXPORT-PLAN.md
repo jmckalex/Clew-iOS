@@ -228,11 +228,54 @@ it can start once Clew-boss has read this plan.
   - the figure engine, `wasm` only: mp-tikz-wasm from the app's bundled
     dist (`__clew_assets__/mptikz/`), through J1 or the build patch;
   - `setImmediate` shimmed with a macrotask.
-- **The config** comes from src/shim/engine-config.js, the generator the
-  render worker uses, so `Run note code: false` holds in a restricted
-  vault exactly as in its reading view. The user's ~/.jmarkdown doesn't
-  exist here; a vault's `.jmarkdown/config.json` applies as in reading
-  view.
+- **The config** is desktop's rule, not the preview's generated one: an
+  export reads the vault's own jmarkdown configuration from the note's
+  folder. A vault this device does not trust exports from a folder whose
+  configuration says `Run note code: false` and nothing else (desktop's
+  restrictedExportDir). The user's ~/.jmarkdown doesn't exist here.
+
+**L1 as built (2026-10-20).**
+
+- **Pieces:**
+  - ExportHost.swift is the hidden web view, the routes and the
+    lifecycle;
+  - ExportJobs.swift holds the rules: a single-use token, outputs only
+    inside the job's folder, each written once, within 2,000 files and
+    512 MB, and the page's last word must name exactly what was written;
+  - src/export/ has host.html, host.js, export-worker.js and outputs.js;
+  - src/shim/export-job.js and export-host.js build the job, and
+    `__clewShim.services.exportHost` runs it;
+  - tools/export-note.mjs is the Node harness.
+
+  No command uses it yet: EXPORT_NOTE's `latex` and `pdf` still refuse.
+- **Found on the way:**
+  - mp-tikz-wasm decides it is in Node from the global `process`, which
+    the worker's shim makes a Node look-alike. The export worker shows
+    that global as a browser worker's (`versions: {}`, `type: 'renderer'`).
+    The engine's own `process` is bound at build time and unchanged.
+  - The engine evaluates strings when it loads, so the worker's own CSP
+    (from its script's response) has `'unsafe-eval'` as well as
+    `'wasm-unsafe-eval'`. The host page's CSP has neither. Both keep
+    `connect-src 'self'`.
+  - The fs shim lacked `mkdtempSync`, which the figure cache's run folders
+    need.
+  - The figure engine's library import is a build patch until J1 (the
+    worker bundle only; the render worker is untouched).
+- **Measured in the simulator** (iPad Pro 11", demo vault):
+  - Features/Diagrams.md took 0.8 s wall (0.58 s in the host): its .tex
+    (12,161 bytes) and its MetaPost figure as a PDF (39,409 bytes),
+    byte-identical to the Node harness's. Welcome.md took 0.5 s.
+  - Every export ran in a NEW WebContent process; the app page's stayed
+    the same throughout. The host peaked at 196–515 MB for these notes.
+  - Killing the host's process mid-export (a 40-figure note) gave "The
+    export stopped: iOS ended its page, most likely because it ran out of
+    memory". The editor carried on: a render worked and the next export
+    succeeded. No job folder was left.
+  - From a note's preview document, all five /__clew_export__/ routes
+    answered 403.
+  - The exported Diagrams.tex compiled on the Mac (latexmk -lualatex
+    -shell-escape, for minted) to a 4-page PDF with no error, its MetaPost
+    figure included.
 
 **(sync)** The Clew-app commits that bring U1–U7 (and J1, if it comes
 first) arrive as an ordinary sync. L2 waits for that sync, so nothing is
@@ -289,6 +332,23 @@ growth is measured against the agreed 12–17 MB.
 - **A dedicated TeX worker per export:** a fresh `MetaPost.create` with
   the latex-doc bundle, disposed of at the end. Passes run strictly one
   after another, never two engines at once.
+- **A NEW instance per export, never a reused one (mp-tikz-wasm's sandbox
+  review, its test/e2e/sandbox.test.ts at its local 83d3d65).**
+  - `removeFiles()` is not enough. Within one instance, /texmf-var
+    (luaotfload's font cache, which it loads as Lua code) is writable by a
+    document, and is carried into every later LuaTeX run on that instance.
+    One untrusted note could change how a later note is typeset.
+  - The passes of ONE export may share the instance.
+  - The export host already gives each export a new web view, worker and
+    instance (L1). The test below holds it to that.
+- **An overall time limit, Clew's own.** mp-tikz-wasm's watchdog kills
+  only a worker that has gone silent. A document that loops while
+  printing runs until the host stops it, and an engine may grow to 2 GiB.
+  - ExportHost stops any export after 3 minutes (L1). The message is "The
+    export took too long (more than 3 minutes) and was stopped", and the
+    job's folder goes.
+  - 3 minutes is desktop's compilePdf limit. The device check below
+    confirms that a real note's passes fit well inside it.
 - **The engine** comes from `chooseLatexEngine(tex, setting, { available:
   ['pdflatex', 'lualatex'] })` (U5):
   - Clew's style → LuaLaTeX;
@@ -337,7 +397,9 @@ owner:
 2. About 20 minutes with the TestFlight build. Run PDF via LaTeX on four
    notes I name (a plain note, Citations, Diagrams with MetaPost, and a
    long note with Clew's style), and report for each: done or the error
-   text, and roughly how long it took.
+   text, and roughly how long it took. The time against the 3-minute limit
+   is part of the check: a note that comes near it says the limit, or the
+   passes, need another look.
 3. Only if the numbers are close: the iPad on a cable to this Mac, with
    Developer Mode on and unlocked. I then run a Debug build under
    Instruments for the WebContent process's real peak. The owner would be
@@ -361,6 +423,13 @@ which is a style decision for the owner.
   - no absolute path and no `..`;
   - a symlink out of the vault, or an embed outside it, is never listed
     (the vault-files clamp).
+- **A fresh instance per export:** an export whose document writes into
+  /texmf-var (a luaotfload cache entry) has no effect on the next export:
+  the next note typesets byte-identically with and without it before. Run
+  under the Node harness and in the simulator.
+- **The time limit:** a document that loops while printing is stopped at
+  the limit with "took too long", and its folder is gone (the limit
+  lowered for the test).
 - **The pass planner:** from an .aux and a .log, bibtex yes or no,
   makeindex yes or no, rerun yes or no, and the cap. The first error comes
   out in the Mac's words (U5).

@@ -37,6 +37,7 @@ import { bridgeCall, toBase64 } from './native-bridge.js';
 import { ARM_SCRIPT, BOOK_ARM_SCRIPT, READY_PROBE, LIGHT_THEME_SCRIPT, PAPER_SIZES } from './print-pdf.js';
 import { SNAPSHOT_SCRIPT, SHARE_IMAGE_MAX, SHARE_IMAGES_MAX, shareLeaks } from './html-share.js';
 import { createColonConversion } from './colon-conversion.js';
+import { createExportHost } from './export-host.js';
 import { readMaster, laterNotice, placeWarnings } from '../../vendor/clew/shared/book.js';
 
 /**
@@ -1256,7 +1257,11 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 		takeQuickAction: () => bridgeCall('takeQuickAction').then((r) => r?.action ?? null),
 	};
 
-	return { clew, native, send, vaultSwitch, ui, conflicts, capture, services: { vaults, indexer, renderService, kvStore, searchService, settings } };
+	// The export host (UPSTREAM-LATEX-EXPORT-PLAN.md §3, L1): no command uses
+	// it yet; EXPORT_NOTE's `latex` and `pdf` still refuse until L2 and P2.
+	const exportHost = createExportHost({ renderService, bridgeCall, vaultRoot: VAULT_ROOT });
+
+	return { clew, native, send, vaultSwitch, ui, conflicts, capture, services: { vaults, indexer, renderService, kvStore, searchService, settings, exportHost } };
 }
 
 export { CH, VAULT_ROOT, toBase64 };

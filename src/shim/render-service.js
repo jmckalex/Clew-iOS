@@ -241,9 +241,9 @@ export class RenderService {
 			null, 2);
 	}
 
-	/** Snapshot every vault text file (plus stubs so wikilink resolution can
-	 *  see binaries) out of the mirror, for one worker's lifetime. */
-	#snapshot() {
+	/** Every vault text file (plus stubs so wikilink resolution can see
+	 *  binaries) out of the mirror, `.clew/` aside. */
+	#vaultFiles() {
 		const files = {};
 		const prefix = VAULT_ROOT + '/';
 		for (const [abs, entry] of vfs.files) {
@@ -254,6 +254,14 @@ export class RenderService {
 				? { data: typeof entry.data === 'string' ? entry.data : '', mtimeMs: entry.mtimeMs }
 				: '';
 		}
+		return files;
+	}
+
+	/** Snapshot every vault text file out of the mirror, with the preview's
+	 *  config and the enabled plugins' engine surfaces, for one worker's
+	 *  lifetime. */
+	#snapshot() {
+		const files = this.#vaultFiles();
 		// Enabled plugins' engine surfaces: the config names them by absolute
 		// mirror path — the vault's .clew/plugins/<id>/ or the global root —
 		// so the snapshot must carry exactly those files (the loop above
@@ -273,6 +281,40 @@ export class RenderService {
 		return files;
 	}
 
+	/** The env every worker of this vault spawns with (engine-config.js). */
+	#env() {
+		return engineEnv({
+			noteFonts: this.noteFonts,
+			vaultRoot: VAULT_ROOT,
+			sessionId: this.sessionId,
+			vaultOptions: this.#vaultOptions,
+			// The device's global TeX fragments; a change to them
+			// reconfigures (ipc.js SETTINGS_SET), so a standby never
+			// outlives the list it was spawned with.
+			globalTexFragments: settings.get('texFragments') ?? [],
+			callouts: this.calloutsEnv(),
+			access: this.access,
+		});
+	}
+
+	/**
+	 * What an export's engine starts from (src/shim/export-job.js): the vault's
+	 * text files as a render worker gets them, the template assets, the spawn
+	 * env, and whether the device trusts the vault. Not the preview's generated
+	 * config, nor the plugins' engine surfaces: an export reads the vault's own
+	 * jmarkdown configuration, as desktop's does (engine/export-worker.mjs).
+	 */
+	async exportInputs() {
+		await this.#openPromise;
+		if (!this.#open || !this.#assets) throw new Error('no vault open');
+		return {
+			files: { ...this.#vaultFiles(), ...this.#assets },
+			env: this.#env(),
+			trusted: this.access.trusted === true,
+			vaultOptions: { ...this.#vaultOptions },
+		};
+	}
+
 	#spawnStandby() {
 		if (!this.#open) return;
 		const worker = this.workerFactory();
@@ -288,18 +330,7 @@ export class RenderService {
 			type: 'init',
 			files: this.#snapshot(),
 			cwd: ENGINE_CWD,
-			env: engineEnv({
-				noteFonts: this.noteFonts,
-				vaultRoot: VAULT_ROOT,
-				sessionId: this.sessionId,
-				vaultOptions: this.#vaultOptions,
-				// The device's global TeX fragments; a change to them
-				// reconfigures (ipc.js SETTINGS_SET), so a standby never
-				// outlives the list it was spawned with.
-				globalTexFragments: settings.get('texFragments') ?? [],
-				callouts: this.calloutsEnv(),
-				access: this.access,
-			}),
+			env: this.#env(),
 		});
 		this.#standby = { worker, ready };
 	}

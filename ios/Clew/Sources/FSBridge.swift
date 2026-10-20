@@ -12,9 +12,13 @@ final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 	private let printer = PdfPrinter()
 	private let colonBackups = ColonBackupStore(root: ColonBackupStore.deviceRoot())
 	private let scanner = DocumentScanner()
+	/// The export host (ExportHost.swift), shared with the scheme handler,
+	/// which routes its page's requests.
+	let exportHost: ExportHost
 
-	init(vaults: VaultStore) {
+	init(vaults: VaultStore, exportHost: ExportHost) {
 		self.vaults = vaults
+		self.exportHost = exportHost
 	}
 
 	func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage,
@@ -233,6 +237,36 @@ final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 				case .failure(let error): reply(nil, error.localizedDescription)
 				}
 			}
+
+		case "exportRun":
+			// One export in the export host (UPSTREAM-LATEX-EXPORT-PLAN.md §3):
+			// the job is the JSON string the app page built
+			// (src/shim/export-job.js), run in the host's own web view; the
+			// answer names the folder its outputs were written into, kept
+			// until exportDiscard or the next export.
+			guard let job = params["job"] as? String, !job.isEmpty else { throw ClewError.badPayload }
+			guard let webView, let window = webView.window,
+				let handler = webView.configuration.urlSchemeHandler(forURLScheme: "clew-preview") else {
+				return reply(nil, "no window to export from")
+			}
+			exportHost.run(job: Data(job.utf8), schemeHandler: handler, in: window) { result in
+				switch result {
+				case .success(let done):
+					reply([
+						"folder": done.folder.lastPathComponent,
+						"output": done.output,
+						"files": done.files.keys.sorted().map { ["rel": $0, "bytes": done.files[$0] ?? 0] },
+						"warnings": done.warnings,
+						"ms": done.ms,
+					], nil)
+				case .failure(let error):
+					reply(nil, error.localizedDescription)
+				}
+			}
+
+		case "exportDiscard":
+			guard let folder = params["folder"] as? String else { throw ClewError.badPayload }
+			reply(["removed": exportHost.jobs.discard(folderName: folder)], nil)
 
 		case "shareBase64":
 			guard let name = params["name"] as? String, let base64 = params["base64"] as? String,

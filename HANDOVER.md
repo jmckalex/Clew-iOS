@@ -14,6 +14,15 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
 
 ## 1. Where things stand
 
+- **LaTeX exports on the iPad: L1, the export host, is built**
+  (`latex-p1-host-0e773c3`, chained after the plan `latex-p0-plan-0e773c3`,
+  off the 0e773c3 sync's build commit 527a245; first built as
+  `latex-p1-host` 093cc4e off b1443f4, which Clew-boss verified). It is a
+  hidden preview-scheme WKWebView in a WebContent process of its own,
+  running the engine with mp-tikz-wasm in a worker. No command uses it
+  yet. The plan and L1's measurements are in UPSTREAM-LATEX-EXPORT-PLAN.md.
+  L2 (the .tex export) is next: the 0e773c3 sync brought Clew-app's shared
+  export modules (U1–U7).
 - **The sync to Clew-app `0e773c3` (2026-10-20) is DONE; every check was
   green in the simulator.** The chain is `sync-0e773c3-p1-vendor` →
   `-p2-build` → `-p3-verify`, off b1443f4, and stays off main until
@@ -388,8 +397,15 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
   mp-tikz-wasm v0.5.0 (the latex-doc bundle) and jmarkdown ba83371
   (setFigureLibrary), which Clew-app will vendor and pin; Clew-boss
   sends a notice.
+- **A cold-run flake (Clew-boss, 2026-10-20):** one run straight after a
+  build gave 790/791 and never recurred (seven reruns since). The test was
+  not identified. The likeliest are the fixed waits in
+  tests/services.test.js: 400 ms for the kv debounce ("kv store
+  round-trips") and 800 ms before counting renders ("reading mode follows
+  a .bib edit"). If it recurs, read which test failed before rerunning.
 - **Next work: a note's LaTeX exports on the iPad** (the owner's yes,
-  2026-10-20: "tex yes, pdf yes, 1a 2a 3 allow 4 ok").
+  2026-10-20: "tex yes, pdf yes, 1a 2a 3 allow 4 ok"). L1 is done; see
+  §1.
   - .tex first: the engine worker's `to:'latex'`, MetaPost figures through
     mp-tikz-wasm, and a share of the .tex or a zip.
   - Then PDF via LaTeX: LuaLaTeX in mp-tikz-wasm, after its latex-doc

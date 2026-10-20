@@ -20,3 +20,4 @@ DEMO_BUNDLE="$root/seed-vault" DEMO_HISTORY="$root/vendor/clew/main/demo-history
 	run demo-sync "$root/ios/Clew/Sources/DemoSync.swift" "$root/ios/Clew/Sources/VaultPaths.swift" "$root/ios/Clew/Sources/AtomicFile.swift" "$root/ios/Tests/DemoSync/main.swift"
 run app-secrets "$root/ios/Clew/Sources/AppSecrets.swift" "$root/ios/Tests/AppSecrets/main.swift"
 run colon-conversion "$root/ios/Clew/Sources/ColonConversion.swift" "$root/ios/Clew/Sources/VaultPaths.swift" "$root/ios/Clew/Sources/AtomicFile.swift" "$root/ios/Tests/ColonConversion/main.swift"
+run export-jobs "$root/ios/Clew/Sources/ExportJobs.swift" "$root/ios/Tests/ExportJobs/main.swift"

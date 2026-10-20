@@ -32,7 +32,13 @@ final class WebHost: NSObject, ObservableObject {
 		// Apps in notes: each app on an origin of its own (frame-bridge.md §7).
 		config.setURLSchemeHandler(schemeHandler, forURLScheme: "clew-frame")
 
-		let bridge = FSBridge(vaults: vaults)
+		// The export host (ExportHost.swift): the bridge starts its jobs, the
+		// scheme handler answers its page. A launch begins with no job folders.
+		let exportJobs = ExportJobs(root: FileManager.default.temporaryDirectory.appendingPathComponent("clew-export", isDirectory: true))
+		exportJobs.sweep()
+		let exportHost = ExportHost(jobs: exportJobs)
+		schemeHandler.exportHost = exportHost
+		let bridge = FSBridge(vaults: vaults, exportHost: exportHost)
 		config.userContentController.addScriptMessageHandler(bridge, contentWorld: .page, name: "clew")
 
 		#if DEBUG

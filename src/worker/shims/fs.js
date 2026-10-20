@@ -46,6 +46,17 @@ export function mkdirSync(p) {
 	vfs.mkdir(p);
 }
 
+// jmarkdown's figure cache makes each figure in a run folder of its own
+// (figure-cache.js#compileInRunDir), then renames what it keeps out of it:
+// the export worker's figure engine (src/export/export-worker.js).
+export function mkdtempSync(prefix) {
+	let dir;
+	do dir = prefix + Math.random().toString(36).slice(2, 8);
+	while (vfs.has(dir));
+	vfs.mkdir(dir);
+	return dir;
+}
+
 export function readdirSync(p, options) {
 	const names = vfs.readdir(p);
 	if (!options?.withFileTypes) return names;
@@ -170,7 +181,7 @@ export const promises = fsPromises;
 
 export default {
 	readFileSync, writeFileSync, appendFileSync, existsSync, statSync, lstatSync,
-	mkdirSync, readdirSync, rmSync, rmdirSync, unlinkSync, copyFileSync,
+	mkdirSync, mkdtempSync, readdirSync, rmSync, rmdirSync, unlinkSync, copyFileSync,
 	renameSync, utimesSync, openSync, writeSync, fsyncSync, fchmodSync, closeSync,
 	accessSync, realpathSync, Stats, readFile, writeFile, stat,
 	lstat, readdir, watch, watchFile, unwatchFile, createReadStream,
