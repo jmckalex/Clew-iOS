@@ -1,9 +1,9 @@
-# Handover — 2026-10-15 (the sync to Clew-app f0aeaa4: EmbedPDF's cards fit a narrow viewer; the colon sheet's long list opens at once)
+# Handover — 2026-10-20 (the sync to Clew-app 0ada21d: list keys and the iPad's Next item button; {{TOC}}, title blocks and quotes in lists in live edit)
 
 Current state for a fresh session, rewritten whole. Durable architecture
 lives in **README.md** and **PORT-PLAN.md**. Each sync's reasoning and
 measurements are in its record: `UPSTREAM-*-PLAN.md`. The latest records
-are `UPSTREAM-F0AEAA4-PLAN.md` (EmbedPDF's cards at 208 px, the colon list's fill, the LaTeX refusal, 2026-10-15), `UPSTREAM-EF5F7F2-PLAN.md` (the index cache's save, tables wrapping at words, PDF #page=N, images within a line, 2026-10-15), `UPSTREAM-F4FEB68-PLAN.md` (tables in live edit, the guard, the PDF height upstream, 2026-10-15), `UPSTREAM-185E950-PLAN.md` (the colon retirement and "Convert this vault", 2026-10-11), `HTML-SHARE.md` (the iPad HTML share, 2026-10-11), `UPSTREAM-F959799-PLAN.md` (the figure engine, Proof this chapter, figures
+are `UPSTREAM-0ADA21D-PLAN.md` (list keys, the Next item button, {{TOC}}, title blocks, quotes in lists, 2026-10-20), `UPSTREAM-F0AEAA4-PLAN.md` (EmbedPDF's cards at 208 px, the colon list's fill, the LaTeX refusal, 2026-10-15), `UPSTREAM-EF5F7F2-PLAN.md` (the index cache's save, tables wrapping at words, PDF #page=N, images within a line, 2026-10-15), `UPSTREAM-F4FEB68-PLAN.md` (tables in live edit, the guard, the PDF height upstream, 2026-10-15), `UPSTREAM-185E950-PLAN.md` (the colon retirement and "Convert this vault", 2026-10-11), `HTML-SHARE.md` (the iPad HTML share, 2026-10-11), `UPSTREAM-F959799-PLAN.md` (the figure engine, Proof this chapter, figures
 in exports measured, 2026-10-10), `UPSTREAM-6B6FBBB-PLAN.md` (PostScript figures, system font families,
 mp-tikz-wasm 0.4.0, 2026-10-10), `UPSTREAM-5ABF52D-PLAN.md` (app secrets,
 book mode phase 2, the book print, 2026-10-10), `UPSTREAM-CBFA692-PLAN.md` (book mode and the demo
@@ -14,10 +14,27 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
 
 ## 1. Where things stand
 
-- **The sync to Clew-app `f0aeaa4` (2026-10-15) is DONE; every check was
-  green in the simulator.** The chain is `sync-f0aeaa4-p1-vendor` →
-  `-p2-build` → `-p3-verify`, off main 07810a8. The record is
-  UPSTREAM-F0AEAA4-PLAN.md.
+- **The sync to Clew-app `0ada21d` (2026-10-20) is DONE; every check was
+  green in the simulator, with synthetic input.** The chain is
+  `sync-0ada21d-p1-vendor` → `-p2-build` → `-p3-verify`, off main
+  3447b9d. The record is UPSTREAM-0ADA21D-PLAN.md.
+  - **Lists:** Enter stays in an item, ⌘Enter starts the next one, and ⌘L
+    makes a task (Obsidian's toggle). The desktop's expected log matched
+    line for line, but the keys were synthetic keydowns on CodeMirror. The
+    real hardware and on-screen keyboards are the owner's check on
+    TestFlight.
+  - **The iPad is a touch-first host** (`window.clew.host`, src/shim/ipc.js),
+    so the toolbar draws Next list item (↵, ⌘Enter's command) in the Lists
+    group, enabled in a list.
+  - **Live edit:** `{{TOC}}` follows edited headings. Title-page directives
+    are a title block, sized as reading view's. A quote in a list item
+    stands under its text and reads grey, as reading view's.
+  - Clew's LaTeX export style is the desktop's (export-worker.mjs). Its
+    Settings row is dropped here.
+- **The sync to Clew-app `f0aeaa4` (2026-10-15) is DONE and PUSHED**
+  (2026-10-20, origin/main 3447b9d; cloud build OK). The chain is
+  `sync-f0aeaa4-p1-vendor` → `-p2-build` → `-p3-verify`, off main
+  07810a8. The record is UPSTREAM-F0AEAA4-PLAN.md.
   - **EmbedPDF's cards stay whole at 208 px** (pdf-card-fit.js): the
     error's long word wraps, and the prompt's Open stays inside its card.
   - **The colon sheet's 4,001-note list opens in ~180 ms** (65 s before):
@@ -26,8 +43,8 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
   - The desktop's latexmk, biber and PATH guards and its refusal of a
     restricted vault's PDF via LaTeX are desktop main's, and inert here.
     iOS has no PDF via LaTeX in any vault. The palette still offers a
-    note's two LaTeX exports, refused when run (the record; the owner's
-    call).
+    note's two LaTeX exports, refused when run. The owner has since
+    decided they come to the iPad (§3).
 - **The sync to Clew-app `ef5f7f2` (2026-10-15) is DONE; every check was
   green in the simulator.** The chain is `sync-ef5f7f2-p1-vendor` →
   `-p2-build` → `-p3-verify`, off main c0f2a20. The record is
@@ -304,13 +321,13 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
 ## 2. Waiting on the owner
 
 - **Push main** (a push to main is a TestFlight build). origin/main is
-  07810a8, pushed 2026-10-15 (cloud build OK): the ef5f7f2 sync. The
-  f0aeaa4 sync's build commit (the tip of `sync-f0aeaa4-p3-verify`) goes
+  3447b9d, pushed 2026-10-20 (cloud build OK): the f0aeaa4 sync. The
+  0ada21d sync's build commit (the tip of `sync-0ada21d-p3-verify`) goes
   onto main once Clew-boss has verified it. The push is on the owner's
   word, typed in the Clew-iOS window.
-- **Decide:** should the palette keep "Export note as LaTeX (.tex)" and
-  "Export note as PDF (via LaTeX)" on the iPad? Both are refused when run
-  ("needs a LaTeX toolchain"). The book's equivalents were dropped.
+- (Decided 2026-10-20: both of a note's LaTeX exports come to the iPad,
+  through mp-tikz-wasm, in every vault. Until they are built, the palette
+  keeps both commands, refused when run.)
 0. **Push `integration`** (a push to main is a TestFlight build), and say
    whether the share extension should follow, after the App Store
    Connect steps in CAPTURE.md. On the device, check:
@@ -350,7 +367,28 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
 
 ## 3. Next
 
-- **The next sync's range starts at Clew-app `f0aeaa4`.**
+- **The next sync's range starts at Clew-app `0ada21d`.** Clew-app's
+  0038ec3..2675150 (the export worker's `Header style: fenced`, `LaTeX
+  maketitle`, the vault's Biblify) waits on the owner's push there.
+- **Next work: a note's LaTeX exports on the iPad** (the owner's yes,
+  2026-10-20: "tex yes, pdf yes, 1a 2a 3 allow 4 ok").
+  - .tex first: the engine worker's `to:'latex'`, MetaPost figures through
+    mp-tikz-wasm, and a share of the .tex or a zip.
+  - Then PDF via LaTeX: LuaLaTeX in mp-tikz-wasm, after its latex-doc
+    bundle, bibtex/makeindex wasm and third-pass fix, and jmarkdown's
+    coloured code stand-in.
+  - Every vault is allowed: no shell escape, and no file outside the vault
+    reaches the engine. The app grows 12–17 MB.
+  - A device memory check comes before the PDF ships (~550 MiB a LuaLaTeX
+    pass).
+  - The plan will be UPSTREAM-LATEX-EXPORT-PLAN.md; the scoping is in
+    Claude's memory and Clew-boss's ledger.
+- **iPad checks from the 0ada21d sync:** its record's list (a hardware
+  keyboard's Enter, ⌘Enter and ⌘L in a list; the on-screen keyboard's
+  Return and the Next item button; `{{TOC}}`, a title block and a quote in
+  a list on the device).
+- **Upstream candidate from the 0ada21d sync:** a quote in a nested list
+  item is 2 px right of its item's text in live edit (0 in reading view).
 - (Done upstream in f0aeaa4's range: the ef5f7f2 sync's two card
   candidates, and the colon list's fill.)
 - **iPad checks from the f0aeaa4 sync:** its record's list (the cards
