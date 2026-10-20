@@ -52,6 +52,10 @@ function markOf(cls) {
 }
 
 /** Inline constructs whose delimiters hide and whose body gets a class. */
+/** `@today` as the engine prints it (additional-directives.js#todayText):
+ *  "19 October 2026", whatever this Mac's locale. */
+const todayText = () => new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+
 const STYLED = new Set(['strong', 'intense', 'italic', 'underline', 'highlight', 'strike', 'sub', 'sup', 'code']);
 
 /**
@@ -228,11 +232,20 @@ function build(view) {
 
 	function directive(c) {
 		const content = c.content ? text(c.content) : '';
+		if (c.titlePage) {
+			c.hidden.forEach(hide);
+			// `@date+[@today]`, the idiom: a directive at a bracket's start is
+			// no construct to the scanner, so the date is drawn here.
+			if (/^\s*[@:]today\s*$/.test(content)) {
+				widget(c.content.from, c.content.to, new ChipWidget({ cls: 'le-today', text: todayText(), title: text(c) }));
+			} else {
+				mark(c.content.from, c.content.to, 'le-tp-text');
+			}
+			return;
+		}
 		switch (c.name) {
 			case 'today':
-				widget(c.from, c.to, new ChipWidget({
-					cls: 'le-today', text: new Date().toLocaleDateString(), title: text(c),
-				}));
+				widget(c.from, c.to, new ChipWidget({ cls: 'le-today', text: todayText(), title: text(c) }));
 				return;
 			case 'label': {
 				const target = numbers().labels.get(content);
@@ -314,6 +327,21 @@ function build(view) {
 					lineClass(c.from, `le-align-${c.align}`);
 					if (hidden) c.hidden.forEach(hide);
 					break;
+				case 'directiveAt':
+				case 'directiveInline': {
+					// A title-page line (model.js#TITLE_PAGE): its size on every
+					// line it spans, in both states, as a heading's; concealed, a
+					// line the bracket runs on to starts at the margin.
+					if (!c.titlePage) break;
+					const first = doc.lineAt(c.from).number;
+					const last = doc.lineAt(c.to).number;
+					for (let n = first; n <= last; n += 1) {
+						const line = doc.line(n);
+						lineClass(line.from, `le-tp le-tp-${c.titlePage}`);
+						if (hidden && n > first) hide({ from: line.from, to: line.from + /^[ \t]*/.exec(line.text)[0].length });
+					}
+					break;
+				}
 				case 'quote': {
 					// A callout's lines draw one box, as reading view's .callout:
 					// its first and last carry the padding and the corners; a bare
@@ -325,8 +353,13 @@ function build(view) {
 						? ` le-callout le-callout-${c.callout}${color ? ' le-callout-custom' : ''}${c.calloutFirst ? ' le-callout-first' : ''}${c.calloutLast ? ' le-callout-last' : ''}`
 						: '';
 					const blank = /^(?:[ \t]*>)+[ \t]*$/.test(doc.lineAt(c.from).text) ? ' le-quote-blank' : '';
-					lineClass(c.from, `le-quote le-quote-${Math.min(c.depth, 4)}${box}${blank}`,
-						color ? { style: `--clew-callout-color: ${color}` } : undefined);
+					// A quote in a list item stands under the item's text
+					// (model.js#quote), its indentation concealed whatever the
+					// reveal, as a list line's is.
+					const style = [color && `--clew-callout-color: ${color}`, c.listMark && `--le-indent: ${listIndent(c)}`].filter(Boolean).join('; ');
+					lineClass(c.from, `le-quote le-quote-${Math.min(c.depth, 4)}${box}${blank}${c.listMark ? ' le-quote-li' : ''}`,
+						style ? { style } : undefined);
+					if (c.indent) hide(c.indent);
 					if (hidden) c.hidden.forEach(hide);
 					break;
 				}

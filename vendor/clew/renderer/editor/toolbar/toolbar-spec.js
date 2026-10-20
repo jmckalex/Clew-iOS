@@ -91,6 +91,11 @@ export const TOOLBAR_GROUPS = [
 		{ kind: 'toggle', icon: 'list-ul', label: 'Bullet list', command: 'format:bullet-list', active: (s) => s.blockType === 'bullet' },
 		{ kind: 'toggle', icon: 'list-ol', label: 'Numbered list', command: 'format:numbered-list', active: (s) => s.blockType === 'numbered' },
 		{ kind: 'toggle', icon: 'list-check', label: 'Task list', command: 'format:task-list', active: (s) => s.blockType === 'task' },
+		// ⌘Enter's next item, as a button where there is no ⌘ — a touch-first
+		// host (lib/host.js: the iPad; the owner's ask 2026-10-20). Never drawn
+		// on a Mac.
+		{ kind: 'button', icon: 'arrow-turn-down', label: 'Next list item', command: 'editor:new-list-item',
+			enabled: (s) => s.inList, when: (s) => s.touchFirst === true },
 		{ kind: 'button', icon: 'outdent', label: 'Outdent', command: 'format:outdent', enabled: (s) => s.inList },
 		{ kind: 'button', icon: 'indent', label: 'Indent', command: 'format:indent', enabled: (s) => s.inList },
 	] },

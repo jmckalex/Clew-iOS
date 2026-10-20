@@ -22,14 +22,20 @@ import { fenceLanguage } from '../langs/fence-languages.js';
 /**
  * The markdown extension for a note.
  *
- * @param {{ normalSyntax?: boolean }} [options] - The vault's
- *   `normalSyntax` setting: standard markdown emphasis, and no TeX-style
- *   sub/superscripts (the engine registers neither under it).
+ * @param {{ normalSyntax?: boolean, keymap?: boolean }} [options] -
+ *   `normalSyntax`: the vault's setting — standard markdown emphasis, and no
+ *   TeX-style sub/superscripts (the engine registers neither under it).
+ *   `keymap`: lang-markdown's own keys (Enter continues a list or quote,
+ *   Backspace deletes markup) at ITS precedence, Prec.high — off by default,
+ *   because the note editor puts them in its own order, after Enter in a list
+ *   item (note-keys.js); at Prec.high they ran first and that Enter never
+ *   did on an item's first line. The table cell editor asks for them.
  * @returns {import('@codemirror/language').LanguageSupport}
  */
-export function noteMarkdown({ normalSyntax = false } = {}) {
+export function noteMarkdown({ normalSyntax = false, keymap = false } = {}) {
 	return markdown({
 		base: markdownLanguage,
+		addKeymap: keymap,
 		// jmarkdown has no indented code blocks or setext headings; removing
 		// them also stops the metadata header masquerading as a heading.
 		// jmdFootnotes takes `[^label: …]` / `[fn: …]` away from the link

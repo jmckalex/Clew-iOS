@@ -114,7 +114,8 @@ function cellState(main, text, head) {
 		doc: text,
 		selection: { anchor: Math.min(head, text.length) },
 		extensions: [
-			noteMarkdown({ normalSyntax: config.normalSyntax }),
+			// lang-markdown's keys as a cell always had them (markdown-config.js).
+			noteMarkdown({ normalSyntax: config.normalSyntax, keymap: true }),
 			clewHighlighting,
 			jmdOverlay(),
 			// The live INLINE layer: `*strong*` conceals in a cell as it does in

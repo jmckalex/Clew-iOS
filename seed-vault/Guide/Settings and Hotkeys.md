@@ -47,7 +47,8 @@ The **This vault** section holds per-vault settings (stored in
 | ⌘E | Toggle reading mode |
 | ⌘⇧E | Toggle live edit / source |
 | ⌥⇧T | Focus the editor toolbar |
-| ⌘↩ | Toggle the task on this line |
+| ⌘↩ | Next list item (Enter stays in the item) |
+| ⌘L | Make this line a task, or tick / untick it |
 | ⌘⇧F / ⌘F | Search vault / search note |
 | ⌘⌥← ⌘⌥→ | History back / forward |
 | ⌘T ⌘W ⌃Tab | New / close / cycle tabs |

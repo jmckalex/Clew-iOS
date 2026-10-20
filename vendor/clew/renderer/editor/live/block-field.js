@@ -97,11 +97,7 @@ function build(state) {
 		out.push(Decoration.replace({ widget, block: true }).range(c.lineFrom, c.lineTo));
 	};
 
-	const headings = model.filter((c) => c.kind === 'heading').map((h) => ({
-		depth: h.depth,
-		text: text(h.hidden[0]?.to ?? h.from, h.hidden[1]?.from ?? h.to).trim(),
-		pos: h.hidden[0]?.to ?? h.from,
-	}));
+	const headings = tocHeadings(state).map(({ depth, text }) => ({ depth, text }));
 
 	// Tier C placeholders. An edit to a block changes its id (the id is a
 	// hash of the text), so a height is also remembered by kind + ordinal:
@@ -229,6 +225,23 @@ function tableWidget(state, c, model, numbering) {
 			: tooBig ? `Large table (over ${CELL_EDIT_LIMITS.rows} rows or ${CELL_EDIT_LIMITS.cols} columns) — edited as source` : '',
 		active,
 	});
+}
+
+/**
+ * The headings a `{{TOC}}` lists, in order, each with where its text starts
+ * — what the widget draws and what a click on its Nth entry goes to, read
+ * from the same state so the two cannot disagree.
+ *
+ * @returns {{depth: number, text: string, pos: number}[]}
+ */
+export function tocHeadings(state) {
+	const live = state.field(liveStateField, false);
+	if (!live) return [];
+	return live.model.filter((c) => c.kind === 'heading').map((h) => ({
+		depth: h.depth,
+		text: state.doc.sliceString(h.hidden[0]?.to ?? h.from, h.hidden[1]?.from ?? h.to).trim(),
+		pos: h.hidden[0]?.to ?? h.from,
+	}));
 }
 
 function hasFoldedCallouts(state) {

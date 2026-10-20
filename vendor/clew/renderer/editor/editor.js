@@ -13,17 +13,13 @@
 // wikilink/tag completion sources land in M3.
 import { EditorState, Compartment } from '@codemirror/state';
 import {
-	EditorView, keymap, drawSelection, dropCursor, highlightActiveLine,
+	EditorView, drawSelection, dropCursor, highlightActiveLine,
 } from '@codemirror/view';
-import {
-	defaultKeymap, history, historyKeymap, indentWithTab,
-} from '@codemirror/commands';
+import { history } from '@codemirror/commands';
 import { indentOnInput, bracketMatching } from '@codemirror/language';
-import {
-	autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap,
-} from '@codemirror/autocomplete';
-import { search, searchKeymap } from '@codemirror/search';
-import { markdownKeymap } from '@codemirror/lang-markdown';
+import { autocompletion, closeBrackets } from '@codemirror/autocomplete';
+import { search } from '@codemirror/search';
+import { noteKeys } from './note-keys.js';
 import { clewEditorTheme, clewHighlighting } from './theme.js';
 import { wikilinkCompletions } from './complete/wikilinks.js';
 import { slashCompletions } from './complete/slash-commands.js';
@@ -40,7 +36,6 @@ import { jmdOverlay } from './jmd/overlay.js';
 import { noteMarkdown } from './jmd/markdown-config.js';
 import { liveCompartment } from './live/index.js';
 import { jmdFolding } from './jmd/folding.js';
-import { tableKeymap } from './tables.js';
 import { autoFillHandler } from './fill.js';
 import { settingsStore } from '../state/settings-store.js';
 
@@ -102,19 +97,9 @@ export function makeNoteState(doc, handlerRef, { normalSyntax = false } = {}) {
 				column: settingsStore.get('fillColumn') ?? 72,
 			})),
 			search({ top: true }),
-			// Before the general keymap: Tab has to reach a table before
-			// indentWithTab claims it. Every handler declines when the cursor
-			// is not in a table, so ordinary Tab is untouched.
-			tableKeymap(),
-			keymap.of([
-				...closeBracketsKeymap,
-				...markdownKeymap,
-				...defaultKeymap,
-				...historyKeymap,
-				...searchKeymap,
-				...completionKeymap,
-				indentWithTab,
-			]),
+			// The keys, in order (note-keys.js — lang-markdown's keymap among
+			// them, after Enter in a list item).
+			noteKeys(),
 			EditorView.lineWrapping,
 			EditorView.updateListener.of((update) => onUpdate?.(update)),
 		],

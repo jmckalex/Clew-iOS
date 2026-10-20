@@ -13,6 +13,7 @@
 // Pure — from the editor state and the construct model — so it is tested
 // without a toolbar.
 import { undoDepth, redoDepth } from '@codemirror/commands';
+import { touchFirst } from '../../lib/host.js';
 
 const INLINE = {
 	strong: 'strong', intense: 'intense', italic: 'italic', underline: 'underline',
@@ -24,9 +25,10 @@ const INLINE = {
 /**
  * @param {import('@codemirror/state').EditorState} state
  * @param {object[]} model - liveModel(state)
- * @param {{ mode?: string, normalSyntax?: boolean }} [options]
+ * @param {{ mode?: string, normalSyntax?: boolean, inCell?: boolean, touch?: boolean }} [options] -
+ *   `touch`: a touch-first host (lib/host.js — the iPad), for its own items
  */
-export function deriveState(state, model, { mode = 'source', normalSyntax = false, inCell = false } = {}) {
+export function deriveState(state, model, { mode = 'source', normalSyntax = false, inCell = false, touch = touchFirst() } = {}) {
 	const { from, to, head } = state.selection.main;
 	const line = state.doc.lineAt(head);
 	const contains = (c) => c.from <= from && c.to >= to;
@@ -67,6 +69,7 @@ export function deriveState(state, model, { mode = 'source', normalSyntax = fals
 		inTable: blockType === 'table',
 		// A table cell is being edited in place (docs/dev/live-edit.md §5.5c).
 		inCell,
+		touchFirst: touch,
 		selectionEmpty: from === to,
 		multiLine: state.doc.lineAt(from).number !== state.doc.lineAt(to).number,
 	};

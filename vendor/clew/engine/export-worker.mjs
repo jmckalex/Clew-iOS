@@ -52,11 +52,13 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveFileTarget } from './vault-files.js';
 import { familyFiles, readFontIndex } from './font-families.js';
+import { latexStyleConfig, headerValues, STYLE_KEYS } from './latex-style.js';
 
 const engineDir = path.dirname(process.argv[2]);
 const load = (name) => import(pathToFileURL(path.join(engineDir, name)).href);
 const { processFile } = await load('index.js');
 const { getWarnings } = await load('warnings.js');
+const { configManager, DEFAULT_CONFIG } = await load('config-manager.js');
 
 let building = null;   // the build's message: its file and options
 const fontIndex = process.env.CLEW_FONT_INDEX ? readFontIndex(process.env.CLEW_FONT_INDEX) : null;
@@ -98,6 +100,36 @@ process.once('message', async (msg) => {
 	building = msg;
 	try {
 		const options = { ...msg.options, obsidianLinks: { resolveEmbed, resolveLink: () => null }, ...figureFonts };
+		// Clew's LaTeX style (latex-style.js): configuration added to what the
+		// user's config files gave the engine at import — decided before the
+		// build, and again when the engine merges the document's header
+		// (wrapped here: the engine's own parse; a note with no header never
+		// merges one), from the config as it was, so the header's `Lang` and
+		// `LaTeX engine` decide it and no key the header set is touched. Once,
+		// and for the engine's own configuration only: a book's chapter checks
+		// merge into TRIAL copies made with Object.create(configManager)
+		// (book.js#sameAsBook), which inherit this wrapper — re-deciding from a
+		// chapter's one key reset a German book's language to English
+		// (measured).
+		if (msg.latexStyle && options.to === 'latex') {
+			const user = new Map(['Lang', ...STYLE_KEYS].map((k) => [k, configManager.get(k)]));
+			const style = (header) => {
+				for (const key of STYLE_KEYS) if (!(key in header)) configManager.set(key, user.get(key));
+				const where = { ...msg.latexStyle, defaults: DEFAULT_CONFIG, header };
+				for (const [key, value] of latexStyleConfig((k) => user.get(k), where)) configManager.set(key, value);
+			};
+			style({});
+			const merge = configManager.mergeMetadata;
+			let decided = false;
+			configManager.mergeMetadata = function (metadata) {
+				const merged = merge.call(this, metadata);
+				if (this === configManager && !decided) {
+					decided = true;
+					style(headerValues(metadata));
+				}
+				return merged;
+			};
+		}
 		const { outFile, bookMap = null, latexFiles = null } = await processFile(msg.file, options);
 		if (process.send) process.send({ type: 'done', output: outFile, warnings: getWarnings(), bookMap, latexFiles });
 	} catch (err) {

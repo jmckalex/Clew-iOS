@@ -23,14 +23,14 @@ import { Prec } from '@codemirror/state';
 import * as actions from '../../commands/actions.js';
 import { openExternal } from '../../lib/external-links.js';
 import { runCommand } from '../../commands/registry.js';
-import { setCalloutFold, calloutFolded } from './block-field.js';
+import { setCalloutFold, calloutFolded, tocHeadings } from './block-field.js';
 import { liveStateField } from './reveal-field.js';
 import { activateCell } from './table-cell-editor.js';
 import { openTableMenu } from '../toolbar/popovers.js';
 import { numberingFor } from './numbering-source.js';
 import { workspaceStore } from '../../state/workspace-store.js';
 
-const TARGETS = '[data-le-cite],[data-le-cell],[data-le-task],[data-le-fold],[data-le-copy],[data-le-goto],[data-le-command],[data-le-href],[data-le-target],[data-le-tag],[data-le-ref],[data-le-blockid],.le-reveal-on-click';
+const TARGETS = '[data-le-cite],[data-le-cell],[data-le-task],[data-le-fold],[data-le-copy],[data-le-heading],[data-le-command],[data-le-href],[data-le-target],[data-le-tag],[data-le-ref],[data-le-blockid],.le-reveal-on-click';
 
 /** Put the cursor at `pos` (revealing whatever is there) and focus. */
 function placeCursor(view, pos) {
@@ -89,8 +89,11 @@ export const liveEvents = Prec.high(EditorView.domEventHandlers({
 			if (fence) navigator.clipboard.writeText(view.state.doc.sliceString(fence.body.from, fence.body.to)).catch(() => {});
 			return true;
 		}
-		if (el.dataset.leGoto) {
-			const pos = Math.min(Number(el.dataset.leGoto), view.state.doc.length);
+		if (el.dataset.leHeading) {
+			// A TOC entry: its heading as the document is now.
+			const heading = tocHeadings(view.state)[Number(el.dataset.leHeading)];
+			if (!heading) return true;
+			const pos = Math.min(heading.pos, view.state.doc.length);
 			view.dispatch({ selection: { anchor: pos }, effects: EditorView.scrollIntoView(pos, { y: 'start' }) });
 			view.focus();
 			return true;

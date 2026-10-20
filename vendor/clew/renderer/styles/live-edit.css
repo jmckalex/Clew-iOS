@@ -88,6 +88,19 @@
 .le-h5, .le-h6 { font-size: 1em; }
 .le-h6 { color: var(--clew-text-muted); }
 
+/* ---- the title page: `@title[…]`, `@author[…]`, … alone on their lines
+   (model.js#TITLE_PAGE), sized as reading view sizes them (preview.css) —
+   on the LINE, in both states, as a heading's. Concealed, the text is plain:
+   no directive underline, and not the link colour the markdown grammar gives
+   a `[…]`. `@today` in one reads as the line's text. ---- */
+.le-tp { --le-tp-color: var(--clew-text-normal); }
+.le-tp-title { --le-tp-color: var(--clew-heading); font-size: 1.8em; font-weight: 700; line-height: 1.25; color: var(--le-tp-color); }
+.le-tp-title:not(.le-tp-title + .le-tp-title) { padding-top: 0.3em !important; }
+.le-tp-title:not(:has(+ .le-tp-title)) { padding-bottom: 0.2em !important; }
+.le-tp-author, .le-tp-date { font-size: 1.15em; line-height: 1.4; }
+.le-tp .le-tp-text, .le-tp .le-tp-text .cmt-link, .le-tp .cmt-link .le-tp-text { color: var(--le-tp-color); }
+.le-tp .le-today { background: none; color: inherit; font: inherit; padding: 0; }
+
 /* ---- alignment ---- */
 .le-align-center { text-align: center; }
 .le-align-right { text-align: right; }
@@ -123,9 +136,13 @@
 .le-done { color: var(--clew-text-muted); text-decoration: line-through; text-decoration-color: var(--clew-text-faint); }
 
 /* ---- quotes and callouts (colours mirror preview.css's callout table) ---- */
+/* A quote is reading view's (preview.css `blockquote`): muted text, the
+   border's grey bar — --clew-text-muted and --clew-border are its
+   --preview-muted and --preview-border, in both themes. Until 2026-10-19 it
+   was source mode's quote green (the owner's choice). */
 .le-quote {
-	border-left: 3px solid var(--clew-quote);
-	color: var(--clew-quote);
+	border-left: 3px solid var(--clew-border);
+	color: var(--clew-text-muted);
 	padding-left: 20px !important;
 	margin-left: 24px;
 }
@@ -187,6 +204,15 @@
    reading view's list does, 2.5em from the callout's text. */
 .le-quote.le-li, .le-quote.le-li-cont { padding-left: calc(20px + var(--le-hang)) !important; }
 .le-quote.le-callout.le-li, .le-quote.le-callout.le-li-cont { padding-left: calc(16px + 2.5em + var(--le-indent, 0) * 0.3em) !important; }
+/* A quote inside a list item: its border under the item's text, where
+   reading view's <li> holds it — the item's hang past the line's 24px — and
+   its text the quote's, not the list face lang-markdown gives the item's
+   every span (model.js#quote). */
+.le-quote.le-quote-li {
+	--le-hang: calc(var(--le-indent, 0) * 0.3em + 1.4em);
+	margin-left: calc(24px + var(--le-hang));
+}
+.cm-live .le-quote .cmt-list { color: inherit; }
 /* A bare `>` between a callout's paragraphs is reading view's paragraph gap. */
 .le-quote.le-callout.le-quote-blank { line-height: 1em; }
 .le-callout-note          { --callout: #5b8def; }
@@ -375,9 +401,9 @@ body[data-theme='light'] .le-frame { color-scheme: light; }
 	font-size: 0.8em;
 }
 .le-frame-slot.is-measured .le-frame-skeleton { border-color: transparent; color: transparent; }
-/* A callout's text is prose, as in reading mode — not the quote face that
-   lang-markdown puts on every span of a blockquote. */
-.cm-live .le-callout .cmt-quote { color: inherit; }
+/* A quote's text is its line's colour — muted, or a callout's prose — not
+   the quote face lang-markdown puts on every span of a blockquote. */
+.cm-live .le-quote .cmt-quote { color: inherit; }
 /* lang-markdown tags `__x__` as strong emphasis, and the source theme's
    strong face is the dialect's INTENSE (small caps). Concealed, `__x__` is
    an underline and nothing else — whichever way the two spans nest. */

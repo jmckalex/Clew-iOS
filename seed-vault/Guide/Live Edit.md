@@ -47,7 +47,7 @@ becomes a small badge — click it to copy a link to its block. ^live-inline
 
 - Bullets are drawn as bullets
   - and nested ones as nested ones
-- [ ] a task: click the box, or put the cursor on it and press *⌘↩*
+- [ ] a task: click the box, or put the cursor on it and press *⌘L*
 - [x] a finished task
 1. numbered items keep their numbers
 

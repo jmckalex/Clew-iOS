@@ -89,6 +89,18 @@ function workerPath(restricted) {
  * worker, which gives the engine those resolvers. Without it, the engine's
  * own worker, exactly as before.
  */
+/**
+ * Clew's LaTeX style for this build (engine/latex-style.js), or null: a
+ * LaTeX build, the `latexExportStyle` setting `clew` (the default), and an
+ * engine that can set its fonts — never with pdfLaTeX forced. The machine's
+ * locale and platform choose the paper, the hyphenation and the emoji face.
+ */
+function latexStyle(options) {
+	if (options?.to !== 'latex' || (settings.get('latexExportStyle') ?? 'clew') !== 'clew') return null;
+	if (settings.get('latexEngine') === 'pdflatex') return null;
+	return { locale: Intl.DateTimeFormat().resolvedOptions().locale, platform: process.platform };
+}
+
 export function runWorker({ file, options, cwd, callouts = '', vault = null }) {
 	// The font index the export worker hands figures' named families from
 	// (engine/font-families.js) — the preview's, brought up to date first
@@ -113,7 +125,7 @@ export function runWorker({ file, options, cwd, callouts = '', vault = null }) {
 		child.stderr.on('data', (chunk) => { stderr += chunk; });
 		child.on('message', (msg) => {
 			if (msg?.type === 'ready') {
-				child.send({ type: 'build', file, options });
+				child.send({ type: 'build', file, options, latexStyle: latexStyle(options) });
 			} else if (msg?.type === 'done') {
 				resolve({
 					output: msg.output, warnings: Array.isArray(msg.warnings) ? msg.warnings : [],

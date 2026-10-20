@@ -62,6 +62,9 @@ const CALLOUT_HEAD = /^[ \t]*\[!([A-Za-z][\w-]*)\][ \t]*([+-]?)[ \t]*(.*)$/;
 /** The engine's alignment rules (syntax-enhancements.js). */
 const ALIGN_CENTER = /^>> .*<<\s*$/;
 const ALIGN_RIGHT = /^>>/;
+/** The engine's title-page directives (additional-directives.js): each a
+ *  `<div class>` of its name, sized by preview.css as its LaTeX sizes it. */
+const TITLE_PAGE = new Set(['title', 'subtitle', 'author', 'institution', 'date']);
 /** A description-list term: `Term:: definition` (the engine's form). */
 const TERM = /^([^\s:>|#-][^:\n]*?)::(?:\s|$)/;
 
@@ -372,8 +375,18 @@ function build(doc, tree, config) {
 		// The outermost blockquote collects every marker, nested ones
 		// included — the tree visits the nested nodes too, for callouts.
 		if (depth > 1) return;
+		// A quote inside a list item (`* text`, then `    > …`) stands under
+		// the item's text, as reading view's <li> holds it: each of its lines
+		// knows the item's marker (inline-layer.js#listIndent). Until
+		// 2026-10-19 it was drawn at the note's margin, left of the bullets,
+		// the spaces before its `>` showing (the owner's report).
+		let item = node.parent;
+		while (item && item.name !== 'ListItem') item = item.parent;
+		const itemMark = item ? childrenNamed(item, 'ListMark')[0] : null;
 		for (const mark of descendantsNamed(node, 'QuoteMark')) {
-			quoteLine(lineOf(mark.from).from).marks.push(mark);
+			const entry = quoteLine(lineOf(mark.from).from);
+			entry.marks.push(mark);
+			if (itemMark) entry.listMark = rangeOf(itemMark);
 		}
 	}
 	function quoteLine(from) {
@@ -482,6 +495,9 @@ function build(doc, tree, config) {
 		add('quote', 'A', 'line', from, line.to, {
 			depth: entry.marks.length, callout: entry.callout,
 			...(entry.callout ? { calloutFirst: entry.calloutFirst, calloutLast: entry.calloutLast } : {}),
+			// In a list item: the item's marker, and the indentation before the
+			// first `>` — concealed in both states, as a list line's is.
+			...(entry.listMark ? { listMark: entry.listMark, indent: { from, to: entry.marks[0].from } } : {}),
 			hidden: [{ from: entry.marks[0].from, to: skipSpace(doc, last.to, line.to, 1) }],
 		});
 	}
@@ -582,9 +598,16 @@ function build(doc, tree, config) {
 					add('richBlock', 'C', 'block', s.start, s.end, { source: 'directiveAt', name });
 					break;
 				}
+				// A title-page line — `@title[…]`, `@author+[…]`, `::date[…]` — on
+				// its own line(s) is drawn as reading view draws it (inline-
+				// layer.js: line classes, as a heading's). `@<title>` too — the
+				// sigils never change a known name — but not `:title`, which the
+				// engine prints as a <title> element (both measured).
+				const titlePage = TITLE_PAGE.has(name) && s.content && alone(s.start, s.end)
+					&& (s.kind === 'directiveAt' || s.block);
 				add(s.kind, 'A', 'inline', s.start, s.end, {
 					name, content: r(s.content), attrs: r(s.attrs), block: s.block,
-					hidden: directiveHidden(s),
+					hidden: directiveHidden(s), titlePage: titlePage ? name : null,
 				});
 				break;
 			}

@@ -82,6 +82,16 @@ body {
 }
 
 h1, h2, h3, h4, h5, h6 { line-height: 1.25; color: var(--preview-text); }
+/* The title-page directives (jmarkdown's additional-directives.js: `@title`,
+   `@subtitle`, `@author`, `@institution`, `@date`, each a <div> of its
+   class), sized as the engine's LaTeX sizes them — the title bold and large,
+   author and date a step up, subtitle and institution as body text — one line
+   each, a little room under the title. Until 2026-10-19 they were unstyled
+   body text. A title-box's `.title` is the box's own; `@today` is a
+   span.date, sized by the line it is in. Live edit draws the same lines
+   (live-edit.css, `.le-tp`). */
+div.title:not(.title-box > .title) { font-size: 1.8em; font-weight: 700; line-height: 1.25; margin: 0.4em 0 0.3em; }
+div.author, div.date { font-size: 1.15em; line-height: 1.4; }
 a { color: var(--preview-accent); }
 hr { border: none; border-top: 1px solid var(--preview-border); }
 blockquote {

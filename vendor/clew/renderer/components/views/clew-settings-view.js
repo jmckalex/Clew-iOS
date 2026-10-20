@@ -89,6 +89,15 @@ class ClewSettingsView extends ClewElement {
 				this.#hint('Automatic reads the exported document: one that loads fontspec, unicode-math, '
 					+ 'polyglossia or Lua code (a \\setmainfont in your jmarkdown config, say) is compiled with '
 					+ 'LuaLaTeX, anything else with pdfLaTeX. Choose an engine here for what that cannot see.'),
+				this.#selectRow('Style of LaTeX and PDF via LaTeX exports', 'latexExportStyle',
+					[['clew', 'Clew (EB Garamond)'], ['none', 'Your jmarkdown configuration only']]),
+				this.#hint('Clew\'s style sets the document in EB Garamond with matching maths, 12pt on A4 '
+					+ '(US Letter where your Mac\'s region uses it), with smart quotes and the language\'s '
+					+ 'hyphenation — on top of your jmarkdown configuration, whose packages and macros still '
+					+ 'apply; its fonts win over a font your configuration sets. A note\'s own header keys '
+					+ '(Class options, Geometry, LaTeX preamble, …) win over the style. It needs LuaLaTeX or '
+					+ 'XeLaTeX, so with pdfLaTeX chosen above it is left out; a TeX installation without the '
+					+ 'EB Garamond fonts keeps its default face.'),
 				this.#selectRow('TikZ and MetaPost figures in exports', 'exportFigureEngine',
 					[['auto', 'Clew\'s built-in TeX'], ['external', 'Your TeX installation']]),
 				this.#hint('For a note or book exported as HTML, LaTeX or PDF. Clew\'s built-in TeX is the '

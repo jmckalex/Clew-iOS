@@ -58,6 +58,11 @@ const DEFAULTS = {
 	// generated document (main/latex-engine.js — fontspec and friends take
 	// LuaLaTeX), or 'pdflatex' | 'lualatex' | 'xelatex' for what it cannot see.
 	latexEngine: 'auto',
+	// The style of a LaTeX export and a PDF via LaTeX (src/engine/latex-style.js):
+	// 'clew' — EB Garamond, 12pt, A4 or Letter by region, and the rest, added
+	// to the user's jmarkdown configuration, a note's header still winning —
+	// or 'none', that configuration alone. With pdfLaTeX forced above, 'none'.
+	latexExportStyle: 'clew',
 	// What draws TikZ and MetaPost in a TRUSTED vault's note and book exports
 	// (export-cache.js#figureEngineOptions): 'auto' — mp-tikz-wasm, the
 	// preview's own build, with the installed TeX tools for a figure it cannot

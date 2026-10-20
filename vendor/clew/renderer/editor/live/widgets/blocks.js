@@ -31,8 +31,18 @@ export class HrWidget extends WidgetType {
 	ignoreEvent(event) { return event.type !== 'mousedown'; }
 }
 
+/**
+ * The note's contents. An entry carries its heading's ORDINAL, and a click
+ * finds that heading's place in the document as it is then
+ * (block-field.js#tocHeadings) — a position kept in the DOM went stale at
+ * the first edit above its heading, and a click landed there. So the
+ * entries' text and depth are the whole widget, and a widget differing in
+ * either is drawn afresh; until 2026-10-19 an `updateDOM` that patched only
+ * positions kept a renamed heading's old text, which CodeMirror reuses
+ * whenever it says yes (smoke/live-toc-scenario.js).
+ */
 export class TocWidget extends WidgetType {
-	/** @param {{depth: number, text: string, pos: number}[]} headings */
+	/** @param {{depth: number, text: string}[]} headings */
 	constructor(headings) {
 		super();
 		this.headings = headings;
@@ -40,8 +50,6 @@ export class TocWidget extends WidgetType {
 	}
 
 	eq(other) {
-		// Positions move with every edit above a heading; the entries only
-		// need them at click time, so they are patched in updateDOM.
 		return other instanceof TocWidget && other.key === this.key;
 	}
 
@@ -54,22 +62,15 @@ export class TocWidget extends WidgetType {
 		el.append(title);
 		const list = document.createElement('ul');
 		const top = Math.min(...this.headings.map((h) => h.depth), 6);
-		for (const h of this.headings) {
+		this.headings.forEach((h, i) => {
 			const li = document.createElement('li');
 			li.style.paddingLeft = `${(h.depth - top) * 1.2}em`;
 			li.textContent = h.text;
-			li.dataset.leGoto = String(h.pos);
+			li.dataset.leHeading = String(i);
 			list.append(li);
-		}
+		});
 		el.append(list);
 		return el;
-	}
-
-	updateDOM(dom) {
-		const items = dom.querySelectorAll('li');
-		if (items.length !== this.headings.length) return false;
-		items.forEach((li, i) => { li.dataset.leGoto = String(this.headings[i].pos); });
-		return true;
 	}
 
 	ignoreEvent(event) { return event.type !== 'mousedown'; }
