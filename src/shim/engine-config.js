@@ -2,18 +2,22 @@
 // has to agree on: which vault files are TEXT (and so enter the vfs snapshot
 // with their bytes), and the jmarkdown config the worker reads at import time.
 //
-// This module is deliberately dependency-free — no bridge, no vfs, no DOM —
-// so the Node-side harness (tools/render-note.mjs, and the test battery it
-// backs) imports exactly what the app runs. Before this existed the harness
-// carried its own hand-copied config, which silently went stale: the 0.8 sync
-// added four engine extensions and the harness rendered notes without them,
-// reporting green while callouts, dataview, bases and block refs did nothing.
+// This module is deliberately free of the app — no bridge, no vfs, no DOM;
+// its one import is a pure vendored module — so the Node-side harness
+// (tools/render-note.mjs, and the test battery it backs) imports exactly
+// what the app runs. Before this existed the harness carried its own
+// hand-copied config, which silently went stale: the 0.8 sync added four
+// engine extensions and the harness rendered notes without them, reporting
+// green while callouts, dataview, bases and block refs did nothing.
 //
 // Mirrors vendor/clew/main/render-service.js #writeEngineConfig +
-// #biblifyConfig. Extension paths here are REGISTRY KEYS, not filesystem
+// #biblifyConfig (whose body is the vendored, pure
+// shared/citation-files.js#vaultBiblify, imported here). Extension paths here are REGISTRY KEYS, not filesystem
 // paths: the build patches the engine's dynamic-import loader to consult
 // globalThis.__jmdExtensionRegistry, which src/worker/engine-worker.js fills
 // with the pre-bundled modules. Adding an extension means editing BOTH.
+
+import { vaultBiblify } from '../../vendor/clew/shared/citation-files.js';
 
 // `excalidraw` (plain-JSON drawings) and `base` (Obsidian Bases) are text:
 // without them a drawing or a base mirrors as a binary stub — unindexed,
@@ -22,11 +26,6 @@
 export const TEXT_EXT = /\.(md|jmd|bib|canvas|json|css|js|mjs|txt|csl|xml|yaml|yml|svg|html|gpx|geojson|tex|bibtex|org|csv|excalidraw|base)$/i;
 
 export const isTextPath = (rel) => TEXT_EXT.test(rel);
-
-// The engine's named bibliography styles: three from @citation-js/plugin-csl,
-// five bundled as CSL files in the engine's own csl/ directory. Anything else
-// is a custom .csl the engine registers by basename.
-const NAMED_BIB_STYLES = ['apa', 'chicago', 'harvard1', 'vancouver', 'bjps', 'ajp', 'econometrica', 'ergo'];
 
 // Those five CSL files (biblify-compile.js#BUNDLED_TEMPLATES reads them from
 // '<Jmarkdown app directory>/csl/', i.e. /engine/csl/ in the worker's vfs).
@@ -44,23 +43,11 @@ export const ENGINE_CSL_FILES = [
 // `bibliographyStyle`), resolved against the mirror root — the vault's
 // .bib/.csl files are text, so the snapshot already carries them. Per-note
 // `Bibliography:` metadata still wins: headers run after the config file.
+// The decision is desktop's own (shared/citation-files.js#vaultBiblify,
+// U3), which an export is handed too.
 function biblifyConfig(vaultRoot, vaultOptions) {
-	const bib = String(vaultOptions.bibliography ?? '').trim();
-	if (!bib) return {};
-	const abs = (p) => (p.startsWith('/') ? p : `${vaultRoot}/${p}`);
-	const biblify = { 'bibliography': abs(bib), 'resolve': true };
-	const style = String(vaultOptions.bibliographyStyle ?? '').trim();
-	if (style) {
-		if (NAMED_BIB_STYLES.includes(style)) {
-			biblify['bibliography style'] = style;
-		} else {
-			const file = abs(style);
-			const name = file.slice(file.lastIndexOf('/') + 1).replace(/\.csl$/i, '');
-			biblify['bibliography style'] = name;
-			biblify['template'] = { name, file };
-		}
-	}
-	return { 'Biblify': biblify };
+	const biblify = vaultBiblify(vaultOptions, vaultRoot);
+	return biblify ? { 'Biblify': biblify } : {};
 }
 
 /**
@@ -71,7 +58,7 @@ function biblifyConfig(vaultRoot, vaultOptions) {
  * Both callers compute them with vendor/clew/main/plugins.js
  * #engineExtensionEntries (the app over the aliased vfs-backed fs, the Node
  * harness over the real one) so manifest reading has one implementation;
- * they are parameters here because this module stays dependency-free.
+ * they are parameters here because this module stays free of the app.
  * `noteCode` is whether a note may make the engine run code — the
  * device's trust in the vault (VaultTrust.swift), never the vault's own
  * setting. Off unless the caller says so, as desktop's render service

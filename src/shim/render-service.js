@@ -13,7 +13,8 @@ import { engineConfig, engineEnv, isTextPath, ENGINE_CSL_FILES } from './engine-
 import { engineExtensionEntries } from '../../vendor/clew/main/plugins.js';
 import { inlineScriptHashes, previewCsp } from '../../vendor/clew/main/preview-csp.js';
 import { isDependentFragment } from '../../vendor/clew/shared/fragment-deps.js';
-import { citationHeader, bookCitationHeader, noteBibFiles } from '../../vendor/clew/main/citation-header.js';
+import { citationHeader, bookCitationHeader } from '../../vendor/clew/main/citation-header.js';
+import { noteBibFiles } from '../../vendor/clew/shared/citation-files.js';
 import nodePath from 'node:path';
 import { refusedNames } from '../../vendor/clew/shared/refused-names.js';
 import { settings } from './settings.js';
