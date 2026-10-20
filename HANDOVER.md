@@ -14,15 +14,25 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
 
 ## 1. Where things stand
 
-- **LaTeX exports on the iPad: L1, the export host, is built**
-  (`latex-p1-host-0e773c3`, chained after the plan `latex-p0-plan-0e773c3`,
-  off the 0e773c3 sync's build commit 527a245; first built as
-  `latex-p1-host` 093cc4e off b1443f4, which Clew-boss verified). It is a
-  hidden preview-scheme WKWebView in a WebContent process of its own,
-  running the engine with mp-tikz-wasm in a worker. No command uses it
-  yet. The plan and L1's measurements are in UPSTREAM-LATEX-EXPORT-PLAN.md.
-  L2 (the .tex export) is next: the 0e773c3 sync brought Clew-app's shared
-  export modules (U1–U7).
+- **LaTeX exports on the iPad: "Export note as LaTeX (.tex)" works (L2,
+  `latex-p2-tex`, 2026-10-20).** The chain is the plan
+  `latex-p0-plan-0e773c3` → L1 `latex-p1-host-0e773c3` → L2, off the
+  0e773c3 sync's build commit 527a245. L1 was first built as
+  `latex-p1-host` 093cc4e off b1443f4, which Clew-boss verified.
+  - L1 is the export host: a hidden preview-scheme WKWebView in a
+    WebContent process of its own, running the engine with mp-tikz-wasm
+    in a worker.
+  - L2 runs desktop's build there (U1, U2, U3, U4, U7 imported: Clew's
+    EB Garamond style, LaTeX's own title, the fenced header, image embeds
+    as vault paths).
+  - It shares the .tex alone, or a zip of the .tex, its figures and the
+    vault files and bibliographies it names. The app page decides what
+    goes in, from the .tex.
+  - Every zip from the simulator typesets on the Mac as it stands.
+  - The style's Settings row is back, said for the iPad.
+  - PDF via LaTeX still refuses (P1–P3).
+  - The plan, L1's and L2's measurements, and the owner's font and device
+    decisions are in UPSTREAM-LATEX-EXPORT-PLAN.md.
 - **The sync to Clew-app `0e773c3` (2026-10-20) is DONE; every check was
   green in the simulator.** The chain is `sync-0e773c3-p1-vendor` →
   `-p2-build` → `-p3-verify`, off b1443f4, and stays off main until
@@ -403,20 +413,25 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
   tests/services.test.js: 400 ms for the kv debounce ("kv store
   round-trips") and 800 ms before counting renders ("reading mode follows
   a .bib edit"). If it recurs, read which test failed before rerunning.
-- **Next work: a note's LaTeX exports on the iPad** (the owner's yes,
-  2026-10-20: "tex yes, pdf yes, 1a 2a 3 allow 4 ok"). L1 is done; see
-  §1.
-  - .tex first: the engine worker's `to:'latex'`, MetaPost figures through
-    mp-tikz-wasm, and a share of the .tex or a zip.
-  - Then PDF via LaTeX: LuaLaTeX in mp-tikz-wasm, after its latex-doc
-    bundle, bibtex/makeindex wasm and third-pass fix, and jmarkdown's
-    coloured code stand-in.
+- **Next work: a note's PDF via LaTeX on the iPad** (the owner's yes,
+  2026-10-20: "tex yes, pdf yes, 1a 2a 3 allow 4 ok"; the .tex is done, see
+  §1). UPSTREAM-LATEX-EXPORT-PLAN.md §4 has the phases:
+  - P1 stages mp-tikz-wasm 0.5.0 with default + opentype + otf-fonts +
+    latex-doc. otf-fonts holds latinmodern-math, which Clew's style needs
+    on the iPad, and counts in the growth against the owner's 12–17 MB.
+  - P2 runs LuaLaTeX in mp-tikz-wasm, after bibtex/makeindex wasm, the
+    third-pass fix and jmarkdown's coloured code stand-in (J2).
+  - Fonts without the style, the owner's (a): LuaLaTeX with Latin Modern
+    OpenType, or `lmodern` when a header forces pdfLaTeX; no cm-super.
+    The pdfLaTeX half needs an upstream hook (proposal to Clew-boss).
   - Every vault is allowed: no shell escape, and no file outside the vault
-    reaches the engine. The app grows 12–17 MB.
-  - A device memory check comes before the PDF ships (~550 MiB a LuaLaTeX
-    pass).
-  - The plan will be UPSTREAM-LATEX-EXPORT-PLAN.md; the scoping is in
-    Claude's memory and Clew-boss's ledger.
+    reaches the engine.
+  - The device memory check covers both of the owner's iPads (iPad Pro
+    12.9" M1 and iPad mini A17 Pro), the mini first.
+- **iPad checks for the .tex export:** a share to Files and AirDrop; the
+  share sheet closed without sharing (the job folder goes); a note with
+  images in an iCloud Drive vault whose files are evicted (they download
+  for the zip).
 - **iPad checks from the 0ada21d sync:** its record's list (a hardware
   keyboard's Enter, ⌘Enter and ⌘L in a list; the on-screen keyboard's
   Return and the Next item button; `{{TOC}}`, a title block and a quote in

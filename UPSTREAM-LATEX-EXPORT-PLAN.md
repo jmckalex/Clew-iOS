@@ -13,6 +13,19 @@ yes, 1a 2a 3 allow 4 ok".
   and no file from outside the vault ever reaches the engine.
 - **(4)** The app grows by the 12–17 MB "latex-doc" bundle.
 
+The owner's second word, the same day, also to Clew-boss: "Then let's fix
+entities, (a), and uniform. I have two iPads: a big iPad Pro and an iPad
+Mini."
+
+- **(a), fonts without Clew's style (for the PDF):** a note that forces no
+  engine runs LuaLaTeX, set in Latin Modern (OpenType, in the bundles); a
+  note whose header forces pdfLaTeX gets `lmodern`, so no cm-super is
+  needed. No cm-super ships, in any amount. §4 says how.
+- **The two iPads for the memory check:** an iPad Pro 12.9-inch (5th
+  generation, iPad13,8, M1) and an iPad mini (A17 Pro, iPad16,1). §4.
+- **Entities and uniform:** jmarkdown's entity and URL-specials fixes
+  change only the .tex's escaping, so nothing here waits for them.
+
 The scoping behind this went to Clew-boss on 2026-10-20 (summary in §1).
 This plan has three parts:
 
@@ -316,6 +329,78 @@ copied.
 - **Code blocks:** minted, as the Mac's .tex, until J2 lands. Then the
   stand-in for every iPad LaTeX build.
 
+**L2 as built (2026-10-20,** `latex-p2-tex`, on the 0e773c3 sync: L1 and
+this plan cherry-picked onto its build commit 527a245).
+
+- **The build is desktop's, imported:**
+  - src/shim/export-job.js takes processFile's options from
+    `noteExportOptions` (U7), and decides Clew's style with
+    `latexStyleWanted` (U2) and the vault's citations with `vaultBiblify`
+    (U3).
+  - The style's platform is `ios`, with no emoji face. The .tex may be
+    typeset anywhere, and the iPad's own TeX has none.
+  - src/export/export-worker.js applies them as desktop's export worker
+    does: `configureExportBuild` (U1) on the engine's own configManager,
+    then processFile with the engine's Obsidian links. resolveEmbed is
+    `resolveFileTarget` (clamped in a restricted vault) and
+    `exportEmbedPath` (U4); a [[link]] prints as its text.
+  - So a .tex gets `LaTeX maketitle`, the fenced header (a first line
+    `Note: …` is text) and Clew's EB Garamond preamble, as on the Mac.
+- **The share:**
+  - src/shim/export-references.js reads the .tex in the APP page, against
+    the vault's mirror: each `\includegraphics` path the vault has, at its
+    vault path (graphicx's extension search included), and each
+    `\bibliography`/`\addbibresource` name matched to the build's .bib
+    files (the vault's jmarkdown config, the vault setting, the note's
+    header), to sit beside the .tex. Never the export's own figures, a
+    path out of the vault, a URL, or a commented line. A name the vault
+    lacks becomes a warning.
+  - FSBridge `exportShare` → `ExportJobs.share`. Nothing named and only
+    the .tex written: the .tex alone. Otherwise the outputs are moved
+    into `<job folder>/.share/<note name>/`, and each vault file is copied
+    in through VaultStore.materialize (clamped by realpath, iCloud
+    downloaded) with a coordinated read, never over an output and never
+    outside the stage. Then `NSFileCoordinator(.forUploading)` zips the
+    stage: a zip whose one top folder is the note's name.
+  - The folder goes when the share sheet closes, when a share fails, at
+    the next export, and at launch.
+  - The host page never decides what leaves the vault: it writes outputs
+    into its own job folder only.
+- **A `<base>-figures/` folder the vault already has at the output's
+  place** (a desktop export saved at the vault's root, synced) stays out of
+  the worker's vfs. The engine would otherwise refuse it as not its own
+  and point the .tex at the vfs's cache.
+- **Settings:** "Style of LaTeX and PDF via LaTeX exports" is back, its
+  hint said for the iPad by two build patches: "this iPad's region", and
+  "a note whose header asks for pdfLaTeX is left without it" (no engine
+  row above it here).
+- **Measured in the simulator** (iPad Pro 11", demo vault, the palette's
+  own `export:latex`):
+
+  | note | time | share | contents |
+  | --- | --- | --- | --- |
+  | Features/Media Gallery | 0.9 s | Media Gallery.zip, 2 MB | the .tex and 3 JPEGs under Attachments/ |
+  | Features/Citations | 0.8 s | Citations.zip | the .tex and refs.bib beside it |
+  | Features/Diagrams | 1.3 s | Diagrams.zip | the .tex and Diagrams-figures/ (one MetaPost PDF) |
+  | Welcome | 0.9 s | Welcome.tex | the .tex alone |
+
+  - Each share sheet came up ("ZIP Archive · 2 MB" for Media Gallery).
+  - Every .tex is byte-identical to the Node harness's.
+  - Each zip, unzipped on the Mac, typesets as it stands (latexmk
+    -lualatex -shell-escape): 1, 4, 4 and 2 pages; no undefined citation
+    and no missing file. Citations' references come from the refs.bib in
+    the zip. Media Gallery's 3 images are in the PDF, set in EB Garamond.
+  - The status bar's notice and ⚠ carry the engine's warnings (a film is
+    not an image; Mermaid needs mmdc).
+  - With the style set to "Your jmarkdown configuration only" in
+    Settings, the next .tex has no style.
+  - The previous run's job folder was gone after a relaunch.
+- **Not checked in the simulator:** the share sheet's own close, which
+  removes the folder. A tap is not something the kit does; the next
+  export and the launch remove it in any case. That is a device check.
+- **For upstream (wording):** the Mermaid warning says "install
+  @mermaid-js/mermaid-cli", which no iPad user can do.
+
 **L3 `latex-p3-verify`:** the record and the simulator (§5).
 
 ## 4. PDF via LaTeX on the iPad
@@ -326,6 +411,18 @@ makeindex.wasm and the third-pass fix, and on jmarkdown's J2.
 **P1 `latexpdf-p1-assets`.** stage-mptikz.js and CI fetch and verify the
 new release assets (sha256, as the ghostscript archive is), and the app's
 growth is measured against the agreed 12–17 MB.
+
+- **The bundles (Clew-boss, 2026-10-20, against the staged 0.5.0):**
+  `MetaPost.create` loads default + opentype + **otf-fonts** + latex-doc.
+  Clew's style loads unicode-math; Garamond-Math is not on the iPad, so
+  unicode-math falls back to latinmodern-math.otf, which is only in
+  otf-fonts (0.7 MiB). Without it every styled PDF that reaches maths
+  setup fails ("The font "latinmodern-math" cannot be found").
+- **The growth reported** against the owner's 12–17 MB includes
+  otf-fonts.
+- **A known 0.5.0 defect:** for a fontspec error, `latex()`'s diagnostics
+  have an empty message (the text is on "(fontspec)" lines). Until
+  mp-tikz-wasm's fix ships, the error is read from the log.
 
 **P2 `latexpdf-p2-compile`,** in the export host:
 
@@ -349,6 +446,33 @@ growth is measured against the agreed 12–17 MB.
     job's folder goes.
   - 3 minutes is desktop's compilePdf limit. The device check below
     confirms that a real note's passes fit well inside it.
+- **Fonts without Clew's style, (a):**
+  - **No engine forced → LuaLaTeX, Latin Modern OpenType.** jmarkdown's
+    own `LaTeX engine` key decides the preamble (preamble.js:
+    `lualatex` → fontspec; anything else → inputenc and T1 fontenc). The
+    iPad's PDF build sets `LaTeX engine: lualatex` as its configuration
+    default before processFile, so the .tex loads fontspec, and
+    `chooseLatexEngine` then picks LuaLaTeX. A header's `LaTeX engine`
+    is merged later and wins. That is an existing key. Proposed upstream,
+    so both hosts share it: an `engine` option for configureExportBuild.
+  - **A header forcing pdfLaTeX → `lmodern`.** T1 fontenc without it
+    wants cm-super, which ships in no amount, so TeX would fall back to
+    bitmap Type 3 fonts. A configuration `LaTeX preamble` or `Packages`
+    line does not survive: a header's own key replaces the
+    configuration's (config-manager.js#mergeMetadata), and latex-style.js
+    already leaves alone every key a header sets. This needs a hook
+    upstream, which goes to Clew-boss as a proposal; nothing is copied
+    here. For example, a jmarkdown key "Config or host only" that
+    assemblePreamble emits after T1 fontenc, or `lmodern` there always.
+  - mp-tikz-wasm checked against 0.5.0, and Clew-boss verified the
+    unicode-math case:
+    - pdfLaTeX with T1 and lmodern gives Type 1 Latin Modern only;
+    - LuaLaTeX with fontspec gives Latin Modern OpenType text with CM
+      Type 1 maths;
+    - LuaLaTeX with unicode-math needs otf-fonts.
+  - **Acceptance:** the same unstyled note, and that note forced to
+    pdflatex, each give a PDF on the iPad. `pdffonts` lists only Latin
+    Modern (and CM maths) fonts, and no Type 3.
 - **The engine** comes from `chooseLatexEngine(tex, setting, { available:
   ['pdflatex', 'lualatex'] })` (U5):
   - Clew's style → LuaLaTeX;
@@ -390,20 +514,43 @@ memory check below.
 **The device memory check (before the PDF ships).** About 550 MiB a
 LuaLaTeX pass is close to what an iPad's WebContent process may hold. In
 the simulator, the host's process can be measured from the Mac (`ps`,
-`footprint`), but the jetsam limit is the device's. What I need from the
-owner:
+`footprint`), but the jetsam limit is the device's. The owner has two
+iPads (from Xcode's paired-device list):
 
-1. The iPad's model (its RAM decides the limit).
-2. About 20 minutes with the TestFlight build. Run PDF via LaTeX on four
-   notes I name (a plain note, Citations, Diagrams with MetaPost, and a
-   long note with Clew's style), and report for each: done or the error
-   text, and roughly how long it took. The time against the 3-minute limit
-   is part of the check: a note that comes near it says the limit, or the
-   passes, need another look.
-3. Only if the numbers are close: the iPad on a cable to this Mac, with
-   Developer Mode on and unlocked. I then run a Debug build under
-   Instruments for the WebContent process's real peak. The owner would be
-   present for that.
+| | iPad Pro 12.9-inch (5th generation) | iPad mini (A17 Pro) |
+| --- | --- | --- |
+| identifier | iPad13,8 | iPad16,1 |
+| chip | M1 | A17 Pro |
+| RAM | 8 GB (16 GB on the 1 and 2 TB models) | 8 GB |
+
+Neither's limit for a WebContent process is published, and it is not
+the app's own limit. The mini is the likelier tighter one: a smaller
+device, and iOS's limits follow the device class as well as its RAM. So
+the plan measures both, the mini first:
+
+1. **TestFlight, about 20 minutes, the owner (when P2 is ready).** On the
+   mini, then on the Pro: PDF via LaTeX on five notes I name, each
+   reported as done or the error's text, with roughly how long it took.
+   - a plain note, without Clew's style (pdfLaTeX's path, font (a));
+   - Citations (bibtex.wasm);
+   - Diagrams (MetaPost, TikZ);
+   - a long note with Clew's style (LuaLaTeX, EB Garamond, about 550 MiB
+     a pass on the Mac);
+   - the 40-figure note from L1's kill test, with Clew's style: the
+     headroom case.
+
+   The time against the 3-minute limit is part of the check. A note that
+   comes near it says the limit, or the passes, need another look.
+   Each export has a WebContent process of its own (L1), so memory does
+   not build up from one export to the next. The order of the notes
+   doesn't matter.
+2. **Instruments, only if a note fails with the out-of-memory message on
+   either iPad, or the numbers look close:** that iPad on a cable to this
+   Mac, with Developer Mode on and unlocked. A Debug build under
+   Instruments (Allocations and VM Tracker on the export's WebContent
+   process) gives the real peak against the point jetsam ended it. The
+   owner would be present for that. If only the mini fails, the fallback
+   below can be decided for small iPads alone.
 
 The fallback if LuaLaTeX does not fit: pdfLaTeX with a Type 1 Garamond,
 which is a style decision for the owner.
@@ -481,5 +628,6 @@ which is a style decision for the owner.
 2. L1 (the host) starts. It needs nothing upstream.
 3. The sync that brings U1–U7 (and J1, if it comes first).
 4. L2, then L3. Clew-boss verifies, and the push needs the owner's word.
+   (L2 is built, 2026-10-20, on the 0e773c3 sync.)
 5. P1–P3 once mp-tikz-wasm and jmarkdown have shipped their parts. The
    device memory check comes before that push.
