@@ -1,9 +1,9 @@
-# Handover — 2026-10-20 (the sync to Clew-app 0ada21d: list keys and the iPad's Next item button; {{TOC}}, title blocks and quotes in lists in live edit)
+# Handover — 2026-10-20 (the sync to Clew-app 0e773c3: the export pipeline factored for the iPad's LaTeX exports; list indentation measured in live edit)
 
 Current state for a fresh session, rewritten whole. Durable architecture
 lives in **README.md** and **PORT-PLAN.md**. Each sync's reasoning and
 measurements are in its record: `UPSTREAM-*-PLAN.md`. The latest records
-are `UPSTREAM-0ADA21D-PLAN.md` (list keys, the Next item button, {{TOC}}, title blocks, quotes in lists, 2026-10-20), `UPSTREAM-F0AEAA4-PLAN.md` (EmbedPDF's cards at 208 px, the colon list's fill, the LaTeX refusal, 2026-10-15), `UPSTREAM-EF5F7F2-PLAN.md` (the index cache's save, tables wrapping at words, PDF #page=N, images within a line, 2026-10-15), `UPSTREAM-F4FEB68-PLAN.md` (tables in live edit, the guard, the PDF height upstream, 2026-10-15), `UPSTREAM-185E950-PLAN.md` (the colon retirement and "Convert this vault", 2026-10-11), `HTML-SHARE.md` (the iPad HTML share, 2026-10-11), `UPSTREAM-F959799-PLAN.md` (the figure engine, Proof this chapter, figures
+are `UPSTREAM-0E773C3-PLAN.md` (the export pipeline's shared modules, quotes and tabs in lists measured, 2026-10-20), `UPSTREAM-0ADA21D-PLAN.md` (list keys, the Next item button, {{TOC}}, title blocks, quotes in lists, 2026-10-20), `UPSTREAM-F0AEAA4-PLAN.md` (EmbedPDF's cards at 208 px, the colon list's fill, the LaTeX refusal, 2026-10-15), `UPSTREAM-EF5F7F2-PLAN.md` (the index cache's save, tables wrapping at words, PDF #page=N, images within a line, 2026-10-15), `UPSTREAM-F4FEB68-PLAN.md` (tables in live edit, the guard, the PDF height upstream, 2026-10-15), `UPSTREAM-185E950-PLAN.md` (the colon retirement and "Convert this vault", 2026-10-11), `HTML-SHARE.md` (the iPad HTML share, 2026-10-11), `UPSTREAM-F959799-PLAN.md` (the figure engine, Proof this chapter, figures
 in exports measured, 2026-10-10), `UPSTREAM-6B6FBBB-PLAN.md` (PostScript figures, system font families,
 mp-tikz-wasm 0.4.0, 2026-10-10), `UPSTREAM-5ABF52D-PLAN.md` (app secrets,
 book mode phase 2, the book print, 2026-10-10), `UPSTREAM-CBFA692-PLAN.md` (book mode and the demo
@@ -14,9 +14,26 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
 
 ## 1. Where things stand
 
-- **The sync to Clew-app `0ada21d` (2026-10-20) is DONE; every check was
-  green in the simulator, with synthetic input.** The chain is
-  `sync-0ada21d-p1-vendor` → `-p2-build` → `-p3-verify`, off main
+- **The sync to Clew-app `0e773c3` (2026-10-20) is DONE; every check was
+  green in the simulator.** The chain is `sync-0e773c3-p1-vendor` →
+  `-p2-build` → `-p3-verify`, off b1443f4, and stays off main until
+  Clew-boss has verified it. The record is UPSTREAM-0E773C3-PLAN.md.
+  - **The export pipeline's decisions are shared modules now** (U1–U7 of
+    UPSTREAM-LATEX-EXPORT-PLAN.md): shared/citation-files.js,
+    latex-engine.js, export-figures.js, latex-style.js#latexStyleWanted
+    (with an `ios` platform) and engine/export-config.js. Only the
+    citation half has an iOS caller so far: reading view's `Biblify` and
+    a note's .bib files are desktop's `vaultBiblify` and `noteBibFiles`,
+    imported. The rest waits for L2.
+  - **Live edit:** a quote in a nested list item stands under its text (it
+    was 2 px right, this port's report), and a tab-indented item is four
+    columns in, as the desktop measures.
+  - `LaTeX maketitle` and the fenced export header are desktop's export
+    worker's, inert here until L2.
+- **The sync to Clew-app `0ada21d` (2026-10-20) is DONE and PUSHED**
+  (2026-10-20, origin/main b1443f4, on the owner's word in this window).
+  Every check was green in the simulator, with synthetic input. The chain
+  is `sync-0ada21d-p1-vendor` → `-p2-build` → `-p3-verify`, off main
   3447b9d. The record is UPSTREAM-0ADA21D-PLAN.md.
   - **Lists:** Enter stays in an item, ⌘Enter starts the next one, and ⌘L
     makes a task (Obsidian's toggle). The desktop's expected log matched
@@ -321,10 +338,10 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
 ## 2. Waiting on the owner
 
 - **Push main** (a push to main is a TestFlight build). origin/main is
-  3447b9d, pushed 2026-10-20 (cloud build OK): the f0aeaa4 sync. The
-  0ada21d sync's build commit (the tip of `sync-0ada21d-p3-verify`) goes
-  onto main once Clew-boss has verified it. The push is on the owner's
-  word, typed in the Clew-iOS window.
+  b1443f4, pushed 2026-10-20: the 0ada21d sync. The 0e773c3 sync's build
+  commit (the tip of `sync-0e773c3-p3-verify`) goes onto main once
+  Clew-boss has verified it. The push is on the owner's word, typed in
+  the Clew-iOS window.
 - (Decided 2026-10-20: both of a note's LaTeX exports come to the iPad,
   through mp-tikz-wasm, in every vault. Until they are built, the palette
   keeps both commands, refused when run.)
@@ -367,9 +384,10 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
 
 ## 3. Next
 
-- **The next sync's range starts at Clew-app `0ada21d`.** Clew-app's
-  0038ec3..2675150 (the export worker's `Header style: fenced`, `LaTeX
-  maketitle`, the vault's Biblify) waits on the owner's push there.
+- **The next sync's range starts at Clew-app `0e773c3`.** Coming:
+  mp-tikz-wasm v0.5.0 (the latex-doc bundle) and jmarkdown ba83371
+  (setFigureLibrary), which Clew-app will vendor and pin; Clew-boss
+  sends a notice.
 - **Next work: a note's LaTeX exports on the iPad** (the owner's yes,
   2026-10-20: "tex yes, pdf yes, 1a 2a 3 allow 4 ok").
   - .tex first: the engine worker's `to:'latex'`, MetaPost figures through
@@ -387,8 +405,12 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
   keyboard's Enter, ⌘Enter and ⌘L in a list; the on-screen keyboard's
   Return and the Next item button; `{{TOC}}`, a title block and a quote in
   a list on the device).
-- **Upstream candidate from the 0ada21d sync:** a quote in a nested list
-  item is 2 px right of its item's text in live edit (0 in reading view).
+- **iPad checks from the 0e773c3 sync:** its record's list (a quote under
+  a nested item; a tab-indented list under a finger).
+- **Upstream candidate from the 0e773c3 sync:** in a monospace editor
+  face, a quote in a numbered item stands 5.6 px left of its item's text
+  (the number is drawn wider than the fixed hang).
+- (Done upstream in 7c46c38: the 0ada21d sync's nested-quote 2 px.)
 - (Done upstream in f0aeaa4's range: the ef5f7f2 sync's two card
   candidates, and the colon list's fill.)
 - **iPad checks from the f0aeaa4 sync:** its record's list (the cards
