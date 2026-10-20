@@ -23,28 +23,21 @@
 //     .tex or .html stands on its own wherever the cache is.
 //
 // Electron-free, so its rules are unit-tested (tests/export-cache.test.js);
-// export.js and export-book.js do the rest.
+// export.js and export-book.js do the rest. The figures folder's name, mark
+// and warning are shared/export-figures.js, which every host imports.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { FIGURES_MARKER } from '../shared/export-figures.js';
 
 /** The cache's ceiling, every vault's together. */
 export const EXPORT_CACHE_LIMIT = 500 * 1024 * 1024;
 
-/** The engine's mark on a figures folder it made (jmarkdown figure-cache.js
- *  FIGURES_MARKER — never imported: that module loads the engine's config
- *  manager; a test holds the two equal). */
-export const FIGURES_MARKER = '.jmarkdown-figures';
 
 // A figure compiles in a `.run-*` folder of its own inside its kind's folder
 // (figure-cache.js compileInRunDir), removed when the compile ends; one older
 // than this was left by a worker that died.
 const RUN_STALE_MS = 60 * 60 * 1000;
-
-/** The folder the engine copies an output's figures into: `x.tex` → `x-figures`. */
-export function figuresFolder(output) {
-	return `${output.replace(/\.[^./\\]+$/, '')}-figures`;
-}
 
 /** 'none', 'marked' (the engine's: it may go), or 'foreign' (the user's: never touched). */
 export function figuresState(dir) {
@@ -130,25 +123,6 @@ export function pruneExportCache(root, { limit = EXPORT_CACHE_LIMIT, now = Date.
 		try { if (!fs.readdirSync(dir).length) fs.rmdirSync(dir); } catch { /* not empty, or gone */ }
 	}
 	return { removed, bytes };
-}
-
-const FOREIGN = /Copy figures: (.+?)\/ was not made by jmarkdown/;
-
-/**
- * The engine's warning about a figures folder that is not its own, said for
- * the reader: where the output's figures are instead, and what to do. Other
- * warnings pass unchanged.
- */
-export function explainFiguresWarnings(warnings, { restricted }) {
-	return warnings.map((w) => {
-		const text = String(w);
-		const m = FOREIGN.exec(text);
-		if (!m) return w;
-		const where = restricted
-			? 'they were in a temporary folder this export removed, so its diagrams will not show'
-			: 'it refers to Clew\'s export cache on this computer instead, which is pruned, so the file will not travel';
-		return `${m[1]}/ beside the export is not one Clew or jmarkdown made, so its figures were not copied there: ${where}. Rename or move ${m[1]}/ and export again.`;
-	});
 }
 
 // What draws an export's TikZ and MetaPost (jmarkdown 21dee42, figure-engine.js:

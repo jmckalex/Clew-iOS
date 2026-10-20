@@ -29,7 +29,8 @@ import { engineExtensionEntries } from './plugins.js';
 import { inlineScriptHashes } from './preview-csp.js';
 import { writeFileAtomic, absoluteSearchPath } from './fs-utils.js';
 import { isDependentFragment } from '../shared/fragment-deps.js';
-import { citationHeader, bookCitationHeader, noteBibFiles } from './citation-header.js';
+import { citationHeader, bookCitationHeader } from './citation-header.js';
+import { noteBibFiles, vaultBiblify } from '../shared/citation-files.js';
 import { refusedNames } from '../shared/refused-names.js';
 import { calloutsEnv } from './callout-types.js';
 import { iconTable } from './callout-files.js';
@@ -344,28 +345,11 @@ export class RenderService {
 	// `bibliographyStyle`): written into the generated config as absolute
 	// paths, so every note resolves citations without per-note properties.
 	// Per-note `Bibliography:` / `Bibliography style:` metadata still wins —
-	// the engine processes metadata headers after the config file.
+	// the engine processes metadata headers after the config file. The same
+	// object an export is handed (shared/citation-files.js#vaultBiblify).
 	#biblifyConfig() {
-		const bib = String(this.#vaultOptions.bibliography ?? '').trim();
-		if (!bib) return {};
-		const abs = (p) => (path.isAbsolute(p) ? p : path.join(this.vaultRoot, p));
-		const biblify = { 'bibliography': abs(bib), 'resolve': true };
-		const style = String(this.#vaultOptions.bibliographyStyle ?? '').trim();
-		if (style) {
-			// The engine's named styles (three from @citation-js/plugin-csl,
-			// five bundled as CSL files in its own csl/ directory); anything
-			// else is a custom .csl file the engine registers by basename.
-			const named = ['apa', 'chicago', 'harvard1', 'vancouver', 'bjps', 'ajp', 'econometrica', 'ergo'];
-			if (named.includes(style)) {
-				biblify['bibliography style'] = style;
-			} else {
-				const file = abs(style);
-				const name = path.basename(file, '.csl');
-				biblify['bibliography style'] = name;
-				biblify['template'] = { name, file };
-			}
-		}
-		return { 'Biblify': biblify };
+		const biblify = vaultBiblify(this.#vaultOptions, this.vaultRoot);
+		return biblify ? { 'Biblify': biblify } : {};
 	}
 
 	/** Rendered HTML for a note (rendered on demand) — the References panel's feed. */

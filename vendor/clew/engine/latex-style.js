@@ -80,7 +80,10 @@ const LETTER_REGIONS = new Set(['US', 'CA', 'MX', 'PH', 'CL', 'CO', 'VE', 'GT', 
 const PAPER = /\b(a[0-6]|b[0-6]|letter|legal|executive)paper\b|\bpaper(size)?\s*=/;
 
 /** A colour emoji face each platform ships, for the main font's fallback. */
-const EMOJI = { darwin: 'AppleColorEmoji', win32: 'SegoeUIEmoji', linux: 'NotoColorEmoji' };
+const EMOJI = { darwin: 'AppleColorEmoji', win32: 'SegoeUIEmoji', linux: 'NotoColorEmoji',
+	// Clew-iOS's TeX (mp-tikz-wasm) has no HarfBuzz, which a colour face's
+	// fallback needs (`mode=harf`), and the iPad's fonts are not TeX's: none.
+	ios: null };
 
 const asList = (v) => (v == null || v === '' ? [] : Array.isArray(v) ? v : [v]);
 const asText = (v) => asList(v).join(' ').trim();
@@ -111,6 +114,22 @@ export function babelName(lang, region = '') {
 	const tag = String(lang ?? '').trim().toLowerCase().replace(/_/g, '-');
 	if (tag === 'en' && region) return BABEL[`en-${region.toLowerCase()}`] ?? BABEL.en;
 	return BABEL[tag] ?? BABEL[tag.split('-')[0]] ?? null;
+}
+
+/**
+ * Whether a build gets the style, and what then decides its paper and faces —
+ * the host's settings, as each host reads them: null unless the build is
+ * LaTeX (a PDF via LaTeX is one), the `latexExportStyle` setting is `clew`
+ * (its default) and the `latexEngine` setting does not force pdfLaTeX (which
+ * no Garamond-by-file style survives); else the machine's locale and
+ * platform (`darwin`, `win32`, `linux`, `ios` — the emoji face, EMOJI).
+ *
+ * @param {{ to?: string, style?: string, engine?: string, locale?: string, platform?: string }} o
+ * @returns {{ locale: string, platform: string } | null}
+ */
+export function latexStyleWanted({ to, style, engine, locale = '', platform = '' } = {}) {
+	if (to !== 'latex' || (style ?? 'clew') !== 'clew' || engine === 'pdflatex') return null;
+	return { locale, platform };
 }
 
 /**
@@ -159,7 +178,7 @@ export function latexStyleConfig(get, { locale = '', platform = 'darwin', defaul
 
 /** The style's preamble lines: every one guarded by the package it needs. */
 function preamble({ babel, platform }) {
-	const emoji = EMOJI[platform] ?? EMOJI.linux;
+	const emoji = Object.hasOwn(EMOJI, platform) ? EMOJI[platform] : EMOJI.linux;
 	const garamond = 'EBGaramond-Regular.otf';
 	const faces = '[Extension=.otf,UprightFont=*-Regular,ItalicFont=*-Italic,BoldFont=*-Bold,BoldItalicFont=*-BoldItalic';
 	// Commands as old as LaTeX2e: \@ifpackageloaded, inside \makeatletter —
@@ -179,20 +198,23 @@ function preamble({ babel, platform }) {
 		// none). The emoji fallback is LuaTeX's — luaotfload 3.11 and later
 		// (TeX Live 2020), asked first — and only for a face that is there: a
 		// fallback naming a missing one leaves the MAIN font null, every
-		// character dropped (measured). XeTeX gets the face alone.
+		// character dropped (measured). XeTeX gets the face alone, and so does a
+		// platform with no colour face (`ios`).
 		'\\@ifpackageloaded{fontspec}{\\IfFontExistsTF{' + garamond + '}{%',
-		'  \\ifdefined\\directlua',
-		`    \\IfFontExistsTF{${emoji}}{%`,
-		'      \\ifnum\\directlua{tex.sprint(luaotfload.add_fallback and 1 or 0)}=1\\relax',
-		`        \\directlua{luaotfload.add_fallback("clewemoji", {"${emoji}:mode=harf;"})}%`,
-		`        \\setmainfont{EBGaramond}${faces},RawFeature={fallback=clewemoji}]%`,
-		'      \\else',
-		`        \\setmainfont{EBGaramond}${faces}]%`,
-		'      \\fi',
-		`    }{\\setmainfont{EBGaramond}${faces}]}%`,
-		'  \\else',
-		`    \\setmainfont{EBGaramond}${faces}]%`,
-		'  \\fi',
+		...(emoji ? [
+			'  \\ifdefined\\directlua',
+			`    \\IfFontExistsTF{${emoji}}{%`,
+			'      \\ifnum\\directlua{tex.sprint(luaotfload.add_fallback and 1 or 0)}=1\\relax',
+			`        \\directlua{luaotfload.add_fallback("clewemoji", {"${emoji}:mode=harf;"})}%`,
+			`        \\setmainfont{EBGaramond}${faces},RawFeature={fallback=clewemoji}]%`,
+			'      \\else',
+			`        \\setmainfont{EBGaramond}${faces}]%`,
+			'      \\fi',
+			`    }{\\setmainfont{EBGaramond}${faces}]}%`,
+			'  \\else',
+			`    \\setmainfont{EBGaramond}${faces}]%`,
+			'  \\fi',
+		] : [`  \\setmainfont{EBGaramond}${faces}]%`]),
 		'}{}}{}',
 		ifLoaded('unicode-math', '\\IfFontExistsTF{Garamond-Math.otf}{\\setmathfont{Garamond-Math.otf}[StylisticSet={7,8,9}]}{}'),
 		ifLoaded('enumitem', '\\setlist{itemsep=0.35\\baselineskip,topsep=0.5\\baselineskip}\\setlist[itemize,2]{label=–,itemsep=0.15\\baselineskip}'),
@@ -203,9 +225,15 @@ function preamble({ babel, platform }) {
 		'  \\titlespacing*{\\subsection}{0pt}{2ex plus .5ex minus .2ex}{0.8ex plus .2ex}%',
 		'}{}',
 		ifLoaded('etoolbox', '\\AtBeginEnvironment{quote}{\\small}\\AtBeginEnvironment{quotation}{\\small}'),
+		// The title: jmarkdown's \maketitle under `LaTeX maketitle` (the
+		// title-page directives, which the export worker turns on) or the
+		// header's. Each author is a column, as LaTeX's own — `\and` closes one
+		// tabular and opens the next, so the authors' line needs them — its
+		// name in small capitals and the institution under it upright.
 		'\\@ifpackageloaded{titling}{%',
 		'  \\pretitle{\\begin{center}\\LARGE}\\posttitle{\\par\\end{center}\\vskip 1.2em}%',
-		'  \\preauthor{\\begin{center}\\large\\scshape}\\postauthor{\\par\\end{center}}%',
+		'  \\preauthor{\\begin{center}\\lineskip .5em\\def\\and{\\end{tabular}\\hskip 1em \\@plus.17fil\\begin{tabular}[t]{c}\\large\\scshape}\\begin{tabular}[t]{c}\\large\\scshape}%',
+		'  \\postauthor{\\end{tabular}\\par\\end{center}}%',
 		'  \\predate{\\begin{center}\\normalsize}\\postdate{\\par\\end{center}\\vskip 1.5em}%',
 		'}{}',
 		ifLoaded('hyperref', '\\hypersetup{hidelinks}'),

@@ -133,12 +133,15 @@ export function processLatexTemplate(content) {
 	// (`@title+`, additional-directives.js) gets no \maketitle either, as the
 	// HTML shows that one title alone (the owner, 2026-10-11); \title, \author
 	// and \date stay, for the PDF's metadata and a header that names the title.
+	// Under `LaTeX maketitle` a Title with no Date gets \date{}: LaTeX would
+	// print today's date, which the HTML does not show.
 	const ownTitle = bodyPrintsTitle(content);
 	let frontmatter = '';
 	if (title) {
 		frontmatter += `\\title{${title}}\n`;
 		if (author) frontmatter += `\\author{${author}}\n`;
 		if (date) frontmatter += `\\date{${date}}\n`;
+		else if (configManager.get('LaTeX maketitle') === true) frontmatter += '\\date{}\n';
 		frontmatter += ownTitle ? '\n' : '\\maketitle\n\n';
 	}
 

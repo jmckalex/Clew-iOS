@@ -29,6 +29,7 @@ import {
 	BulletWidget, TaskWidget, CalloutHeadWidget, FenceHeadWidget, FenceFootWidget,
 	EnvHeadWidget, EnvFootWidget,
 } from './widgets/lines.js';
+import { tabbedIndent } from './columns.js';
 import { calloutFolded } from './block-field.js';
 import { ImageWidget } from './widgets/image.js';
 import { imageSpec } from './images.js';
@@ -376,6 +377,14 @@ function build(view) {
 				case 'task': {
 					lineClass(c.from, `le-li le-li-${Math.min(c.depth, 4)}${c.kind === 'task' && c.checked ? ' le-done' : ''}`,
 						{ style: `--le-indent: ${listIndent(c)}` });
+					// An indentation holding a tab is a box of its own, in both
+					// states, so its tabs fill the columns they count
+					// (columns.js#tabbedIndent): CSS's stops are moved by the hang.
+					{
+						const line = doc.lineAt(c.listMark.from);
+						const run = tabbedIndent(line.text.slice(0, c.listMark.from - line.from));
+						if (run) mark(line.from + run.from, line.from + run.to, 'le-indent-tabs');
+					}
 					if (c.kind === 'numbered') mark(c.numberMark.from, c.numberMark.to, 'le-num');
 					if (!hidden) break;
 					if (c.kind === 'bullet') widget(c.hidden[0].from, c.hidden[0].to, new BulletWidget(c.depth));

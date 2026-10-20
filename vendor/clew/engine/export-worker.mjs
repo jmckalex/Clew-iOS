@@ -21,19 +21,9 @@
 //     resolves one (vault-files.js#resolveFileTarget, wikilinks.js's own: by
 //     name across the vault, the shortest path first, clamped by realpath in
 //     a vault this device does not trust: CLEW_VAULT_ROOT,
-//     CLEW_VAULT_RESTRICTED), written RELATIVE to the folder of the file the
-//     export WRITES (processFile's `output`) — never absolute, which would put
-//     the user's home folder and vault layout into a .tex or .html they share,
-//     and not relative to the note, which only works for an export saved
-//     beside the note (TeX never searches TEXINPUTS for a `../` path, and the
-//     engine copies an image path into HTML as written — measured). For LaTeX
-//     both the folder and the image by realpath (TeX's `..` is physical). In a
-//     BOOK the answer is relative to the CHAPTER the embed is written in (the
-//     engine's `file`, jmarkdown 283cd30), and nothing more: the engine reads
-//     it as a Markdown image written there and rebases it itself — onto the
-//     master's folder, then onto each page's folder (split HTML) or the .tex's
-//     (LaTeX), the last between REAL paths (jmarkdown dc36e9b). One mechanism:
-//     a correction here as well would be counted twice.
+//     CLEW_VAULT_RESTRICTED), pointed from the file the export WRITES by
+//     export-config.js#exportEmbedPath — every host's arithmetic: relative to
+//     the output's folder, by realpath for LaTeX, a book's from its chapter.
 //     Nothing found: the name stays as written, relative to the note.
 //   resolveLink() — nothing: an export has no page to point a note's link at,
 //     so a [[link]] prints as its text (the alias, or "Note > Heading").
@@ -52,7 +42,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveFileTarget } from './vault-files.js';
 import { familyFiles, readFontIndex } from './font-families.js';
-import { latexStyleConfig, headerValues, STYLE_KEYS } from './latex-style.js';
+import { configureExportBuild, exportEmbedPath } from './export-config.js';
 
 const engineDir = path.dirname(process.argv[2]);
 const load = (name) => import(pathToFileURL(path.join(engineDir, name)).href);
@@ -64,33 +54,13 @@ let building = null;   // the build's message: its file and options
 const fontIndex = process.env.CLEW_FONT_INDEX ? readFontIndex(process.env.CLEW_FONT_INDEX) : null;
 const figureFonts = fontIndex ? { figureFonts: (family) => familyFiles(fontIndex, family) } : {};
 
+// An image embed resolved as the preview resolves one, then pointed from the
+// file this export writes (export-config.js#exportEmbedPath).
 const resolveEmbed = (name, { file } = {}) => {
 	const rel = resolveFileTarget(String(name));
 	if (!rel) return null;
-	const abs = path.join(process.env.CLEW_VAULT_ROOT, rel);
-	const output = building.options?.output;
-	if (!output) return abs;
-	if (building.options?.chapters?.length) {
-		if (!file) return abs;   // the engine names no file: nothing to be relative to
-		return path.relative(path.dirname(file), abs).split(path.sep).join('/');
-	}
-	// A single note's paths the engine prints as given, so they are made
-	// relative to the output's folder here. TeX climbs `..` from its REAL
-	// working folder, a browser from the URL it was given: under a symlinked
-	// folder (macOS's /var → /private/var holds every temp folder — `clew
-	// export`'s build) the two count differently. For LaTeX both ends are real
-	// paths, so a vault reached through a link (a linked folder, an external
-	// volume) gives `../Attachments/…`, not a climb out to the link's own
-	// path. The clamp has already run.
-	const from = path.dirname(path.resolve(output));
-	let wanted = path.relative(from, abs);
-	if (building.options?.to === 'latex') {
-		let realFrom = from, realTo = abs;
-		try { realFrom = fs.realpathSync(from); } catch { /* not there yet: as given */ }
-		try { realTo = fs.realpathSync(abs); } catch { /* as resolved */ }
-		wanted = path.relative(realFrom, realTo);
-	}
-	return wanted.split(path.sep).join('/');
+	const { output, to, chapters } = building.options ?? {};
+	return exportEmbedPath({ abs: path.join(process.env.CLEW_VAULT_ROOT, rel), output, to, chapters, file, realpath: fs.realpathSync });
 };
 
 if (process.send) process.send({ type: 'ready' });
@@ -100,36 +70,11 @@ process.once('message', async (msg) => {
 	building = msg;
 	try {
 		const options = { ...msg.options, obsidianLinks: { resolveEmbed, resolveLink: () => null }, ...figureFonts };
-		// Clew's LaTeX style (latex-style.js): configuration added to what the
-		// user's config files gave the engine at import — decided before the
-		// build, and again when the engine merges the document's header
-		// (wrapped here: the engine's own parse; a note with no header never
-		// merges one), from the config as it was, so the header's `Lang` and
-		// `LaTeX engine` decide it and no key the header set is touched. Once,
-		// and for the engine's own configuration only: a book's chapter checks
-		// merge into TRIAL copies made with Object.create(configManager)
-		// (book.js#sameAsBook), which inherit this wrapper — re-deciding from a
-		// chapter's one key reset a German book's language to English
-		// (measured).
-		if (msg.latexStyle && options.to === 'latex') {
-			const user = new Map(['Lang', ...STYLE_KEYS].map((k) => [k, configManager.get(k)]));
-			const style = (header) => {
-				for (const key of STYLE_KEYS) if (!(key in header)) configManager.set(key, user.get(key));
-				const where = { ...msg.latexStyle, defaults: DEFAULT_CONFIG, header };
-				for (const [key, value] of latexStyleConfig((k) => user.get(k), where)) configManager.set(key, value);
-			};
-			style({});
-			const merge = configManager.mergeMetadata;
-			let decided = false;
-			configManager.mergeMetadata = function (metadata) {
-				const merged = merge.call(this, metadata);
-				if (this === configManager && !decided) {
-					decided = true;
-					style(headerValues(metadata));
-				}
-				return merged;
-			};
-		}
+		// Clew's configuration for this build (export-config.js: the fenced
+		// header, the vault's citations in HTML, LaTeX's own title, Clew's
+		// LaTeX style), on the engine's own configManager, after the user's
+		// config files and before the build.
+		configureExportBuild(configManager, { to: options.to, latexStyle: msg.latexStyle, biblify: msg.biblify, defaults: DEFAULT_CONFIG });
 		const { outFile, bookMap = null, latexFiles = null } = await processFile(msg.file, options);
 		if (process.send) process.send({ type: 'done', output: outFile, warnings: getWarnings(), bookMap, latexFiles });
 	} catch (err) {

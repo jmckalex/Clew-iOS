@@ -28,6 +28,7 @@ import { liveEvents } from './events.js';
 import { tableEditing } from './table-cell-editor.js';
 import { liveKeys } from './keys.js';
 import { sidenotes } from './sidenotes.js';
+import { columnWidth } from './columns.js';
 
 /** The compartment every note state carries (empty in source mode). */
 export const liveCompartment = new Compartment();
@@ -54,5 +55,7 @@ export function liveEdit(config) {
 		liveEvents,
 		liveKeys,
 		sidenotes,
+		// A list's indentation column, the font's space (live-edit.css's --le-col).
+		columnWidth,
 	];
 }

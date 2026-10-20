@@ -1,0 +1,93 @@
+// Clew — an Obsidian-style note app built on the jmarkdown engine.
+// Copyright © 2026 J. McKenzie Alexander <jmckalex@gmail.com> · https://jmckalex.org
+//
+// This file is part of Clew, free software released under the GNU General
+// Public License, version 3 or later. Clew is distributed in the hope that it
+// will be useful, but WITHOUT ANY WARRANTY. See LICENSE at the repository
+// root, or <https://www.gnu.org/licenses/>.
+//
+// SPDX-License-Identifier: GPL-3.0-or-later
+
+// One column of a list's indentation as live edit draws it: the width of a
+// space in the note's own font, as `--le-col` on the scroller, which
+// live-edit.css multiplies a line's --le-indent (its item marker's column,
+// inline-layer.js#listIndent) by. A nested item's first line is indented by
+// its leading whitespace, DRAWN — spaces, and tabs to their stops in the same
+// spaces (tab-size) — while a quote in the item and the item's text past its
+// first line are indented by that CSS, their whitespace concealed; the two
+// agree only when the column is the font's space. A fixed 0.3em was Avenir
+// Next's 0.25em by a fifth: a quote in a nested item stood 2px right of the
+// item's text, reading view's 0 (Clew-iOS's measure, 2026-10-20). Measured
+// on a hidden run of spaces in the scroller, as an em of the font's size, so
+// a size setting alone changes nothing; again whenever that run's width
+// changes, as a new face's does.
+import { ViewPlugin } from '@codemirror/view';
+
+/**
+ * A list item's indentation when it holds a tab — the run of spaces and tabs
+ * after a quote's `>`s (where --le-indent counts from, inline-layer.js#
+ * listIndent) up to the marker — or null. Live edit draws that run as a box
+ * of its own (`le-indent-tabs`): CSS counts a tab's stops from the edge of the
+ * box it is in, and a line's is moved by the item's hang (its negative
+ * text-indent), so `\t* item` stood 6px in, not four columns' 16, its quote
+ * and its later lines where the columns were (2026-10-20). In its own box the
+ * run starts at a stop, and every tab fills to the next as the columns count
+ * it. The characters stay characters: the caret, ←/→ and a click are as
+ * before. A run of spaces alone is drawn as it always was.
+ *
+ * @param {string} text - the line up to the item's marker
+ * @returns {{ from: number, to: number } | null} offsets in `text`
+ */
+export function tabbedIndent(text) {
+	const from = /^(?:[ \t]*>)+[ \t]?/.exec(text)?.[0].length ?? 0;
+	const to = from + /^[ \t]*/.exec(text.slice(from))[0].length;
+	return text.slice(from, to).includes('\t') ? { from, to } : null;
+}
+
+/** A space's width as an em of the font's size: `0.25em`. Null for nothing measurable. */
+export function columnEm(spaceWidth, fontSize) {
+	if (!(spaceWidth > 0) || !(fontSize > 0)) return null;
+	return `${Math.round((spaceWidth / fontSize) * 10000) / 10000}em`;
+}
+
+// The probe's run of spaces: long enough that a fraction of a pixel per space
+// shows in its width.
+const PROBE = 32;
+
+export const columnWidth = ViewPlugin.fromClass(class {
+	constructor(view) {
+		this.view = view;
+		// A hidden run of spaces in the scroller, in the note's font (the
+		// scroller carries the editor's face and size): its width IS the
+		// columns as the lines draw them, and it changes exactly when the face
+		// or the size does — which a ResizeObserver hears. CodeMirror's own
+		// geometry change does not: a new face that rewraps no line moves no
+		// height, and a short note kept the old column (measured, Menlo).
+		this.probe = document.createElement('span');
+		this.probe.className = 'le-col-probe';
+		this.probe.setAttribute('aria-hidden', 'true');
+		this.probe.textContent = ' '.repeat(PROBE);
+		view.scrollDOM.append(this.probe);
+		this.observer = new ResizeObserver(() => this.schedule());
+		this.observer.observe(this.probe);
+		this.schedule();
+	}
+
+	schedule() {
+		this.view.requestMeasure({
+			key: this,
+			read: () => ({ width: this.probe.getBoundingClientRect().width, size: parseFloat(getComputedStyle(this.probe).fontSize) }),
+			write: ({ width, size }, view) => {
+				const em = columnEm(width / PROBE, size);
+				if (em) view.scrollDOM.style.setProperty('--le-col', em);
+				else view.scrollDOM.style.removeProperty('--le-col');
+			},
+		});
+	}
+
+	destroy() {
+		this.observer.disconnect();
+		this.probe.remove();
+		this.view.scrollDOM.style.removeProperty('--le-col');
+	}
+});

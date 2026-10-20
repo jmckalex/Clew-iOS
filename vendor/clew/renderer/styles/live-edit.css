@@ -105,12 +105,26 @@
 .le-align-center { text-align: center; }
 .le-align-right { text-align: right; }
 
-/* ---- lists: a hanging indent, so wrapped lines sit under the text ---- */
+/* ---- lists: a hanging indent, so wrapped lines sit under the text ----
+   --le-indent is the item marker's column; --le-col one column, a space in
+   the note's font (live/columns.js) — what an item's DRAWN indentation is
+   made of, so every line indented by this CSS lines up with it. */
 .le-li, .le-li-cont {
-	--le-hang: calc(var(--le-indent, 0) * 0.3em + 1.4em);
+	--le-hang: calc(var(--le-indent, 0) * var(--le-col, 0.25em) + 1.4em);
 	padding-left: calc(24px + var(--le-hang)) !important;
 }
 .le-li { text-indent: calc(-1 * var(--le-hang)); }
+/* An item's indentation holding a tab, a box of its own: its tabs' stops
+   count from its edge, not from the line's, which the hang moves
+   (live/columns.js#tabbedIndent). No text-indent of its own (a box inherits
+   the line's). */
+.le-indent-tabs { display: inline-block; text-indent: 0; }
+/* live/columns.js's measure of a space: in the scroller's face and size,
+   out of the flow and never seen. */
+.le-col-probe {
+	position: absolute; top: 0; left: 0; white-space: pre;
+	visibility: hidden; pointer-events: none; user-select: none;
+}
 /* An item's number and its space, one width as the bullet is, so the text
    starts where the hang does (a longer number pushes past it). */
 .le-num { display: inline-block; min-width: 1.4em; text-indent: 0; }
@@ -203,13 +217,13 @@
    and the numbers hung over the border); inside a callout it indents as
    reading view's list does, 2.5em from the callout's text. */
 .le-quote.le-li, .le-quote.le-li-cont { padding-left: calc(20px + var(--le-hang)) !important; }
-.le-quote.le-callout.le-li, .le-quote.le-callout.le-li-cont { padding-left: calc(16px + 2.5em + var(--le-indent, 0) * 0.3em) !important; }
+.le-quote.le-callout.le-li, .le-quote.le-callout.le-li-cont { padding-left: calc(16px + 2.5em + var(--le-indent, 0) * var(--le-col, 0.25em)) !important; }
 /* A quote inside a list item: its border under the item's text, where
    reading view's <li> holds it — the item's hang past the line's 24px — and
    its text the quote's, not the list face lang-markdown gives the item's
    every span (model.js#quote). */
 .le-quote.le-quote-li {
-	--le-hang: calc(var(--le-indent, 0) * 0.3em + 1.4em);
+	--le-hang: calc(var(--le-indent, 0) * var(--le-col, 0.25em) + 1.4em);
 	margin-left: calc(24px + var(--le-hang));
 }
 .cm-live .le-quote .cmt-list { color: inherit; }

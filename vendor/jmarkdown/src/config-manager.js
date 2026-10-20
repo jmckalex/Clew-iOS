@@ -97,6 +97,11 @@ export const DEFAULT_CONFIG = {
 	// Opt-in typographic educator (see src/smart-typography.js): straight
 	// quotes → curly, ---/-- → em/en dash, ... → ellipsis, in both outputs.
 	'Smart typography': false,
+	// In LaTeX, the body's title block (@title+, @author+, @date+ and their kin)
+	// becomes \title, \author and \date with \maketitle where it stands, and a
+	// header's Title with no Date gets \date{} (additional-directives.js,
+	// latex-template.js). Off: the title lines as they always were.
+	'LaTeX maketitle': false,
 	// Custom Obsidian callout types (src/callouts.js): a list of
 	// { "name", "title"?, "icon"?, "color"?, "aliases"? } — `[!name]` with
 	// that title, a Font Awesome icon by name ("lightbulb", "regular:circle",
@@ -353,6 +358,12 @@ class ConfigManager {
 				// configManager.get('Smart typography') lazily at walk time.
 				str = value[0].trim().toLowerCase();
 				this.config["Smart typography"] = (str == "true");
+				break;
+			case "LaTeX_maketitle":
+				// Space-keyed, read at render time by additional-directives.js and
+				// latex-template.js.
+				str = value[0].trim().toLowerCase();
+				this.config["LaTeX maketitle"] = (str == "true");
 				break;
 			case "Code_language":
 				// Space-keyed, like Block_elements: latex-renderer.js reads

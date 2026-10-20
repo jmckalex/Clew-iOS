@@ -20,6 +20,8 @@
 import { requirePackage, addPreamble } from './preamble.js';
 import { registerBlockEnvironment } from './begin-end-core.js';
 import { escapeLatexText } from './latex-escape.js';
+import { configManager } from './config-manager.js';
+import { marked } from './utils.js';
 
 export function renderAbstract(inner) {
 	if (global.isLatex) return `\\begin{abstract}\n${inner.trim()}\n\\end{abstract}\n\n`;
@@ -60,20 +62,136 @@ export function renderHTMLEnv(innerHtml) {
 	A document's `Title`/`Author`/`Date` header keys give \maketitle in a full
 	LaTeX document, except when the body prints its own title (bodyPrintsTitle,
 	below).
+
+	`LaTeX maketitle` (default off; the owner, 2026-10-20) makes the title block
+	LaTeX's own instead: \title{…}, \author{…} and \date{…}, then \maketitle,
+	where the block stands (below).
 */
-const titlePageLatex = {
-	title:       (content) => {
-		const line = `{\\noindent\\LARGE\\bfseries ${content.trim()}\\par}`;
-		latexTitles.add(line);
-		return `${line}\n\n`;
-	},
-	subtitle:    (content) => `{\\noindent ${content.trim()}\\par}\n\n`,
-	author:      (content) => `{\\noindent\\large ${content.trim()}\\par}\n\n`,
-	institution: (content) => `{\\noindent ${content.trim()}\\par}\n\n`,
+const TITLE_PAGE_LINES = {
+	title:       (content) => `{\\noindent\\LARGE\\bfseries ${content.trim()}\\par}`,
+	subtitle:    (content) => `{\\noindent ${content.trim()}\\par}`,
+	author:      (content) => `{\\noindent\\large ${content.trim()}\\par}`,
+	institution: (content) => `{\\noindent ${content.trim()}\\par}`,
 	// The date closes the block in nearly every document: the gap after it is
 	// the margin the next paragraph has in the HTML.
-	date:        (content) => `{\\noindent\\large ${content.trim()}\\par}\\medskip\n\n`
+	date:        (content) => `{\\noindent\\large ${content.trim()}\\par}\\medskip`
 };
+
+function titlePageLine(kind, content) {
+	const line = TITLE_PAGE_LINES[kind](content);
+	if (kind === 'title') latexTitles.add(line);
+	return `${line}\n\n`;
+}
+
+// Each kind's renderer, given the line's content and its token: the line, or,
+// for a line of the title block `LaTeX maketitle` takes over, its part of it.
+const titlePageLatex = Object.fromEntries(Object.keys(TITLE_PAGE_LINES).map((kind) => [kind,
+	(content, token) => token?.jmdTitleRun ? titleRunPart(kind, content, token) : titlePageLine(kind, content)]));
+
+/*
+	`LaTeX maketitle`. The first run of title-page lines in the body — lines one
+	after another, blank lines between them allowed, at the top level of the
+	document and holding a title — becomes LaTeX's title page, where it stands:
+
+		\title{Title\\{\large Subtitle}}
+		\author{Author\\Institution \and Second author}
+		\date{Date}
+		\maketitle
+
+	Several titles or dates are joined with \\; a subtitle is a smaller line
+	under the title; an institution goes under the author before it, each
+	author's set apart with \and. A part the block lacks is written empty —
+	\author{}, \date{} — since the block is the title page, as it is in the HTML:
+	LaTeX would print today's date, or a header's Author, which the page does not
+	show. Any other title line stays a line: a second block (\maketitle works
+	once), a block with no title, one nested in a container, and a book's
+	chapter's (a book has one title page, the master's).
+
+	The run is found before anything renders (a processAllTokens hook); each line
+	then renders its content as always, and the last one writes the block. Every
+	part is a macro's argument, so the lines' inline code and links are marked as
+	a heading's are (token.jmdArgument, latex-renderer.js): \mintinline's
+	delimiters and a `%` in a URL break there. A paragraph break, which \title
+	cannot hold (an @begin(title) of two paragraphs), becomes \\.
+*/
+function latexMaketitle() {
+	return configManager.get('LaTeX maketitle') === true;
+}
+
+// The kind of title-page line a token is, or null. Override sigils
+// (`@.title+[…]`) render the same line in LaTeX, so they count.
+function titleKind(token) {
+	const name = token.meta?.marker?.startsWith('::') ? token.meta.name
+		: ['atBlock', 'atInline', 'beginEnd'].includes(token.type) && token.literal === undefined && !token.misplaced ? token.name
+		: null;
+	return Object.hasOwn(TITLE_PAGE_LINES, name ?? '') ? name : null;
+}
+
+// A top-level token's title-page lines: a block form, or a paragraph that
+// holds nothing but inline ones (`@title[…]` and `@author[…]` on lines of
+// their own). Null for anything else.
+function titleLinesIn(token) {
+	if (titleKind(token)) return [token];
+	if (token.type !== 'paragraph' || !token.tokens) return null;
+	const lines = token.tokens.filter(titleKind);
+	const others = token.tokens.filter((t) => !titleKind(t));
+	if (lines.length && others.every((t) => t.type === 'br' || (t.type === 'text' && !t.text.trim()))) return lines;
+	return null;
+}
+
+function markArgumentTokens(tokens) {
+	for (const token of tokens ?? []) {
+		if (token.type === 'codespan' || token.type === 'link') token.jmdArgument = true;
+		markArgumentTokens(token.tokens);
+	}
+}
+
+function markTitleRun(tokens) {
+	if (!global.isLatex || !latexMaketitle()) return tokens;
+	let lines = [];
+	let inChapter = false;
+	for (const token of tokens) {
+		// Whitespace, and marked-footnote's list (nothing, in LaTeX), keep a run.
+		if (token.type === 'space' || token.type === 'footnotes') continue;
+		// book.js's chapter edges.
+		if (token.type === 'jmdChapter') inChapter = token.edge === 'start';
+		const found = inChapter ? null : titleLinesIn(token);
+		if (found) {
+			lines.push(...found);
+			continue;
+		}
+		if (lines.some((line) => titleKind(line) === 'title')) break;
+		lines = [];
+	}
+	if (!lines.some((line) => titleKind(line) === 'title')) return tokens;
+	const run = { parts: [], last: lines.at(-1) };
+	for (const line of lines) {
+		line.jmdTitleRun = run;
+		markArgumentTokens(line.tokens);
+	}
+	return tokens;
+}
+
+marked.use({ hooks: { processAllTokens: markTitleRun } });
+
+function titleRunPart(kind, content, token) {
+	const run = token.jmdTitleRun;
+	run.parts.push({ kind, content: content.trim().replace(/\s*\n\s*\n\s*/g, '\\\\\n') });
+	return token === run.last ? titleRunLatex(run.parts) : '';
+}
+
+function titleRunLatex(parts) {
+	const of = (kind) => parts.filter((part) => part.kind === kind).map((part) => part.content);
+	const title = [...of('title'), ...of('subtitle').map((subtitle) => `{\\large ${subtitle}}`)].join('\\\\');
+	const authors = [];
+	for (const { kind, content } of parts) {
+		if (kind === 'author' || (kind === 'institution' && !authors.length)) authors.push(content);
+		else if (kind === 'institution') authors[authors.length - 1] += `\\\\${content}`;
+	}
+	const block = `\\title{${title}}\n\\author{${authors.join(' \\and ')}}\n\\date{${of('date').join('\\\\')}}\n\\maketitle`;
+	latexTitles.add(block);
+	return `${block}\n\n`;
+}
 
 /*
 	Whether a full LaTeX document's body prints its own title — a `@title+`,
@@ -111,7 +229,7 @@ const additionalDirectives = [
 		label: "title",
 		renderer(token) {
 			if (token.meta.name === "title") {
-				if (global.isLatex) return titlePageLatex.title(this.parser.parseInline(token.tokens));
+				if (global.isLatex) return titlePageLatex.title(this.parser.parseInline(token.tokens), token);
 				let html = marked.parser(token.tokens);
 				html = html.replace(/<\/?p>/g, '');
 				return `<div class="title">${html}</div>`;
@@ -125,7 +243,7 @@ const additionalDirectives = [
 		label: "subtitle",
 		renderer(token) {
 			if (token.meta.name === "subtitle") {
-				if (global.isLatex) return titlePageLatex.subtitle(this.parser.parseInline(token.tokens));
+				if (global.isLatex) return titlePageLatex.subtitle(this.parser.parseInline(token.tokens), token);
 				let html = marked.parser(token.tokens);
 				html = html.replace(/<\/?p>/g, '');
 				return `<div class="subtitle">${html}</div>`;
@@ -139,7 +257,7 @@ const additionalDirectives = [
 		label: "author",
 		renderer(token) {
 			if (token.meta.name === "author") {
-				if (global.isLatex) return titlePageLatex.author(escapeLatexText(token.text));
+				if (global.isLatex) return titlePageLatex.author(escapeLatexText(token.text), token);
 				return `<div class="author">${token.text}</div>`;
 			}
 			return false;
@@ -158,7 +276,7 @@ const additionalDirectives = [
 			if (token.meta.name === "institution") {
 				// The tokenizer made each line break a <br>, which LaTeX writes \\.
 				if (global.isLatex) {
-					return titlePageLatex.institution(this.parser.parseInline(token.tokens).replaceAll('<br>', '\\\\'));
+					return titlePageLatex.institution(this.parser.parseInline(token.tokens).replaceAll('<br>', '\\\\'), token);
 				}
 				let html = marked.parser(token.tokens);
 				html = html.replace(/<\/?p>/g, '');
@@ -174,7 +292,7 @@ const additionalDirectives = [
 		renderer(token) {
 			if (token.meta.name === "date") {
 				const content = this.parser.parseInline(token.tokens);
-				if (global.isLatex) return titlePageLatex.date(content);
+				if (global.isLatex) return titlePageLatex.date(content, token);
 				return `<div class="date">${content}</div>`;
 				// return `<div class="date">${token.text}</div>`;
 			}
@@ -504,23 +622,23 @@ const pass_through = {
 */
 registerBlockEnvironment('title', {
 	html: (ctx) => `<div class="title">${ctx.inner}</div>`,
-	latex: (ctx) => titlePageLatex.title(ctx.inner)
+	latex: (ctx) => titlePageLatex.title(ctx.inner, ctx.token)
 });
 registerBlockEnvironment('subtitle', {
 	html: (ctx) => `<div class="subtitle">${ctx.inner}</div>`,
-	latex: (ctx) => titlePageLatex.subtitle(ctx.inner)
+	latex: (ctx) => titlePageLatex.subtitle(ctx.inner, ctx.token)
 });
 registerBlockEnvironment('author', {
 	html: (ctx) => `<div class="author">${ctx.text}</div>`,
-	latex: (ctx) => titlePageLatex.author(escapeLatexText(ctx.text))
+	latex: (ctx) => titlePageLatex.author(escapeLatexText(ctx.text), ctx.token)
 });
 registerBlockEnvironment('institution', {
 	html: (ctx) => `<div class="institution">${ctx.text.trim().replaceAll('\n', '<br>')}</div>`,
-	latex: (ctx) => titlePageLatex.institution(escapeLatexText(ctx.text.trim()).replaceAll('\n', '\\\\'))
+	latex: (ctx) => titlePageLatex.institution(escapeLatexText(ctx.text.trim()).replaceAll('\n', '\\\\'), ctx.token)
 });
 registerBlockEnvironment('date', {
 	html: (ctx) => `<div class="date">${ctx.inner}</div>`,
-	latex: (ctx) => titlePageLatex.date(ctx.inner)
+	latex: (ctx) => titlePageLatex.date(ctx.inner, ctx.token)
 });
 registerBlockEnvironment('today', {
 	html: () => `<span class="date">${todayText()}</span>`,
