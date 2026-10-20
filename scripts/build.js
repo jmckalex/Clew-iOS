@@ -287,6 +287,21 @@ const rendererPatches = {
 				+ "\t\t\t\t\t+ 'polyglossia or Lua code (a \\\\setmainfont in your jmarkdown config, say) is compiled with '\n"
 				+ "\t\t\t\t\t+ 'LuaLaTeX, anything else with pdfLaTeX. Choose an engine here for what that cannot see.'),\n",
 				'');
+			// "Style of LaTeX and PDF via LaTeX exports" (Clew-app 3bfc0b6,
+			// 41f8713): Clew's EB Garamond style for desktop's LaTeX exports
+			// (engine/latex-style.js, applied by export-worker.mjs). The iPad
+			// has no LaTeX export yet, so the row and its hint go.
+			src = patched('clew-settings-view.js', src,
+				"\t\t\t\tthis.#selectRow('Style of LaTeX and PDF via LaTeX exports', 'latexExportStyle',\n"
+				+ "\t\t\t\t\t[['clew', 'Clew (EB Garamond)'], ['none', 'Your jmarkdown configuration only']]),\n"
+				+ "\t\t\t\tthis.#hint('Clew\\'s style sets the document in EB Garamond with matching maths, 12pt on A4 '\n"
+				+ "\t\t\t\t\t+ '(US Letter where your Mac\\'s region uses it), with smart quotes and the language\\'s '\n"
+				+ "\t\t\t\t\t+ 'hyphenation — on top of your jmarkdown configuration, whose packages and macros still '\n"
+				+ "\t\t\t\t\t+ 'apply; its fonts win over a font your configuration sets. A note\\'s own header keys '\n"
+				+ "\t\t\t\t\t+ '(Class options, Geometry, LaTeX preamble, …) win over the style. It needs LuaLaTeX or '\n"
+				+ "\t\t\t\t\t+ 'XeLaTeX, so with pdfLaTeX chosen above it is left out; a TeX installation without the '\n"
+				+ "\t\t\t\t\t+ 'EB Garamond fonts keeps its default face.'),\n",
+				'');
 			// "TikZ and MetaPost figures in exports" (Clew-app 2cc6d89; the
 			// built-in TeX the default since step C, 3267bf5, and the hint
 			// reworded in 72af6a2 and 0520b2c) picks what draws figures in desktop's note

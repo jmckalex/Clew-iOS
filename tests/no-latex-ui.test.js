@@ -37,3 +37,9 @@ test('the exports\' figure-engine setting (Clew-app 2cc6d89) has no Settings row
 	assert.ok(!bundle.includes('TikZ and MetaPost figures in exports'));
 	assert.ok(!bundle.includes('Your TeX installation') && !bundle.includes('built-in TeX'), 'nor its choices');
 });
+
+test('Clew\'s LaTeX export style (Clew-app 3bfc0b6, 41f8713) has no Settings row', () => {
+	// (The key itself stays in the shim's defaults, src/shim/settings.js.)
+	assert.ok(!bundle.includes('Style of LaTeX and PDF via LaTeX exports'));
+	assert.ok(!bundle.includes('Clew (EB Garamond)') && !bundle.includes('Your jmarkdown configuration only'), 'nor its choices');
+});

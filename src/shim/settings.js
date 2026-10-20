@@ -66,8 +66,10 @@ const DEFAULTS = {
 	// download (its section is dropped), no shell (stubbed), and no note or
 	// book export that draws figures with TeX (exportFigureEngine, Clew-app
 	// 2cc6d89: the installed tools or mp-tikz-wasm, the latter the default
-	// since step C, 3267bf5; its row is dropped).
+	// since step C, 3267bf5; its row is dropped), nor Clew's style for those
+	// LaTeX exports (latexExportStyle, Clew-app 3bfc0b6; its row is dropped).
 	latexEngine: 'auto',
+	latexExportStyle: 'clew',
 	exportFigureEngine: 'auto',
 	pdfCjkFonts: false,
 	shellFont: '',

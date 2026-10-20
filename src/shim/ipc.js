@@ -1174,6 +1174,11 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 
 	// ---- the window.clew bridge ------------------------------------------
 	const clew = {
+		// What this host is (renderer lib/host.js, Clew-app 7eae0d0): touch
+		// first, so the toolbar offers Next item, ⌘Enter's command, which the
+		// on-screen keyboard cannot type. Set here, before the renderer starts
+		// (install-shim.js); upstream reads `touchFirst === true` alone.
+		host: Object.freeze({ touchFirst: true }),
 		invoke(channel, payload) {
 			const handler = handlers[channel];
 			if (!handler) return Promise.reject(new Error(`Unknown channel: ${channel}`));

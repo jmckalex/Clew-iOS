@@ -1062,6 +1062,22 @@ test('the iOS settings defaults carry every key upstream defines, with the plan\
 	assert.equal(all.slashCommands, true);
 });
 
+test('window.clew says the host is touch-first, as the renderer reads it (the toolbar\'s Next item)', async () => {
+	assert.equal(clew.host?.touchFirst, true);
+	assert.ok(Object.isFrozen(clew.host), 'nothing in the page can turn it off');
+	// Upstream's own reader (renderer/lib/host.js, Clew-app 7eae0d0), over
+	// the shim's object as install-shim.js installs it.
+	const { touchFirst } = await import(path.join(root, 'vendor/clew/renderer/lib/host.js'));
+	const had = Object.getOwnPropertyDescriptor(globalThis, 'window');
+	globalThis.window = { clew };
+	try {
+		assert.equal(touchFirst(), true);
+	} finally {
+		if (had) Object.defineProperty(globalThis, 'window', had);
+		else delete globalThis.window;
+	}
+});
+
 // ---- live-edit block frames (plan §2.2): keys, sidecars, eviction ----------
 
 test('renderBlock builds a FULL document from a temp note + .source sidecar in the fragments dir, keyed for reuse', async () => {
