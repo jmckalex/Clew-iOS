@@ -1101,7 +1101,8 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 					throw err;
 				}
 				const warnings = [
-					...explainFiguresWarnings(done.warnings ?? [], { restricted: done.trusted !== true }),
+					// Said for the iPad (`ios`): a Mermaid diagram's words among them.
+					...explainFiguresWarnings(done.warnings ?? [], { restricted: done.trusted !== true, platform: 'ios' }),
 					...(shared.missing ?? []).map((name) => `${name} is named by the .tex but is not in this vault, so the share does not carry it`),
 					...(shared.refused ?? []).map(({ rel, why }) => (why === 'hidden'
 						? `${rel} is named by the .tex but is in a hidden folder or is a hidden file, so the share does not carry it`

@@ -412,11 +412,13 @@ this plan cherry-picked onto its build commit 527a245).
   @mermaid-js/mermaid-cli", which no iPad user can do. Clew-boss: this
   belongs in Clew's warning layer (as explainFiguresWarnings), not in
   jmarkdown.
-- **For upstream (small):** jmarkdown embeds SVG, GIF, WebP, BMP and AVIF
-  images as `\includegraphics` (obsidian-links.js#IMAGE), which neither
-  pdfLaTeX nor LuaLaTeX typesets ("Unknown graphics extension"). The
-  iPad's share refuses those files with a warning. The engine could warn
-  at export time, or convert them.
+- **Corrected (Clew-boss's run, 2026-10-20):** an SVG embed was never an
+  `\includegraphics`: it is a `\href{run:…}` link, which compiles. GIF was
+  the fault: `![[anim.gif]]` became an `\includegraphics` that stopped the
+  export with "Unknown graphics extension: .gif", on the desktop too.
+  jmarkdown 6ac8a6c (in the 0768f36 sync) makes GIF, WebP, BMP and AVIF
+  links with a warning, as SVG. The share's refusal of non-images stands
+  either way.
 
 **L3 `latex-p3-verify`:** the record and the simulator (§5).
 

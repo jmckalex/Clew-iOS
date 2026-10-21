@@ -120,7 +120,8 @@ const fakeBridge = {
 				// What ExportHost.swift answers once the host page said done, with
 				// the .tex (a test may set what the build "wrote").
 				return { folder: `clew-export-${'a'.repeat(32)}`, output: 'X.tex', files: [{ rel: 'X.tex', bytes: 3 }],
-					warnings: ['code: one warning'], ms: 1, tex: fakeExportTex ?? '\\documentclass{article}' };
+					warnings: ['code: one warning', 'mermaid: "sequenceDiagram" left out of the LaTeX — mermaid-cli (mmdc) was not found; install @mermaid-js/mermaid-cli to render mermaid for print'],
+					ms: 1, tex: fakeExportTex ?? '\\documentclass{article}' };
 			case 'exportShare':
 				// What FSBridge.swift answers once the share sheet is up.
 				if (fakeShareFails) throw new Error('the zip could not be made');
@@ -944,6 +945,7 @@ test('the export host (UPSTREAM-LATEX-EXPORT-PLAN.md L1, L2): one LaTeX build ov
 	assert.equal(result.output, 'Links and Embeds.zip');
 	assert.deepEqual(result.warnings, [
 		'code: one warning',
+		'mermaid: "sequenceDiagram" left out of the LaTeX — Mermaid diagrams are left out of LaTeX exports on the iPad, which cannot run the program that draws them for print; reading view still shows them.',
 		'Attachments/nothere.png is named by the .tex but is not in this vault, so the share does not carry it',
 		'.clew/vault-settings.json is named by the .tex but is in a hidden folder or is a hidden file, so the share does not carry it',
 		'Welcome.md is named by the .tex but is not an image TeX can typeset (PDF, PNG, JPEG or EPS), so the share does not carry it',

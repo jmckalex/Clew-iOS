@@ -24,9 +24,9 @@ const BIBLIOGRAPHY = /\\bibliography\s*\{([^{}]+)\}/g;
 const BIBRESOURCE = /\\addbibresource\s*(?:\[[^\]]*\])?\s*\{([^{}]+)\}/g;
 // What graphicx tries for a name without an extension (pdfTeX's and
 // LuaTeX's list, the common part), and so the only files the share carries
-// for an \includegraphics. jmarkdown embeds SVG, GIF, WebP, BMP and AVIF
-// images too (obsidian-links.js#IMAGE), which no TeX here typesets: those
-// are refused, with the rest.
+// for an \includegraphics. An image TeX cannot typeset is a link in the
+// .tex, not an \includegraphics (SVG always; GIF, WebP, BMP, AVIF since
+// jmarkdown 6ac8a6c), so naming one here is refused with the rest.
 const GRAPHIC_EXTS = ['.pdf', '.png', '.jpg', '.jpeg', '.jbig2', '.jb2', '.eps', '.mps'];
 const isGraphic = (rel) => GRAPHIC_EXTS.some((ext) => rel.toLowerCase().endsWith(ext));
 /** A path through a hidden folder, or to a hidden file (`.git/`, `.obsidian/`,
