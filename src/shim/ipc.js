@@ -83,8 +83,8 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 	const renderService = new RenderService({ workerFactory, assetLoader });
 	const kvStore = new KvStore();
 	const searchService = new SearchService({ vaults, indexer });
-	// The export host (UPSTREAM-LATEX-EXPORT-PLAN.md §3): a note's LaTeX
-	// export (EXPORT_NOTE `latex`); PDF via LaTeX still refuses until P2.
+	// The export host (UPSTREAM-LATEX-EXPORT-PLAN.md §3, §4): a note's LaTeX
+	// export and its PDF via LaTeX (EXPORT_NOTE `latex`, `pdf`).
 	const exportHost = createExportHost({ renderService, bridgeCall, vaultRoot: VAULT_ROOT, settings });
 
 	vaults.send = send;
@@ -1110,8 +1110,25 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 				];
 				return { shared: true, output: shared.name, warnings };
 			}
+			if (format === 'pdf') {
+				// "Export note as PDF (via LaTeX)" (UPSTREAM-LATEX-EXPORT-PLAN.md §4):
+				// the same build, typeset in the export host by mp-tikz-wasm's own
+				// TeX (src/export/typeset.js), in every vault — that TeX sees only
+				// what the job hands it (the owner's (3)). Only the PDF is shared.
+				vaults.resolve(path);
+				const done = await exportHost.run(path, 'pdf');
+				let shared;
+				try {
+					shared = await bridgeCall('exportShare', { folder: done.folder, name: done.base, output: done.output, include: [], bibs: [] });
+				} catch (err) {
+					await exportHost.discard(done.folder).catch(() => {});
+					throw err;
+				}
+				const warnings = explainFiguresWarnings(done.warnings ?? [], { restricted: done.trusted !== true, platform: 'ios' });
+				return { shared: true, output: shared.name, warnings };
+			}
 			if (format !== 'html') {
-				throw new Error(`${format} export needs a LaTeX toolchain and is not available on iOS`);
+				throw new Error(`${format} export is not available on iOS`);
 			}
 			// The note as reading view drew it, in one file: the same hidden
 			// document as the PDF, serialized with no scripts, its styles,

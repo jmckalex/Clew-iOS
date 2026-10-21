@@ -49,6 +49,9 @@ export function createExportHost({ renderService, bridgeCall, vaultRoot, setting
 			vaultRoot, noteRel, format, ...inputs,
 			settings: { latexExportStyle: settings?.get('latexExportStyle'), latexEngine: settings?.get('latexEngine') },
 			locale: Intl.DateTimeFormat().resolvedOptions().locale,
+			// What a PDF's TeX may be given as a bibliography (the worker reads
+			// the .tex's names against these, export-references.js).
+			bibFiles: bibFilesFor(noteRel, inputs.vaultOptions, inputs.trusted),
 		});
 		return { inputs, job };
 	};

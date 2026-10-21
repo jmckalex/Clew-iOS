@@ -42,8 +42,8 @@ const NOTE = /\.(md|jmd)$/i;
  * @returns {{ base: string, init: { files: object, cwd: string, env: object },
  *   build: { file: string, options: object, latexStyle: object | null, biblify: object | null } }}
  */
-export function exportJob({ vaultRoot = '/vault', noteRel, format, files, env, trusted, vaultOptions = {}, settings = {}, locale = '' }) {
-	if (format !== 'latex') throw new Error(`not an export the export host makes: ${format}`);
+export function exportJob({ vaultRoot = '/vault', noteRel, format, files, env, trusted, vaultOptions = {}, settings = {}, locale = '', bibFiles = [] }) {
+	if (format !== 'latex' && format !== 'pdf') throw new Error(`not an export the export host makes: ${format}`);
 	const rel = String(noteRel ?? '');
 	if (!NOTE.test(rel) || rel.startsWith('/') || rel.split('/').some((seg) => seg === '' || seg === '.' || seg === '..')) {
 		throw new Error(`not a note in this vault: ${rel}`);
@@ -80,6 +80,9 @@ export function exportJob({ vaultRoot = '/vault', noteRel, format, files, env, t
 				to: 'latex', style: settings.latexExportStyle, engine: settings.latexEngine, locale, platform: 'ios',
 			}),
 			biblify: vaultBiblify(vaultOptions, vaultRoot),
+			// PDF via LaTeX (§4): the .tex typeset in the worker, only the PDF out.
+			pdf: format === 'pdf',
+			bibFiles,
 		},
 	};
 }

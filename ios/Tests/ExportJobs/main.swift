@@ -197,5 +197,26 @@ check(!fm.fileExists(atPath: scratch.appendingPathComponent("escape.png").path) 
 check(jobs.discard(folderName: d2.folder.lastPathComponent) && !fm.fileExists(atPath: zipped.url.path), "the share's folder is discarded whole")
 check(jobs.finishedFolder(named: d2.folder.lastPathComponent) == nil, "and is no longer one to share")
 
+// MARK: - PDF via LaTeX: the vault route's rule, the PDF alone
+
+let p1 = try! jobs.begin(job: job)
+check(!jobs.mayRead(token: p1, rel: "Attachments/x.png"), "nothing before the job is taken")
+_ = try! jobs.takeJob(token: p1)
+check(jobs.mayRead(token: p1, rel: "Attachments/x y.PNG") && jobs.mayRead(token: p1, rel: "f.pdf") && jobs.mayRead(token: p1, rel: "a/b.eps"),
+	"an image graphicx typesets, any case")
+for bad in ["Attachments/x.svg", "Notes/a.md", "refs.bib", ".git/config.png", "a/.hidden.jpg", "../x.png", "/etc/x.png", "a//b.png", "x"] {
+	check(!jobs.mayRead(token: p1, rel: bad), "refused: \(bad)")
+}
+check(!jobs.mayRead(token: String(repeating: "0", count: 32), rel: "Attachments/x.png"), "another token")
+try! jobs.write(token: p1, rel: "Note.pdf", data: Data("%PDF-1.5".utf8))
+let dp = try! jobs.finish(token: p1, body: answer(["Note.pdf"], "Note.pdf"))
+check(!jobs.mayRead(token: p1, rel: "Attachments/x.png"), "nothing after the job ends")
+let fp = jobs.finishedFolder(named: dp.folder.lastPathComponent)!
+let sharedPdf = try! ExportJobs.share(in: fp, name: "Note", output: "Note.pdf", include: ["Attachments/x y.png"],
+	bibs: [(rel: "Library/refs.bib", as: "refs.bib")], copy: copyFromVault)
+check(sharedPdf.kind == "pdf" && sharedPdf.url.lastPathComponent == "Note.pdf" && sharedPdf.bytes == 8 && sharedPdf.entries == 1,
+	"PDF via LaTeX: the PDF alone, whatever else is named")
+check(!fm.fileExists(atPath: fp.appendingPathComponent(".share").path), "nothing staged beside it")
+
 print("ExportJobs: \(passed) passed, \(failed) failed")
 exit(failed == 0 ? 0 : 1)

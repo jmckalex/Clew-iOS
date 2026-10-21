@@ -8,7 +8,11 @@
 // as a child process: the bundle installs its own `process` global) and
 // handy as a dev CLI:
 //
-//   node tools/export-note.mjs <vault-dir> <note-rel-path> <out-dir> [--restricted] [--style=none]
+//   node tools/export-note.mjs <vault-dir> <note-rel-path> <out-dir> [--restricted] [--style=none] [--pdf]
+//
+// With --pdf, the job is PDF via LaTeX: the worker typesets the .tex with
+// mp-tikz-wasm (src/export/typeset.js) and writes the PDF alone; the vault's
+// images come from the folder, as native's route gives them in the app.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -59,8 +63,20 @@ for (const name of ENGINE_CSL_FILES) {
 
 const access = { trusted, plugins: [], dataviewJs: false };
 const style = flags.find((f) => f.startsWith('--style='))?.slice('--style='.length) ?? 'clew';
+const pdf = flags.includes('--pdf');
+// The bibliographies a build could use, as the app lists them
+// (export-host.js#bibFilesFor), less the vault's jmarkdown config's.
+const header = /^Bibliography:\s*(.+)$/mi.exec(files[`/vault/${noteRel}`] ?? '')?.[1];
+const noteDir = path.posix.dirname(noteRel);
+const bibFiles = [
+	...(vaultOptions.bibliography ? [vaultOptions.bibliography] : []),
+	...(header ? header.split(',').map((b) => path.posix.normalize(path.posix.join(noteDir, b.trim()))) : []),
+];
+globalThis.__clewVaultFile = (rel) => {
+	try { return new Uint8Array(fs.readFileSync(path.join(vaultAbs, rel))); } catch { return null; }
+};
 const job = exportJob({
-	noteRel, format: 'latex', files, trusted, vaultOptions,
+	noteRel, format: pdf ? 'pdf' : 'latex', files, trusted, vaultOptions, bibFiles,
 	env: engineEnv({ vaultRoot: '/vault', sessionId: 's1', vaultOptions, access }),
 	settings: { latexExportStyle: style, latexEngine: 'auto' }, locale: 'en-GB',
 });
@@ -100,19 +116,12 @@ for (const { rel, data } of result.outputs) {
 	fs.writeFileSync(path.join(outDir, rel), data);
 }
 const tex = result.outputs.find((o) => o.rel === path.basename(result.output))?.data;
-// The bibliographies a build could use, as the app lists them
-// (export-host.js#bibFilesFor), less the vault's jmarkdown config's.
-const header = /^Bibliography:\s*(.+)$/mi.exec(files[`/vault/${noteRel}`] ?? '')?.[1];
-const noteDir = path.posix.dirname(noteRel);
-const bibFiles = [
-	...(vaultOptions.bibliography ? [vaultOptions.bibliography] : []),
-	...(header ? header.split(',').map((b) => path.posix.normalize(path.posix.join(noteDir, b.trim()))) : []),
-];
 const summary = {
 	output: path.basename(result.output),
 	files: result.outputs.map(({ rel, data }) => ({ rel, bytes: typeof data === 'string' ? new TextEncoder().encode(data).byteLength : data.byteLength })),
 	warnings: result.warnings,
 	references: texReferences({ tex: typeof tex === 'string' ? tex : '', base: job.base, exists: (r) => `/vault/${r}` in files, bibFiles }),
+	stats: result.stats ?? null,
 };
 fs.writeFileSync(1, JSON.stringify(summary) + '\n');
 realExit(0);

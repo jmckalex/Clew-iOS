@@ -45,6 +45,10 @@ final class ExportHost: NSObject, WKNavigationDelegate {
 	].joined(separator: "; ")
 
 	let jobs: ExportJobs
+	/// A vault file by its vault-relative path, clamped to the vault and
+	/// downloaded if evicted (WebHost: VaultStore.materialize), or nil. The
+	/// `vault/` route reads through it, never a path of its own.
+	var vaultFile: ((String) -> URL?)?
 	private(set) var webView: WKWebView?
 	private var completion: ((Result<ExportJobs.Done, Error>) -> Void)?
 	private var deadline: DispatchWorkItem?
@@ -115,6 +119,24 @@ final class ExportHost: NSObject, WKNavigationDelegate {
 				respond(task, 200, job, ["Content-Type": "application/json", "Cache-Control": "no-store", "Content-Security-Policy": Self.csp])
 			} catch {
 				json(403, ["error": error.localizedDescription])
+			}
+		case ("GET", "vault", let n) where n >= 3:
+			// PDF via LaTeX: an image the .tex names, for TeX (the worker's
+			// vaultFile, src/export/export-worker.js). Only for this job's
+			// token and only an image graphicx typesets, nothing hidden
+			// (ExportJobs.mayRead), clamped to the vault by vaultFile.
+			let rel = parts[2...].joined(separator: "/")
+			guard jobs.mayRead(token: parts[1], rel: rel), let vaultFile else { return json(403, ["error": "Forbidden"]) }
+			DispatchQueue.global(qos: .userInitiated).async {
+				var data: Data?
+				if let url = vaultFile(rel) {
+					var coordinationError: NSError?
+					NSFileCoordinator().coordinate(readingItemAt: url, options: [], error: &coordinationError) { data = try? Data(contentsOf: $0) }
+				}
+				DispatchQueue.main.async {
+					guard let data else { return json(404, ["error": "Not found"]) }
+					respond(task, 200, data, ["Content-Type": "application/octet-stream", "Cache-Control": "no-store", "Content-Security-Policy": Self.csp])
+				}
 			}
 		case ("POST", "out", 2):
 			let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems

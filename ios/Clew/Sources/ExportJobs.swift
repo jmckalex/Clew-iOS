@@ -208,9 +208,16 @@ final class ExportJobs {
 		bibs: [(rel: String, as: String)], copy: (String, URL) throws -> Bool) throws -> Shared {
 		let fm = FileManager.default
 		let name = Self.shareName(name)
-		guard Self.isSafeRelativePath(output), !output.contains("/"), output.lowercased().hasSuffix(".tex"),
+		let isPdf = output.lowercased().hasSuffix(".pdf")
+		guard Self.isSafeRelativePath(output), !output.contains("/"), output.lowercased().hasSuffix(".tex") || isPdf,
 			fm.fileExists(atPath: folder.appendingPathComponent(output).path) else {
-			throw Failure.malformed("no .tex named \(output)")
+			throw Failure.malformed("no .tex or .pdf named \(output)")
+		}
+		// PDF via LaTeX: the PDF alone, whatever else was named (the Mac's
+		// rule since 2026-10-04: no .aux, .log or figures beside it).
+		if isPdf {
+			let url = folder.appendingPathComponent(output)
+			return Shared(url: url, kind: "pdf", bytes: Self.size(of: url), entries: 1, skipped: [])
 		}
 		let outputs = try fm.contentsOfDirectory(atPath: folder.path).filter { !$0.hasPrefix(".") }
 		if include.isEmpty && bibs.isEmpty && outputs == [output] {
@@ -267,6 +274,19 @@ final class ExportJobs {
 
 	private static func size(of url: URL) -> Int {
 		((try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? NSNumber)?.intValue ?? 0
+	}
+
+	/// What graphicx typesets, and so the only vault files a PDF via LaTeX's
+	/// TeX is handed (src/shim/export-references.js's GRAPHIC_EXTS).
+	static let graphicExtensions: Set<String> = ["pdf", "png", "jpg", "jpeg", "jbig2", "jb2", "eps", "mps"]
+
+	/// May the running job's page read the vault file `rel` — an image its
+	/// .tex names, for TeX (PDF via LaTeX, ExportHost's `vault/` route)? Its
+	/// own token, once the job is taken; a safe path, nothing hidden, and only
+	/// an image graphicx typesets. The caller still clamps it to the vault.
+	func mayRead(token: String, rel: String) -> Bool {
+		guard (try? check(token)) != nil, served, Self.isSafeRelativePath(rel), !Self.isHiddenPath(rel) else { return false }
+		return Self.graphicExtensions.contains((rel as NSString).pathExtension.lowercased())
 	}
 
 	/// A path through a hidden folder or to a hidden file (`.git/config`,

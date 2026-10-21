@@ -46,7 +46,9 @@ async function run() {
 		worker.postMessage({ type: 'init', ...job.init });
 		await ready;
 		const built = next(worker, 'done');
-		worker.postMessage({ type: 'build', ...job.build, mptikzUrl: MPTIKZ });
+		// The token names this job to native's vault route, which hands TeX the
+		// images a PDF via LaTeX needs (ExportHost.swift).
+		worker.postMessage({ type: 'build', ...job.build, token, mptikzUrl: MPTIKZ });
 		const result = await built;
 		const files = [];
 		for (const out of result.outputs) {

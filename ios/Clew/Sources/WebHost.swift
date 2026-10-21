@@ -37,6 +37,7 @@ final class WebHost: NSObject, ObservableObject {
 		let exportJobs = ExportJobs(root: FileManager.default.temporaryDirectory.appendingPathComponent("clew-export", isDirectory: true))
 		exportJobs.sweep()
 		let exportHost = ExportHost(jobs: exportJobs)
+		exportHost.vaultFile = { [weak vaults] rel in vaults?.materialize(rel: rel, timeout: 15) }
 		schemeHandler.exportHost = exportHost
 		let bridge = FSBridge(vaults: vaults, exportHost: exportHost)
 		config.userContentController.addScriptMessageHandler(bridge, contentWorld: .page, name: "clew")

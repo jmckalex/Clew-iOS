@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { exportJob, EXPORT_RESTRICTED_CWD } from '../src/shim/export-job.js';
 import { exportOutputs, isSafeExportPath } from '../src/export/outputs.js';
 import { texReferences } from '../src/shim/export-references.js';
+import { typeset, DOCUMENT_BUNDLES, MAX_PASSES } from '../src/export/typeset.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
@@ -70,6 +71,11 @@ test('exportJob: one LaTeX build at the vault\'s root; a trusted vault from the 
 	assert.deepEqual(restricted.build.options.bibliography, []);
 
 	assert.throws(() => exportJob({ noteRel: 'A.md', format: 'html', files, env, trusted: true }), /not an export/);
+	const pdf = exportJob({ noteRel: 'A.md', format: 'pdf', files, env, trusted: true, bibFiles: ['refs.bib'] });
+	assert.equal(pdf.build.pdf, true, 'PDF via LaTeX: the worker typesets');
+	assert.equal(pdf.build.options.to, 'latex');
+	assert.deepEqual(pdf.build.bibFiles, ['refs.bib']);
+	assert.equal(trusted.build.pdf, false);
 	for (const bad of ['../A.md', '/etc/A.md', 'A.txt', 'a//A.md', './A.md']) {
 		assert.throws(() => exportJob({ noteRel: bad, format: 'latex', files, env, trusted: true }), /not a note/, bad);
 	}
@@ -221,4 +227,146 @@ test('the export worker under Node (L2): image embeds as their vault paths, the 
 	} finally {
 		fs.rmSync(vault, { recursive: true, force: true });
 	}
+});
+
+// PDF via LaTeX under Node (UPSTREAM-LATEX-EXPORT-PLAN.md §4, L3): the iPad's
+// path — the .tex written for LuaLaTeX (or lmodern under a header's
+// pdfLaTeX), typeset by the staged mp-tikz-wasm 0.5.0 with default + opentype
+// + otf-fonts + latex-doc — read back with poppler's pdftotext and pdffonts.
+// The Clew-styled cases take ~15 s each; CLEW_PDF_SLOW=1 runs them.
+const poppler = (() => {
+	for (const dir of ['/opt/homebrew/bin', '/usr/local/bin', '/Library/TeX/texbin']) {
+		if (fs.existsSync(path.join(dir, 'pdffonts')) && fs.existsSync(path.join(dir, 'pdftotext'))) return dir;
+	}
+	return null;
+})();
+const latexDoc = fs.existsSync(path.join(root, 'mptikz-assets', 'bundles', 'latex-doc'));
+const pdfSkip = (!latexDoc && 'mptikz-assets/ has no latex-doc bundle (0.5.0)') || (!poppler && 'no pdftotext/pdffonts');
+const exportPdf = (vault, note, ...flags) => {
+	const out = fs.mkdtempSync(path.join(os.tmpdir(), 'clew-pdf-test-'));
+	try {
+		const summary = JSON.parse(execFileSync(process.execPath, [path.join(root, 'tools', 'export-note.mjs'), vault, note, out, '--pdf', ...flags],
+			{ encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
+		const file = path.join(out, summary.output);
+		const tool = (name, ...args) => execFileSync(path.join(poppler, name), [...args, file, ...(name === 'pdftotext' ? ['-'] : [])], { encoding: 'utf8' });
+		return { summary, text: tool('pdftotext'), fonts: tool('pdffonts'), head: fs.readFileSync(file).subarray(0, 5).toString('latin1') };
+	} finally {
+		fs.rmSync(out, { recursive: true, force: true });
+	}
+};
+const withVault = (notes, body) => {
+	const vault = fs.mkdtempSync(path.join(os.tmpdir(), 'clew-pdf-vault-'));
+	try {
+		for (const [name, text] of Object.entries(notes)) fs.writeFileSync(path.join(vault, name), text);
+		return body(vault);
+	} finally {
+		fs.rmSync(vault, { recursive: true, force: true });
+	}
+};
+
+test('PDF via LaTeX (L3): an unstyled note is LuaLaTeX in Latin Modern, its Unicode intact; a header\'s pdfLaTeX gets lmodern, no Type 3; unicode-math falls back to LatinModernMath', { skip: pdfSkip }, () => {
+	withVault({
+		'Unicode.md': '# Signs\n\nAn en dash – in 1–2, a times sign 3 × 4, “curly quotes” and ‘single’, ÿ é ß Œ.\n',
+		'Forced.md': '---\nLaTeX engine: pdflatex\n---\n# Forced\n\nAn en dash – and 3 × 4 and “quotes”.\n',
+		'UMaths.md': '---\nPackages: unicode-math\n---\n# Maths\n\nEuler: $e^{i\\pi} + 1 = 0$.\n',
+	}, (vault) => {
+		const uni = exportPdf(vault, 'Unicode.md', '--style=none');
+		assert.equal(uni.head, '%PDF-');
+		assert.equal(uni.summary.stats.engine, 'lualatex', 'no engine forced: LuaLaTeX (the owner\'s (a))');
+		assert.ok(uni.text.includes('An en dash – in 1–2, a times sign 3 × 4, “curly quotes” and ‘single’'), `the characters come back: ${uni.text}`);
+		assert.ok(uni.text.includes('ÿ é ß Œ'));
+		assert.match(uni.fonts, /LMRoman10-Regular\s+CID Type 0C/, 'Latin Modern OpenType');
+		assert.doesNotMatch(uni.fonts, /Type 3/);
+
+		const forced = exportPdf(vault, 'Forced.md', '--style=none');
+		assert.equal(forced.summary.stats.engine, 'pdflatex', 'the header\'s engine wins');
+		assert.ok(forced.text.includes('An en dash – and 3 × 4 and “quotes”'), `pdfLaTeX's T1 text intact: ${forced.text}`);
+		assert.match(forced.fonts, /LMRoman10-Regular\s+Type 1 /, 'lmodern\'s Type 1 (`LaTeX T1 fonts: lmodern`)');
+		assert.doesNotMatch(forced.fonts, /Type 3/, 'no bitmap fallback: no cm-super needed');
+
+		const umaths = exportPdf(vault, 'UMaths.md', '--style=none');
+		assert.match(umaths.fonts, /LatinModernMath-Regular/, 'unicode-math with no maths font named: otf-fonts\' latinmodern-math');
+		assert.doesNotMatch(umaths.fonts, /CMMI/);
+	});
+});
+
+test('PDF via LaTeX (L3), Clew\'s style: maths in Garamond-Math; a header\'s own preamble falls back to LatinModernMath; BibTeX\'s references', { skip: pdfSkip || (!process.env.CLEW_PDF_SLOW && 'CLEW_PDF_SLOW=1 runs the styled cases (~50 s)') }, () => {
+	withVault({
+		'Maths.md': '# Maths\n\nEuler: $e^{i\\pi} + 1 = 0$, and\n\n$$\\int_0^\\infty e^{-x^2}\\,dx = \\frac{\\sqrt{\\pi}}{2}$$\n',
+		'Own.md': '---\nLaTeX preamble: \\newcommand{\\R}{\\mathbb{R}}\n---\n# Own preamble\n\nIn $\\R^n$, $e^{i\\pi} + 1 = 0$.\n',
+	}, (vault) => {
+		const maths = exportPdf(vault, 'Maths.md');
+		assert.match(maths.fonts, /EBGaramond-Regular/);
+		assert.match(maths.fonts, /Garamond-Math/, 'latex-doc carries Garamond-Math (Clew-boss\'s correction of §4 P1)');
+		assert.doesNotMatch(maths.fonts, /LatinModernMath|CMMI/);
+		const own = exportPdf(vault, 'Own.md');
+		assert.match(own.fonts, /LatinModernMath-Regular/, 'the style\'s packages load, its \\setmathfont does not: otf-fonts\' latinmodern-math');
+		assert.doesNotMatch(own.fonts, /CMMI/);
+	});
+	const cites = exportPdf(path.join(root, 'seed-vault'), 'Features/Citations.md');
+	assert.equal(cites.summary.stats.bibtex, true, 'BibTeX ran');
+	assert.match(cites.text, /Lewis \[1969\]/);
+	assert.match(cites.text, /David Lewis\. Convention: A Philosophical Study\. Harvard University Press/);
+	assert.doesNotMatch(cites.fonts, /Type 3/);
+});
+
+// typeset() against a stand-in library: what it asks mp-tikz-wasm for, in what
+// order, and what it refuses — without TeX.
+const fakeLib = ({ aux = '', idx = false, rerun = 0, pdf = true } = {}) => {
+	const calls = [];
+	let runs = 0;
+	const lib = {
+		DEFAULT_BUNDLES: ['core'],
+		MetaPost: {
+			create: async (options) => {
+				calls.push(['create', options.bundles.join(',')]);
+				return {
+					latex: async (tex, o) => {
+						runs += 1;
+						calls.push(['latex', o.engine, Object.keys(o.files).sort().join(',')]);
+						const artifacts = { 'doc.aux': new TextEncoder().encode(aux + `%pass${runs}`) };
+						if (idx) artifacts['doc.idx'] = new Uint8Array(1);
+						return { status: 'ok', pdf: pdf ? new Uint8Array([37, 80, 68, 70]) : undefined, artifacts,
+							texLog: runs <= 2 + rerun ? (runs > 2 ? 'Rerun to get cross-references right' : '') : '' };
+					},
+					bibtex: async (o) => { calls.push(['bibtex', Object.keys(o.files).sort().join(',')]); return { artifacts: { 'doc.bbl': 'bbl' }, diagnostics: [{ message: 'warning$ -- empty year' }] }; },
+					makeindex: async (o) => { calls.push(['makeindex', o.input]); return { artifacts: { 'doc.ind': 'ind' }, diagnostics: [] }; },
+					dispose: () => calls.push(['dispose']),
+				};
+			},
+		},
+	};
+	return { lib, calls };
+};
+
+test('typeset: latexmk\'s passes over a NEW instance per export, disposed; BibTeX and makeindex only when asked; reruns capped; XeLaTeX refused in words', async () => {
+	const tex = '\\documentclass{article}\\usepackage{fontspec}\\begin{document}x\\end{document}';
+	let { lib, calls } = fakeLib();
+	const plain = await typeset({ lib, tex, inputs: { 'N-figures/f.pdf': new Uint8Array(1) } });
+	assert.deepEqual(calls.map((c) => c[0]), ['create', 'latex', 'latex', 'latex', 'dispose'], 'three passes, then the instance goes');
+	assert.equal(calls[0][1], ['core', ...DOCUMENT_BUNDLES].join(','), 'default + opentype + otf-fonts + latex-doc');
+	assert.equal(calls[1][1], 'lualatex', 'fontspec: LuaLaTeX (chooseLatexEngine)');
+	assert.equal(calls[1][2], 'N-figures/f.pdf', 'the first pass sees the inputs alone');
+	assert.deepEqual([plain.engine, plain.passes, plain.bibtex, plain.makeindex], ['lualatex', 3, false, false]);
+	await typeset({ lib, tex });
+	assert.equal(calls.filter((c) => c[0] === 'create').length, 2, 'a second export, a second instance (/texmf-var is never shared)');
+
+	({ lib, calls } = fakeLib({ aux: '\\bibdata{refs}', idx: true }));
+	const cited = await typeset({ lib, tex: '\\documentclass{article}\\begin{document}\\end{document}', inputs: { 'refs.bib': '@book{a,}' } });
+	assert.deepEqual(calls.map((c) => c[0]), ['create', 'latex', 'bibtex', 'makeindex', 'latex', 'latex', 'dispose']);
+	assert.equal(calls[1][1], 'latex', 'nothing Unicode: pdfLaTeX');
+	assert.match(calls[4][2], /doc\.bbl.*doc\.ind/, 'the second pass reads the .bbl and the .ind');
+	assert.deepEqual(cited.warnings, ['BibTeX: warning$ -- empty year']);
+
+	({ lib, calls } = fakeLib({ rerun: 10 }));
+	const capped = await typeset({ lib, tex });
+	assert.equal(capped.passes, MAX_PASSES, 'a log that keeps asking stops at five passes');
+
+	({ lib, calls } = fakeLib({ pdf: false }));
+	await assert.rejects(typeset({ lib, tex }), /PDF via LaTeX failed — LuaLaTeX ran \(the document needs a Unicode engine/);
+	assert.equal(calls.at(-1)[0], 'dispose', 'a failure disposes too');
+
+	({ lib, calls } = fakeLib());
+	await assert.rejects(typeset({ lib, tex: '\\usepackage{xeCJK}' }), /needs XeLaTeX .* which the iPad's TeX does not have/);
+	assert.equal(calls.length, 0, 'refused before any engine starts');
 });

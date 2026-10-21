@@ -28,7 +28,7 @@
 // Protocol (postMessage):
 //   → {type:'init', files, env, cwd}                      as the render worker
 //   ← {type:'ready'}
-//   → {type:'build', file, options, latexStyle, biblify, mptikzUrl}
+//   → {type:'build', file, options, latexStyle, biblify, pdf, bibFiles, token, mptikzUrl}
 //   ← {type:'done', output, warnings, outputs:[{rel, data}]} | {type:'error', message, stack}
 
 import '../worker/shims/globals.js';
@@ -39,6 +39,8 @@ import { getWarnings } from '../../vendor/jmarkdown/src/warnings.js';
 import { configureExportBuild, exportEmbedPath } from '../../vendor/clew/engine/export-config.js';
 import { resolveFileTarget } from '../../vendor/clew/engine/vault-files.js';
 import { exportOutputs } from './outputs.js';
+import { typeset } from './typeset.js';
+import { texReferences } from '../shim/export-references.js';
 
 // mp-tikz-wasm decides where it runs from the GLOBAL `process`: Node when it
 // has `versions.node` (its index.js#isNode), and its Emscripten modules
@@ -93,7 +95,22 @@ async function init({ files, env, cwd }) {
 	self.postMessage({ type: 'ready' });
 }
 
-async function build({ file, options, latexStyle = null, biblify = null, mptikzUrl }) {
+/**
+ * A vault file the .tex names, for TeX (an image graphicx typesets, never a
+ * hidden one: export-references.js decided which), from native's export
+ * route for this job's token (ExportHost.swift, `vault/<token>/<rel>`), which
+ * checks the same and clamps it to the vault. The Node harness hands its own
+ * reader in (__clewVaultFile).
+ */
+async function vaultFile(rel, token) {
+	if (typeof globalThis.__clewVaultFile === 'function') return globalThis.__clewVaultFile(rel);
+	const path = rel.split('/').map(encodeURIComponent).join('/');
+	const response = await fetch(`/__clew_export__/vault/${token}/${path}`);
+	if (!response.ok) return null;
+	return new Uint8Array(await response.arrayBuffer());
+}
+
+async function build({ file, options, latexStyle = null, biblify = null, pdf = false, bibFiles = [], token = '', mptikzUrl }) {
 	try {
 		// Read by the figure engine's library import (the build's patch of
 		// figure-engine.js#instance): the app's mp-tikz-wasm, by URL.
@@ -109,13 +126,55 @@ async function build({ file, options, latexStyle = null, biblify = null, mptikzU
 			const { output, to, chapters } = options;
 			return exportEmbedPath({ abs: `${process.env.CLEW_VAULT_ROOT}/${rel}`, output, to, chapters, file: from });
 		};
+		// Code coloured by the build, set with fvextra (jmarkdown's `LaTeX
+		// highlighter: highlight.js`, the owner's (2a)), for every iPad LaTeX
+		// build, the .tex as the PDF: minted runs Python from TeX, which the
+		// iPad's TeX cannot, and a .tex shared from here compiles anywhere
+		// without shell escape. A header's own key still wins.
+		configManager.set('LaTeX highlighter', 'highlight.js');
+		if (pdf) {
+			// The owner's (a), for the iPad's TeX: the .tex itself is written for
+			// LuaLaTeX — fontspec, so Latin Modern OpenType text — unless the
+			// note's header asks for pdfLaTeX (merged later, it wins); then its
+			// T1 text is in lmodern's Type 1 fonts, never cm-super's, which this
+			// TeX lacks (bitmaps). Never a .tex built for pdfLaTeX run through
+			// LuaLaTeX: Unicode prints wrongly (– as nothing, × as Œ).
+			configManager.set('LaTeX engine', 'lualatex');
+			configManager.set('LaTeX T1 fonts', 'lmodern');
+		}
 		configureExportBuild(configManager, { to: options.to, latexStyle, biblify, defaults: DEFAULT_CONFIG });
 		const { outFile } = await processFile(file, { ...options, obsidianLinks: { resolveEmbed, resolveLink: () => null } });
-		const outputs = exportOutputs(vfs.writes, outFile);
+		let outputs = exportOutputs(vfs.writes, outFile);
+		let output = outFile;
+		const extra = [];
+		let typesetting = null;
+		if (pdf) {
+			// PDF via LaTeX: the .tex typeset here, and only the PDF goes out.
+			const texRel = outFile.slice(outFile.lastIndexOf('/') + 1);
+			const dir = outFile.slice(0, outFile.lastIndexOf('/'));
+			const base = texRel.replace(/\.tex$/, '');
+			const tex = String(outputs.find((o) => o.rel === texRel)?.data ?? '');
+			const inputs = Object.fromEntries(outputs.filter((o) => o.rel !== texRel).map((o) => [o.rel, o.data]));
+			const refs = texReferences({ tex, base, exists: (r) => vfs.files.has(`${dir}/${r}`), bibFiles });
+			for (const { rel, as } of refs.bibs) inputs[as] = String(vfs.files.get(`${dir}/${rel}`)?.data ?? '');
+			for (const rel of refs.files) {
+				const bytes = await vaultFile(rel, token);
+				if (bytes) inputs[rel] = bytes;
+				else extra.push(`${rel} could not be read from the vault, so the PDF goes without it`);
+			}
+			for (const name of refs.missing) extra.push(`${name} is named by the .tex but is not in this vault`);
+			for (const { rel } of refs.refused) extra.push(`${rel} is named by the .tex but is not an image TeX can typeset, or is hidden, so TeX was not given it`);
+			const lib = await import(mptikzUrl);
+			typesetting = await typeset({ lib, tex, inputs });
+			extra.push(...typesetting.warnings);
+			outputs = [{ rel: `${base}.pdf`, data: typesetting.pdf }];
+			output = `${dir}/${base}.pdf`;
+		}
 		// Each figure's bytes are its own buffer (the fs shim copies on write);
 		// a Set all the same, since a buffer listed twice cannot be transferred.
 		const transfer = [...new Set(outputs.map((o) => o.data).filter((d) => d instanceof Uint8Array).map((d) => d.buffer))];
-		self.postMessage({ type: 'done', output: outFile, warnings: getWarnings(), outputs }, transfer);
+		const stats = typesetting && { engine: typesetting.engine, passes: typesetting.passes, bibtex: typesetting.bibtex, makeindex: typesetting.makeindex, ms: typesetting.ms };
+		self.postMessage({ type: 'done', output, warnings: [...getWarnings(), ...extra], outputs, stats }, transfer);
 	} catch (err) {
 		self.postMessage({ type: 'error', message: String(err?.message ?? err), stack: err?.stack });
 	}

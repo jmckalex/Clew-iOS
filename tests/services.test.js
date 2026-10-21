@@ -119,12 +119,14 @@ const fakeBridge = {
 			case 'exportRun':
 				// What ExportHost.swift answers once the host page said done, with
 				// the .tex (a test may set what the build "wrote").
-				return { folder: `clew-export-${'a'.repeat(32)}`, output: 'X.tex', files: [{ rel: 'X.tex', bytes: 3 }],
+				return { folder: `clew-export-${'a'.repeat(32)}`, ...(JSON.parse(params.job).build.pdf
+					? { output: 'X.pdf', files: [{ rel: 'X.pdf', bytes: 9 }] } : { output: 'X.tex', files: [{ rel: 'X.tex', bytes: 3 }] }),
 					warnings: ['code: one warning', 'mermaid: "sequenceDiagram" left out of the LaTeX — mermaid-cli (mmdc) was not found; install @mermaid-js/mermaid-cli to render mermaid for print'],
 					ms: 1, tex: fakeExportTex ?? '\\documentclass{article}' };
 			case 'exportShare':
 				// What FSBridge.swift answers once the share sheet is up.
 				if (fakeShareFails) throw new Error('the zip could not be made');
+				if (params.output.endsWith('.pdf')) return { kind: 'pdf', name: `${params.name}.pdf`, bytes: 9, entries: 1, skipped: [] };
 				return { kind: 'zip', name: `${params.name}.zip`, bytes: 100, entries: 1 + params.include.length + params.bibs.length, skipped: [] };
 			case 'exportDiscard':
 				return { removed: true };
@@ -898,7 +900,7 @@ test('the export host (UPSTREAM-LATEX-EXPORT-PLAN.md L1, L2): one LaTeX build ov
 		assert.equal(job.init.cwd, '/export/restricted');
 		assert.deepEqual(JSON.parse(job.init.files['/export/restricted/.jmarkdown/config.json']), { 'Run note code': false });
 	}
-	await assert.rejects(services.exportHost.job(rel, 'pdf'), /not an export the export host makes/);
+	await assert.rejects(services.exportHost.job(rel, 'html'), /not an export the export host makes/);
 	await assert.rejects(services.exportHost.job('../outside.md'), /not a note in this vault/);
 
 	// The settings the job reads: the style off, the vault's bibliography on.
@@ -960,8 +962,18 @@ test('the export host (UPSTREAM-LATEX-EXPORT-PLAN.md L1, L2): one LaTeX build ov
 	await clew.invoke('clew:vault-settings-set', { key: 'bibliography', value: '' });
 	fs.rmSync(path.join(vaultDir, 'Links and Embeds-figures'), { recursive: true, force: true });
 
-	// PDF via LaTeX still refuses (P2).
-	await assert.rejects(clew.invoke('clew:export-note', { path: rel, format: 'pdf' }), /needs a LaTeX toolchain/);
+	// PDF via LaTeX (§4): the same build, typeset in the host; only the PDF shared.
+	const pdfMark = fakeBridge.calls.length;
+	const pdf = await clew.invoke('clew:export-note', { path: rel, format: 'pdf' });
+	const pdfCalls = fakeBridge.calls.slice(pdfMark).filter(([m]) => m.startsWith('export'));
+	assert.deepEqual(pdfCalls.map(([m]) => m), ['exportRun', 'exportShare']);
+	const pdfJob = JSON.parse(pdfCalls[0][1].job);
+	assert.equal(pdfJob.build.pdf, true, 'the worker typesets');
+	assert.deepEqual(pdfJob.build.bibFiles, [], 'what TeX may be given as a bibliography (none named here)');
+	assert.deepEqual(pdfCalls[1][1], { folder: `clew-export-${'a'.repeat(32)}`, name: 'Links and Embeds', output: 'X.pdf', include: [], bibs: [] },
+		'the PDF alone: nothing of the vault beside it');
+	assert.equal(pdf.output, 'Links and Embeds.pdf');
+	await assert.rejects(clew.invoke('clew:export-note', { path: rel, format: 'docx' }), /not available on iOS/);
 	await assert.rejects(clew.invoke('clew:export-note', { path: '../outside.md', format: 'latex' }), /escapes/i);
 });
 
