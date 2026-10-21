@@ -26,6 +26,23 @@ final class ExportHost: NSObject, WKNavigationDelegate {
 	/// As desktop's compilePdf: three minutes, then the export is stopped.
 	static let timeout: TimeInterval = 180
 
+	/// The limit this run uses: `timeout`, or — in a Debug build only — the
+	/// `ClewExportTimeout` default in seconds, so the simulator can test the
+	/// stop without waiting three minutes (UPSTREAM-LATEX-EXPORT-PLAN.md §5).
+	static var limit: TimeInterval {
+		#if DEBUG
+		let override = UserDefaults.standard.double(forKey: "ClewExportTimeout")
+		if override > 0 { return override }
+		#endif
+		return timeout
+	}
+
+	/// "3 minutes", or a shorter Debug limit in seconds.
+	static func limitWords(_ seconds: TimeInterval) -> String {
+		seconds >= 60 && seconds.truncatingRemainder(dividingBy: 60) == 0
+			? "\(Int(seconds / 60)) minute\(seconds == 60 ? "" : "s")" : "\(Int(seconds)) seconds"
+	}
+
 	/// Every response here carries it: the page runs only its own script and
 	/// the worker it starts, and may fetch only its own origin (the job, the
 	/// outputs, the engines' files).
@@ -78,11 +95,12 @@ final class ExportHost: NSObject, WKNavigationDelegate {
 		self.webView = view
 		self.pageURL = url
 		self.completion = completion
+		let limit = Self.limit
 		let deadline = DispatchWorkItem { [weak self] in
-			self?.complete(.failure(ClewError.message("The export took too long (more than \(Int(Self.timeout / 60)) minutes) and was stopped")))
+			self?.complete(.failure(ClewError.message("The export took too long (more than \(Self.limitWords(limit))) and was stopped")))
 		}
 		self.deadline = deadline
-		DispatchQueue.main.asyncAfter(deadline: .now() + Self.timeout, execute: deadline)
+		DispatchQueue.main.asyncAfter(deadline: .now() + limit, execute: deadline)
 		view.load(URLRequest(url: url))
 	}
 

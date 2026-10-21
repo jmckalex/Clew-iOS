@@ -28,22 +28,19 @@ const text = (bytes) => (bytes ? new TextDecoder().decode(bytes) : '');
 
 /**
  * @param {{ lib: { MetaPost: any, DEFAULT_BUNDLES: string[] }, tex: string,
- *   inputs?: Record<string, string | Uint8Array>, date?: 'now' | 'fixed',
- *   timeoutMs?: number }} o
+ *   inputs?: Record<string, string | Uint8Array>, date?: 'now' | 'fixed' }} o
  * @returns {Promise<{ pdf: Uint8Array, engine: string, reason: string, passes: number,
  *   bibtex: boolean, makeindex: boolean, warnings: string[], ms: number }>}
  */
-export async function typeset({ lib, tex, inputs = {}, date = 'now', timeoutMs = 170_000 }) {
+export async function typeset({ lib, tex, inputs = {}, date = 'now' }) {
 	const t0 = Date.now();
 	const choice = chooseLatexEngine(tex, 'auto', { available: ['pdflatex', 'lualatex'], host: 'the iPad\'s TeX' });
 	if (choice.unavailable) throw new Error(choice.refusal);
-	const mp = await lib.MetaPost.create({
-		bundles: [...lib.DEFAULT_BUNDLES, ...DOCUMENT_BUNDLES],
-		logLevel: 'silent',
-		// One TeX pass may take a while on an iPad; Clew's own limit (three
-		// minutes, ExportHost.swift) is the one that stops an export.
-		texTimeoutMs: timeoutMs,
-	});
+	// Nothing here limits a pass: in-process, a document that loops never
+	// returns (0.5.0 declares `texTimeoutMs` and reads it nowhere). Clew's
+	// own limit stops it — three minutes, ExportHost.swift, which ends the
+	// page and with it this worker.
+	const mp = await lib.MetaPost.create({ bundles: [...lib.DEFAULT_BUNDLES, ...DOCUMENT_BUNDLES], logLevel: 'silent' });
 	try {
 		const run = (files) => mp.latex(tex, {
 			engine: choice.engine === 'lualatex' ? 'lualatex' : 'latex', output: 'pdf', jobName: 'doc', date, files,

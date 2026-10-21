@@ -606,13 +606,29 @@ growth is measured against the agreed 12–17 MB.
   - Already in place: each export has a page, a process and an engine of
     its own (no build-up), and a killed page is reported as out of memory
     with the editor untouched (L1).
-- **Not done yet (owed before P3):**
-  - the time-limit test (a looping document stopped at the limit, its
-    folder gone);
-  - the /texmf-var test run in the simulator (by construction each export
-    has a new instance; the stand-in test holds typeset.js to it);
-  - a PDF kill test;
-  - the restricted-vault security cases of §5.
+- **Then checked in the simulator** (`latexpdf-p3b-limits`):
+  - **The time limit.** A note whose header preamble is
+    `\loop\iftrue\repeat` never finishes a pass, and in-process nothing
+    in mp-tikz-wasm stops it: 0.5.0 declares `texTimeoutMs` and reads it
+    nowhere. With the limit lowered to 20 s (`ClewExportTimeout`, a Debug
+    build's default only), the export stopped at 21.0 s with "The export
+    took too long (more than 20 seconds) and was stopped". The host's
+    process was gone and no job folder was left. The release limit stays
+    3 minutes.
+  - **A device path.** A header preamble `\input{/etc/hosts}` fails with
+    TeX's own "File `/etc/hosts.tex' not found", in desktop's words
+    (pdfViaLatexFailure). TeX's file system is mp-tikz-wasm's own, and
+    the device's file never reached it. No job folder was left.
+  - **A kill.** The export host, killed at 1,042 MB during the 40-figure
+    note, gave "The export stopped: iOS ended its page, most likely
+    because it ran out of memory". The app page carried on, and no job
+    folder was left.
+- **Still owed before P3:**
+  - the /texmf-var test in the simulator (by construction each export has
+    a new instance; the stand-in test holds typeset.js to it);
+  - the rest of §5's restricted-vault cases (an `\includegraphics` of a
+    device path; an embed of a symlink out of the vault: the export
+    route's clamp, untested in the simulator).
 
 **P3 `latexpdf-p3-verify`:** the record, the simulator, and the device
 memory check below.
