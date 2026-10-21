@@ -433,10 +433,18 @@ growth is measured against the agreed 12–17 MB.
 
 - **The bundles (Clew-boss, 2026-10-20, against the staged 0.5.0):**
   `MetaPost.create` loads default + opentype + **otf-fonts** + latex-doc.
-  Clew's style loads unicode-math; Garamond-Math is not on the iPad, so
-  unicode-math falls back to latinmodern-math.otf, which is only in
-  otf-fonts (0.7 MiB). Without it every styled PDF that reaches maths
-  setup fails ("The font "latinmodern-math" cannot be found").
+  - **Premise corrected (Clew-boss and Clew-app, 2026-10-21; measured
+    here too):** 0.5.0's latex-doc bundle carries Garamond-Math.otf. So a
+    Clew-styled note's maths IS in Garamond-Math, with or without
+    otf-fonts.
+  - otf-fonts (latinmodern-math, 0.7 MiB) is needed only where
+    unicode-math loads with no \setmathfont: a styled note whose header
+    has its own `LaTeX preamble` (the style's packages load, its
+    \setmathfont does not), or an unstyled note that loads unicode-math.
+    Without it: a fontspec error with an empty message, and CMMI in its
+    place.
+  - The bundle list stands. Clew-app is putting it in
+    shared/latex-engine.js#BUILT_IN_TEX, to import from a later sync.
 - **The growth reported** against the owner's 12–17 MB includes
   otf-fonts.
 - **A known 0.5.0 defect:** for a fontspec error, `latex()`'s diagnostics
@@ -526,6 +534,85 @@ growth is measured against the agreed 12–17 MB.
   figures stay in the job's folder, which is removed. This is the Mac's
   rule since 2026-10-04.
 - **The code stand-in (J2):** on.
+
+**P2 as built (2026-10-21,** `latexpdf-p2-compile` 98b7355, on the
+0768f36 sync; the owner's "Go with the plan").
+
+- **The pieces:**
+  - src/export/typeset.js runs the passes over a NEW mp-tikz-wasm
+    instance with the four bundles, disposed at the end;
+  - the export worker sets, for a PDF, `LaTeX engine: lualatex` and
+    `LaTeX T1 fonts: lmodern` before processFile, and for every iPad
+    LaTeX build `LaTeX highlighter: highlight.js`. The (2a) stand-in had
+    landed (jmarkdown ba83371), so the .tex export uses it too: minted is
+    gone from the iPad's .tex;
+  - the worker hands TeX the figures, the bibliographies the .tex names
+    (bibFiles from the app page) and its images, read through native's
+    new route `__clew_export__/vault/<token>/<rel>`. That route serves
+    only this job's token and only an image graphicx typesets, never a
+    hidden one (ExportJobs.mayRead), and it reads through
+    VaultStore.materialize;
+  - EXPORT_NOTE `pdf` runs it, and only the PDF is shared.
+- **mp-tikz-wasm 0.5.0 is a LOCAL OVERRIDE** in the git-ignored
+  mptikz-assets/: release/mp-tikz-wasm-0.5.0.tar.gz (sha256 76b5591a…,
+  the published asset) plus its Ghostscript archive (d820e454…).
+  STAGED.json says `local-override`, so `npm run sync-mptikz -- --force`
+  puts the pinned release back. P1 (the pin, stage-mptikz.js, CI) waits
+  for Clew-app's re-pin; nothing of the assets is committed.
+- **Under Node** (tests/export-host.test.js, with poppler's pdftotext and
+  pdffonts):
+  - an unstyled note with – × “ ” ‘ ’ ÿ é ß Œ gets them all back from
+    pdftotext, set by LuaLaTeX in Latin Modern OpenType;
+  - a header's pdfLaTeX gives Type 1 Latin Modern only (lmodern), with
+    no Type 3;
+  - unicode-math with no maths font named gives LatinModernMath;
+  - Clew's style gives EB Garamond and Garamond-Math, and a styled note
+    with its own header preamble gives LatinModernMath with no CMMI (the
+    corrected premise above);
+  - Citations' BibTeX references.
+
+  The styled cases take about 15 s each, so CLEW_PDF_SLOW=1 runs them.
+  A stand-in library tests the pass planner: a new instance per export,
+  BibTeX and makeindex only when asked, five passes at most, a failure
+  disposed and said in desktop's words, XeLaTeX refused before any
+  engine starts.
+- **Measured in the simulator** (iPad Pro 11" on an M4 Max Mac, the
+  palette's own `export:pdf`). The peak is the export host's WebContent
+  process's resident size, from the Mac's `ps`, every 0.1 s:
+
+  | note | style | time | export host peak | PDF |
+  | --- | --- | --- | --- | --- |
+  | Forced (header `LaTeX engine: pdflatex`) | (left out) | 1.4 s | 629 MB | Type 1 Latin Modern |
+  | Unicode, with a formula | none | 3.6 s | 872 MB | characters intact; LM OpenType, CM maths |
+  | Features/Citations | Clew | 15.3 s | 1,465 MB | BibTeX's references, "Lewis [1969]" |
+  | Features/Media Gallery | Clew | 15.2 s | 1,949 MB | 4 pages, its 3 images |
+  | Long (40 sections, maths) | Clew | 15.6 s | 1,934 MB | 18 pages, Garamond-Math |
+  | Features/Diagrams | Clew | 18.6 s | 2,267 MB | 4 pages, MetaPost and TikZ |
+  | Many (40 MetaPost figures) | Clew | 23.0 s | 2,658 MB | |
+
+  No PDF has a Type 3 font. The Mermaid warning is the iPad's.
+- **What that says for the iPad mini (a first estimate only):**
+  - **Time** is well inside the 3-minute limit even at several times the
+    Mac's speed. The styled cases' ~15 s is mostly LuaLaTeX loading the
+    EB Garamond and Garamond-Math faces in a new instance; every export
+    pays it.
+  - **Memory** is the risk. Clew's style puts the export host at 1.5–2.7 GB
+    resident in the simulator, against L1's 0.2–0.5 GB for a .tex, and
+    0.6–0.9 GB without the style. The simulator's resident size is not the
+    device's footprint (macOS's allocator, the JIT, wasm reservations), and
+    the iPad's limit for a WebContent process is unpublished, but
+    1.5–2.7 GB is the range where an 8 GB iPad may end the page. The
+    device check below decides it; the mini first.
+  - Already in place: each export has a page, a process and an engine of
+    its own (no build-up), and a killed page is reported as out of memory
+    with the editor untouched (L1).
+- **Not done yet (owed before P3):**
+  - the time-limit test (a looping document stopped at the limit, its
+    folder gone);
+  - the /texmf-var test run in the simulator (by construction each export
+    has a new instance; the stand-in test holds typeset.js to it);
+  - a PDF kill test;
+  - the restricted-vault security cases of §5.
 
 **P3 `latexpdf-p3-verify`:** the record, the simulator, and the device
 memory check below.
