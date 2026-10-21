@@ -40,11 +40,19 @@ const PAGE_WIDTH = 'SetOptions[, PageWidth->100]';
 function wolframscript(args, { cwd, outFile } = {}) {
 	if (!outFile) return execFileSync('wolframscript', args, cwd ? { cwd } : {});
 	const fd = fs.openSync(outFile, 'w');
+	let failed = true;
 	try {
 		execFileSync('wolframscript', args, { cwd, stdio: ['pipe', fd, 'inherit'] });
+		failed = false;
 	}
 	finally {
 		fs.closeSync(fd);
+		// A run that failed leaves no output behind. `outFile` is the cache:
+		// a later build finds it and never asks again, so a licence refused
+		// under load (wolframscript exits 255 or 40, with nothing or a
+		// fragment on stdout) went on printing that, empty, for good. The
+		// error still reaches the caller, as before.
+		if (failed) fs.rmSync(outFile, { force: true });
 	}
 }
 

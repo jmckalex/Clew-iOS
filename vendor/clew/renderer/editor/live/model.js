@@ -383,10 +383,12 @@ function build(doc, tree, config) {
 		let item = node.parent;
 		while (item && item.name !== 'ListItem') item = item.parent;
 		const itemMark = item ? childrenNamed(item, 'ListMark')[0] : null;
+		const numberMark = itemMark ? numberMarkOf(item, itemMark) : null;
 		for (const mark of descendantsNamed(node, 'QuoteMark')) {
 			const entry = quoteLine(lineOf(mark.from).from);
 			entry.marks.push(mark);
 			if (itemMark) entry.listMark = rangeOf(itemMark);
+			if (numberMark) entry.numberMark = numberMark;
 		}
 	}
 	function quoteLine(from) {
@@ -395,11 +397,23 @@ function build(doc, tree, config) {
 		return entry;
 	}
 
+	// A numbered item's number and the space after it: drawn one box
+	// (live-edit.css .le-num), which every line of the item hangs by — its
+	// quotes' and its text past its first line too (inline-layer.js,
+	// columns.js#numberWidth). Null for a bullet and a task, whose marker is
+	// drawn a fixed width.
+	function numberMarkOf(item, mark) {
+		const task = childrenNamed(item, 'Task')[0];
+		if (item.parent?.name !== 'OrderedList' || (task && childrenNamed(task, 'TaskMarker')[0])) return null;
+		return { from: mark.from, to: skipSpace(doc, mark.to, lineOf(mark.from).to) };
+	}
+
 	function listItem(node) {
 		const list = node.parent;
 		const depth = ancestors(node, 'BulletList') + ancestors(node, 'OrderedList');
 		const mark = childrenNamed(node, 'ListMark')[0];
 		if (!mark) return;
+		const numberMark = numberMarkOf(node, mark);
 		const task = childrenNamed(node, 'Task')[0];
 		const taskMarker = task ? childrenNamed(task, 'TaskMarker')[0] : null;
 		const first = lineRange(node.from);
@@ -412,10 +426,7 @@ function build(doc, tree, config) {
 			});
 		} else if (list?.name === 'OrderedList') {
 			add('numbered', 'A', 'line', mark.from, node.to, {
-				depth, listMark: rangeOf(mark), number: text(mark.from, mark.to), extents: [first],
-				// The number and the space after it: drawn one width (live-edit.css
-				// .le-num), so the item's text starts where its hang does.
-				numberMark: { from: mark.from, to: skipSpace(doc, mark.to, first.to) },
+				depth, listMark: rangeOf(mark), number: text(mark.from, mark.to), extents: [first], numberMark,
 			});
 		} else {
 			add('bullet', 'A', 'line', mark.from, node.to, {
@@ -424,7 +435,7 @@ function build(doc, tree, config) {
 				extents: [first],
 			});
 		}
-		listText(node, first, depth, mark);
+		listText(node, first, depth, mark, numberMark);
 	}
 
 	// An item's text past its first line — after a hard break, a lazy line, a
@@ -434,8 +445,9 @@ function build(doc, tree, config) {
 	// face, started where the item's text starts, its indentation concealed
 	// in both states, so the caret entering the line never moves it. Its
 	// `indent` is that indentation, after a quote's `>`s and the one space
-	// the quote construct conceals with them.
-	function listText(node, first, depth, mark) {
+	// the quote construct conceals with them; a numbered item's carry its
+	// number (numberMarkOf).
+	function listText(node, first, depth, mark, numberMark) {
 		const quoted = ancestors(node, 'Blockquote') > 0;
 		const paragraphs = [...childrenNamed(node, 'Paragraph'), ...childrenNamed(node, 'Task')];
 		for (const para of paragraphs) {
@@ -446,6 +458,7 @@ function build(doc, tree, config) {
 				const lead = marks + /^[ \t]*/.exec(line.text.slice(marks))[0].length;
 				add('listText', 'A', 'line', line.from, line.to, {
 					depth, listMark: rangeOf(mark), indent: { from: line.from + marks, to: line.from + lead },
+					...(numberMark ? { numberMark } : {}),
 				});
 			}
 		}
@@ -495,9 +508,11 @@ function build(doc, tree, config) {
 		add('quote', 'A', 'line', from, line.to, {
 			depth: entry.marks.length, callout: entry.callout,
 			...(entry.callout ? { calloutFirst: entry.calloutFirst, calloutLast: entry.calloutLast } : {}),
-			// In a list item: the item's marker, and the indentation before the
-			// first `>` — concealed in both states, as a list line's is.
+			// In a list item: the item's marker (and a numbered item's number),
+			// and the indentation before the first `>` — concealed in both
+			// states, as a list line's is.
 			...(entry.listMark ? { listMark: entry.listMark, indent: { from, to: entry.marks[0].from } } : {}),
+			...(entry.numberMark ? { numberMark: entry.numberMark } : {}),
 			hidden: [{ from: entry.marks[0].from, to: skipSpace(doc, last.to, line.to, 1) }],
 		});
 	}

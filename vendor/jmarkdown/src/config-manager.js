@@ -102,6 +102,14 @@ export const DEFAULT_CONFIG = {
 	// header's Title with no Date gets \date{} (additional-directives.js,
 	// latex-template.js). Off: the title lines as they always were.
 	'LaTeX maketitle': false,
+	// How LaTeX sets code: `minted` (Pygments, which LaTeX runs while it
+	// compiles) or `highlight.js` (coloured by the build in Pygments' default
+	// colours, set with fvextra — no shell escape; src/latex-highlight.js).
+	'LaTeX highlighter': 'minted',
+	// `lmodern`: a pdfLaTeX document's T1 text in Latin Modern's Type 1 fonts,
+	// not the EC fonts, which a TeX without cm-super draws as bitmaps
+	// (latex-template.js, preamble.js). Config or host only. null: off.
+	'LaTeX T1 fonts': null,
 	// Custom Obsidian callout types (src/callouts.js): a list of
 	// { "name", "title"?, "icon"?, "color"?, "aliases"? } — `[!name]` with
 	// that title, a Font Awesome icon by name ("lightbulb", "regular:circle",
@@ -365,6 +373,10 @@ class ConfigManager {
 				str = value[0].trim().toLowerCase();
 				this.config["LaTeX maketitle"] = (str == "true");
 				break;
+			case "LaTeX_highlighter":
+				// Space-keyed, read at render time by latex-highlight.js.
+				this.config["LaTeX highlighter"] = value[0].trim().toLowerCase();
+				break;
 			case "Code_language":
 				// Space-keyed, like Block_elements: latex-renderer.js reads
 				// configManager.get('Code language'). Without this case a
@@ -388,6 +400,12 @@ class ConfigManager {
 				// Config or host only (figure-cache.js): where the engine writes
 				// is the host's to say, not the document's.
 				addWarning('Cache directory: where the engine keeps the figures it makes is set in .jmarkdown/config.json or by the host, not in a document header — ignored');
+				break;
+			case "LaTeX_T1_fonts":
+				// Config or host only (latex-template.js): which fonts the host's
+				// TeX has is the host's to say, so a header neither sets nor
+				// clears it.
+				addWarning('LaTeX T1 fonts: the fonts for T1 text are set in .jmarkdown/config.json or by the host, not in a document header — ignored');
 				break;
 			case "Copy_figures":
 				// Config or host only (figure-cache.js), like Cache directory.

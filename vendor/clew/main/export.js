@@ -340,7 +340,7 @@ export async function exportNote({ win, vaults, sessionId, callerToken = null, r
 			format, output: written, vaultSettings, vaultRoot: vaults.root, cacheDir: figures.cacheDir, figureEngine: figureEngine(trusted),
 		});
 		const built = await runWorker({ file: abs, options, cwd, callouts, vault });
-		const warnings = explainFiguresWarnings(built.warnings, { restricted: !trusted });
+		const warnings = explainFiguresWarnings(built.warnings, { restricted: !trusted, platform: process.platform });
 		if (format !== 'pdf') return { output: written, warnings };
 		const noteDir = path.dirname(abs);
 		const configured = [...configuredBibliographies(cwd), ...options.bibliography];

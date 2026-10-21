@@ -20,7 +20,12 @@
 // item's text, reading view's 0 (Clew-iOS's measure, 2026-10-20). Measured
 // on a hidden run of spaces in the scroller, as an em of the font's size, so
 // a size setting alone changes nothing; again whenever that run's width
-// changes, as a new face's does.
+// changes, as a new face's does. The digits, `.` and `)` are measured beside
+// it (`--le-d0`…`--le-d9`, `--le-dot`, `--le-paren`): a numbered item's
+// lines hang by its number's width (numberWidth), which a fixed 1.4em was
+// only while the number fitted it — Menlo's `1. ` is 1.8em, and a quote in
+// the item stood 6px left of its text, item 10's in Avenir Next 5px
+// (Clew-iOS, 2026-10-20).
 import { ViewPlugin } from '@codemirror/view';
 
 /**
@@ -44,43 +49,81 @@ export function tabbedIndent(text) {
 	return text.slice(from, to).includes('\t') ? { from, to } : null;
 }
 
+/**
+ * A numbered item's marker box, as CSS (live-edit.css's `--le-mark`): its
+ * number, its `.` or `)` and the spaces after it, each the width the probe
+ * measured in the note's face — never narrower than a bullet's 1.4em, the box
+ * a short number has always been drawn in. Every line of the item hangs by
+ * it, so its quotes and later lines stand where its text does. Null for a
+ * tab after the number (drawn to a stop, not a width): the bullet's box, as
+ * before.
+ *
+ * @param {string} text - the number and the space after it (model.js numberMark)
+ * @returns {string | null}
+ */
+export function numberWidth(text) {
+	const parts = [];
+	for (const ch of text) {
+		const unit = ch === ' ' ? 'col' : NUMBER_UNITS[ch];
+		if (!unit) return null;
+		parts.push(`var(--le-${unit})`);
+	}
+	return parts.length ? `max(1.4em, ${parts.join(' + ')})` : null;
+}
+
+// The characters of a list number, by the custom property holding each one's
+// width.
+const NUMBER_UNITS = { '.': 'dot', ')': 'paren', ...Object.fromEntries([...'0123456789'].map((d) => [d, `d${d}`])) };
+
 /** A space's width as an em of the font's size: `0.25em`. Null for nothing measurable. */
 export function columnEm(spaceWidth, fontSize) {
 	if (!(spaceWidth > 0) || !(fontSize > 0)) return null;
 	return `${Math.round((spaceWidth / fontSize) * 10000) / 10000}em`;
 }
 
-// The probe's run of spaces: long enough that a fraction of a pixel per space
-// shows in its width.
+// What the probe measures, by the custom property each sets: a space (the
+// column), each digit, `.` and `)`. Each a run long enough that a fraction of
+// a pixel per character shows in its width.
 const PROBE = 32;
+const UNITS = { col: ' ', ...Object.fromEntries(Object.entries(NUMBER_UNITS).map(([ch, unit]) => [unit, ch])) };
 
 export const columnWidth = ViewPlugin.fromClass(class {
 	constructor(view) {
 		this.view = view;
-		// A hidden run of spaces in the scroller, in the note's font (the
-		// scroller carries the editor's face and size): its width IS the
-		// columns as the lines draw them, and it changes exactly when the face
+		// Hidden runs in the scroller, in the note's font (the scroller carries
+		// the editor's face and size): their widths ARE the columns and the
+		// numbers as the lines draw them, and they change exactly when the face
 		// or the size does — which a ResizeObserver hears. CodeMirror's own
 		// geometry change does not: a new face that rewraps no line moves no
 		// height, and a short note kept the old column (measured, Menlo).
 		this.probe = document.createElement('span');
 		this.probe.className = 'le-col-probe';
 		this.probe.setAttribute('aria-hidden', 'true');
-		this.probe.textContent = ' '.repeat(PROBE);
+		this.runs = Object.entries(UNITS).map(([unit, ch]) => {
+			const run = document.createElement('span');
+			run.textContent = ch.repeat(PROBE);
+			this.probe.append(run);
+			return [unit, run];
+		});
 		view.scrollDOM.append(this.probe);
 		this.observer = new ResizeObserver(() => this.schedule());
-		this.observer.observe(this.probe);
+		for (const [, run] of this.runs) this.observer.observe(run);
 		this.schedule();
 	}
 
 	schedule() {
 		this.view.requestMeasure({
 			key: this,
-			read: () => ({ width: this.probe.getBoundingClientRect().width, size: parseFloat(getComputedStyle(this.probe).fontSize) }),
-			write: ({ width, size }, view) => {
-				const em = columnEm(width / PROBE, size);
-				if (em) view.scrollDOM.style.setProperty('--le-col', em);
-				else view.scrollDOM.style.removeProperty('--le-col');
+			read: () => ({
+				widths: this.runs.map(([unit, run]) => [unit, run.getBoundingClientRect().width]),
+				size: parseFloat(getComputedStyle(this.probe).fontSize),
+			}),
+			write: ({ widths, size }, view) => {
+				for (const [unit, width] of widths) {
+					const em = columnEm(width / PROBE, size);
+					if (em) view.scrollDOM.style.setProperty(`--le-${unit}`, em);
+					else view.scrollDOM.style.removeProperty(`--le-${unit}`);
+				}
 			},
 		});
 	}
@@ -88,6 +131,6 @@ export const columnWidth = ViewPlugin.fromClass(class {
 	destroy() {
 		this.observer.disconnect();
 		this.probe.remove();
-		this.view.scrollDOM.style.removeProperty('--le-col');
+		for (const unit of Object.keys(UNITS)) this.view.scrollDOM.style.removeProperty(`--le-${unit}`);
 	}
 });

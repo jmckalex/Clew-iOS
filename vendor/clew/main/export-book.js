@@ -130,7 +130,7 @@ export async function exportBook({ vaults, indexer, masterRel, format, trusted =
 
 	const figures = figureCache({ root: vaults.root, trusted });
 	const engineFigures = { cacheDir: figures.cacheDir, copyFigures: true, ...figureEngine(trusted) };
-	const explained = (warnings) => place(explainFiguresWarnings(warnings, { restricted: !trusted }));
+	const explained = (warnings) => place(explainFiguresWarnings(warnings, { restricted: !trusted, platform: process.platform }));
 	const output = path.join(outDir, `${base}.${format === 'html' ? 'html' : 'tex'}`);
 	let work = null;   // a proof's own folder
 	try {

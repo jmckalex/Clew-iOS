@@ -17,11 +17,13 @@ import Mustache from 'mustache';
 import fs from 'fs';
 import path from 'path';
 import { configManager } from './config-manager.js';
-import { assemblePreamble, requirePackage, addPreamble, addLatePreamble, requiredPackageNames } from './preamble.js';
+import { assemblePreamble, requirePackage, addPreamble, addLatePreamble, requiredPackageNames, dropPackage } from './preamble.js';
 import { checkMathPackages } from './latex-lint.js';
 import { getBook, bookPreamble, warnPreambleClashes } from './book.js';
-import { escapeLatexText } from './latex-escape.js';
-import { bodyPrintsTitle } from './additional-directives.js';
+import { escapeArgumentPercent, escapeLatexText } from './latex-escape.js';
+import { bodyPrintsTitle, bodyTitleBlockText } from './additional-directives.js';
+import { highlightsCode, mintedListingFloat } from './latex-highlight.js';
+import { addWarning } from './warnings.js';
 
 // Metadata values arrive as single-element arrays (from the metadata-header
 // parser) or as strings (from config files / DEFAULT_CONFIG). Coerce to a
@@ -36,6 +38,24 @@ function asList(v) {
 	if (v == null) return [];
 	if (Array.isArray(v)) return v;
 	return [v];
+}
+
+/*
+	`LaTeX T1 fonts` (config or host only, default off; the owner, 2026-10-20 —
+	Clew's iPad, whose TeX has no cm-super): `lmodern` loads lmodern after a
+	pdfLaTeX document's \usepackage[T1]{fontenc}, so its text is set in Latin
+	Modern's Type 1 fonts rather than the EC fonts, which without cm-super
+	come out as bitmaps (Type 3). The Unicode engines (fontspec) are not
+	touched; nor is a document that loads lmodern itself (preamble.js). Any
+	other value is warned and ignored. A header's is ignored (config-manager.js
+	mergeMetadata): it can neither set the key nor clear it.
+*/
+function t1Fonts() {
+	const value = configManager.get('LaTeX T1 fonts');
+	if (value == null || value === false || String(value).trim() === '') return null;
+	if (String(value).trim().toLowerCase() === 'lmodern') return 'lmodern';
+	addWarning(`LaTeX T1 fonts: "${value}" is not lmodern — ignored`);
+	return null;
 }
 
 export function processLatexTemplate(content) {
@@ -56,10 +76,11 @@ export function processLatexTemplate(content) {
 		: `\\documentclass{${docClass}}`;
 
 	// Title / Author / Date — plain-text metadata (not markdown-parsed), so escape
-	// the prose specials &/# before they hit \title{} / \hypersetup{}.
-	const title = escapeLatexText(asString(meta('Title')));
-	const author = escapeLatexText(asString(meta('Author')));
-	const date = escapeLatexText(asString(meta('Date')));
+	// the prose specials &/# before they hit \title{} / \hypersetup{}, and a
+	// `%`, which in those arguments was a comment and stopped the build.
+	const title = escapeArgumentPercent(escapeLatexText(asString(meta('Title'))));
+	const author = escapeArgumentPercent(escapeLatexText(asString(meta('Author'))));
+	const date = escapeArgumentPercent(escapeLatexText(asString(meta('Date'))));
 
 	// --- Page setup (metadata → preamble); registered before assembly ---
 	// Geometry (margins / paper): raw geometry options, e.g. "margin=1in".
@@ -103,9 +124,12 @@ export function processLatexTemplate(content) {
 
 	// hyperref for every full document: clickable refs/ToC + PDF bookmarks, plus
 	// PDF metadata from Title/Author. (cleveref, when used, still loads after it.)
+	// Under `LaTeX maketitle`, a header with no Title takes the body's title
+	// block's, as text (the owner, 2026-10-20).
 	requirePackage('hyperref');
 	const pdf = [];
-	if (title) pdf.push(`pdftitle={${title}}`);
+	const pdfTitle = title || (configManager.get('LaTeX maketitle') === true ? bodyTitleBlockText(content) : '');
+	if (pdfTitle) pdf.push(`pdftitle={${pdfTitle}}`);
 	if (author) pdf.push(`pdfauthor={${author}}`);
 	if (pdf.length) addLatePreamble(`\\hypersetup{${pdf.join(', ')}}`, 'hyperref');
 
@@ -123,11 +147,16 @@ export function processLatexTemplate(content) {
 		addPreamble('\\AtBeginDocument{\\ifcsname c@listing\\endcsname\\counterwithin{listing}{chapter}\\fi}');
 	}
 
+	// `LaTeX highlighter: highlight.js` loads no minted, which needs a shell:
+	// what a document asked minted for besides its code — @begin(listing)'s
+	// float, {{LOL}}'s \listoflistings — comes from minted's own definitions.
+	if (highlightsCode() && dropPackage('minted')) mintedListingFloat();
+
 	// Every package the document will load is known now: warn for maths that
 	// needs one it won't (latex-lint.js).
 	checkMathPackages(requiredPackageNames());
 
-	const preamble = assemblePreamble({ engine, userPackages, userPreamble });
+	const preamble = assemblePreamble({ engine, userPackages, userPreamble, t1Fonts: t1Fonts() });
 
 	// Frontmatter — no Title → no \maketitle. A body that prints its own title
 	// (`@title+`, additional-directives.js) gets no \maketitle either, as the

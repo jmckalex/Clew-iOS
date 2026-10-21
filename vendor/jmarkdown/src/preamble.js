@@ -37,6 +37,13 @@ export function requirePackage(name, options = '') {
 	}
 }
 
+// Withdraw a required package: whether it had been required. For a package
+// whose services a document gets otherwise (latex-template.js: minted, under
+// `LaTeX highlighter: highlight.js`).
+export function dropPackage(name) {
+	return requiredPackages.delete(name);
+}
+
 // The packages required so far, by name — what the assembled preamble will
 // load (latex-lint.js asks before warning that a package is missing).
 export function requiredPackageNames() {
@@ -80,6 +87,14 @@ function usepackage(name, options) {
 	return options ? `\\usepackage[${options}]{${name}}` : `\\usepackage{${name}}`;
 }
 
+// Whether a document loads `name` itself: its `Packages`, or a \usepackage
+// (or \RequirePackage) line of its `LaTeX preamble` naming it.
+function loadsPackage(name, userPackages, userPreamble) {
+	if (requiredPackages.has(name) || normaliseList(userPackages).includes(name)) return true;
+	const line = new RegExp(String.raw`\\(?:usepackage|RequirePackage)\s*(?:\[[^\]]*\])?\s*\{[^}]*\b${name}\b[^}]*\}`);
+	return normaliseList(userPreamble).some((l) => line.test(String(l)));
+}
+
 function normaliseList(v) {
 	if (v == null) return [];
 	if (Array.isArray(v)) return v.filter(x => x != null && String(x).trim() !== '');
@@ -98,7 +113,7 @@ function normaliseList(v) {
 	cleveref forced last) → feature raw snippets → user raw preamble (last, so the
 	author can always override).
 */
-export function assemblePreamble({ engine = 'pdflatex', userPackages = [], userPreamble = [] } = {}) {
+export function assemblePreamble({ engine = 'pdflatex', userPackages = [], userPreamble = [], t1Fonts = null } = {}) {
 	const lines = [];
 	const emitted = new Set();
 
@@ -116,6 +131,12 @@ export function assemblePreamble({ engine = 'pdflatex', userPackages = [], userP
 	} else {
 		emitPackage('inputenc', 'utf8');
 		emitPackage('fontenc', 'T1');
+		// `LaTeX T1 fonts: lmodern` (config or host only; latex-template.js):
+		// T1 text in Latin Modern, whose fonts are Type 1, not in cm-super's EC
+		// fonts — which a TeX without cm-super (Clew's iPad) can only draw as
+		// bitmaps (Type 3). Not when the document loads lmodern itself: its
+		// line stays where it always was.
+		if (t1Fonts === 'lmodern' && !loadsPackage('lmodern', userPackages, userPreamble)) emitPackage('lmodern');
 	}
 
 	// Feature-required packages, then user-named packages — both in order,

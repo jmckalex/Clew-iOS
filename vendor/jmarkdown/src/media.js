@@ -77,7 +77,7 @@ import { configManager } from './config-manager.js';
 import { registerBlockEnvironment } from './begin-end-core.js';
 import { requirePackage } from './preamble.js';
 import { escapeLatexText } from './latex-escape.js';
-import { latexGraphic, resolveGraphic, isRemote, markdownDir, escapeLatexPath, texPath } from './latex-graphics.js';
+import { latexGraphic, resolveGraphic, unreadableGraphic, isRemote, markdownDir, escapeLatexPath, texPath } from './latex-graphics.js';
 import { addWarning } from './warnings.js';
 import { compileInRunDir, cacheDir, texCachePath } from './figure-cache.js';
 
@@ -447,9 +447,10 @@ function videoLatex(ctx) {
 		addWarning(`@video: poster ${poster} was not found`);
 		poster = null;
 	}
-	// An SVG still can't go to \\includegraphics; a .pdf/.png beside it can.
+	// An SVG (or a GIF, …) still can't go to \\includegraphics; a .pdf/.png
+	// beside it can.
 	if (poster && resolveGraphic(poster) === null) {
-		addWarning(`@video: poster ${poster} is an SVG, which \\includegraphics cannot read — put a .pdf or .png beside it; the link shows the caption instead`);
+		addWarning(`@video: poster ${poster} is ${unreadableGraphic(poster)}, which \\includegraphics cannot read — put a .pdf or .png beside it; the link shows the caption instead`);
 		poster = null;
 	} else if (poster) {
 		poster = resolveGraphic(poster);

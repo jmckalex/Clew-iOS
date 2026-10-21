@@ -19,7 +19,7 @@
 */
 import { requirePackage, addPreamble } from './preamble.js';
 import { registerBlockEnvironment } from './begin-end-core.js';
-import { escapeLatexText } from './latex-escape.js';
+import { escapeArgumentPercent, escapeLatexText, escapeTexText } from './latex-escape.js';
 import { configManager } from './config-manager.js';
 import { marked } from './utils.js';
 
@@ -109,9 +109,11 @@ const titlePageLatex = Object.fromEntries(Object.keys(TITLE_PAGE_LINES).map((kin
 
 	The run is found before anything renders (a processAllTokens hook); each line
 	then renders its content as always, and the last one writes the block. Every
-	part is a macro's argument, so the lines' inline code and links are marked as
-	a heading's are (token.jmdArgument, latex-renderer.js): \mintinline's
-	delimiters and a `%` in a URL break there. A paragraph break, which \title
+	part is a macro's argument, so the lines' inline code is marked as a
+	heading's is (token.jmdArgument, latex-renderer.js): \mintinline's
+	delimiters break there. (A link's URL is safe in any argument: its `%` is
+	always written `\%`.) A `%` the parts hold as text is written `\%` too
+	(escapeArgumentPercent, latex-escape.js). A paragraph break, which \title
 	cannot hold (an @begin(title) of two paragraphs), becomes \\.
 */
 function latexMaketitle() {
@@ -141,7 +143,7 @@ function titleLinesIn(token) {
 
 function markArgumentTokens(tokens) {
 	for (const token of tokens ?? []) {
-		if (token.type === 'codespan' || token.type === 'link') token.jmdArgument = true;
+		if (token.type === 'codespan') token.jmdArgument = true;
 		markArgumentTokens(token.tokens);
 	}
 }
@@ -176,7 +178,13 @@ marked.use({ hooks: { processAllTokens: markTitleRun } });
 
 function titleRunPart(kind, content, token) {
 	const run = token.jmdTitleRun;
-	run.parts.push({ kind, content: content.trim().replace(/\s*\n\s*\n\s*/g, '\\\\\n') });
+	// Each part is an argument (\title, \author, \date, pdftitle), where a
+	// raw `%` is a comment that swallows the closing brace: escaped.
+	run.parts.push({
+		kind,
+		content: escapeArgumentPercent(content.trim().replace(/\s*\n\s*\n\s*/g, '\\\\\n')),
+		pdf: kind === 'title' ? escapeArgumentPercent(pdfTitleText(token.tokens).replace(/\s+/g, ' ').trim()) : ''
+	});
 	return token === run.last ? titleRunLatex(run.parts) : '';
 }
 
@@ -190,7 +198,41 @@ function titleRunLatex(parts) {
 	}
 	const block = `\\title{${title}}\n\\author{${authors.join(' \\and ')}}\n\\date{${of('date').join('\\\\')}}\n\\maketitle`;
 	latexTitles.add(block);
+	titleBlockPdfTitles.set(block, parts.map((part) => part.pdf).filter(Boolean).join(' '));
 	return `${block}\n\n`;
+}
+
+/*
+	The block's title as the PDF's Title — hyperref's pdftitle — for a
+	document whose header names none (the owner, 2026-10-20; latex-template.js).
+	It is the title's text as the page prints it, without the formatting:
+	hyperref would strip \emph and the like itself, but not inline code's
+	\mintinline, which it reads as letters. Code and maths keep their source,
+	escaped; notes, index marks, labels, citations and what LaTeX leaves out
+	print nothing in a title, so nothing here. The subtitle stays out: a
+	header's Title names the title alone.
+*/
+const PDF_TITLE_SILENT = new Set(['footnoteRef', 'footnote', 'footnotes', 'inlineFootnote',
+	'jmdClassicFootnote', 'indexMark', 'html', 'image', 'citation', 'citefile']);
+const PDF_TITLE_SILENT_DIRECTIVES = new Set(['label', 'ref', 'cref', 'Cref', 'index', 'HTML', 'web', 'comment']);
+
+function pdfTitleText(tokens) {
+	let text = '';
+	for (const token of tokens ?? []) {
+		const name = token.name ?? token.meta?.name;
+		if (PDF_TITLE_SILENT.has(token.type) || PDF_TITLE_SILENT_DIRECTIVES.has(name)) continue;
+		if (name === 'today') text += todayText();
+		else if (['codespan', 'escape', 'latex'].includes(token.type)) text += escapeTexText(token.text);
+		else if (Array.isArray(token.tokens)) {
+			text += pdfTitleText(token.tokens);
+			// An @begin(title)'s paragraphs, one after another.
+			if (token.type === 'paragraph') text += ' ';
+		}
+		else if (token.type === 'text') text += escapeLatexText(token.text);
+		// A line break, a blank line.
+		else text += ' ';
+	}
+	return text;
 }
 
 /*
@@ -207,11 +249,20 @@ function titleRunLatex(parts) {
 	once asked.
 */
 const latexTitles = new Set();
+const titleBlockPdfTitles = new Map();
 
 export function bodyPrintsTitle(body) {
 	const found = [...latexTitles].some((line) => body.includes(line));
 	latexTitles.clear();
+	titleBlockPdfTitles.clear();
 	return found;
+}
+
+// The PDF Title a `LaTeX maketitle` block in the finished body gives (above),
+// or ''. Asked before bodyPrintsTitle, which forgets the blocks.
+export function bodyTitleBlockText(body) {
+	for (const [block, text] of titleBlockPdfTitles) if (body.includes(block)) return text;
+	return '';
 }
 
 // The date `today` prints: "11 October 2026".

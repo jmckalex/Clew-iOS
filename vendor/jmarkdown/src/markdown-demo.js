@@ -6,6 +6,7 @@
 import hljs from 'highlight.js';
 import { marked_copy } from './utils.js';
 import { registerBlockEnvironment } from './begin-end-core.js';
+import { restoreFootnoteSource } from './inline-footnotes.js';
 
 function createMarkdownDemo(marker) {
 	return {
@@ -28,7 +29,10 @@ function createMarkdownDemo(marker) {
 				// wrapping it in code-fenced blocks and processing it with blockTokens().
 				// Why?  Because if the demo code includes a code-fenced bit, that will
 				// create a parse error.
-				const code = t.join('\n');
+				// A multi-paragraph inline note was lifted out of the document before
+				// it was parsed, leaving a marker (inline-footnotes.js): the code pane
+				// shows the note as written.
+				const code = restoreFootnoteSource(t.join('\n'));
 				const lang = token?.attrs?.type ?? "markdown";
 
 				// LaTeX: the two panes one above the other, with the HTML's labels —

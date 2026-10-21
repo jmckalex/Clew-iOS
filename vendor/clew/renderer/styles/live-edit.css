@@ -108,9 +108,11 @@
 /* ---- lists: a hanging indent, so wrapped lines sit under the text ----
    --le-indent is the item marker's column; --le-col one column, a space in
    the note's font (live/columns.js) — what an item's DRAWN indentation is
-   made of, so every line indented by this CSS lines up with it. */
+   made of, so every line indented by this CSS lines up with it. --le-mark is
+   the marker's box: a bullet's 1.4em, a number's own width where it is wider
+   (columns.js#numberWidth, on each of the item's lines). */
 .le-li, .le-li-cont {
-	--le-hang: calc(var(--le-indent, 0) * var(--le-col, 0.25em) + 1.4em);
+	--le-hang: calc(var(--le-indent, 0) * var(--le-col, 0.25em) + var(--le-mark, 1.4em));
 	padding-left: calc(24px + var(--le-hang)) !important;
 }
 .le-li { text-indent: calc(-1 * var(--le-hang)); }
@@ -125,9 +127,11 @@
 	position: absolute; top: 0; left: 0; white-space: pre;
 	visibility: hidden; pointer-events: none; user-select: none;
 }
-/* An item's number and its space, one width as the bullet is, so the text
-   starts where the hang does (a longer number pushes past it). */
-.le-num { display: inline-block; min-width: 1.4em; text-indent: 0; }
+/* Each run a box of its own width: a ResizeObserver hears no inline box. */
+.le-col-probe > span { display: block; width: max-content; }
+/* An item's number and its space, one box, so the text starts where the hang
+   does: the bullet's width, or the number's own where it is wider. */
+.le-num { display: inline-block; min-width: var(--le-mark, 1.4em); text-indent: 0; }
 /* `.le-li-cont`: the item's text past its first line — after a hard break,
    a lazy line, a second paragraph (model.js#listText). The same hang with no
    bullet: it starts where the item's text does. */
@@ -223,7 +227,7 @@
    its text the quote's, not the list face lang-markdown gives the item's
    every span (model.js#quote). */
 .le-quote.le-quote-li {
-	--le-hang: calc(var(--le-indent, 0) * var(--le-col, 0.25em) + 1.4em);
+	--le-hang: calc(var(--le-indent, 0) * var(--le-col, 0.25em) + var(--le-mark, 1.4em));
 	margin-left: calc(24px + var(--le-hang));
 }
 .cm-live .le-quote .cmt-list { color: inherit; }

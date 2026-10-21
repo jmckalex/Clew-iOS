@@ -97,14 +97,56 @@ function distDir() {
 	return d ? path.resolve(process.cwd(), String(d)) : null;
 }
 
+/*
+	A host's own copy of the library (Clew-boss, 2026-10-20, for the iPad's
+	browser worker, which has no file system to load a dist/ from or to
+	fingerprint one by): { load: () => Promise<module>, fingerprint: string,
+	bundles?: string[] }, set before the build. Given, it stands in for
+	`MP-TikZ dist`, which it wins over: the library is load()'s module, a
+	render is keyed by `fingerprint` where a dist's is by its files (so the
+	same library under the same fingerprint gives the same cache keys as the
+	path does — distFingerprint, below, is the path's), and the bundles are
+	`bundles`, else the library's DEFAULT_BUNDLES and opentype (a dist's
+	ghostscript is found by its file, which a host's library has none of). A
+	malformed one is ignored, and warned when the build asks for the library
+	(a build starts with its warnings cleared). Absent, nothing changes.
+*/
+let hostLibrary = null;
+let hostLibraryMalformed = false;
+
+export function setFigureLibrary(option) {
+	// What came from the library before — its module, a live instance, the
+	// fingerprint its keys carry, the fonts and files handed to it — is
+	// forgotten, so whatever loads next is this call's: the host's, or with
+	// null the dist's. Before any build, there is nothing to forget.
+	if (mp) { mp.dispose(); mp = null; }
+	lib = null;
+	compiles = 0;
+	fingerprintCache = null;
+	fontsGiven.clear();
+	filesGiven.clear();
+	hostLibrary = null;
+	hostLibraryMalformed = false;
+	if (option == null) return;
+	const bundlesOk = option.bundles == null
+		|| (Array.isArray(option.bundles) && option.bundles.every((b) => typeof b === 'string'));
+	if (typeof option.load !== 'function' || typeof option.fingerprint !== 'string' || !option.fingerprint || !bundlesOk) {
+		hostLibraryMalformed = true;
+		return;
+	}
+	hostLibrary = option;
+}
+
 /**
  * Whether this build renders figures with the library: a setting other than
- * external AND a dist to load it from. Read by index.js (the async parse) and
- * the tokenizers. A setting with no dist is warned, and the tools are used.
+ * external AND a library to load — a host's, or a dist's. Read by index.js
+ * (the async parse) and the tokenizers. A setting with neither is warned, and
+ * the tools are used.
  */
 export function figureEngineWanted() {
 	if (setting() === 'external') return false;
-	if (!distDir()) {
+	if (hostLibraryMalformed) warnOnce('Figure engine: `figureLibrary` is { load: a function, fingerprint: a string, bundles?: names } — ignored');
+	if (!hostLibrary && !distDir()) {
 		warnOnce(`Figure engine: ${setting()} needs \`MP-TikZ dist\` (a path to mp-tikz-wasm's dist/) — ${fallback()}`);
 		return false;
 	}
@@ -119,10 +161,14 @@ let compiles = 0;
 let fingerprintCache = null;
 const fontsGiven = new Set();
 
-/** What a library render's cache key carries: index.js and the files' sizes, so a new release re-renders. */
+/** What a library render's cache key carries: the host's fingerprint, else its dist's. */
 function fingerprint() {
-	if (fingerprintCache) return fingerprintCache;
-	const dist = distDir();
+	fingerprintCache ??= hostLibrary ? hostLibrary.fingerprint : distFingerprint(distDir());
+	return fingerprintCache;
+}
+
+/** A dist's fingerprint: index.js and the files' sizes, so a new release re-renders. */
+export function distFingerprint(dist) {
 	const h = crypto.createHash('sha1');
 	try {
 		h.update(fs.readFileSync(path.join(dist, 'index.js')));
@@ -131,8 +177,7 @@ function fingerprint() {
 			if (st.isFile()) h.update(`${name}:${st.size}\n`);
 		}
 	} catch { h.update('unreadable'); }
-	fingerprintCache = `mp-tikz-wasm ${h.digest('hex').slice(0, 12)}`;
-	return fingerprintCache;
+	return `mp-tikz-wasm ${h.digest('hex').slice(0, 12)}`;
 }
 
 async function instance() {
@@ -140,15 +185,22 @@ async function instance() {
 	if (mp && compiles < RECREATE_EVERY) return mp;
 	if (mp) { mp.dispose(); mp = null; fontsGiven.clear(); filesGiven.clear(); }
 	try {
-		lib ??= await import(pathToFileURL(path.join(distDir(), 'index.js')).href);
-		const bundles = [...lib.DEFAULT_BUNDLES, 'opentype'];
-		if (fs.existsSync(path.join(distDir(), 'ghostscript', 'gs.wasm'))) bundles.push('ghostscript');
+		let bundles;
+		if (hostLibrary) {
+			lib ??= await hostLibrary.load();
+			bundles = hostLibrary.bundles ? [...hostLibrary.bundles] : [...lib.DEFAULT_BUNDLES, 'opentype'];
+		} else {
+			lib ??= await import(pathToFileURL(path.join(distDir(), 'index.js')).href);
+			bundles = [...lib.DEFAULT_BUNDLES, 'opentype'];
+			if (fs.existsSync(path.join(distDir(), 'ghostscript', 'gs.wasm'))) bundles.push('ghostscript');
+		}
 		mp = await lib.MetaPost.create({ bundles, logLevel: 'silent' });
 		compiles = 0;
 		return mp;
 	} catch (error) {
 		lib = false;
-		warnOnce(`Figure engine: mp-tikz-wasm would not load from ${distDir()} (${String(error?.message ?? error).split('\n')[0]}) — ${fallback()}`);
+		const from = hostLibrary ? 'the host\'s `figureLibrary`' : distDir();
+		warnOnce(`Figure engine: mp-tikz-wasm would not load from ${from} (${String(error?.message ?? error).split('\n')[0]}) — ${fallback()}`);
 		return null;
 	}
 }

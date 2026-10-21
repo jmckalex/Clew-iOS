@@ -12,7 +12,11 @@
 	    otherwise becomes a link to the file itself, \href{run:path}{alt},
 	    which opens it in the reader's own viewer (as @video's link mode
 	    does);
-	each with a build warning. Graphics the engine makes itself (TikZ,
+	  - so does every other image a browser shows and pdfLaTeX and LuaLaTeX
+	    cannot read (UNREADABLE: GIF, WebP, BMP, AVIF, TIFF, …), which
+	    stopped the build the same way (fixed 2026-10-20: `![[anim.gif]]`);
+	each with a build warning. PDF, PNG, JPEG and EPS are read as they
+	always were. Graphics the engine makes itself (TikZ,
 	MetaPost, Mermaid) are PDFs and never come here.
 
 	Where a relative path is printed from (texPath): LaTeX looks for it where
@@ -68,16 +72,31 @@ export function texPath(src) {
 	return texRelative(out, path.resolve(markdownDir(), src));
 }
 
+// The image types a browser shows that \includegraphics cannot read under
+// pdfLaTeX or LuaLaTeX ("Unknown graphics extension"), each with how a
+// warning names it.
+const UNREADABLE = {
+	svg: 'an SVG', gif: 'a GIF', webp: 'a WebP image', bmp: 'a BMP image', avif: 'an AVIF image',
+	apng: 'an APNG', tif: 'a TIFF image', tiff: 'a TIFF image', ico: 'an icon (.ico)',
+	heic: 'a HEIC image', heif: 'a HEIF image', jxl: 'a JPEG XL image',
+};
+
+/** For an image \includegraphics cannot read, how a warning names it; else null. */
+export function unreadableGraphic(src) {
+	const ext = /\.([a-z0-9]+)$/i.exec(String(src))?.[1].toLowerCase();
+	return ext && Object.hasOwn(UNREADABLE, ext) ? UNREADABLE[ext] : null;
+}
+
 /**
  * What \includegraphics should be given for `src`: `src` itself, or for an
- * SVG a .pdf/.png beside it — or null for an SVG with neither, which LaTeX
- * cannot include at all.
+ * image it cannot read (an SVG, a GIF, …) a .pdf/.png beside it — or null for
+ * one with neither, which LaTeX cannot include at all.
  */
 export function resolveGraphic(src) {
-	if (!/\.svg$/i.test(src)) return src;
+	if (!unreadableGraphic(src)) return src;
 	const dir = markdownDir();
 	for (const ext of ['.pdf', '.png']) {
-		const sibling = src.replace(/\.svg$/i, ext);
+		const sibling = src.replace(/\.[a-z0-9]+$/i, ext);
 		if (fs.existsSync(path.resolve(dir, sibling))) return sibling;
 	}
 	return null;
@@ -103,7 +122,7 @@ export function latexGraphic({ src, alt, options = () => '', what }) {
 		// The link text is plain text, so it is escaped in full (a path's `_`
 		// would otherwise break it).
 		requirePackage('hyperref');
-		addWarning(`${what}: ${src} is an SVG, which \\includegraphics cannot read — LaTeX output links to it instead; put a .pdf or .png beside it to include it`);
+		addWarning(`${what}: ${src} is ${unreadableGraphic(src)}, which \\includegraphics cannot read — LaTeX output links to it instead; put a .pdf or .png beside it to include it`);
 		return `\\href{${escapeLatexPath(`run:${texPath(src)}`)}}{${escapeTexText(alt || src)}}`;
 	}
 	requirePackage('graphicx');

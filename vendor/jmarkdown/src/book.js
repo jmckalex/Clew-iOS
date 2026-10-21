@@ -58,6 +58,7 @@ import { isDeepStrictEqual } from 'util';
 import { marked } from 'marked';
 import { configManager, DEFAULT_CONFIG } from './config-manager.js';
 import { addWarning, setWarningLocation, getWarningLocation } from './warnings.js';
+import { linesLiftedBefore } from './line-shifts.js';
 import processFileInclusions from './file-inclusion.js';
 import { requirePackage } from './preamble.js';
 
@@ -499,9 +500,12 @@ let lexChapter = null;
 export function currentLexChapter() { return lexChapter; }
 
 class BookLexer extends marked.Lexer {
-	constructor(options, chapter) {
+	// `firstLine`: the chapter's first line in the text marked parses (0-based),
+	// where the lines a lifted note took out are counted from (line-shifts.js).
+	constructor(options, chapter, firstLine = null) {
 		super(options);
 		this.chapter = chapter;
+		this.firstLine = firstLine;
 	}
 
 	// marked's own lex(), with the chapter's place set for each step: its
@@ -517,7 +521,10 @@ class BookLexer extends marked.Lexer {
 		if (this.chapter) {
 			let line = 1;
 			for (const token of this.tokens) {
-				const at = line + this.chapter.offset;
+				// With the lines put back that a multi-paragraph inline note above
+				// it, in this chapter, took out of the text (inline-footnotes.js).
+				const lifted = this.firstLine === null ? 0 : linesLiftedBefore(this.firstLine + line - 1, this.firstLine);
+				const at = line + lifted + this.chapter.offset;
 				token._jmdLoc = { file: this.chapter.name, line: at };
 				mapArrays(token, at, lineOf);
 				line += (String(token.raw || '').match(/\n/g) || []).length;
@@ -538,7 +545,12 @@ function lexBook(src, options) {
 	const parts = src.split(MARKERS_SPLIT);
 	const tokens = [];
 	let chapter = null;
+	// Where each text part starts, as a line of `src` (0-based): a marker line
+	// holds no line break of its own, so only the text parts' are counted.
+	let lineAt = 0;
 	parts.forEach((part, i) => {
+		const partLine = lineAt;
+		if (i % 2 === 0) lineAt += (part.match(/\n/g) || []).length;
 		if (i % 2 === 1) {
 			if (part.startsWith('chapter')) {
 				chapter = book.chapters.find((c) => c.index === Number(part.slice(8))) || null;
@@ -552,9 +564,13 @@ function lexBook(src, options) {
 		if (!part.trim()) return;
 		// The marker line's own newline is not the chapter's: drop it, so the
 		// chapter's first line is line 1.
-		if (chapter) part = part.replace(/^\n/, '');
+		let firstLine = partLine;
+		if (chapter && part.startsWith('\n')) {
+			part = part.slice(1);
+			firstLine++;
+		}
 		resetFootnoteState();
-		const lexed = new BookLexer(options, chapter).lex(part);
+		const lexed = new BookLexer(options, chapter, firstLine).lex(part);
 		settleFootnotes(lexed);
 		for (const t of lexed) tokens.push(t);
 	});

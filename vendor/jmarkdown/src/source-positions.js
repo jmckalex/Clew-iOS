@@ -16,7 +16,14 @@
 	Usage:
 	    import { sourcePositions } from './source-positions.js';
 	    marked.use(sourcePositions(text, headerLength));
+
+	The text marked parses can be shorter than the source: a multi-paragraph
+	inline note is lifted out before the parse, leaving a one-line marker
+	(inline-footnotes.js). The lines it took are added back (line-shifts.js),
+	and the note's own blocks, lexed from its stored body, carry their lines
+	(_jmdSourceLine) and are not looked for in the text.
 */
+import { linesLiftedBefore } from './line-shifts.js';
 
 /**
  * Build a function that maps a character offset in `text` to a 0-based line number.
@@ -64,6 +71,10 @@ function tryLocateInSource(token, text, offsetToLine, headerLength, searchFrom) 
 function resolveSourceLines(tokens, parentLine, text, offsetToLine, headerLength, searchFrom) {
 	if (!tokens) return;
 	for (const token of tokens) {
+		// A block of a lifted note's body knows its line (inline-footnotes.js).
+		if (token.sourceLine === undefined && token._jmdSourceLine !== undefined) {
+			token.sourceLine = token._jmdSourceLine + headerLength;
+		}
 		if (token.sourceLine === undefined) {
 			if (!tryLocateInSource(token, text, offsetToLine, headerLength, searchFrom)) {
 				// Can't find it searching forward from the parent's position.
@@ -75,42 +86,54 @@ function resolveSourceLines(tokens, parentLine, text, offsetToLine, headerLength
 		}
 		const line = token.sourceLine;
 
+		// A block of a lifted note's body: its children are found in its own raw,
+		// counted from its line.
+		if (token._jmdSourceLine !== undefined && token.raw) {
+			const rawLine = buildLineMap(token.raw);
+			resolveChildLines(token, line, token.raw, (offset) => rawLine(offset) + token._jmdSourceLine, headerLength, 0);
+			continue;
+		}
+
 		// When recursing into children, search from this token's source offset
 		// if it was found, otherwise keep the parent's searchFrom.
 		const childSearchFrom = token._sourceOffset !== undefined ? token._sourceOffset : searchFrom;
+		resolveChildLines(token, line, text, offsetToLine, headerLength, childSearchFrom);
+	}
+}
 
-		// Standard child arrays
-		if (token.tokens) {
-			resolveSourceLines(token.tokens, line, text, offsetToLine, headerLength, childSearchFrom);
+// A token's children, wherever marked keeps them.
+function resolveChildLines(token, line, text, offsetToLine, headerLength, childSearchFrom) {
+	// Standard child arrays
+	if (token.tokens) {
+		resolveSourceLines(token.tokens, line, text, offsetToLine, headerLength, childSearchFrom);
+	}
+
+	// List items
+	if (token.type === 'list' && token.items) {
+		resolveSourceLines(token.items, line, text, offsetToLine, headerLength, childSearchFrom);
+	}
+
+	// Table cells
+	if (token.type === 'table') {
+		if (token.header) {
+			for (const cell of token.header) {
+				if (cell.tokens) resolveSourceLines(cell.tokens, line, text, offsetToLine, headerLength, childSearchFrom);
+			}
 		}
-
-		// List items
-		if (token.type === 'list' && token.items) {
-			resolveSourceLines(token.items, line, text, offsetToLine, headerLength, childSearchFrom);
-		}
-
-		// Table cells
-		if (token.type === 'table') {
-			if (token.header) {
-				for (const cell of token.header) {
+		if (token.rows) {
+			for (const row of token.rows) {
+				for (const cell of row) {
 					if (cell.tokens) resolveSourceLines(cell.tokens, line, text, offsetToLine, headerLength, childSearchFrom);
 				}
 			}
-			if (token.rows) {
-				for (const row of token.rows) {
-					for (const cell of row) {
-						if (cell.tokens) resolveSourceLines(cell.tokens, line, text, offsetToLine, headerLength, childSearchFrom);
-					}
-				}
-			}
 		}
+	}
 
-		// childTokens (used by some extensions like description lists)
-		if (token.childTokens) {
-			for (const childKey of token.childTokens) {
-				if (token[childKey]) {
-					resolveSourceLines(token[childKey], line, text, offsetToLine, headerLength, childSearchFrom);
-				}
+	// childTokens (used by some extensions like description lists)
+	if (token.childTokens) {
+		for (const childKey of token.childTokens) {
+			if (token[childKey]) {
+				resolveSourceLines(token[childKey], line, text, offsetToLine, headerLength, childSearchFrom);
 			}
 		}
 	}
@@ -129,7 +152,13 @@ export function sourcePositions(text, headerLength = 0) {
 	// headerLength that already lands in 1-based original-file coordinates —
 	// so a headerless file needs the +1 explicitly.
 	if (headerLength === 0) headerLength = 1;
-	const offsetToLine = buildLineMap(text);
+	// A line of the parsed text, as a line of the source: with the lines lifted
+	// out above it put back (line-shifts.js).
+	const parsedLine = buildLineMap(text);
+	const offsetToLine = (offset) => {
+		const line = parsedLine(offset);
+		return line + linesLiftedBefore(line);
+	};
 
 	return {
 		hooks: {

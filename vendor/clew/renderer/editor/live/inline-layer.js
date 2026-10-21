@@ -29,7 +29,7 @@ import {
 	BulletWidget, TaskWidget, CalloutHeadWidget, FenceHeadWidget, FenceFootWidget,
 	EnvHeadWidget, EnvFootWidget,
 } from './widgets/lines.js';
-import { tabbedIndent } from './columns.js';
+import { tabbedIndent, numberWidth } from './columns.js';
 import { calloutFolded } from './block-field.js';
 import { ImageWidget } from './widgets/image.js';
 import { imageSpec } from './images.js';
@@ -305,6 +305,14 @@ function build(view) {
 			const quoted = /^(?:[ \t]*>)+[ \t]?/.exec(line.text)?.[0].length ?? 0;
 			return countColumn(line.text.slice(quoted, c.listMark.from - line.from), state.tabSize);
 		};
+		// A list line's style: its --le-indent, and for a numbered item's every
+		// line its marker box (columns.js#numberWidth), so the hang counts the
+		// number as drawn in this face — a quote in the item and its later lines
+		// under its text, whatever the number's width.
+		const listStyle = (c) => {
+			const box = c.numberMark ? numberWidth(doc.sliceString(c.numberMark.from, c.numberMark.to)) : null;
+			return `--le-indent: ${listIndent(c)}${box ? `; --le-mark: ${box}` : ''}`;
+		};
 		for (const c of model) guarded(c, () => lineConstruct(c), out, replaced);
 
 		function lineConstruct(c) {
@@ -357,7 +365,7 @@ function build(view) {
 					// A quote in a list item stands under the item's text
 					// (model.js#quote), its indentation concealed whatever the
 					// reveal, as a list line's is.
-					const style = [color && `--clew-callout-color: ${color}`, c.listMark && `--le-indent: ${listIndent(c)}`].filter(Boolean).join('; ');
+					const style = [color && `--clew-callout-color: ${color}`, c.listMark && listStyle(c)].filter(Boolean).join('; ');
 					lineClass(c.from, `le-quote le-quote-${Math.min(c.depth, 4)}${box}${blank}${c.listMark ? ' le-quote-li' : ''}`,
 						style ? { style } : undefined);
 					if (c.indent) hide(c.indent);
@@ -376,7 +384,7 @@ function build(view) {
 				case 'numbered':
 				case 'task': {
 					lineClass(c.from, `le-li le-li-${Math.min(c.depth, 4)}${c.kind === 'task' && c.checked ? ' le-done' : ''}`,
-						{ style: `--le-indent: ${listIndent(c)}` });
+						{ style: listStyle(c) });
 					// An indentation holding a tab is a box of its own, in both
 					// states, so its tabs fill the columns they count
 					// (columns.js#tabbedIndent): CSS's stops are moved by the hang.
@@ -398,7 +406,7 @@ function build(view) {
 					// The item's text past its first line (model.js#listText):
 					// under the item's text, its indentation concealed whatever
 					// the reveal — the line stays put when the caret enters it.
-					lineClass(c.from, 'le-li-cont', { style: `--le-indent: ${listIndent(c)}` });
+					lineClass(c.from, 'le-li-cont', { style: listStyle(c) });
 					hide(c.indent);
 					break;
 				case 'codeFence': {

@@ -56,6 +56,7 @@ import { addWarning } from './warnings.js';
 import { marked } from './utils.js';
 import { crefName } from './preamble.js';
 import { getBook, currentWalkChapter, currentRenderChapter, hasChapterMarker, CHAPTER_NOTES } from './book.js';
+import { resetLineShifts, recordLineShift } from './line-shifts.js';
 
 // ========================================================================
 //  Classic [^label] footnotes in LaTeX
@@ -182,7 +183,7 @@ const ALL_GROUPS = '\uFDD2ALL';
 
 let autoLabelCounter = 0;                // for anonymous [fn: ...] footnotes
 const footnoteEntries = [];              // collected notes: { group, n, label, content }
-const footnoteStore = new Map();         // label → { body, indent, group }
+const footnoteStore = new Map();         // label → { body, indent, group, source, bodyLine }
 const groupCounters = new Map();         // group → running per-group number
 const groupOrder = [];                   // groups in first-appearance (numbering) order
 const placements = [];                   // @endnotes markers in document order: { id, group, title }
@@ -217,6 +218,7 @@ export function resetFootnotes() {
 	autoLabelCounter = 0;
 	footnoteEntries.length = 0;
 	footnoteStore.clear();
+	resetLineShifts();
 	groupCounters.clear();
 	groupOrder.length = 0;
 	placements.length = 0;
@@ -317,6 +319,45 @@ function resolveAmbientGroups(src) {
 	return lines.join('\n');
 }
 
+/*
+	The character ranges of fenced code blocks (``` or ~~~, the delimiter lines
+	included), found as Pass A finds them: line by line, a fence closed by one
+	of the same character, and in a book none running past its chapter.
+*/
+function fencedRanges(src) {
+	const ranges = [];
+	const inBook = getBook() !== null;
+	let open = -1;
+	let fenceMarker = '';
+	let at = 0;
+	for (const line of src.split('\n')) {
+		const next = at + line.length + 1;
+		if (inBook && hasChapterMarker(line)) {
+			if (open !== -1) ranges.push([open, at]);
+			open = -1;
+			fenceMarker = '';
+		} else {
+			const fence = /^(\s*)(`{3,}|~{3,})/.exec(line);
+			if (fence && open === -1) { open = at; fenceMarker = fence[2][0]; }
+			else if (fence && fence[2][0] === fenceMarker) { ranges.push([open, next]); open = -1; fenceMarker = ''; }
+		}
+		at = next;
+	}
+	if (open !== -1) ranges.push([open, src.length]);
+	return ranges;
+}
+
+/**
+ * The source as written, each multi-paragraph note's marker replaced by the
+ * note it stands for (preprocessFootnotes). For markdown-demo's code pane:
+ * the demo shows its source and renders it, and the source it is given has
+ * been through the preprocess like the rest of the document.
+ */
+export function restoreFootnoteSource(text) {
+	const marker = new RegExp(escapeForRegExp(FN_MARKER_PREFIX) + '([^' + escapeForRegExp(FN_MARKER_SUFFIX) + ']+)' + escapeForRegExp(FN_MARKER_SUFFIX), 'g');
+	return String(text).replace(marker, (m, label) => footnoteStore.get(label)?.source ?? m);
+}
+
 /**
  * Preprocess the source to resolve ambient endnote groups and to extract
  * multi-paragraph inline footnotes.
@@ -332,8 +373,25 @@ export function preprocessFootnotes(src) {
 	src = resolveAmbientGroups(src);
 
 	// Pass B: extract multi-paragraph bodies (unchanged in spirit; now group-aware).
+	// A note inside fenced code is the code's text, as Pass A takes it: lifting
+	// it out left the marker in the code block, and the note nowhere. Such a note
+	// is still read here — its label numbered, its group noted — only not lifted
+	// out, so every other note keeps its id.
+	const fenced = fencedRanges(src);
 	const result = [];
 	let i = 0;
+	// Line breaks so far, in the text given back and in `src` (up to inAt), for
+	// inverse search's record of lifted notes (line-shifts.js).
+	let outLines = 0;
+	let inLines = 0, inAt = 0;
+	const linesTo = (at) => {
+		for (; inAt < at; inAt++) if (src[inAt] === '\n') inLines++;
+		return inLines;
+	};
+	const emit = (piece) => {
+		result.push(piece);
+		for (const c of piece) if (c === '\n') outLines++;
+	};
 
 	while (i < src.length) {
 		// Find the earliest of the two trigger sequences
@@ -343,7 +401,7 @@ export function preprocessFootnotes(src) {
 		// Pick the earlier match; if neither, flush and break
 		let idx;
 		if (idxCaret === -1 && idxFn === -1) {
-			result.push(src.slice(i));
+			emit(src.slice(i));
 			break;
 		} else if (idxCaret === -1) {
 			idx = idxFn;
@@ -363,7 +421,7 @@ export function preprocessFootnotes(src) {
 		if (!match) {
 			// Not a footnote — skip past the trigger characters
 			const skip = (idx === idxFn) ? 3 : 2;   // '[fn' or '[^'
-			result.push(src.slice(i, idx + skip));
+			emit(src.slice(i, idx + skip));
 			i = idx + skip;
 			continue;
 		}
@@ -377,7 +435,7 @@ export function preprocessFootnotes(src) {
 		if (closingPos === -1) {
 			// Unmatched bracket — skip past trigger
 			const skip = match[0].length;
-			result.push(src.slice(i, idx + skip));
+			emit(src.slice(i, idx + skip));
 			i = idx + skip;
 			continue;
 		}
@@ -390,15 +448,17 @@ export function preprocessFootnotes(src) {
 		// rather than carrying the chapter boundary off into the note.
 		if (getBook() && hasChapterMarker(footnoteSlice)) {
 			const skip = match[0].length;
-			result.push(src.slice(i, idx + skip));
+			emit(src.slice(i, idx + skip));
 			i = idx + skip;
 			continue;
 		}
 		const hasBlankLines = /\n[ \t]*\n/.test(footnoteSlice);
+		const inFence = fenced.some(([start, end]) => idx >= start && idx < end);
 
-		if (!hasBlankLines) {
-			// Single-paragraph footnote — leave for the inline extension
-			result.push(src.slice(i, closingPos));
+		if (!hasBlankLines || inFence) {
+			// Single-paragraph footnote — leave for the inline extension (or, in
+			// fenced code, as the code's text)
+			emit(src.slice(i, closingPos));
 			i = closingPos;
 			continue;
 		}
@@ -430,10 +490,22 @@ export function preprocessFootnotes(src) {
 			return line.trimStart();
 		}).join('\n').trim();
 
-		footnoteStore.set(label, { body: dedented, indent, group });
+		// The body's first line in the source (0-based), for its paragraphs'
+		// own lines: where it starts after the opener, and below any line breaks
+		// the trim took off its front.
+		const bodyStart = idx + match[0].length;
+		const leading = bodyRaw.length - bodyRaw.replace(/^\s+/, '').length;
+		const bodyLine = linesTo(bodyStart) + (bodyRaw.slice(0, leading).match(/\n/g) || []).length;
 
-		// Replace the whole [...] with a marker
-		result.push(src.slice(i, idx) + makeFnMarker(label));
+		// `source`: the note as written, for markdown-demo's code pane
+		// (restoreFootnoteSource), which shows the source, marker and all.
+		footnoteStore.set(label, { body: dedented, indent, group, source: src.slice(idx, closingPos), bodyLine });
+
+		// Replace the whole [...] with a marker, and record the lines it took
+		// out for inverse search (line-shifts.js): the text marked reads is
+		// that much shorter from the marker's line on.
+		emit(src.slice(i, idx) + makeFnMarker(label));
+		recordLineShift(outLines, (footnoteSlice.match(/\n/g) || []).length);
 		i = closingPos;
 	}
 
@@ -489,6 +561,14 @@ export const inlineFootnote = {
 				tokens: []
 			};
 			this.lexer.blockTokens(stored.body, token.tokens);
+			// Each of the body's blocks, with its line in the source (0-based):
+			// they were lexed from the stored body, not the text, so source
+			// positions cannot find them there (source-positions.js).
+			let line = stored.bodyLine;
+			for (const block of token.tokens) {
+				block._jmdSourceLine = line;
+				line += (String(block.raw ?? '').match(/\n/g) || []).length;
+			}
 			return token;
 		}
 
