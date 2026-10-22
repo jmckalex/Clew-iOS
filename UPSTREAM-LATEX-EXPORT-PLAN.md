@@ -608,13 +608,22 @@ growth is measured against the agreed 12–17 MB.
     with the editor untouched (L1).
 - **Then checked in the simulator** (`latexpdf-p3b-limits`):
   - **The time limit.** A note whose header preamble is
-    `\loop\iftrue\repeat` never finishes a pass, and in-process nothing
-    in mp-tikz-wasm stops it: 0.5.0 declares `texTimeoutMs` and reads it
-    nowhere. With the limit lowered to 20 s (`ClewExportTimeout`, a Debug
-    build's default only), the export stopped at 21.0 s with "The export
-    took too long (more than 20 seconds) and was stopped". The host's
-    process was gone and no job folder was left. The release limit stays
-    3 minutes.
+    `\loop\iftrue\repeat` never finishes a pass. With the limit lowered to
+    20 s (`ClewExportTimeout`, a Debug build's default only), the export
+    stopped at 21.0 s with "The export took too long (more than 20
+    seconds) and was stopped". The host's process was gone and no job
+    folder was left. The release limit stays 3 minutes.
+    - **Corrected (p3c, 2026-10-22): that was a race.** I wrote that
+      nothing in mp-tikz-wasm stops such a pass. That holds in-process,
+      under Node. In the export host, mp-tikz-wasm runs TeX in a worker of
+      its own, and its stall watchdog ends a pass that prints nothing for
+      20 s. That loop prints nothing, and Clew's 20 s limit won by half a
+      second. In a build where Clew's limit is never armed, the same note
+      stopped at 21.5 s with "mp-tikz-wasm: latex made no progress for
+      20000 ms; worker terminated".
+    - The premise of P2 above stands as written: the watchdog ends only a
+      silent worker, and a document that loops while printing runs until
+      Clew's limit stops it. p3c tests exactly that.
   - **A device path.** A header preamble `\input{/etc/hosts}` fails with
     TeX's own "File `/etc/hosts.tex' not found", in desktop's words
     (pdfViaLatexFailure). TeX's file system is mp-tikz-wasm's own, and
@@ -623,12 +632,53 @@ growth is measured against the agreed 12–17 MB.
     note, gave "The export stopped: iOS ended its page, most likely
     because it ran out of memory". The app page carried on, and no job
     folder was left.
-- **Still owed before P3:**
-  - the /texmf-var test in the simulator (by construction each export has
-    a new instance; the stand-in test holds typeset.js to it);
-  - the rest of §5's restricted-vault cases (an `\includegraphics` of a
-    device path; an embed of a symlink out of the vault: the export
-    route's clamp, untested in the simulator).
+- **The tests owed before P3, as built** (Clew-boss's brief, 2026-10-22;
+  local, `[ci skip]`). Each new test was mutated once to show it can fail.
+- **p3c `latexpdf-p3c-texmfvar`: a new instance per export, and the
+  limit.**
+  - **Under Node** (tests/export-host.test.js). PLANT's Lua writes
+    /texmf-var/clew-planted.txt, and PLANT has luaotfload cache EB
+    Garamond. PROBE prints what it finds, and writes a file of its own on
+    every pass.
+    - Run on ONE instance after PLANT, PROBE finds both
+      (`planted=present garamond=present`). That is what typeset must
+      never share.
+    - Through typeset, after PLANT, PROBE gives `planted=absent
+      garamond=absent own=present`. Its own passes share an instance, as
+      planned. Its PDF is byte-identical to PROBE typeset with nothing
+      before it (with the date fixed).
+    - Mutant (typeset keeps one instance across exports): the test fails,
+      with `planted=present garamond=present own=present`.
+  - **In the simulator** (tools/sim-pdf-checks.mjs: headless, a Debug
+    build, a vault this device does not trust, opened by path; 7 checks).
+    - **texmf.** Plant then Probe, in ONE app session. Each export has its
+      own export-host process, and Plant's is gone before Probe's starts.
+      Plant is set in EB Garamond, and Probe gives `planted=absent
+      garamond=absent own=present`. The last part shows that on the
+      iPad's TeX too, an instance carries /texmf-var, so the probe would
+      have seen a carried file.
+    - **limit** (the Debug limit at 30 s, apart from the watchdog's 20 s):
+      - A preamble loop that adds two million times and prints a line, for
+        ever (a line every ~0.4 s, which keeps the watchdog fed), was
+        stopped by Clew's limit at 31.5 s: "took too long (more than 30
+        seconds)". Its process was gone and no job folder was left.
+      - The silent loop was stopped by the watchdog at 21.5 s, and its
+        process went too.
+      - Mutant (Clew's limit never armed): the printing loop ran on, with
+        no answer after 100 s and its folder and process still there. Both
+        of its checks failed; the silent one still passed.
+    - Not mutated in the simulator: a page per export. Each export has its
+      own page, process and worker, so a typeset.js that kept its instance
+      would still get a new one with each export. The Node mutant covers
+      typeset.js.
+  - **Found (for Clew-boss; nothing changed):** the watchdog's 20 s of
+    silence applies to each pass, at the device's own speed.
+    - A pass that is silent for 20 s on a slow iPad (a long font load, a
+      heavy TikZ picture) would be stopped, and the user would see
+      mp-tikz-wasm's words, not desktop's.
+    - Options: pass `timeoutMs` (longer, or 0 to leave it all to Clew's
+      limit), and word the message.
+    - The device check should note any "made no progress".
 
 **P3 `latexpdf-p3-verify`:** the record, the simulator, and the device
 memory check below.

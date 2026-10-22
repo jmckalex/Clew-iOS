@@ -36,10 +36,14 @@ export async function typeset({ lib, tex, inputs = {}, date = 'now' }) {
 	const t0 = Date.now();
 	const choice = chooseLatexEngine(tex, 'auto', { available: ['pdflatex', 'lualatex'], host: 'the iPad\'s TeX' });
 	if (choice.unavailable) throw new Error(choice.refusal);
-	// Nothing here limits a pass: in-process, a document that loops never
-	// returns (0.5.0 declares `texTimeoutMs` and reads it nowhere). Clew's
-	// own limit stops it — three minutes, ExportHost.swift, which ends the
-	// page and with it this worker.
+	// Nothing here limits a pass. In the export host, mp-tikz-wasm runs TeX
+	// in a worker of its own, whose stall watchdog ends a pass that prints
+	// nothing for 20 s (its `timeoutMs` default): "latex made no progress
+	// for 20000 ms; worker terminated", thrown here. A document that loops
+	// while printing feeds the watchdog; Clew's own limit stops it — three
+	// minutes, ExportHost.swift, which ends the page and with it this worker
+	// (tools/sim-pdf-checks.mjs, `limit`). Under Node, in-process, there is
+	// no watchdog (0.5.0 declares `texTimeoutMs` and reads it nowhere).
 	const mp = await lib.MetaPost.create({ bundles: [...lib.DEFAULT_BUNDLES, ...DOCUMENT_BUNDLES], logLevel: 'silent' });
 	try {
 		const run = (files) => mp.latex(tex, {

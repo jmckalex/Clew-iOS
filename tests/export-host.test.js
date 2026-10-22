@@ -11,7 +11,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { exportJob, EXPORT_RESTRICTED_CWD } from '../src/shim/export-job.js';
 import { exportOutputs, isSafeExportPath } from '../src/export/outputs.js';
 import { texReferences } from '../src/shim/export-references.js';
@@ -308,6 +308,67 @@ test('PDF via LaTeX (L3), Clew\'s style: maths in Garamond-Math; a header\'s own
 	assert.match(cites.text, /Lewis \[1969\]/);
 	assert.match(cites.text, /David Lewis\. Convention: A Philosophical Study\. Harvard University Press/);
 	assert.doesNotMatch(cites.fonts, /Type 3/);
+});
+
+// A NEW instance per export (§4 P2, mp-tikz-wasm's sandbox review): what one
+// export leaves in /texmf-var is not there for the next. One instance keeps
+// /texmf-var from run to run (core.js#collectTexmfVar, luaotfload's warm
+// cache), and a document's Lua may write there. PLANT writes a file and has
+// luaotfload cache EB Garamond, a face PROBE never loads; PROBE prints what
+// it finds, and writes a file of its own on every pass, which its later
+// passes find (one export's passes share the instance, by design).
+const PLANT = String.raw`\documentclass{article}\usepackage{fontspec}\setmainfont{EBGaramond-Regular.otf}
+\directlua{local f = io.open('/texmf-var/clew-planted.txt', 'w') f:write('planted') f:close()}
+\begin{document}Planted.\end{document}`;
+const PROBE = String.raw`\documentclass{article}\usepackage{fontspec}
+\begin{document}
+\directlua{
+  local function has(p) local f = io.open(p, 'r') if f then f:close() return true end return false end
+  local garamond = 'absent'
+  local function walk(d)
+    for name in lfs.dir(d) do
+      if name ~= '.' and name ~= '..' then
+        local p = d .. '/' .. name
+        if lfs.attributes(p, 'mode') == 'directory' then walk(p) elseif name:find('ebgaramond', 1, true) then garamond = 'present' end
+      end
+    end
+  end
+  walk('/texmf-var')
+  local own = has('/texmf-var/clew-own.txt') and 'present' or 'absent'
+  local f = io.open('/texmf-var/clew-own.txt', 'w') f:write('own') f:close()
+  tex.sprint('planted=' .. (has('/texmf-var/clew-planted.txt') and 'present' or 'absent') .. ' garamond=' .. garamond .. ' own=' .. own)
+}
+\end{document}`;
+
+test('PDF via LaTeX: each export a NEW instance — a file one export\'s Lua left in /texmf-var, and luaotfload\'s cache of its face, are not there for the next', { skip: pdfSkip }, async () => {
+	const lib = await import(pathToFileURL(path.join(root, 'mptikz-assets', 'index.js')).href);
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clew-texmf-var-'));
+	const text = (pdf, name) => {
+		fs.writeFileSync(path.join(dir, name), pdf);
+		return execFileSync(path.join(poppler, 'pdftotext'), [path.join(dir, name), '-'], { encoding: 'utf8' });
+	};
+	try {
+		// The probe sees what one instance carries: run on ONE instance, after
+		// PLANT, it finds both.
+		const mp = await lib.MetaPost.create({ bundles: [...lib.DEFAULT_BUNDLES, ...DOCUMENT_BUNDLES], logLevel: 'silent' });
+		try {
+			await mp.latex(PLANT, { engine: 'lualatex', output: 'pdf', jobName: 'doc', date: 'fixed', files: {} });
+			const carried = await mp.latex(PROBE, { engine: 'lualatex', output: 'pdf', jobName: 'doc', date: 'fixed', files: {} });
+			assert.match(text(carried.pdf, 'carried.pdf'), /planted=present garamond=present own=absent/, 'one instance carries /texmf-var: what typeset must never share');
+		} finally {
+			mp.dispose();
+		}
+
+		const alone = await typeset({ lib, tex: PROBE, date: 'fixed' });
+		assert.match(text(alone.pdf, 'alone.pdf'), /planted=absent garamond=absent own=present/, 'its own passes share the instance');
+		const planted = await typeset({ lib, tex: PLANT, date: 'fixed' });
+		assert.equal(planted.engine, 'lualatex');
+		const after = await typeset({ lib, tex: PROBE, date: 'fixed' });
+		assert.match(text(after.pdf, 'after.pdf'), /planted=absent garamond=absent own=present/, 'the export after PLANT finds nothing of it');
+		assert.ok(Buffer.from(after.pdf).equals(Buffer.from(alone.pdf)), 'and typesets byte for byte as it does with nothing before it');
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
 });
 
 // typeset() against a stand-in library: what it asks mp-tikz-wasm for, in what
