@@ -38,6 +38,16 @@ final class WebHost: NSObject, ObservableObject {
 		exportJobs.sweep()
 		let exportHost = ExportHost(jobs: exportJobs)
 		exportHost.vaultFile = { [weak vaults] rel in vaults?.materialize(rel: rel, timeout: 15) }
+		// The export figure cache, under the staged mp-tikz-wasm's stamp (its
+		// archive's SHA-256, from the bundle's STAGED.json).
+		if let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first {
+			let staged = Bundle.main.url(forResource: "WebRoot", withExtension: nil)?
+				.appendingPathComponent("preview-assets/mptikz/STAGED.json")
+			let stamp = staged.flatMap { try? Data(contentsOf: $0) }
+				.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+				.flatMap { $0["sha256"] as? String }.map { String($0.prefix(12)) } ?? "unstamped"
+			exportHost.cache = ExportCache(root: caches.appendingPathComponent("export-cache", isDirectory: true), library: stamp)
+		}
 		schemeHandler.exportHost = exportHost
 		let bridge = FSBridge(vaults: vaults, exportHost: exportHost)
 		config.userContentController.addScriptMessageHandler(bridge, contentWorld: .page, name: "clew")

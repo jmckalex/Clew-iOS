@@ -44,11 +44,12 @@ export const LUA_GC = '\\directlua{collectgarbage("setpause", 100) collectgarbag
  * memory some 0.5–2 s later. TeX's first pass, started at once, overlapped it:
  * the 40-figure note peaked at 950–1,000 MB against about 840 once it had
  * gone, Diagrams at 675–693 against about 535 (the simulator's footprint).
- * A build without figures started no such worker and waits for nothing.
+ * A build that drew nothing — no figures, or every one from the export
+ * figure cache — started no such worker and waits for nothing.
  */
 export const FIGURE_SETTLE_MS = 750;
-/** The wait before TeX: FIGURE_SETTLE_MS when the build's outputs hold figures (`<base>-figures/`), else none. */
-export const settleBeforeTex = (inputs, base) => (Object.keys(inputs).some((rel) => rel.startsWith(`${base}-figures/`)) ? FIGURE_SETTLE_MS : 0);
+/** The wait before TeX: FIGURE_SETTLE_MS when the figure engine drew any figure, else none. */
+export const settleBeforeTex = (drawn) => (drawn > 0 ? FIGURE_SETTLE_MS : 0);
 const RERUN = /Rerun to get|Label\(s\) may have changed|Rerun LaTeX|Please rerun LaTeX|undefined references.*rerun/i;
 
 const text = (bytes) => (bytes ? new TextDecoder().decode(bytes) : '');

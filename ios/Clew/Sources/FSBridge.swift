@@ -251,7 +251,12 @@ final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 				let handler = webView.configuration.urlSchemeHandler(forURLScheme: "clew-preview") else {
 				return reply(nil, "no window to export from")
 			}
-			exportHost.run(job: Data(job.utf8), schemeHandler: handler, in: window) { result in
+			// A trusted vault's export keeps the figures it draws for the next
+			// (ExportJobs.swift#ExportCache); a restricted one's do not outlive
+			// it. The device's trust decides, never the page.
+			let trusted = vaults.refreshAccess()["trusted"] as? Bool == true
+			let cacheVault = trusted ? vaults.currentVaultPath.map { vaults.trust.identity(URL(fileURLWithPath: $0, isDirectory: true)) } : nil
+			exportHost.run(job: Data(job.utf8), cacheVault: cacheVault, schemeHandler: handler, in: window) { result in
 				switch result {
 				case .success(let done):
 					let tex = done.output.lowercased().hasSuffix(".tex") && (done.files[done.output] ?? 0) <= 16 * 1024 * 1024

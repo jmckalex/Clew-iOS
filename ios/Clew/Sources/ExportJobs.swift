@@ -18,6 +18,10 @@
 //
 // ExportHost.swift drives it from the web view; SchemeHandler.swift routes
 // the host page's requests to it.
+//
+// And the export figure cache (ExportCache, below): what a trusted vault's
+// exports drew, kept between them.
+import CryptoKit
 import Foundation
 
 final class ExportJobs {
@@ -63,6 +67,10 @@ final class ExportJobs {
 	let root: URL
 	private(set) var token: String?
 	private var job: Data?
+	/// The vault identity whose export figure cache this job may use (a
+	/// trusted vault's, decided by the bridge), or nil: the figures stay in
+	/// the worker for this export alone.
+	private var cacheVault: String?
 	private var served = false
 	private(set) var folder: URL?
 	private var written: [String: Int] = [:]
@@ -76,7 +84,7 @@ final class ExportJobs {
 
 	/// A new job: every earlier job's folder goes, this one's is made, and its
 	/// token (32 random hex digits) is returned. Refused while one runs.
-	func begin(job: Data) throws -> String {
+	func begin(job: Data, cacheVault: String? = nil) throws -> String {
 		guard token == nil else { throw Failure.busy }
 		sweep()
 		let id = Self.randomHex(16)
@@ -85,6 +93,7 @@ final class ExportJobs {
 		let token = Self.randomHex(16)
 		self.token = token
 		self.job = job
+		self.cacheVault = cacheVault
 		self.served = false
 		self.folder = dir
 		self.written = [:]
@@ -322,6 +331,13 @@ final class ExportJobs {
 			.allSatisfy { $0 != "" && $0 != "." && $0 != ".." }
 	}
 
+	/// The vault whose figure cache the running job's page may read and add
+	/// to: its own token, once the job is taken, and only a trusted vault's.
+	func cacheVault(token: String) -> String? {
+		guard (try? check(token)) != nil, served else { return nil }
+		return cacheVault
+	}
+
 	private func check(_ given: String) throws {
 		guard let token, Self.constantTimeEqual(token, given) else { throw Failure.unknownToken }
 	}
@@ -330,6 +346,7 @@ final class ExportJobs {
 		if removing, let folder { try? FileManager.default.removeItem(at: folder) }
 		token = nil
 		job = nil
+		cacheVault = nil
 		served = false
 		if removing { folder = nil }
 		written = [:]
@@ -345,5 +362,127 @@ final class ExportJobs {
 	private static func randomHex(_ bytes: Int) -> String {
 		var rng = SystemRandomNumberGenerator()
 		return (0..<bytes).map { _ in String(format: "%02x", UInt8.random(in: 0...255, using: &rng)) }.joined()
+	}
+}
+
+/// The export figure cache, as desktop's main/export-cache.js keeps it (the
+/// owner's "Outside", 2026-10-06): the figures a TRUSTED vault's exports drew,
+/// kept between them in the app's Caches, so a re-export draws only the
+/// figures that changed. jmarkdown's figure engine names each by its source
+/// (`<kind>/<md5>-<n>.<ext>`) and looks for it in the build's cache folder
+/// before drawing; the export worker lists this vault's (`GET cache/<token>`),
+/// reads a file only when the engine does, and hands back what it drew. A
+/// RESTRICTED vault's exports keep theirs in the worker, for the export alone,
+/// as desktop's keep theirs in a temporary folder removed when it ends.
+///
+/// - Each vault has a folder of its own, named as desktop names it: the first
+///   16 hex digits of the SHA-256 of its identity (vaultCacheDir).
+/// - Everything sits under the staged mp-tikz-wasm's stamp: on the iPad the
+///   figure engine cannot fingerprint the library (it has no dist folder to
+///   read), so a new release would otherwise reuse the old one's figures. A
+///   folder for another stamp is removed at the next prune.
+/// - Pruned before each export, never during one, as desktop's: least
+///   recently used first (an export marks the files it used), to `limit`.
+struct ExportCache {
+	/// Every vault's together. Desktop's is 500 MB; an iPad's storage is
+	/// smaller, the figures are small (the 40-figure note's are 1.3 MB), and
+	/// iOS may purge Caches when it needs the room anyway.
+	static let limit = 100 * 1024 * 1024
+
+	/// …/Caches/export-cache
+	let root: URL
+	/// The staged mp-tikz-wasm's stamp (its archive's SHA-256, shortened).
+	let library: String
+
+	var base: URL { root.appendingPathComponent(library, isDirectory: true) }
+
+	/// A vault's folder name: desktop's vaultCacheDir.
+	static func vaultKey(_ identity: String) -> String {
+		SHA256.hash(data: Data(identity.utf8)).map { String(format: "%02x", $0) }.joined().prefix(16).description
+	}
+
+	func dir(identity: String) -> URL {
+		base.appendingPathComponent(Self.vaultKey(identity), isDirectory: true)
+	}
+
+	/// A cached figure's path: `<kind>/<file>`, exactly two plain segments,
+	/// neither hidden (a compile's `.run-*` folder is the engine's own).
+	static func isFigurePath(_ rel: String) -> Bool {
+		let parts = rel.split(separator: "/", omittingEmptySubsequences: false)
+		let plain = { (s: Substring) in
+			!s.isEmpty && s.count <= 200 && !s.hasPrefix(".")
+				&& s.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || "-_.".contains($0)) }
+		}
+		return parts.count == 2 && parts.allSatisfy(plain)
+	}
+
+	/// The vault's cached figures, `<kind>/<file>` with their sizes.
+	func list(identity: String) -> [(rel: String, bytes: Int)] {
+		let fm = FileManager.default
+		let vault = dir(identity: identity)
+		var out: [(rel: String, bytes: Int)] = []
+		for kind in (try? fm.contentsOfDirectory(atPath: vault.path)) ?? [] {
+			for file in (try? fm.contentsOfDirectory(atPath: vault.appendingPathComponent(kind).path)) ?? [] {
+				let rel = "\(kind)/\(file)"
+				guard Self.isFigurePath(rel),
+					let attrs = try? fm.attributesOfItem(atPath: vault.appendingPathComponent(rel).path),
+					attrs[.type] as? FileAttributeType == .typeRegular else { continue }
+				out.append((rel: rel, bytes: (attrs[.size] as? NSNumber)?.intValue ?? 0))
+			}
+		}
+		return out.sorted { $0.rel < $1.rel }
+	}
+
+	/// A cached figure's file, or nil.
+	func url(identity: String, rel: String) -> URL? {
+		guard Self.isFigurePath(rel) else { return nil }
+		let url = dir(identity: identity).appendingPathComponent(rel)
+		return FileManager.default.fileExists(atPath: url.path) ? url : nil
+	}
+
+	/// A figure the export drew, kept for the vault's next.
+	func store(identity: String, rel: String, data: Data) throws {
+		guard Self.isFigurePath(rel) else { throw ExportJobs.Failure.badPath(rel) }
+		let url = dir(identity: identity).appendingPathComponent(rel)
+		try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+		try data.write(to: url, options: .atomic)
+	}
+
+	/// The figures an export used, used now: the prune keeps them longest.
+	func markUsed(identity: String, rels: [String], now: Date = Date()) {
+		for rel in rels where Self.isFigurePath(rel) {
+			try? FileManager.default.setAttributes([.modificationDate: now], ofItemAtPath: dir(identity: identity).appendingPathComponent(rel).path)
+		}
+	}
+
+	/// Keep the cache under `limit`: another library's folder goes whole, then
+	/// the least recently used files, then any folder left empty.
+	@discardableResult
+	func prune(limit: Int = ExportCache.limit) -> (removed: Int, bytes: Int) {
+		let fm = FileManager.default
+		for stamp in (try? fm.contentsOfDirectory(atPath: root.path)) ?? [] where stamp != library {
+			try? fm.removeItem(at: root.appendingPathComponent(stamp))
+		}
+		var files: [(url: URL, bytes: Int, modified: Date)] = []
+		var dirs: [URL] = []
+		if let walker = fm.enumerator(at: base, includingPropertiesForKeys: [.isDirectoryKey, .fileSizeKey, .contentModificationDateKey]) {
+			for case let url as URL in walker {
+				let values = try? url.resourceValues(forKeys: [.isDirectoryKey, .fileSizeKey, .contentModificationDateKey])
+				if values?.isDirectory == true { dirs.append(url); continue }
+				files.append((url: url, bytes: values?.fileSize ?? 0, modified: values?.contentModificationDate ?? .distantPast))
+			}
+		}
+		var bytes = files.reduce(0) { $0 + $1.bytes }
+		var removed = 0
+		if bytes > limit {
+			for file in files.sorted(by: { $0.modified < $1.modified }) {
+				if bytes <= limit { break }
+				if (try? fm.removeItem(at: file.url)) != nil { bytes -= file.bytes; removed += 1 }
+			}
+		}
+		for dir in dirs.sorted(by: { $0.path.count > $1.path.count }) {
+			if ((try? fm.contentsOfDirectory(atPath: dir.path)) ?? ["x"]).isEmpty { try? fm.removeItem(at: dir) }
+		}
+		return (removed, bytes)
 	}
 }

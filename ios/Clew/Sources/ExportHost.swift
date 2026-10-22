@@ -14,7 +14,9 @@
 // /__clew_export__/ are answered only for THIS web view (SchemeHandler.swift
 // passes the requesting view): the page, its script and its worker from the
 // WebRoot's export/ folder; the job, once, for its token; each output as the
-// body of a POST; then `done`. The rules live in ExportJobs.swift.
+// body of a POST; then `done`. And a trusted vault's export figure cache:
+// listed, read, added to and marked used (`cache/`, `cacheused/`). The rules
+// live in ExportJobs.swift.
 //
 // Like PdfPrinter, the view sits behind everything in the app's window, at a
 // point's size: in a window, so WebKit runs it as a live page, and never seen.
@@ -66,6 +68,9 @@ final class ExportHost: NSObject, WKNavigationDelegate {
 	/// downloaded if evicted (WebHost: VaultStore.materialize), or nil. The
 	/// `vault/` route reads through it, never a path of its own.
 	var vaultFile: ((String) -> URL?)?
+	/// The export figure cache (ExportJobs.swift#ExportCache), when the app
+	/// has one: a trusted vault's jobs list, read and add to it.
+	var cache: ExportCache?
 	private(set) var webView: WKWebView?
 	private var completion: ((Result<ExportJobs.Done, Error>) -> Void)?
 	private var deadline: DispatchWorkItem?
@@ -78,12 +83,17 @@ final class ExportHost: NSObject, WKNavigationDelegate {
 
 	var isBusy: Bool { webView != nil }
 
-	/// One export: `job` is the JSON the app page built (src/shim/export-job.js).
-	func run(job: Data, schemeHandler: WKURLSchemeHandler, in window: UIWindow,
+	/// One export: `job` is the JSON the app page built (src/shim/export-job.js);
+	/// `cacheVault` the identity of the trusted vault whose figure cache it may
+	/// use, or nil (a restricted vault's figures stay in the worker).
+	func run(job: Data, cacheVault: String? = nil, schemeHandler: WKURLSchemeHandler, in window: UIWindow,
 		completion: @escaping (Result<ExportJobs.Done, Error>) -> Void) {
 		guard !isBusy else { return completion(.failure(ExportJobs.Failure.busy)) }
+		// Between exports, never during one (desktop's rule): nothing a build
+		// lists is removed while it reads.
+		cache?.prune()
 		let token: String
-		do { token = try jobs.begin(job: job) } catch { return completion(.failure(error)) }
+		do { token = try jobs.begin(job: job, cacheVault: cache == nil ? nil : cacheVault) } catch { return completion(.failure(error)) }
 		let config = WKWebViewConfiguration()
 		config.setURLSchemeHandler(schemeHandler, forURLScheme: "clew-preview")
 		// Nothing of the page outlives it: no cookies, storage or caches.
@@ -156,6 +166,35 @@ final class ExportHost: NSObject, WKNavigationDelegate {
 					respond(task, 200, data, ["Content-Type": "application/octet-stream", "Cache-Control": "no-store", "Content-Security-Policy": Self.csp])
 				}
 			}
+		case ("GET", "cache", 2):
+			// The vault's cached figures, for the worker to install as files it
+			// reads only when the figure engine does; none for a restricted
+			// vault's job, whose figures stay in the worker.
+			guard let identity = jobs.cacheVault(token: parts[1]), let cache else { return json(200, ["files": []]) }
+			json(200, ["files": cache.list(identity: identity).map { ["rel": $0.rel, "bytes": $0.bytes] }])
+		case ("GET", "cache", 4):
+			let rel = parts[2...].joined(separator: "/")
+			guard let identity = jobs.cacheVault(token: parts[1]), let cache, let file = cache.url(identity: identity, rel: rel),
+				let data = try? Data(contentsOf: file) else { return json(404, ["error": "Not found"]) }
+			respond(task, 200, data, ["Content-Type": "application/octet-stream", "Cache-Control": "no-store", "Content-Security-Policy": Self.csp])
+		case ("POST", "cache", 2):
+			// A figure the build drew, kept for the vault's next export.
+			let rel = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "rel" }?.value ?? ""
+			let body = task.request.httpBody ?? Self.readStream(task.request.httpBodyStream) ?? Data()
+			guard let identity = jobs.cacheVault(token: parts[1]), let cache, body.count <= 64 * 1024 * 1024 else { return json(403, ["error": "Forbidden"]) }
+			do {
+				try cache.store(identity: identity, rel: rel, data: body)
+				json(200, ["ok": true])
+			} catch {
+				json(400, ["error": error.localizedDescription])
+			}
+		case ("POST", "cacheused", 2):
+			// The cached figures the export used: the prune keeps them longest.
+			let body = task.request.httpBody ?? Self.readStream(task.request.httpBodyStream) ?? Data()
+			guard let identity = jobs.cacheVault(token: parts[1]), let cache,
+				let rels = (try? JSONSerialization.jsonObject(with: body)) as? [String] else { return json(200, ["ok": false]) }
+			cache.markUsed(identity: identity, rels: rels)
+			json(200, ["ok": true])
 		case ("POST", "out", 2):
 			let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems
 			let rel = query?.first { $0.name == "rel" }?.value ?? ""

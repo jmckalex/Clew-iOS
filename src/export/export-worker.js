@@ -110,6 +110,56 @@ async function vaultFile(rel, token) {
 	return new Uint8Array(await response.arrayBuffer());
 }
 
+/**
+ * A trusted vault's export figure cache (ExportJobs.swift#ExportCache): the
+ * figures its earlier exports drew, installed under the build's cache folder
+ * as files read only when the figure engine wants one (vfs.lazy, a
+ * synchronous read of native's `cache/` route, as mp-tikz-wasm reads its
+ * own). Native lists none for a restricted vault's job: its figures stay in
+ * the worker. The Node harness hands its own in (__clewExportCache).
+ * Answers the paths installed, `<kind>/<file>`.
+ */
+async function installFigureCache(cacheDir, token) {
+	const hook = globalThis.__clewExportCache;
+	let files = [];
+	try {
+		files = hook ? hook.list() : ((await (await fetch(`/__clew_export__/cache/${token}`)).json()).files ?? []);
+	} catch { files = []; }
+	for (const { rel, bytes } of files) {
+		vfs.lazy(`${cacheDir}/${rel}`, bytes, () => {
+			if (hook) return hook.read(rel);
+			const xhr = new XMLHttpRequest();
+			xhr.open('GET', `/__clew_export__/cache/${token}/${rel.split('/').map(encodeURIComponent).join('/')}`, false);
+			xhr.responseType = 'arraybuffer';
+			xhr.send(null);
+			if (xhr.status !== 200) throw Object.assign(new Error(`ENOENT: no such file or directory, open '${cacheDir}/${rel}'`), { code: 'ENOENT' });
+			return new Uint8Array(xhr.response);
+		});
+	}
+	return new Set(files.map((f) => f.rel));
+}
+
+/** A cached figure's path, `<kind>/<file>`: never a compile's `.run-*` folder, nor a mark. */
+const isFigurePath = (rel) => rel.split('/').length === 2 && rel.split('/').every((seg) => seg !== '' && !seg.startsWith('.'));
+
+/**
+ * Hand native what the build drew into the cache folder, for the vault's next
+ * export, and mark the cached figures this one used (the prune keeps them
+ * longest). Native keeps them only for a trusted vault's job.
+ */
+async function keepFigures(cacheDir, token, drawn, used) {
+	const hook = globalThis.__clewExportCache;
+	// A figure not kept is drawn again next time: nothing here fails the export.
+	const post = async (url, body) => { try { await fetch(url, { method: 'POST', body }); } catch { /* not kept */ } };
+	for (const rel of drawn) {
+		const data = vfs.writes.get(`${cacheDir}/${rel}`);
+		if (hook) hook.store?.(rel, data);
+		else await post(`/__clew_export__/cache/${token}?rel=${encodeURIComponent(rel)}`, data);
+	}
+	if (hook) hook.used?.(used);
+	else if (used.length) await post(`/__clew_export__/cacheused/${token}`, JSON.stringify(used));
+}
+
 async function build({ file, options, latexStyle = null, biblify = null, pdf = false, bibFiles = [], token = '', mptikzUrl }) {
 	try {
 		// Read by the figure engine's library import (the build's patch of
@@ -143,9 +193,20 @@ async function build({ file, options, latexStyle = null, biblify = null, pdf = f
 			configManager.set('LaTeX T1 fonts', 'lmodern');
 		}
 		configureExportBuild(configManager, { to: options.to, latexStyle, biblify, defaults: DEFAULT_CONFIG });
+		const cacheDir = options.cacheDir ?? null;
+		const cached = cacheDir ? await installFigureCache(cacheDir, token) : new Set();
 		const { outFile } = await processFile(file, { ...options, obsidianLinks: { resolveEmbed, resolveLink: () => null } });
 		const built = Date.now();
 		let outputs = exportOutputs(vfs.writes, outFile);
+		// What the figure engine drew (new in the cache folder), and the
+		// cached figures the output uses (its `<base>-figures/` copies).
+		const figuresPrefix = `${outFile.slice(outFile.lastIndexOf('/') + 1).replace(/\.[^.]+$/, '')}-figures/`;
+		const drawn = cacheDir ? [...vfs.writes.keys()]
+			.filter((abs) => abs.startsWith(`${cacheDir}/`)).map((abs) => abs.slice(cacheDir.length + 1))
+			.filter((rel) => isFigurePath(rel) && !cached.has(rel)) : [];
+		const used = outputs.map((o) => o.rel).filter((rel) => rel.startsWith(figuresPrefix))
+			.map((rel) => rel.slice(figuresPrefix.length)).filter(isFigurePath);
+		if (cacheDir) await keepFigures(cacheDir, token, drawn, used);
 		let output = outFile;
 		const extra = [];
 		let typesetting = null;
@@ -168,7 +229,7 @@ async function build({ file, options, latexStyle = null, biblify = null, pdf = f
 			const lib = await import(mptikzUrl);
 			// The figure engine's worker goes before TeX's starts (typeset.js
 			// #settleBeforeTex); the vault reads above count towards the wait.
-			const wait = settleBeforeTex(inputs, base) - (Date.now() - built);
+			const wait = settleBeforeTex(drawn.length) - (Date.now() - built);
 			if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
 			typesetting = await typeset({ lib, tex, inputs });
 			extra.push(...typesetting.warnings);
@@ -179,7 +240,7 @@ async function build({ file, options, latexStyle = null, biblify = null, pdf = f
 		// a Set all the same, since a buffer listed twice cannot be transferred.
 		const transfer = [...new Set(outputs.map((o) => o.data).filter((d) => d instanceof Uint8Array).map((d) => d.buffer))];
 		const stats = typesetting && { engine: typesetting.engine, passes: typesetting.passes, bibtex: typesetting.bibtex, makeindex: typesetting.makeindex, ms: typesetting.ms };
-		self.postMessage({ type: 'done', output, warnings: [...getWarnings(), ...extra], outputs, stats }, transfer);
+		self.postMessage({ type: 'done', output, warnings: [...getWarnings(), ...extra], outputs, stats, figures: { drawn: drawn.length, used: used.length } }, transfer);
 	} catch (err) {
 		self.postMessage({ type: 'error', message: String(err?.message ?? err), stack: err?.stack });
 	}

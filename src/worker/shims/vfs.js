@@ -53,6 +53,15 @@ class Vfs {
 		}
 	}
 
+	/** An entry whose bytes are read only when first wanted (the export
+	 *  figure cache, src/export/export-worker.js): its size now, its bytes
+	 *  from `load` on its first read. Not a write. */
+	lazy(p, size, load) {
+		const abs = norm(p);
+		this.files.set(abs, { data: undefined, size, load, mtimeMs: Date.now() });
+		this.#addParents(abs);
+	}
+
 	#addParents(abs) {
 		let dir = abs;
 		while ((dir = dir.slice(0, dir.lastIndexOf('/'))) !== '') this.dirs.add(dir);
@@ -73,6 +82,10 @@ class Vfs {
 			const err = new Error(`ENOENT: no such file or directory, open '${p}'`);
 			err.code = 'ENOENT';
 			throw err;
+		}
+		if (entry.data === undefined && entry.load) {
+			entry.data = entry.load();
+			entry.load = null;
 		}
 		return entry.data;
 	}
@@ -184,7 +197,7 @@ class Vfs {
 			throw err;
 		}
 		const isFile = !!file;
-		const size = file ? (typeof file.data === 'string' ? file.data.length : file.data.byteLength) : 0;
+		const size = !file ? 0 : file.data === undefined ? (file.size ?? 0) : typeof file.data === 'string' ? file.data.length : file.data.byteLength;
 		const ms = file?.mtimeMs ?? 0;
 		return {
 			isFile: () => isFile,

@@ -31,6 +31,9 @@
 //               out by the time of the export (native's route refuses it:
 //               VaultStore.resolve); a `LaTeX preamble` naming an absolute
 //               path. And a control: a vault image, embedded, IS in its PDF.
+//               And the export figure cache: a figure this vault's export
+//               draws is never kept (ExportJobs.swift#ExportCache keeps a
+//               trusted vault's alone).
 //
 // Prints PASS or FAIL per check and writes results.json and the PDFs into
 // --out. Always ends with the app terminated and uninstalled, its defaults
@@ -224,6 +227,7 @@ function writeVault(data) {
 		'Late.md': '# Late\n\n![[late.jpg]]\n\nThe end.\n',
 		'Preamble.md': `---\nLaTeX preamble: \\input{${outside}/secret.tex}\n---\n# Preamble\n\nThe end.\n`,
 		'Inside.md': '# Inside\n\n![[inside.jpg]]\n\nThe end.\n',
+		'Figure.md': '# Figure\n\n@begin(metapost)\nbeginfig(1);\ndraw fullcircle scaled 20mm;\nlabel(btex $x$ etex, origin);\nendfig;\n@end(metapost)\n',
 	};
 	for (const [name, text] of Object.entries(notes)) fs.writeFileSync(path.join(vault, name), text);
 	return { vault, outside };
@@ -346,7 +350,8 @@ async function main() {
 			await kv('smoke/phase', 'retarget');
 			await sleep(1000);
 			await exportPdf('late', 'Late.md');
-			await exportPdf('preamble', 'Preamble.md');`), {
+			await exportPdf('preamble', 'Preamble.md');
+			await exportPdf('figure', 'Figure.md');`), {
 			vault, seconds: 180,
 			onPhase: copier(data, { retarget: () => { fs.rmSync(late); fs.symlinkSync('../../Library/clew-outside/secret.jpg', late); } }),
 		});
@@ -365,6 +370,14 @@ async function main() {
 		const rescanned = (r.late?.warnings ?? []).includes('late.jpg is named by the .tex but is not in this vault');
 		verdict(`restricted: a link repointed out of the vault after it was listed is refused by native's route${rescanned ? ' (INCONCLUSIVE: a rescan dropped it first)' : ''}`,
 			r.late?.ok && images('late') === 0 && refusedByRoute, `${images('late')} image(s); warnings ${JSON.stringify(r.late?.warnings)}`);
+		const cacheFiles = (() => {
+			const found = [];
+			const walk = (dir) => { for (const e of fs.existsSync(dir) ? fs.readdirSync(dir, { withFileTypes: true }) : []) (e.isDirectory() ? walk(path.join(dir, e.name)) : found.push(path.join(dir, e.name))); };
+			walk(path.join(data, 'Library', 'Caches', 'export-cache'));
+			return found;
+		})();
+		verdict('restricted: a figure this vault\'s export draws is in its PDF, and never kept in the export figure cache',
+			r.figure?.ok && cacheFiles.length === 0, `figure export ${r.figure?.ok ? 'ok' : r.figure?.error}; cached files: ${cacheFiles.length}`);
 		verdict('restricted: a `LaTeX preamble` naming an absolute path fails with TeX\'s "not found", the file\'s text nowhere',
 			r.preamble?.ok === false && /secret\.tex' not found/.test(r.preamble.error ?? '') && !String(r.preamble.error).includes(MARKER), r.preamble?.error);
 	}

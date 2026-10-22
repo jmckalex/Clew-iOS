@@ -654,12 +654,95 @@ test('typeset: a first pass that writes no PDF ends it, said from its log; one t
 	assert.deepEqual(calls.map((c) => c[0]), ['create', 'latex', 'dispose', 'create', 'latex', 'dispose', 'create', 'latex', 'dispose']);
 });
 
-test('PDF via LaTeX (A3): after a build that drew figures the export waits before TeX, so the figure engine\'s worker is gone; without figures it does not', () => {
+test('PDF via LaTeX (A3): after a build that drew figures the export waits before TeX, so the figure engine\'s worker is gone; with nothing drawn it does not', () => {
 	assert.equal(FIGURE_SETTLE_MS, 750, 'the simulator\'s 0.5 s sufficed; a margin for a slower iPad');
-	assert.equal(settleBeforeTex({ 'Many-figures/MetaPost/0f3a-1.pdf': new Uint8Array(1), 'refs.bib': '' }, 'Many'), FIGURE_SETTLE_MS);
-	assert.equal(settleBeforeTex({ 'Attachments/a.jpg': new Uint8Array(1), 'refs.bib': '' }, 'Citations'), 0, 'images and bibliographies: no figure engine ran');
-	assert.equal(settleBeforeTex({}, 'Plain'), 0);
-	assert.equal(settleBeforeTex({ 'Other-figures/x.pdf': new Uint8Array(1) }, 'Many'), 0, 'only this export\'s own figures');
+	assert.equal(settleBeforeTex(40), FIGURE_SETTLE_MS);
+	assert.equal(settleBeforeTex(1), FIGURE_SETTLE_MS);
+	assert.equal(settleBeforeTex(0), 0, 'no figures, or every one from the cache: no figure engine ran');
 	const worker = fs.readFileSync(path.join(root, 'src', 'export', 'export-worker.js'), 'utf8');
-	assert.match(worker, /settleBeforeTex\(inputs, base\) - \(Date\.now\(\) - built\)[\s\S]*setTimeout[\s\S]*typesetting = await typeset\(/, 'the worker waits, then typesets');
+	assert.match(worker, /settleBeforeTex\(drawn\.length\) - \(Date\.now\(\) - built\)[\s\S]*setTimeout[\s\S]*typesetting = await typeset\(/, 'the worker waits, then typesets');
+});
+
+// The export figure cache (ExportJobs.swift#ExportCache), as desktop's
+// main/export-cache.js keeps it: a trusted vault's export draws only the
+// figures its earlier exports have not (jmarkdown's figure engine names each
+// by its source); a restricted vault's draws every one, every time.
+// tools/export-note.mjs --cache plays native's part.
+const THREE_FIGURES = `# Three figures\n\n${[1, 2, 3].map((n) => `@begin(metapost)\nbeginfig(${n});\ndraw fullcircle scaled ${10 * n}mm;\nlabel(btex $x_${n}$ etex, origin);\nendfig;\n@end(metapost)\n`).join('\n')}`;
+const exportWith = (vault, note, ...flags) => {
+	const out = fs.mkdtempSync(path.join(os.tmpdir(), 'clew-cache-test-'));
+	try {
+		const summary = JSON.parse(execFileSync(process.execPath, [path.join(root, 'tools', 'export-note.mjs'), vault, note, out, ...flags],
+			{ encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 }));
+		const bytes = Object.fromEntries(summary.files.map((f) => [f.rel, fs.readFileSync(path.join(out, f.rel))]));
+		return { summary, bytes };
+	} finally {
+		fs.rmSync(out, { recursive: true, force: true });
+	}
+};
+
+test('the export figure cache: a trusted vault\'s second export draws nothing and gives the same .tex and figures; a restricted vault\'s keeps nothing', { skip: !staged && 'mptikz-assets/ is not staged' }, () => {
+	withVault({ 'Three.md': THREE_FIGURES }, (vault) => {
+		const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'clew-figure-cache-'));
+		try {
+			const cold = exportWith(vault, 'Three.md', '--cache', cache);
+			assert.deepEqual(cold.summary.figures, { drawn: 3, used: 3 }, 'cold: the figure engine draws all three');
+			assert.equal(cold.summary.cache.listed, 0);
+			assert.equal(cold.summary.cache.stored.length, 3, 'and each is kept');
+			assert.ok(cold.summary.cache.stored.every((rel) => /^MetaPost\/[0-9a-f]{32}-\d\.pdf$/.test(rel)), `<kind>/<md5>-<n>.pdf: ${cold.summary.cache.stored}`);
+
+			const warm = exportWith(vault, 'Three.md', '--cache', cache);
+			assert.deepEqual(warm.summary.figures, { drawn: 0, used: 3 }, 'warm: nothing drawn, all three from the cache');
+			assert.equal(warm.summary.cache.listed, 3);
+			assert.deepEqual(warm.summary.cache.stored, [], 'nothing new to keep');
+			assert.deepEqual([...warm.summary.cache.used].sort(), [...cold.summary.cache.stored].sort(), 'the three marked used');
+			assert.deepEqual(Object.keys(warm.bytes).sort(), Object.keys(cold.bytes).sort());
+			for (const [rel, data] of Object.entries(cold.bytes)) assert.ok(data.equals(warm.bytes[rel]), `${rel}: the same bytes`);
+
+			const changed = THREE_FIGURES.replace('scaled 30mm', 'scaled 35mm');
+			fs.writeFileSync(path.join(vault, 'Three.md'), changed);
+			const edited = exportWith(vault, 'Three.md', '--cache', cache);
+			assert.deepEqual(edited.summary.figures, { drawn: 1, used: 3 }, 'an edited figure is drawn again; the other two come from the cache');
+			fs.writeFileSync(path.join(vault, 'Three.md'), THREE_FIGURES);
+
+			const before = fs.readdirSync(path.join(cache, 'MetaPost')).length;
+			for (let i = 0; i < 2; i++) {
+				const restricted = exportWith(vault, 'Three.md', '--restricted', '--cache', cache);
+				assert.deepEqual(restricted.summary.figures, { drawn: 3, used: 3 }, 'restricted: every figure drawn, every time');
+				assert.equal(restricted.summary.cache.listed, 0, 'native lists it none');
+				assert.deepEqual(restricted.summary.cache.stored, [], 'and keeps none');
+			}
+			assert.equal(fs.readdirSync(path.join(cache, 'MetaPost')).length, before, 'the cache untouched by a restricted vault\'s exports');
+		} finally {
+			fs.rmSync(cache, { recursive: true, force: true });
+		}
+	});
+});
+
+test('the export figure cache, PDF via LaTeX: a warm export typesets the same PDF without drawing, and does not wait for a figure engine', { skip: pdfSkip }, () => {
+	withVault({ 'Three.md': THREE_FIGURES }, (vault) => {
+		const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'clew-figure-cache-'));
+		const facts = (flags) => {
+			const out = fs.mkdtempSync(path.join(os.tmpdir(), 'clew-cache-pdf-'));
+			try {
+				const t0 = Date.now();
+				const summary = JSON.parse(execFileSync(process.execPath, [path.join(root, 'tools', 'export-note.mjs'), vault, 'Three.md', out, '--pdf', '--style=none', ...flags],
+					{ encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }));
+				const file = path.join(out, summary.output);
+				const tool = (name, ...args) => execFileSync(path.join(poppler, name), [...args, file, ...(name === 'pdftotext' ? ['-'] : [])], { encoding: 'utf8' });
+				return { summary, ms: Date.now() - t0, text: tool('pdftotext'), pages: /^Pages:\s+(\d+)/m.exec(tool('pdfinfo'))[1] };
+			} finally {
+				fs.rmSync(out, { recursive: true, force: true });
+			}
+		};
+		try {
+			const cold = facts(['--cache', cache]);
+			const warm = facts(['--cache', cache]);
+			assert.deepEqual([cold.summary.figures.drawn, warm.summary.figures.drawn], [3, 0]);
+			assert.equal(warm.text, cold.text, 'the same text');
+			assert.equal(warm.pages, cold.pages);
+		} finally {
+			fs.rmSync(cache, { recursive: true, force: true });
+		}
+	});
 });

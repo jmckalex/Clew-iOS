@@ -218,5 +218,64 @@ check(sharedPdf.kind == "pdf" && sharedPdf.url.lastPathComponent == "Note.pdf" &
 	"PDF via LaTeX: the PDF alone, whatever else is named")
 check(!fm.fileExists(atPath: fp.appendingPathComponent(".share").path), "nothing staged beside it")
 
+// MARK: - The export figure cache (desktop's main/export-cache.js)
+
+// A vault's folder: desktop's vaultCacheDir, the SHA-256 of its identity, 16 hex digits.
+check(ExportCache.vaultKey("abc") == "ba7816bf8f01cfea", "the vault key is desktop's (sha256 of the identity, 16 hex)")
+check(ExportCache.vaultKey("abc") != ExportCache.vaultKey("abd"), "a vault of its own")
+for good in ["MetaPost/0f1e2d3c4b5a69788796a5b4c3d2e1f0-1.pdf", "TiKZ/abc-12.svg", "Mathematica/x_y.txt"] {
+	check(ExportCache.isFigurePath(good), "a figure path: \(good)")
+}
+for bad in ["", "MetaPost", "MetaPost/", "/MetaPost/a.pdf", "MetaPost/.run-1/a.pdf", "MetaPost/.jmarkdown-figures", ".hidden/a.pdf",
+	"MetaPost/../a.pdf", "MetaPost/a/b.pdf", "Meta Post/a.pdf", "MetaPost/a b.pdf", "MetaPost/a\\b.pdf", "MetaPost/é.pdf"] {
+	check(!ExportCache.isFigurePath(bad), "refused as a figure path: \(bad.debugDescription)")
+}
+
+let cacheRoot = scratch.appendingPathComponent("export-cache", isDirectory: true)
+let cache = ExportCache(root: cacheRoot, library: "76b5591a83ad")
+let vaultA = "file:///vaults/A", vaultB = "file:///vaults/B"
+check(cache.list(identity: vaultA).isEmpty, "a new vault: nothing cached")
+try! cache.store(identity: vaultA, rel: "MetaPost/aaa-1.pdf", data: Data(repeating: 1, count: 1000))
+try! cache.store(identity: vaultA, rel: "MetaPost/bbb-1.pdf", data: Data(repeating: 2, count: 2000))
+try! cache.store(identity: vaultB, rel: "MetaPost/ccc-1.pdf", data: Data(repeating: 3, count: 3000))
+let listedA = cache.list(identity: vaultA)
+check(listedA.map(\.rel) == ["MetaPost/aaa-1.pdf", "MetaPost/bbb-1.pdf"] && listedA.map(\.bytes) == [1000, 2000], "listed with sizes, the vault's own only")
+check(cache.url(identity: vaultA, rel: "MetaPost/ccc-1.pdf") == nil, "another vault's figure is not this one's")
+check((try? Data(contentsOf: cache.url(identity: vaultA, rel: "MetaPost/bbb-1.pdf")!)) == Data(repeating: 2, count: 2000), "read back")
+check(cache.dir(identity: vaultA).path.hasPrefix(cacheRoot.appendingPathComponent("76b5591a83ad").path), "under the library's stamp")
+check(cache.url(identity: vaultA, rel: "../../../etc/hosts") == nil, "a path out is never a figure")
+do { try cache.store(identity: vaultA, rel: "MetaPost/../x.pdf", data: Data()); check(false, "stored a path out") } catch { check(true, "a path out is refused") }
+
+// The job decides who may use it: a trusted vault's (the bridge's word), once taken.
+let cj = try! jobs.begin(job: job, cacheVault: vaultA)
+check(jobs.cacheVault(token: cj) == nil, "not before the page took its job")
+_ = try! jobs.takeJob(token: cj)
+check(jobs.cacheVault(token: cj) == vaultA, "the running job's vault")
+check(jobs.cacheVault(token: String(repeating: "0", count: 32)) == nil, "never another token")
+jobs.abandon()
+check(jobs.cacheVault(token: cj) == nil, "nothing after the job ends")
+let rj = try! jobs.begin(job: job)
+_ = try! jobs.takeJob(token: rj)
+check(jobs.cacheVault(token: rj) == nil, "a restricted vault's job: no cache")
+jobs.abandon()
+
+// Used now, kept longest: the least recently used go first, to the limit.
+let old = Date(timeIntervalSinceNow: -3600)
+for rel in ["MetaPost/aaa-1.pdf", "MetaPost/bbb-1.pdf"] {
+	try! fm.setAttributes([.modificationDate: old], ofItemAtPath: cache.dir(identity: vaultA).appendingPathComponent(rel).path)
+}
+try! fm.setAttributes([.modificationDate: old], ofItemAtPath: cache.dir(identity: vaultB).appendingPathComponent("MetaPost/ccc-1.pdf").path)
+cache.markUsed(identity: vaultA, rels: ["MetaPost/aaa-1.pdf", "../../x"])
+try! fm.createDirectory(at: cacheRoot.appendingPathComponent("0ld11brary00/abc/MetaPost"), withIntermediateDirectories: true)
+try! Data(repeating: 9, count: 5000).write(to: cacheRoot.appendingPathComponent("0ld11brary00/abc/MetaPost/z-1.pdf"))
+let pruned = cache.prune(limit: 2500)
+check(!fm.fileExists(atPath: cacheRoot.appendingPathComponent("0ld11brary00").path), "another library's figures go whole")
+check(cache.url(identity: vaultA, rel: "MetaPost/aaa-1.pdf") != nil, "the figure used just now is kept")
+check(cache.url(identity: vaultA, rel: "MetaPost/bbb-1.pdf") == nil && cache.url(identity: vaultB, rel: "MetaPost/ccc-1.pdf") == nil,
+	"the least recently used go, every vault's together")
+check(pruned.removed == 2 && pruned.bytes == 1000, "to the limit: \(pruned)")
+check(!fm.fileExists(atPath: cache.dir(identity: vaultB).path), "a vault's folder left empty goes")
+check(cache.prune().removed == 0, "under the limit: nothing goes")
+
 print("ExportJobs: \(passed) passed, \(failed) failed")
 exit(failed == 0 ? 0 : 1)

@@ -8,7 +8,7 @@
 // as a child process: the bundle installs its own `process` global) and
 // handy as a dev CLI:
 //
-//   node tools/export-note.mjs <vault-dir> <note-rel-path> <out-dir> [--restricted] [--style=none] [--pdf] [--spy]
+//   node tools/export-note.mjs <vault-dir> <note-rel-path> <out-dir> [--restricted] [--style=none] [--pdf] [--spy] [--cache <dir>]
 //
 // With --pdf, the job is PDF via LaTeX: the worker typesets the .tex with
 // mp-tikz-wasm (src/export/typeset.js) and writes the PDF alone; the vault's
@@ -20,6 +20,11 @@
 // the job asked the route for) and `texRuns` (each TeX run: the files it was
 // handed, by name, its status and log, tools/mptikz-spy.mjs), and a failed
 // build prints `{ error, vaultReads, texRuns }` before exiting 1.
+// With --cache <dir>, the folder is the export figure cache as native keeps
+// it (ExportJobs.swift#ExportCache): listed and read by a trusted vault's
+// export, added to and marked used; a restricted vault's export gets none.
+// The summary's `figures` says what the figure engine drew and what the
+// output used, and `cache` what the folder gave and took.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -102,6 +107,30 @@ const bibFiles = [
 // VaultStore.resolve's clamp by real path.
 const GRAPHIC = new Set(['pdf', 'png', 'jpg', 'jpeg', 'jbig2', 'jb2', 'eps', 'mps']);
 const vaultReads = [];
+// The export figure cache: none unless --cache names a folder, and never
+// for a restricted vault (native lists it none).
+const cacheAt = flags.indexOf('--cache');
+const cacheRoot = cacheAt !== -1 && trusted ? path.resolve(flags[cacheAt + 1]) : null;
+const cacheLog = { listed: 0, read: [], stored: [], used: [] };
+globalThis.__clewExportCache = {
+	list() {
+		if (!cacheRoot) return [];
+		const out = [];
+		for (const kind of fs.existsSync(cacheRoot) ? fs.readdirSync(cacheRoot) : []) {
+			for (const name of fs.readdirSync(path.join(cacheRoot, kind))) out.push({ rel: `${kind}/${name}`, bytes: fs.statSync(path.join(cacheRoot, kind, name)).size });
+		}
+		cacheLog.listed = out.length;
+		return out;
+	},
+	read(rel) { cacheLog.read.push(rel); return new Uint8Array(fs.readFileSync(path.join(cacheRoot, rel))); },
+	store(rel, data) {
+		if (!cacheRoot) return;
+		cacheLog.stored.push(rel);
+		fs.mkdirSync(path.dirname(path.join(cacheRoot, rel)), { recursive: true });
+		fs.writeFileSync(path.join(cacheRoot, rel), data);
+	},
+	used(rels) { if (cacheRoot) cacheLog.used.push(...rels); },
+};
 globalThis.__clewVaultFile = (rel) => {
 	vaultReads.push(rel);
 	const segments = rel.split('/');
@@ -166,6 +195,8 @@ const summary = {
 	warnings: result.warnings,
 	references: texReferences({ tex: typeof tex === 'string' ? tex : '', base: job.base, exists: (r) => `/vault/${r}` in files, bibFiles }),
 	stats: result.stats ?? null,
+	figures: result.figures ?? null,
+	cache: cacheLog,
 	refusedLinks,
 	...(spy ? { vaultReads, texRuns: texRuns() } : {}),
 };
