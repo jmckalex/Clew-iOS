@@ -66,8 +66,9 @@ const DEFAULTS = {
 	// is upstream's, said for the iPad by scripts/build.js).
 	latexExportStyle: 'clew',
 	// Desktop-only, kept so a settings object reads the same everywhere: no
-	// LaTeX toolchain (the row is dropped, scripts/build.js; `auto` is what
-	// latexStyleWanted reads), no CJK font download (its section is
+	// installed LaTeX toolchain to choose (the iPad's one TeX is built in, and
+	// the row is dropped, scripts/build.js; `auto` is what latexStyleWanted
+	// and typeset.js read), no CJK font download (its section is
 	// dropped), no shell (stubbed), and no export that draws figures with
 	// installed TeX tools (exportFigureEngine, Clew-app 2cc6d89: the iPad's
 	// are always mp-tikz-wasm; its row is dropped).

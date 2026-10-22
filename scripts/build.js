@@ -330,8 +330,10 @@ const rendererPatches = {
 		// control that lies. A native URLSession font downloader is a
 		// possible later feature; the office engine is the owner's call.
 		// Likewise the "LaTeX engine (PDF via LaTeX export)" row and its hint
-		// (Clew-app 0b4b7a4): iOS has no TeX toolchain, and that export
-		// answers "not available". And the Updates section (below).
+		// (Clew-app 0b4b7a4): the iPad has one TeX, built in (mp-tikz-wasm),
+		// which picks pdfLaTeX or LuaLaTeX from the document itself
+		// (typeset.js#chooseLatexEngine), so there is no engine to choose.
+		// And the Updates section (below).
 		builder.onLoad({ filter: /vendor\/clew\/renderer\/components\/views\/clew-settings-view\.js$/ }, (args) => {
 			let src = fs.readFileSync(args.path, 'utf8');
 			src = patched('clew-settings-view.js', src,

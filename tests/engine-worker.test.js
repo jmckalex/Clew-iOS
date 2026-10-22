@@ -262,3 +262,30 @@ test('the Inserts\' @ forms (Clew-app acd9c27, jmarkdown 851e8e8) draw through t
 	assert.match(html, /Theorem 1/, 'the theorem, numbered');
 	assert.ok(!/@(begin|end)\(|@today/.test(html.slice(html.indexOf('<body'))), 'no @ form left as text');
 });
+
+// What a note sees when jmarkdown reaches for a program of the desktop's own
+// (src/worker/shims/misc.js#noProcesses): the program by name, and that the
+// iPad runs none. MetaPost, TikZ and PDF via LaTeX run on Clew's own TeX,
+// so the message must not say they cannot be rendered (Clew-docs, 875e177).
+test('an external program on iOS: named, and said truly (child_process shim)', async () => {
+	const { execFileSync: shimExecFile, execSync: shimExec } = await import('../src/worker/shims/misc.js');
+	const said = (fn) => { try { fn(); } catch (err) { return err; } assert.fail('the shim threw nothing'); };
+	const wolfram = said(() => shimExecFile('wolframscript', ['-code', '1+1']));
+	assert.equal(wolfram.code, 'ENOENT', 'the callers\' "not installed" check still works');
+	assert.match(wolfram.message, /^\[clew-ios\] wolframscript cannot run on iOS: Clew runs no external programs there/);
+	assert.match(wolfram.message, /MetaPost, TikZ and PDF via LaTeX run on Clew's own TeX instead\./);
+	assert.doesNotMatch(wolfram.message, /cannot be rendered here/, 'never the old claim that MetaPost and TikZ cannot be drawn');
+	assert.match(said(() => shimExec('"mmdc" "-i" "a.mmd" "-o" "a.pdf"')).message, /^\[clew-ios\] mmdc cannot run on iOS/, 'a shell line: its program, unquoted');
+});
+
+test('a Mathematica block in a vault this device trusts: its error log says wolframscript cannot run on iOS', (t) => {
+	const vault = fs.mkdtempSync(path.join(os.tmpdir(), 'clew-mathematica-'));
+	t.after(() => fs.rmSync(vault, { recursive: true, force: true }));
+	fs.writeFileSync(path.join(vault, 'Wolfram.md'), '# Wolfram\n\n@begin(Mathematica)\nPlot[Sin[x], {x, 0, Pi}]\n@end(Mathematica)\n');
+	const html = renderIn(vault, 'Wolfram.md', '--note-code');
+	assert.doesNotMatch(html, /data-jmd-refused="Mathematica"/, 'note code on: the block runs, and fails');
+	const logs = [...html.matchAll(/data-log="([A-Za-z0-9+/=]+)"/g)].map((m) => Buffer.from(m[1], 'base64').toString('utf8'));
+	assert.ok(logs.length >= 1, 'the block\'s "Show Error Log" carries a log');
+	assert.ok(logs.some((log) => /wolframscript cannot run on iOS: Clew runs no external programs there/.test(log)), `what the user reads: ${logs.join(' | ').slice(0, 300)}`);
+	assert.ok(logs.every((log) => !/cannot be rendered here/.test(log)));
+});

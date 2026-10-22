@@ -5,7 +5,10 @@
 // must not clobber the test runner's) and handy as a dev CLI:
 //
 //   node tools/render-note.mjs <vault-dir> <note-rel-path> [--fragment]
-//                              [--vault-options '<json>'] [--global-fragments '<json>']
+//                              [--vault-options '<json>'] [--global-fragments '<json>'] [--note-code]
+//
+// --note-code renders as a vault this device trusts: notes may make the
+// engine run code (engineConfig's `noteCode`), as the render service does.
 //
 // The engine config and the text-file rule come from src/shim/engine-config.js
 // — the SAME module the app's render service uses. They used to be hand-copied
@@ -85,7 +88,7 @@ for (const entry of engineExtensionEntries(vaultAbs, access)) {
 // ---- engine config + template assets (mirrors render-service.js) ---------
 
 files['/vault/.clew/engine/.jmarkdown/config.json'] = JSON.stringify(
-	engineConfig({ vaultRoot: '/vault', vaultOptions, engineExtensions }), null, 2);
+	engineConfig({ vaultRoot: '/vault', vaultOptions, engineExtensions, noteCode: flags.includes('--note-code') }), null, 2);
 
 for (const [target, source] of Object.entries({
 	'/engine/default-template.html.mustache': 'vendor/jmarkdown/src/default-template.html.mustache',

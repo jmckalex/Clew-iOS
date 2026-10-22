@@ -100,11 +100,18 @@ export function runInThisContext(code) {
 
 // ---- child_process --------------------------------------------------------
 
-const noProcesses = (api) => () => {
-	const err = new Error(
-		`[clew-ios] ${api} is not available on iOS: `
-		+ 'LaTeX, MetaPost, TikZ, and Mathematica blocks cannot be rendered here.');
+// What jmarkdown runs as a program of the desktop's own: Mathematica's
+// wolframscript, mermaid-cli, ffmpeg, and the TeX tools when its figure
+// engine is off. None can run on iOS. MetaPost, TikZ and PDF via LaTeX run
+// on the app's own TeX (mp-tikz-wasm) and never come here. A note sees this
+// message in a block's error log (Mathematica's "Show Error Log"); the other
+// callers catch it and say their own words (mermaid's, @video's).
+const noProcesses = (api) => (command) => {
+	const program = String(command ?? '').trim().split(/\s+/)[0].replace(/^["']|["']$/g, '') || 'An external program';
+	const err = new Error(`[clew-ios] ${program} cannot run on iOS: Clew runs no external programs there `
+		+ '(Mathematica\'s wolframscript, mermaid-cli, ffmpeg). MetaPost, TikZ and PDF via LaTeX run on Clew\'s own TeX instead.');
 	err.code = 'ENOENT';
+	err.api = api;
 	throw err;
 };
 export const execSync = noProcesses('child_process.execSync');
