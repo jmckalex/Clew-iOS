@@ -176,6 +176,91 @@ export function latexStyleConfig(get, { locale = '', platform = 'darwin', defaul
 	return out;
 }
 
+/** The style's preamble opens with this line and closes with its \makeatother. */
+const STYLE_HEAD = '% Clew\'s export style (Settings → Appearance; `latexExportStyle: none` leaves it out).';
+
+/** The style's maths face: Garamond-Math, unicode-math's, where the file is
+ *  there. Exported so mathFontOnlyWithMaths takes out exactly what this wrote. */
+export const MATH_FONT_LINE = '\\@ifpackageloaded{unicode-math}{\\IfFontExistsTF{Garamond-Math.otf}{\\setmathfont{Garamond-Math.otf}[StylisticSet={7,8,9}]}{}}{}';
+
+// What makes a document's maths (the owner's C4, 2026-10-22), erring towards
+// yes: a `$` no backslash escapes, `\(` and `\[` (never the line break
+// `\\[2pt]`), a maths environment, and the commands that set maths in text —
+// \ensuremath, any \math… and unicode-math's \sym…, \frac, \sqrt, siunitx's
+// and mhchem's, which typeset through the maths font — and the kernel's own
+// text commands that do: \textsuperscript and \textsubscript are
+// `\ensuremath{^{\mbox{…}}}` (latex.ltx \@textsuperscript), so a footnote's
+// mark (\@makefnmark) is too, raised by the MATHS font's superscript
+// parameters (measured: without Garamond-Math every superscript and footnote
+// mark of four demo notes moved), and \LaTeXe's ε. Code (minted, verbatim,
+// listings, \mintinline, \verb) and comments are left out first: a `$` in a
+// shell example is no formula.
+const MATH_ENVS = 'equation|align|alignat|flalign|gather|multline|eqnarray|math|displaymath|xalignat|xxalignat|dmath|dgroup|darray|IEEEeqnarray';
+const MATH_MARK = new RegExp(`(\\\\*)(\\$|\\(|\\[)|\\\\begin\\{(?:${MATH_ENVS})\\*?\\}|\\\\(?:ensuremath|math[A-Za-z]+|sym[a-z]+|boldsymbol|[dt]?frac|sqrt|SI|si|num|qty|unit|ang|ce|textsuperscript|textsubscript|footnote|footnotemark|thanks|LaTeXe)(?![A-Za-z])`, 'g');
+const CODE = [
+	/\\begin\{(minted|verbatim|Verbatim|BVerbatim|lstlisting|comment)\*?\}[\s\S]*?\\end\{\1\*?\}/g,
+	/\\mint(?:inline)?(?:\[[^\]]*\])?\{[^}]*\}(?:\{[^}]*\}|([^\s{])[\s\S]*?\1)/g,
+	/\\lstinline(?:\[[^\]]*\])?([^\s\w])[\s\S]*?\1/g,
+	/\\verb\*?([^\s\w*])[\s\S]*?\1/g,
+];
+/** `text` without code, and without comments (a `%` no backslash escapes). */
+function prose(text) {
+	const coded = CODE.reduce((s, re) => s.replace(re, ' '), String(text));
+	return coded.split('\n').map((line) => line.replace(/(^|[^\\])((?:\\\\)*)%.*$/, '$1$2')).join('\n');
+}
+/** Whether `text` (prose already) holds maths by MATH_MARK. */
+function marked(text) {
+	for (const m of text.matchAll(MATH_MARK)) {
+		if (m[2] === undefined) return true;
+		// The backslashes before `$` must pair up (an escaped `\$` is a dollar);
+		// before `(` or `[` one must be left over (`\[`, not `\\[2pt]`).
+		const odd = m[1].length % 2 === 1;
+		if (m[2] === '$' ? !odd : odd) return true;
+	}
+	return false;
+}
+
+/**
+ * Whether a generated LaTeX document has maths: its body, the files it
+ * \include's (a book's chapters), and its preamble less the style's own block
+ * — a macro or a title the user's config or the note's header defines with
+ * maths counts, though nothing in the body shows a `$`.
+ *
+ * @param {string} tex - the document (a book's master)
+ * @param {string[]} [parts] - its \include'd files' texts
+ */
+export function texHasMaths(tex, parts = []) {
+	const text = String(tex);
+	const at = text.indexOf('\\begin{document}');
+	let preamble = at === -1 ? '' : text.slice(0, at);
+	const head = preamble.indexOf(STYLE_HEAD);
+	if (head !== -1) {
+		const end = preamble.indexOf('\\makeatother', head);
+		preamble = preamble.slice(0, head) + (end === -1 ? '' : preamble.slice(end + '\\makeatother'.length));
+	}
+	return [preamble, at === -1 ? text : text.slice(at), ...parts].some((s) => marked(prose(s)));
+}
+
+/**
+ * The generated .tex with the style's maths face only where the document has
+ * maths (the owner's C4): a note without any is typeset without loading
+ * Garamond-Math — unicode-math, still loaded, then takes its own default at
+ * \begin{document} — and prints as before but for the fonts the PDF lists. A
+ * document with maths, or one whose preamble holds no MATH_FONT_LINE (no
+ * style, a header's own `LaTeX preamble`), comes back as it was. Every host
+ * calls it on what the engine wrote, before compiling (export-worker.mjs;
+ * Clew-iOS's export).
+ *
+ * @param {string} tex - the document (a book's master)
+ * @param {string[]} [parts] - its \include'd files' texts
+ * @returns {string}
+ */
+export function mathFontOnlyWithMaths(tex, parts = []) {
+	const text = String(tex);
+	if (!text.includes(MATH_FONT_LINE) || texHasMaths(text, parts)) return text;
+	return text.replace(`${MATH_FONT_LINE}\n`, '').replace(MATH_FONT_LINE, '');
+}
+
 /** The style's preamble lines: every one guarded by the package it needs. */
 function preamble({ babel, platform }) {
 	const emoji = Object.hasOwn(EMOJI, platform) ? EMOJI[platform] : EMOJI.linux;
@@ -186,7 +271,7 @@ function preamble({ babel, platform }) {
 	// does not have, and the style is on by default (Clew-boss, 2026-10-19).
 	const ifLoaded = (pkg, then) => `\\@ifpackageloaded{${pkg}}{${then}}{}`;
 	return [
-		'% Clew\'s export style (Settings → Appearance; `latexExportStyle: none` leaves it out).',
+		STYLE_HEAD,
 		'\\makeatletter',
 		// The document language's hyphenation, unless a babel or polyglossia
 		// is loaded already (the engine's for a book in other languages, the
@@ -216,7 +301,7 @@ function preamble({ babel, platform }) {
 			'  \\fi',
 		] : [`  \\setmainfont{EBGaramond}${faces}]%`]),
 		'}{}}{}',
-		ifLoaded('unicode-math', '\\IfFontExistsTF{Garamond-Math.otf}{\\setmathfont{Garamond-Math.otf}[StylisticSet={7,8,9}]}{}'),
+		MATH_FONT_LINE,
 		ifLoaded('enumitem', '\\setlist{itemsep=0.35\\baselineskip,topsep=0.5\\baselineskip}\\setlist[itemize,2]{label=–,itemsep=0.15\\baselineskip}'),
 		'\\@ifpackageloaded{titlesec}{%',
 		'  \\titleformat{\\section}{\\normalfont\\Large\\bfseries}{\\thesection}{0.8em}{}%',

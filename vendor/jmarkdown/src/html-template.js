@@ -1,4 +1,5 @@
 import Mustache from 'mustache';
+import * as cheerio from 'cheerio';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
 import path from 'path';
@@ -90,7 +91,7 @@ export function processTemplate(content) {
 	}
 
 	if (template_name == 'default') {
-		html = Mustache.render(default_template, config);
+		html = Mustache.render(default_template, withTitleFor(default_template, config));
 	}
 	else {
 		// Relative template names resolve against the note's directory; an
@@ -101,13 +102,50 @@ export function processTemplate(content) {
 			? template_name
 			: path.join(markdown_directory, template_name);
 		const template = fs.readFileSync(template_path, 'utf8');
-		html = Mustache.render(template, config);
+		html = Mustache.render(template, withTitleFor(template, config));
 	}
 	// These are temporary files so that I can inspect how the templating
 	// engine is working.  The should be removed later.
 	//fs.writeFileSync("foo.html", html);
 	//fs.writeFileSync("config.json", JSON.stringify(config, null, 4));
 	return html;
+}
+
+// A header's Title is written as markdown is, so its HTML entities (`A &mdash; B`)
+// are the characters the browser shows. Mustache's {{Title}} escapes the `&`,
+// and <title> showed the entity's code: so for a template that places the
+// Title escaped, the entities are decoded first and Mustache escapes what they
+// give (`&lt;script&gt;` stays text). A template that places it RAW
+// ({{{Title}}}, {{&Title}}) gets it as written, as before: there the browser
+// already reads the entities, and decoded they could be markup. A Title with
+// no entity is the same value either way.
+const ENTITY = /&(?:#\d+|#x[0-9a-f]+|[a-z][a-z0-9]*);/gi;
+
+function withTitleFor(template, config) {
+	const title = config['Title'];
+	const hasEntity = (value) => typeof value === 'string' && value.search(ENTITY) !== -1;
+	if (!(Array.isArray(title) ? title.some(hasEntity) : hasEntity(title))) return config;
+	if (placesRaw(Mustache.parse(template), 'Title')) return config;
+	const decoded = Array.isArray(title) ? title.map(decodeEntities) : decodeEntities(title);
+	return { ...config, Title: decoded };
+}
+
+// Each entity alone, as an HTML parser reads it in text; an unknown one
+// (`&bogus;`) is left as written.
+function decodeEntities(value) {
+	if (typeof value !== 'string') return value;
+	return value.replace(ENTITY, (entity) => cheerio.load(entity, null, false).text());
+}
+
+// Whether a parsed template places `name` unescaped: `{{{name}}}` and
+// `{{&name}}` (both `&` tokens), or `{{{.}}}` inside a `{{#name}}` section.
+function placesRaw(tokens, name, inSection = false) {
+	return tokens.some((token) => {
+		const [type, value, , , children] = token;
+		if (type === '&') return value === name || value.startsWith(`${name}.`) || (inSection && value === '.');
+		if ((type === '#' || type === '^') && Array.isArray(children)) return placesRaw(children, name, inSection || value === name);
+		return false;
+	});
 }
 
 function replaceSpacesInKeys(obj) {

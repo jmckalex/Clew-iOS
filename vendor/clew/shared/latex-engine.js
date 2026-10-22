@@ -105,6 +105,110 @@ export function firstLatexError(log) {
 	return lines.slice(at, at + 3).map((l) => l.trim()).filter(Boolean).join(' ').replace(/\s+/g, ' ').slice(0, 300);
 }
 
+// TeX's transcript breaks its lines at max_print_line, 79 — counted in BYTES
+// of UTF-8, not characters (measured, TeX Live 2025, `Größe Bilder/…`):
+// pdfTeX after exactly 79, cutting a letter's bytes in two across the break;
+// LuaTeX moves a letter of k ≥ 2 bytes that would END on or past byte 79 to
+// the next line (a line of 79−k to 78 bytes; mp-tikz-wasm measured it with
+// \message and texio.write_nl), and breaks its C-level messages (luaotfload's)
+// after 80. So the lines are joined as BYTES, then decoded: a log read as text
+// first has turned pdfTeX's halves into U+FFFD. A line is a broken one when it
+// is 79 or 80 bytes long, or shorter with the next line opening on a letter of
+// k ≥ 2 bytes that would have reached byte 79 — never a shorter one before an
+// ASCII character, which would have fitted — and never into an empty line,
+// TeX's `l.N` or a `<…>` context line (mp-tikz-wasm's rule, the same).
+const LOG_WIDTH = 79;
+const leadBytes = (b) => (b >= 0xf0 ? 4 : b >= 0xe0 ? 3 : b >= 0xc0 ? 2 : 1);
+function unwrapLog(log) {
+	const bytes = log instanceof Uint8Array ? log : new TextEncoder().encode(String(log ?? ''));
+	const segments = [];
+	for (let start = 0; start <= bytes.length;) {
+		let end = bytes.indexOf(0x0a, start);
+		if (end === -1) end = bytes.length;
+		segments.push(bytes.subarray(start, end > start && bytes[end - 1] === 0x0d ? end - 1 : end));
+		start = end + 1;
+	}
+	const decoder = new TextDecoder('utf-8');
+	const lines = [];
+	let joined = [];
+	segments.forEach((segment, i) => {
+		joined.push(segment);
+		const next = segments[i + 1];
+		const continues = next && next.length && next[0] !== 0x3c /* < */ && !/^l\.\d+ /.test(decoder.decode(next.subarray(0, 12)))
+			&& (segment.length === LOG_WIDTH || segment.length === LOG_WIDTH + 1
+				|| (segment.length < LOG_WIDTH && leadBytes(next[0]) >= 2 && segment.length + leadBytes(next[0]) >= LOG_WIDTH));
+		if (continues) return;
+		const line = new Uint8Array(joined.reduce((n, s) => n + s.length, 0));
+		joined.reduce((at, s) => { line.set(s, at); return at + s.length; }, 0);
+		lines.push(decoder.decode(line));
+		joined = [];
+	});
+	return lines;
+}
+// Every way a TeX run that went on says a file was not there (measured, TeX
+// Live 2025 and mp-tikz-wasm 0.5.0, pdfLaTeX and LuaLaTeX): graphicx's
+// `LaTeX Warning: File `x' not found on input line N.`, the driver's
+// `! Package luatex.def Error: File `x' not found: using draft setting.`, and
+// `! LaTeX Error: File `x' not found.` for a name it tried every extension on.
+const NOT_FOUND = /File `([^']+)' not found/;
+
+/**
+ * The files TeX could not find in a run that still made its PDF — an image
+ * named by a path that is not there: nonstopmode goes on, the PDF is made
+ * without it, and until 2026-10-22 nothing said so (the owner's A1). Each
+ * file once, in the order TeX met it, with the .tex line where it can be
+ * read (`on input line N`, or the error's `l.N`).
+ *
+ * @param {Uint8Array | string | { message: string, line?: number }[]} source -
+ *   the run's .log AS BYTES where it can be read so (latexmk's on a desktop:
+ *   pdfTeX cuts a letter's bytes at a line break), else as text
+ *   (mp-tikz-wasm's `result.log` on the iPad: whole under LuaLaTeX; under its
+ *   pdfTeX a letter cut at a break is already lost in 0.5.0's string), or
+ *   else mp-tikz-wasm's `diagnostics`, whose messages 0.5.0 cuts at TeX's line
+ *   break (a long path then reads short)
+ * @returns {{ file: string, line: number | null }[]}
+ */
+export function texMissingFiles(source) {
+	const found = [];
+	for (const { file, line } of texNotFoundLines(source)) {
+		const seen = found.find((f) => f.file === file);
+		if (!seen) found.push({ file, line });
+		else if (seen.line == null) seen.line = line;
+	}
+	return found;
+}
+
+/** Every not-found line of `source` (texMissingFiles's), each as TeX wrote it
+ *  — a file the warning and the driver's error both name comes twice. */
+export function texNotFoundLines(source) {
+	const out = [];
+	if (Array.isArray(source)) {
+		for (const d of source) {
+			const m = NOT_FOUND.exec(String(d?.message ?? ''));
+			if (m) out.push({ file: m[1], line: Number.isInteger(d.line) ? d.line : null, text: String(d.message) });
+		}
+		return out;
+	}
+	const lines = unwrapLog(source);
+	lines.forEach((text, at) => {
+		const m = NOT_FOUND.exec(text);
+		if (!m) return;
+		const onLine = /on input line (\d+)/.exec(text);
+		const context = onLine ? null : lines.slice(at + 1, at + 12).map((l) => /^l\.(\d+) /.exec(l)).find(Boolean);
+		out.push({ file: m[1], line: onLine ? Number(onLine[1]) : context ? Number(context[1]) : null, text });
+	});
+	return out;
+}
+
+/** What a host says, as a build warning, for each file texMissingFiles found. */
+export function missingFileWarnings(missing) {
+	return missing.map(({ file }) => `PDF via LaTeX: TeX could not find the file "${file}", so the PDF was made without it.`);
+}
+const MISSING_WARNING = /^PDF via LaTeX: TeX could not find the file "(.+)", so the PDF was made without it\.$/;
+/** The file a missingFileWarnings sentence names, or null (build-warnings.js
+ *  says them by name, not as "other"). */
+export const missingFileOf = (warning) => MISSING_WARNING.exec(String(warning))?.[1] ?? null;
+
 /**
  * What a failed PDF via LaTeX says, on every host: the engine, why it was
  * chosen, and the log's first error — else the run's own error, else that no

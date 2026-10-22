@@ -14,7 +14,10 @@
 // codes stable (dollars, display-math, mathjax-only, package, backslash,
 // braces) — on every render, HTML included. A note may hold the same mistake
 // many times, so the codes are what is said first, with a count each;
-// everything else (an unresolved reference, an unreadable .bib) is "other".
+// everything else (an unresolved reference, an unreadable .bib) is "other" —
+// except a file TeX could not find in a PDF via LaTeX (latex-engine.js#
+// missingFileWarnings), which the summary names: the PDF was made without it.
+import { missingFileOf } from './latex-engine.js';
 
 const LINT = /^latex-export \[([a-z-]+)\]:\s*([\s\S]*)$/;
 
@@ -45,11 +48,13 @@ export function groupWarnings(warnings = []) {
 	};
 }
 
-/** One line: "LaTeX export: dollars ×2, braces · 1 other", or ''. */
+/** One line: "TeX could not find x.png · LaTeX export: dollars ×2, braces · 1 other", or ''. */
 export function warningSummary(warnings = []) {
 	const { codes, other } = groupWarnings(warnings);
+	const missing = warnings.map(missingFileOf).filter(Boolean);
 	const parts = [];
+	if (missing.length) parts.push(`TeX could not find ${missing.length > 1 ? `${missing.length} files` : missing[0].split('/').pop()}`);
 	if (codes.length) parts.push(`LaTeX export: ${codes.map(({ code, count }) => (count > 1 ? `${code} ×${count}` : code)).join(', ')}`);
-	if (other) parts.push(`${other} other`);
+	if (other > missing.length) parts.push(`${other - missing.length} other`);
 	return parts.join(' · ');
 }

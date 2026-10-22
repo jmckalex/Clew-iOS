@@ -35,6 +35,7 @@ import path from 'node:path';
 import { readMaster, laterNotice, placeWarnings } from '../shared/book.js';
 import { runWorker, compilePdf, configuredBibliographies, restrictedExportDir, figureCache, clearFigures, figureEngine, DEVICE_WORD } from './export.js';
 import { latexPdfRefusal } from './latex-engine.js';
+import { missingFileWarnings } from '../shared/latex-engine.js';
 import { figuresFolder, explainFiguresWarnings } from '../shared/export-figures.js';
 import { bibliographyDirs, vaultBiblify } from '../shared/citation-files.js';
 import { calloutsEnv } from './callout-types.js';
@@ -167,10 +168,10 @@ export async function exportBook({ vaults, indexer, masterRel, format, trusted =
 			copyFullRun({ tex: output, names, work });
 			const proofTex = path.join(work, path.basename(output));
 			const { warnings } = await runWorker({ file: masterAbs, options: { ...options, ...engineFigures, to: 'latex', output: proofTex, latexLayout: 'include', includeOnly: [index + 1] }, cwd, callouts, vault });
-			const { pdf, engine, reason } = await compilePdf(proofTex, masterDir, bibDirs());
+			const { pdf, engine, reason, missing } = await compilePdf(proofTex, masterDir, bibDirs());
 			const proof = path.join(outDir, `${base} (proof, ${baseName(chapter)}).pdf`);
 			fs.copyFileSync(pdf, proof);
-			return { output: proof, outputRel: rel(proof), engine, reason, chapter: index + 1, fullRunAt: ready.record.at, warnings: explained(warnings) };
+			return { output: proof, outputRel: rel(proof), engine, reason, chapter: index + 1, fullRunAt: ready.record.at, warnings: [...explained(warnings), ...missingFileWarnings(missing)] };
 		}
 		await clearFigures(vaults, output);
 		// A PDF is the FULL RUN a proof numbers from: the include layout, and
@@ -179,9 +180,9 @@ export async function exportBook({ vaults, indexer, masterRel, format, trusted =
 		if (full) fs.rmSync(fullRunFile(outDir, base), { force: true });
 		const { warnings } = await runWorker({ file: masterAbs, options: { ...options, ...engineFigures, to: 'latex', output, ...(full ? { latexLayout: 'include' } : {}) }, cwd, callouts, vault });
 		if (format === 'latex') return { output, outputRel: rel(output), warnings: explained(warnings) };
-		const { pdf, engine, reason } = await compilePdf(output, masterDir, bibDirs());
+		const { pdf, engine, reason, missing } = await compilePdf(output, masterDir, bibDirs());
 		fs.writeFileSync(fullRunFile(outDir, base), JSON.stringify(fullRunRecord(names), null, '\t') + '\n');
-		return { output: pdf, outputRel: rel(pdf), engine, reason, warnings: explained(warnings) };
+		return { output: pdf, outputRel: rel(pdf), engine, reason, warnings: [...explained(warnings), ...missingFileWarnings(missing)] };
 	} finally {
 		figures.done([figuresFolder(work ? path.join(work, path.basename(output)) : output)]);
 		if (work) fs.rmSync(work, { recursive: true, force: true });

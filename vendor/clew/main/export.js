@@ -45,7 +45,7 @@ import { settings } from './settings.js';
 import { calloutsEnv } from './callout-types.js';
 import { iconTable } from './callout-files.js';
 import { latexmkCommand, latexPdfRefusal } from './latex-engine.js';
-import { chooseLatexEngine, pdfViaLatexFailure } from '../shared/latex-engine.js';
+import { chooseLatexEngine, pdfViaLatexFailure, texMissingFiles, missingFileWarnings } from '../shared/latex-engine.js';
 import { identityKey } from './vault-trust.js';
 import { figuresState, otherOutputs, vaultCacheDir, markUsed, pruneExportCache, figureEngineOptions, texRefusalDir } from './export-cache.js';
 import { figuresFolder, explainFiguresWarnings } from '../shared/export-figures.js';
@@ -226,9 +226,13 @@ const findTex = (name) => (process.env.CLEW_SMOKE && process.env.CLEW_SMOKE_NO_T
  * paths: the .tex is written beside the chosen output, which need not be
  * beside the note, and `\bibliography{refs}` or a relative graphic is the
  * note's (the default save path is the vault root — every citation came out
- * undefined there, 2026-10-02).
+ * undefined there, 2026-10-02). A run that made its PDF can still have left
+ * something out: TeX goes on past a file it cannot find (nonstopmode), so the
+ * log's not-found lines come back as `missing` (shared/latex-engine.js#
+ * texMissingFiles) for the caller's warnings — an image named by a path that
+ * is not there used to leave the PDF without a word (the owner's A1).
  *
- * @returns {Promise<{pdf: string, engine: string, reason: string}>}
+ * @returns {Promise<{pdf: string, engine: string, reason: string, missing: {file: string, line: number|null}[]}>}
  */
 export function compilePdf(texFile, noteDir, bibDirs = [noteDir]) {
 	const { engine, reason } = chooseLatexEngine(fs.readFileSync(texFile, 'utf8'), settings.get('latexEngine') ?? 'auto');
@@ -259,13 +263,15 @@ export function compilePdf(texFile, noteDir, bibDirs = [noteDir]) {
 			// A non-zero exit can be warnings only: accept a PDF THIS run wrote —
 			// never one an earlier export left at the same path.
 			const fresh = fs.existsSync(pdf) && fs.statSync(pdf).mtimeMs >= started - 1000;
+			// As bytes: pdfTeX breaks its lines inside a letter's UTF-8
+			// (texMissingFiles joins them before decoding).
+			let log = new Uint8Array();
+			try { log = fs.readFileSync(texFile.replace(/\.tex$/, '.log')); } catch { /* none written */ }
 			if (fresh) {
-				resolve({ pdf, engine, reason });
+				resolve({ pdf, engine, reason, missing: texMissingFiles(log) });
 				return;
 			}
-			let log = '';
-			try { log = fs.readFileSync(texFile.replace(/\.tex$/, '.log'), 'utf8'); } catch { /* none written */ }
-			reject(new Error(pdfViaLatexFailure({ engine, reason, log, error: err?.message })));
+			reject(new Error(pdfViaLatexFailure({ engine, reason, log: new TextDecoder().decode(log), error: err?.message })));
 		});
 	});
 }
@@ -345,9 +351,9 @@ export async function exportNote({ win, vaults, sessionId, callerToken = null, r
 		const noteDir = path.dirname(abs);
 		const configured = [...configuredBibliographies(cwd), ...options.bibliography];
 		const bibDirs = bibliographyDirs(fs.readFileSync(abs, 'utf8'), noteDir, configured);
-		const { pdf, engine, reason } = await compilePdf(written, noteDir, bibDirs);
+		const { pdf, engine, reason, missing } = await compilePdf(written, noteDir, bibDirs);
 		fs.copyFileSync(pdf, filePath);
-		return { output: filePath, engine, reason, warnings };
+		return { output: filePath, engine, reason, warnings: [...warnings, ...missingFileWarnings(missing)] };
 	} finally {
 		figures?.done([figuresFolder(written)]);
 		if (build) fs.rmSync(build, { recursive: true, force: true });

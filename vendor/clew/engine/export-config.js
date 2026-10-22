@@ -21,6 +21,18 @@
 // test.js).
 import path from 'node:path';
 import { latexStyleConfig, headerValues, STYLE_KEYS } from './latex-style.js';
+import { obsidianComment, obsidianInlineComment } from './obsidian-comments.js';
+
+/**
+ * Clew's own engine rules an export registers, as the preview's generated
+ * config loads them (render-service.js `Extensions`): an export runs the
+ * user's config cascade, which names none of Clew's. Each host registers them
+ * with the engine's registerExtensions (utils.js) after importing the engine
+ * and before processFile — so after the engine's own rules, as in the
+ * preview, and tried before them. Obsidian's `%%` comments
+ * (obsidian-comments.js).
+ */
+export const EXPORT_EXTENSIONS = Object.freeze([obsidianComment, obsidianInlineComment]);
 
 /**
  * Set an export's configuration on the engine's own configManager, after the

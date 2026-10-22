@@ -42,13 +42,17 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveFileTarget } from './vault-files.js';
 import { familyFiles, readFontIndex } from './font-families.js';
-import { configureExportBuild, exportEmbedPath } from './export-config.js';
+import { configureExportBuild, exportEmbedPath, EXPORT_EXTENSIONS } from './export-config.js';
+import { mathFontOnlyWithMaths } from './latex-style.js';
 
 const engineDir = path.dirname(process.argv[2]);
 const load = (name) => import(pathToFileURL(path.join(engineDir, name)).href);
 const { processFile } = await load('index.js');
 const { getWarnings } = await load('warnings.js');
 const { configManager, DEFAULT_CONFIG } = await load('config-manager.js');
+// Clew's own rules, which the preview's config loads and the user's does not
+// (export-config.js#EXPORT_EXTENSIONS): after the engine's, as there.
+(await load('utils.js')).registerExtensions(EXPORT_EXTENSIONS);
 
 let building = null;   // the build's message: its file and options
 const fontIndex = process.env.CLEW_FONT_INDEX ? readFontIndex(process.env.CLEW_FONT_INDEX) : null;
@@ -76,6 +80,14 @@ process.once('message', async (msg) => {
 		// config files and before the build.
 		configureExportBuild(configManager, { to: options.to, latexStyle: msg.latexStyle, biblify: msg.biblify, defaults: DEFAULT_CONFIG });
 		const { outFile, bookMap = null, latexFiles = null } = await processFile(msg.file, options);
+		// Clew's style loads Garamond-Math only for a document with maths
+		// (latex-style.js#mathFontOnlyWithMaths): the master, read with the
+		// chapters a book's include layout wrote apart.
+		if (options.to === 'latex' && outFile && fs.existsSync(outFile)) {
+			const tex = fs.readFileSync(outFile, 'utf8');
+			const kept = mathFontOnlyWithMaths(tex, (latexFiles ?? []).map((f) => fs.readFileSync(f, 'utf8')));
+			if (kept !== tex) fs.writeFileSync(outFile, kept);
+		}
 		if (process.send) process.send({ type: 'done', output: outFile, warnings: getWarnings(), bookMap, latexFiles });
 	} catch (err) {
 		if (process.send) process.send({ type: 'error', message: String((err && err.message) || err) });

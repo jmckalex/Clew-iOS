@@ -95,9 +95,12 @@ export function createMathematica(marker) {
 			const mathematica_directory = cacheDir('Mathematica');
 			const hash = generateHash(text);
 			const file_name = path.join(mathematica_directory, `${hash}.m`);
-			const svg_name = file_name.replace('.m', '.svg');
-			const png_name = file_name.replace('.m', '.png');
-			const jpg_name = file_name.replace('.m', '.jpg');
+			// Each output changes the extension at the END: a folder on the way can
+			// hold `.m` too (`my.math notes`), and replacing the first one named a
+			// folder that does not exist.
+			const svg_name = file_name.replace(/\.m$/, '.svg');
+			const png_name = file_name.replace(/\.m$/, '.png');
+			const jpg_name = file_name.replace(/\.m$/, '.jpg');
 			//const hash_name = file_name.replace('.m', '.hash');
 			
 			ensureDirectoryExists(mathematica_directory);
@@ -113,10 +116,10 @@ export function createMathematica(marker) {
 			// Since Mathematica can generate different output types, and someone might first generate SVG
 			// output but then change their mind to another type, we need to check whether the requested
 			// output file exists...
-			let output_file = file_name.replace('.m', ".txt"); // This is the default
+			let output_file = file_name.replace(/\.m$/, '.txt'); // This is the default
 			if (token?.attrs?.output) {
 				const type = token?.attrs?.output?.toLowerCase();
-				output_file = output_file.replace('.txt', `.${type}`);
+				output_file = output_file.replace(/\.txt$/, `.${type}`);
 			}
 
 			if (fs.existsSync(output_file) == false) {
@@ -135,7 +138,7 @@ export function createMathematica(marker) {
 						wolframscript([...args, '-format', 'JPEG'], { cwd, outFile: jpg_name });
 					}
 					else {
-						const output = file_name.replace('.m', '.txt');
+						const output = file_name.replace(/\.m$/, '.txt');
 						wolframscript(args, { cwd, outFile: output });
 					}
 				}
@@ -194,11 +197,11 @@ export function createMathematica(marker) {
 				}
 				else {
 					const mathematica_directory = cacheDir('Mathematica');
-					const svg_file_name = path.basename(token['file name']).replace('.m', '.svg');
+					const svg_file_name = path.basename(token['file name']).replace(/\.m$/, '.svg');
 					const svg_full_path = path.join(mathematica_directory, svg_file_name);
-					const png_file_name = path.basename(token['file name']).replace('.m', '.png');
+					const png_file_name = path.basename(token['file name']).replace(/\.m$/, '.png');
 					const png_full_path = path.join(mathematica_directory, png_file_name);
-					const jpg_file_name = path.basename(token['file name']).replace('.m', '.jpg');
+					const jpg_file_name = path.basename(token['file name']).replace(/\.m$/, '.jpg');
 					const jpg_full_path = path.join(mathematica_directory, jpg_file_name);
 
 					const style = token.attrs?.style ? ` style='${token.attrs.style}'` : '';
@@ -268,7 +271,7 @@ export function createMathematica(marker) {
 						}
 					}
 					else {
-						obj = fs.readFileSync(svg_full_path.replace('.svg', '.txt'), 'utf8');
+						obj = fs.readFileSync(svg_full_path.replace(/\.svg$/, '.txt'), 'utf8');
 					}
 
 					if (token['DisplayMath'] == true) {
@@ -354,8 +357,8 @@ export const inlineMathematica = {
 			const code_to_evaluate = mathematica_code_header + match[1];
 			const hash = generateHash(code_to_evaluate);
 			const file_name = path.join(mathematica_directory, `${hash}.m`);
-			const svg_name = file_name.replace('.m', '.svg');
-			const txt_name = file_name.replace('.m', '.txt');
+			const svg_name = file_name.replace(/\.m$/, '.svg');
+			const txt_name = file_name.replace(/\.m$/, '.txt');
 
 			// Check to see if one of the output files already exists
 			let output_file = false;
@@ -452,11 +455,11 @@ export const inlineMathematica = {
 		}
 		else {
 			const mathematica_directory = cacheDir('Mathematica');
-			const svg_file_name = path.basename(token['file name']).replace('.m', '.svg');
+			const svg_file_name = path.basename(token['file name']).replace(/\.m$/, '.svg');
 			const svg_full_path = path.join(mathematica_directory, svg_file_name);
-			const png_file_name = path.basename(token['file name']).replace('.m', '.png');
+			const png_file_name = path.basename(token['file name']).replace(/\.m$/, '.png');
 			const png_full_path = path.join(mathematica_directory, png_file_name);
-			const jpg_file_name = path.basename(token['file name']).replace('.m', '.jpg');
+			const jpg_file_name = path.basename(token['file name']).replace(/\.m$/, '.jpg');
 			const jpg_full_path = path.join(mathematica_directory, jpg_file_name);
 
 			const style = token.attrs?.style ? ` style='${token.attrs.style}'` : '';
@@ -527,13 +530,13 @@ export const inlineMathematica = {
 			}
 			else {
 				if (token.attrs?.TeX?.toLowerCase() == "inline") {
-					obj = "$" + fs.readFileSync(svg_full_path.replace('.svg', '.txt'), 'utf8') + "$";
+					obj = "$" + fs.readFileSync(svg_full_path.replace(/\.svg$/, '.txt'), 'utf8') + "$";
 				}
 				else if (token.attrs?.TeX?.toLowerCase() == "block") {
-					obj = "$$" + fs.readFileSync(svg_full_path.replace('.svg', '.txt'), 'utf8') + "$$";
+					obj = "$$" + fs.readFileSync(svg_full_path.replace(/\.svg$/, '.txt'), 'utf8') + "$$";
 				}
 				else {
-					obj = fs.readFileSync(svg_full_path.replace('.svg', '.txt'), 'utf8');
+					obj = fs.readFileSync(svg_full_path.replace(/\.svg$/, '.txt'), 'utf8');
 				}
 			}
 
