@@ -7,7 +7,7 @@
 // embed an \includegraphics of its vault path, Clew's style in the preamble.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -369,6 +369,111 @@ test('PDF via LaTeX: each export a NEW instance — a file one export\'s Lua lef
 	} finally {
 		fs.rmSync(dir, { recursive: true, force: true });
 	}
+});
+
+// §5's security cases (3): PDF via LaTeX in a vault this device does not
+// trust (the export worker as the app runs it, a restricted job, TeX
+// recorded by tools/mptikz-spy.mjs). Each names something that EXISTS on this
+// machine, outside the vault or by an absolute path: /etc/hosts, a file
+// whose text is a marker, an image, the vault's own image by its absolute
+// path, a link leading out. TeX's file system is mp-tikz-wasm's own, and is
+// handed only what the job gives it (§4 P2, "the files handed in"), so each
+// is TeX's own "not found", and its content is in no run's log. Desktop
+// refuses PDF via LaTeX in such a vault outright (latexPdfRefusal); the iPad
+// typesets, the owner's (3), because nothing outside reaches its TeX.
+const MARKER = 'CLEWOUTSIDEMARKER';
+const withOutside = (notes, body) => {
+	const top = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'clew-restricted-')));
+	try {
+		const outside = path.join(top, 'outside');
+		const vault = path.join(top, 'vault');
+		fs.mkdirSync(outside);
+		fs.mkdirSync(vault);
+		const image = path.join(root, 'seed-vault', 'Attachments', 'NASA - Earthrise.jpg');
+		fs.writeFileSync(path.join(outside, 'secret.tex'), `${MARKER}\n`);
+		fs.copyFileSync(image, path.join(outside, 'secret.jpg'));
+		fs.copyFileSync(image, path.join(vault, 'inside.jpg'));
+		fs.symlinkSync('../outside/secret.jpg', path.join(vault, 'escape.jpg'));
+		for (const [name, text] of Object.entries(notes(top))) fs.writeFileSync(path.join(vault, name), text);
+		return body(vault, top);
+	} finally {
+		fs.rmSync(top, { recursive: true, force: true });
+	}
+};
+/** A restricted PDF export with TeX recorded: `{ ok, summary | error, texRuns, vaultReads, refusedLinks, images }`. */
+const restrictedPdf = (vault, note) => {
+	const out = fs.mkdtempSync(path.join(os.tmpdir(), 'clew-pdf-test-'));
+	try {
+		const run = spawnSync(process.execPath, [path.join(root, 'tools', 'export-note.mjs'), vault, note, out, '--pdf', '--restricted', '--style=none', '--spy'],
+			{ encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+		const answer = JSON.parse(run.stdout);
+		if (run.status !== 0) return { ok: false, ...answer };
+		const file = path.join(out, answer.output);
+		// `pdfimages -list`: two header lines, then one line per image.
+		const images = execFileSync(path.join(poppler, 'pdfimages'), ['-list', file], { encoding: 'utf8' }).trim().split('\n').length - 2;
+		return { ok: true, ...answer, images, bytes: fs.statSync(file).size };
+	} finally {
+		fs.rmSync(out, { recursive: true, force: true });
+	}
+};
+/** Only what TeX makes for itself between passes (doc.aux, doc.out…): never a file of the device's. */
+const onlyOwnArtifacts = (texRuns) => texRuns.every((r) => r.files.every((f) => /^doc\.[a-z]+$/.test(f)));
+const restrictedSkip = pdfSkip || (!fs.existsSync(path.join(poppler ?? '', 'pdfimages')) && 'no pdfimages');
+
+test('PDF via LaTeX in a restricted vault: `\\input{/etc/hosts}` in a note fails with TeX\'s own "not found"; nothing of the file reaches TeX', { skip: restrictedSkip }, () => {
+	const hosts = fs.readFileSync('/etc/hosts', 'utf8').split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+	assert.ok(hosts.length, '/etc/hosts has entries on this machine');
+	withOutside(() => ({ 'Input.md': '# Input\n\nBefore.\n\n\\input{/etc/hosts}\n\nAfter.\n' }), (vault) => {
+		const r = restrictedPdf(vault, 'Input.md');
+		assert.equal(r.ok, false, 'no PDF');
+		assert.match(r.error, /^PDF via LaTeX failed — LuaLaTeX ran .*First error: ! LaTeX Error: File `\/etc\/hosts\.tex' not found\./, 'in desktop\'s words (pdfViaLatexFailure)');
+		assert.deepEqual(r.texRuns[0].files, [], 'TeX was handed nothing');
+		assert.ok(onlyOwnArtifacts(r.texRuns));
+		assert.deepEqual(r.vaultReads, []);
+		for (const line of hosts) assert.ok(r.texRuns.every((run) => !run.log.includes(line)), `no log holds "${line}"`);
+	});
+});
+
+test('PDF via LaTeX in a restricted vault: an image by a device path (outside the vault, or the vault\'s own by its absolute path) is left out, TeX\'s "not found"; the PDF has no image', { skip: restrictedSkip }, () => {
+	withOutside((top) => ({ 'Device.md': `# Device\n\n![outside](${top}/outside/secret.jpg)\n\n![own, absolute](${top}/vault/inside.jpg)\n\nThe end.\n` }), (vault, top) => {
+		const r = restrictedPdf(vault, 'Device.md');
+		assert.equal(r.ok, true, 'desktop\'s rule: a PDF with errors is still the PDF (nonstopmode)');
+		assert.deepEqual(r.vaultReads, [], 'an absolute path is not a vault path: the job asks the route for nothing');
+		assert.ok(onlyOwnArtifacts(r.texRuns), 'TeX was handed none of them');
+		// TeX's log wraps at 79 columns: read it unwrapped.
+		const log = r.texRuns.at(-1).log.replace(/\n/g, '');
+		for (const name of [`${top}/outside/secret.jpg`, `${top}/vault/inside.jpg`]) {
+			assert.ok(log.includes(`File \`${name}' not found`), `TeX's own "not found" for ${name}`);
+		}
+		assert.equal(r.images, 0, 'no image in the PDF');
+		assert.ok(r.bytes < 100_000, `a PDF without the 311 KB image (${r.bytes} bytes)`);
+	});
+});
+
+test('PDF via LaTeX in a restricted vault: an embed of a link leading out of the vault is not listed, not read, not handed to TeX; the PDF goes without it, said', { skip: restrictedSkip }, () => {
+	withOutside(() => ({ 'Link.md': '# Link\n\n![[escape.jpg]]\n\n![md](escape.jpg)\n\nThe end.\n' }), (vault) => {
+		const r = restrictedPdf(vault, 'Link.md');
+		assert.equal(r.ok, true);
+		assert.deepEqual(r.refusedLinks, ['escape.jpg'], 'the vault\'s listing skips it (VaultStore.walk)');
+		assert.deepEqual(r.vaultReads, [], 'so the job never asks for it');
+		assert.ok(r.warnings.includes('escape.jpg is named by the .tex but is not in this vault'), 'and says so');
+		assert.ok(onlyOwnArtifacts(r.texRuns));
+		assert.ok(r.texRuns.at(-1).log.includes('File `escape.jpg\' not found'));
+		assert.equal(r.images, 0, 'no image in the PDF');
+	});
+});
+
+test('PDF via LaTeX in a restricted vault: a `LaTeX preamble` header naming an absolute path fails with TeX\'s "not found"; the file\'s text is in no log', { skip: restrictedSkip }, () => {
+	withOutside((top) => ({ 'Preamble.md': `---\nLaTeX preamble: \\input{${top}/outside/secret.tex}\n---\n# Preamble\n\nThe end.\n` }), (vault, top) => {
+		assert.equal(fs.readFileSync(path.join(top, 'outside', 'secret.tex'), 'utf8'), `${MARKER}\n`, 'the file is there on this machine');
+		const r = restrictedPdf(vault, 'Preamble.md');
+		assert.equal(r.ok, false, 'no PDF');
+		assert.match(r.error, /First error: ! LaTeX Error: File `.*secret\.tex' not found\./s);
+		assert.ok(r.texRuns[0].log.replace(/\n/g, '').includes(`File \`${top}/outside/secret.tex' not found`), 'TeX looked for that very path');
+		assert.ok(onlyOwnArtifacts(r.texRuns), 'and was handed nothing of the device\'s');
+		assert.ok(r.texRuns.every((run) => !run.log.includes(MARKER)), 'the marker is in no log');
+		assert.ok(!r.error.includes(MARKER));
+	});
 });
 
 // typeset() against a stand-in library: what it asks mp-tikz-wasm for, in what

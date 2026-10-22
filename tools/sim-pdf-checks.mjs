@@ -1,15 +1,15 @@
 // PDF via LaTeX in the simulator (UPSTREAM-LATEX-EXPORT-PLAN.md §5, owed
-// before P3): what needs the app itself — a page and an engine per export,
-// the export's time limit. Headless: simctl only, never Simulator.app, never
-// a keystroke. A Debug build's ClewSmokeJS hook drives the export host
-// (export-host.js#run, the path "Export note as PDF (via LaTeX)" takes, less
-// the share sheet); the Mac reads each PDF from the app's tmp/clew-export/
-// while the job still has it.
+// before P3): what needs the app itself — native's `vault/` route and its
+// clamp, a page and an engine per export, the export's time limit. Headless:
+// simctl only, never Simulator.app, never a keystroke. A Debug build's
+// ClewSmokeJS hook drives the export host (export-host.js#run, the path
+// "Export note as PDF (via LaTeX)" takes, less the share sheet); the Mac
+// reads each PDF from the app's tmp/clew-export/ while the job still has it.
 //
-//   node tools/sim-pdf-checks.mjs <Clew.app> [--sim <udid>] [--only texmf,limit] [--out <dir>]
+//   node tools/sim-pdf-checks.mjs <Clew.app> [--sim <udid>] [--only texmf,limit,restricted] [--out <dir>]
 //
 // Everything runs in a vault this device does not trust: a folder in
-// Documents, opened by path.
+// Documents, opened by path (Clew-boss's §5 cases are a restricted vault's).
 //
 //   texmf       In ONE app session, Plant's export writes a file into
 //               /texmf-var and has luaotfload cache EB Garamond; Probe's
@@ -24,6 +24,12 @@
 //               nothing is stopped sooner, at 20 s, by mp-tikz-wasm's own
 //               stall watchdog: in the export host it runs TeX in a worker of
 //               its own, which the watchdog ends after 20 s without a line.
+//   restricted  §5's cases: `\input{/etc/hosts}`; images by a device path;
+//               an embed of a link leading out of the vault (not listed);
+//               a link that was inside when the vault was listed and leads
+//               out by the time of the export (native's route refuses it:
+//               VaultStore.resolve); a `LaTeX preamble` naming an absolute
+//               path. And a control: a vault image, embedded, IS in its PDF.
 //
 // Prints PASS or FAIL per check and writes results.json and the PDFs into
 // --out. Always ends with the app terminated and uninstalled, its defaults
@@ -37,23 +43,25 @@ const args = process.argv.slice(2);
 const option = (name, fallback) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : fallback; };
 const appPath = args[0];
 if (!appPath || !fs.existsSync(path.join(appPath, 'Info.plist'))) {
-	console.error('usage: node tools/sim-pdf-checks.mjs <Clew.app> [--sim <udid>] [--only texmf,limit] [--out <dir>]');
+	console.error('usage: node tools/sim-pdf-checks.mjs <Clew.app> [--sim <udid>] [--only texmf,limit,restricted] [--out <dir>]');
 	process.exit(2);
 }
 const SIM = option('--sim', '90DCB612-1B85-4E1A-A17A-DBEB98F6C36D');
-const ONLY = option('--only', 'texmf,limit').split(',');
+const ONLY = option('--only', 'texmf,limit,restricted').split(',');
 const OUT = option('--out', fs.mkdtempSync(path.join(os.tmpdir(), 'clew-sim-pdf-')));
 const APP = 'org.jmckalex.clew.ios';
 const LIMIT = 30;
 const VAULT_NAME = 'PDF Checks';
+const MARKER = 'CLEWOUTSIDEMARKER';
 process.env.DEVELOPER_DIR ??= '/Applications/Xcode.app/Contents/Developer';
 fs.mkdirSync(OUT, { recursive: true });
 
 const simctl = (...a) => execFileSync('xcrun', ['simctl', ...a], { encoding: 'utf8' }).trim();
 const quietly = (...a) => spawnSync('xcrun', ['simctl', ...a], { encoding: 'utf8' });
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const poppler = ['/opt/homebrew/bin', '/usr/local/bin'].find((d) => fs.existsSync(path.join(d, 'pdffonts')));
+const poppler = ['/opt/homebrew/bin', '/usr/local/bin'].find((d) => fs.existsSync(path.join(d, 'pdfimages')));
 const pdftool = (name, ...a) => execFileSync(path.join(poppler, name), a, { encoding: 'utf8' });
+const imagesIn = (pdf) => pdftool('pdfimages', '-list', pdf).trim().split('\n').length - 2;
 
 // ---- the simulator and the app ---------------------------------------------
 
@@ -77,7 +85,8 @@ const readKv = (vault) => {
 /**
  * One launch with `smoke` as its ClewSmokeJS. The Mac watches the vault's
  * clewdata.json for the smoke's phases: `export:<tag>` (an export starts),
- * `copy:<tag>:<folder>/<file>` (copy that job's PDF out now), `done`. Answers the smoke's
+ * `copy:<tag>:<folder>/<file>` (copy that job's PDF out now), `retarget`
+ * (repoint late.jpg out of the vault), `done`. Answers the smoke's
  * `smoke/result` (with `marks`: when each export started and ended, by the
  * page's clock, which is the Mac's), when each phase was seen, and the
  * WebContent processes born during the launch: when (seconds from launch,
@@ -187,17 +196,34 @@ const PROBE_LUA = "local function has(p) local f = io.open(p, 'r') if f then f:c
 
 function writeVault(data) {
 	const vault = path.join(data, 'Documents', VAULT_NAME);
+	const outside = path.join(data, 'Library', 'clew-outside');
 	fs.rmSync(vault, { recursive: true, force: true });
+	fs.rmSync(outside, { recursive: true, force: true });
 	fs.mkdirSync(vault, { recursive: true });
+	fs.mkdirSync(outside, { recursive: true });
+	const image = path.join(appPath, 'SeedVault', 'Attachments', 'NASA - Earthrise.jpg');
+	fs.writeFileSync(path.join(outside, 'secret.tex'), `${MARKER}\n`);
+	fs.copyFileSync(image, path.join(outside, 'secret.jpg'));
+	fs.copyFileSync(image, path.join(vault, 'inside.jpg'));
+	fs.copyFileSync(image, path.join(vault, 'inside2.jpg'));
+	fs.symlinkSync('../../Library/clew-outside/secret.jpg', path.join(vault, 'escape.jpg'));
+	// Inside when the vault is listed; the Mac repoints it out before the export.
+	fs.symlinkSync('inside2.jpg', path.join(vault, 'late.jpg'));
 	const notes = {
 		'Plant.md': "---\nLaTeX preamble: \\setmainfont{EBGaramond-Regular.otf}\\directlua{local f = io.open('/texmf-var/clew-planted.txt', 'w') f:write('planted') f:close()}\n---\n# Plant\n\nPlanted.\n",
 		'Probe.md': `---\nLaTeX preamble: \\directlua{${PROBE_LUA}}\\AtBeginDocument{\\par\\noindent\\clewprobe\\par}\n---\n# Probe\n\nThe probe's line is above.\n`,
 		// Two million additions, then a line, forever: the watchdog sees output.
 		'Loop.md': '---\nLaTeX preamble: \\newcount\\clewn\\newcount\\clewk\\def\\clewtick{{\\clewn=0 \\loop\\advance\\clewn by 1 \\ifnum\\clewn<2000000 \\repeat}\\immediate\\write16{tick \\the\\clewk}}\\loop\\advance\\clewk by 1 \\clewtick\\iftrue\\repeat\n---\n# Loop\n\nNever reached.\n',
 		'Silent.md': '---\nLaTeX preamble: \\loop\\iftrue\\repeat\n---\n# Silent\n\nNever reached.\n',
+		'Input.md': '# Input\n\nBefore.\n\n\\input{/etc/hosts}\n\nAfter.\n',
+		'Device.md': `# Device\n\n![outside](${outside}/secret.jpg)\n\n![own, absolute](${vault}/inside.jpg)\n\nThe end.\n`,
+		'Link.md': '# Link\n\n![[escape.jpg]]\n\n![md](escape.jpg)\n\nThe end.\n',
+		'Late.md': '# Late\n\n![[late.jpg]]\n\nThe end.\n',
+		'Preamble.md': `---\nLaTeX preamble: \\input{${outside}/secret.tex}\n---\n# Preamble\n\nThe end.\n`,
+		'Inside.md': '# Inside\n\n![[inside.jpg]]\n\nThe end.\n',
 	};
 	for (const [name, text] of Object.entries(notes)) fs.writeFileSync(path.join(vault, name), text);
-	return { vault };
+	return { vault, outside };
 }
 
 // ---- the checks -------------------------------------------------------------
@@ -209,12 +235,13 @@ const verdict = (name, ok, detail) => {
 	console.log(`${ok ? 'PASS' : 'FAIL'} ${name}${detail ? ` — ${detail}` : ''}`);
 };
 /** Copies a job's PDF out when the smoke says so. */
-const copier = (data) => (phase) => {
+const copier = (data, extra = {}) => (phase) => {
 	const m = /^copy:([^:]+):(.+)$/.exec(phase);
 	if (m) {
 		const from = path.join(data, 'tmp', 'clew-export', m[2]);
 		if (fs.existsSync(from)) fs.copyFileSync(from, path.join(OUT, `${m[1]}.pdf`));
 	}
+	extra[phase]?.();
 };
 const pdf = (tag) => path.join(OUT, `${tag}.pdf`);
 const has = (tag) => fs.existsSync(pdf(tag));
@@ -251,7 +278,7 @@ async function main() {
 		verdict('open the checks\' vault, untrusted', false, JSON.stringify(opened.result ?? readKv(demo)['smoke/phase']));
 		return;
 	}
-	verdict('open the checks\' vault, untrusted', true);
+	verdict('open the checks\' vault, untrusted', true, `refused links: ${JSON.stringify(opened.result.refusedLinks)}`);
 
 	if (ONLY.includes('texmf')) {
 		const run = await launch(smokeScript(`
@@ -291,6 +318,39 @@ async function main() {
 		verdict('limit: a loop that prints nothing is stopped at 20 s by mp-tikz-wasm\'s stall watchdog; its page goes too',
 			silent.ok === false && /made no progress for 20000 ms/.test(silent.error ?? '') && silent.ms < LIMIT * 1000 && silentHost?.gone !== null,
 			`${silent.error ?? 'no answer'} after ${((silent.ms ?? NaN) / 1000).toFixed(1)} s; process ${JSON.stringify(silentHost)}`);
+	}
+
+	if (ONLY.includes('restricted')) {
+		const late = path.join(vault, 'late.jpg');
+		const run = await launch(smokeScript(`
+			await exportPdf('inside', 'Inside.md');
+			await exportPdf('input', 'Input.md');
+			await exportPdf('device', 'Device.md');
+			await exportPdf('link', 'Link.md');
+			await kv('smoke/phase', 'retarget');
+			await sleep(1000);
+			await exportPdf('late', 'Late.md');
+			await exportPdf('preamble', 'Preamble.md');`), {
+			vault, seconds: 180,
+			onPhase: copier(data, { retarget: () => { fs.rmSync(late); fs.symlinkSync('../../Library/clew-outside/secret.jpg', late); } }),
+		});
+		results.restricted = run;
+		const r = run.result ?? {};
+		const images = (tag) => (has(tag) ? imagesIn(pdf(tag)) : null);
+		verdict('restricted, control: a vault image embedded is in the PDF (the route serves this untrusted vault)', r.inside?.ok && images('inside') === 1, `${images('inside')} image(s)`);
+		verdict('restricted: `\\input{/etc/hosts}` fails with TeX\'s own "not found"',
+			r.input?.ok === false && /First error: ! LaTeX Error: File `\/etc\/hosts\.tex' not found/.test(r.input.error ?? ''), r.input?.error);
+		verdict('restricted: images by a device path (outside the vault; the vault\'s own, absolute) are not in the PDF',
+			r.device?.ok && images('device') === 0, `${images('device')} image(s); warnings ${JSON.stringify(r.device?.warnings)}`);
+		verdict('restricted: an embed of a link leading out of the vault is not listed, and the PDF goes without it, said',
+			r.link?.ok && images('link') === 0 && (r.refusedLinks ?? []).includes('escape.jpg') && r.link.warnings.includes('escape.jpg is named by the .tex but is not in this vault'),
+			`${images('link')} image(s); warnings ${JSON.stringify(r.link?.warnings)}`);
+		const refusedByRoute = (r.late?.warnings ?? []).includes('late.jpg could not be read from the vault, so the PDF goes without it');
+		const rescanned = (r.late?.warnings ?? []).includes('late.jpg is named by the .tex but is not in this vault');
+		verdict(`restricted: a link repointed out of the vault after it was listed is refused by native's route${rescanned ? ' (INCONCLUSIVE: a rescan dropped it first)' : ''}`,
+			r.late?.ok && images('late') === 0 && refusedByRoute, `${images('late')} image(s); warnings ${JSON.stringify(r.late?.warnings)}`);
+		verdict('restricted: a `LaTeX preamble` naming an absolute path fails with TeX\'s "not found", the file\'s text nowhere',
+			r.preamble?.ok === false && /secret\.tex' not found/.test(r.preamble.error ?? '') && !String(r.preamble.error).includes(MARKER), r.preamble?.error);
 	}
 }
 

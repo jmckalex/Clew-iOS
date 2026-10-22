@@ -8,11 +8,18 @@
 // as a child process: the bundle installs its own `process` global) and
 // handy as a dev CLI:
 //
-//   node tools/export-note.mjs <vault-dir> <note-rel-path> <out-dir> [--restricted] [--style=none] [--pdf]
+//   node tools/export-note.mjs <vault-dir> <note-rel-path> <out-dir> [--restricted] [--style=none] [--pdf] [--spy]
 //
 // With --pdf, the job is PDF via LaTeX: the worker typesets the .tex with
 // mp-tikz-wasm (src/export/typeset.js) and writes the PDF alone; the vault's
 // images come from the folder, as native's route gives them in the app.
+// The folder is read as native reads a vault: a link leaving it is not
+// listed (VaultStore.walk) and not read (VaultStore.resolve), and the
+// route answers only an image graphicx typesets, nothing hidden
+// (ExportJobs.mayRead). With --spy, the summary also has `vaultReads` (what
+// the job asked the route for) and `texRuns` (each TeX run: the files it was
+// handed, by name, its status and log, tools/mptikz-spy.mjs), and a failed
+// build prints `{ error, vaultReads, texRuns }` before exiting 1.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -30,6 +37,11 @@ const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const vaultAbs = path.resolve(vaultDir);
 const realExit = process.exit.bind(process);
 const realErr = (...a) => console.error(...a);
+const spy = flags.includes('--spy');
+const vaultReal = fs.realpathSync(vaultAbs);
+const inVault = (real) => real === vaultReal || real.startsWith(`${vaultReal}/`);
+/** A path's real path, or null (missing, dangling). */
+const realOf = (p) => { try { return fs.realpathSync(p); } catch { return null; } };
 
 const vaultOptions = (() => {
 	try { return JSON.parse(fs.readFileSync(path.join(vaultAbs, '.clew', 'vault-settings.json'), 'utf8')); } catch { return {}; }
@@ -37,17 +49,31 @@ const vaultOptions = (() => {
 
 // The vault's text files, binaries as names only, `.clew/` aside: what the
 // app's render service snapshots (render-service.js#vaultFiles). Dot folders
-// other than .clew ride along, as in the app (a vault's .jmarkdown/).
+// other than .clew ride along, as in the app (a vault's .jmarkdown/). A link
+// is followed only while it stays inside the vault; one leaving it, or
+// dangling, is skipped (VaultStore.walk's refusedLinks).
 const files = {};
-const walk = (dir, rel) => {
+const refusedLinks = [];
+const walk = (dir, rel, seen) => {
 	for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
 		if (['.clew', '.trash', 'node_modules', '.git'].includes(entry.name)) continue;
 		const childRel = rel ? `${rel}/${entry.name}` : entry.name;
-		if (entry.isDirectory()) walk(path.join(dir, entry.name), childRel);
-		else files[`/vault/${childRel}`] = isTextPath(entry.name) ? fs.readFileSync(path.join(dir, entry.name), 'utf8') : '';
+		let abs = path.join(dir, entry.name);
+		if (entry.isSymbolicLink()) {
+			const real = realOf(abs);
+			if (!real) continue;
+			if (!inVault(real)) { refusedLinks.push(childRel); continue; }
+			abs = real;
+		}
+		if (fs.statSync(abs).isDirectory()) {
+			const real = realOf(abs);
+			if (!seen.has(real)) walk(abs, childRel, new Set([...seen, real]));
+		} else {
+			files[`/vault/${childRel}`] = isTextPath(entry.name) ? fs.readFileSync(abs, 'utf8') : '';
+		}
 	}
 };
-walk(vaultAbs, '');
+walk(vaultAbs, '', new Set([vaultReal]));
 for (const [target, source] of Object.entries({
 	'/engine/default-template.html.mustache': 'vendor/jmarkdown/src/default-template.html.mustache',
 	'/engine/default-template.tex.mustache': 'vendor/jmarkdown/src/default-template.tex.mustache',
@@ -72,8 +98,18 @@ const bibFiles = [
 	...(vaultOptions.bibliography ? [vaultOptions.bibliography] : []),
 	...(header ? header.split(',').map((b) => path.posix.normalize(path.posix.join(noteDir, b.trim()))) : []),
 ];
+// Native's `vault/<token>/<rel>` route: ExportJobs.mayRead, then
+// VaultStore.resolve's clamp by real path.
+const GRAPHIC = new Set(['pdf', 'png', 'jpg', 'jpeg', 'jbig2', 'jb2', 'eps', 'mps']);
+const vaultReads = [];
 globalThis.__clewVaultFile = (rel) => {
-	try { return new Uint8Array(fs.readFileSync(path.join(vaultAbs, rel))); } catch { return null; }
+	vaultReads.push(rel);
+	const segments = rel.split('/');
+	if (rel.startsWith('/') || segments.some((seg) => seg === '' || seg === '.' || seg === '..' || seg.startsWith('.'))) return null;
+	if (!GRAPHIC.has(path.extname(rel).slice(1).toLowerCase())) return null;
+	const real = realOf(path.join(vaultAbs, rel));
+	if (!real || !inVault(real)) return null;
+	try { return new Uint8Array(fs.readFileSync(real)); } catch { return null; }
 };
 const job = exportJob({
 	noteRel, format: pdf ? 'pdf' : 'latex', files, trusted, vaultOptions, bibFiles,
@@ -104,9 +140,17 @@ if (ready.type !== 'ready') {
 	realExit(1);
 }
 waiter = nextMessage();
-send({ type: 'build', ...job.build, mptikzUrl: pathToFileURL(path.join(root, 'mptikz-assets', 'index.js')).href });
+const mptikzUrl = pathToFileURL(path.join(root, 'mptikz-assets', 'index.js')).href;
+const spyUrl = () => {
+	const url = pathToFileURL(path.join(root, 'tools', 'mptikz-spy.mjs'));
+	url.searchParams.set('real', mptikzUrl);
+	return url.href;
+};
+send({ type: 'build', ...job.build, mptikzUrl: spy ? spyUrl() : mptikzUrl });
 const result = await waiter;
+const texRuns = () => globalThis.__clewTexRuns ?? [];
 if (result.type !== 'done') {
+	if (spy) fs.writeFileSync(1, JSON.stringify({ error: result.message, refusedLinks, vaultReads, texRuns: texRuns() }) + '\n');
 	realErr('BUILD FAILED:', result.message, '\n', result.stack);
 	realExit(1);
 }
@@ -122,6 +166,8 @@ const summary = {
 	warnings: result.warnings,
 	references: texReferences({ tex: typeof tex === 'string' ? tex : '', base: job.base, exists: (r) => `/vault/${r}` in files, bibFiles }),
 	stats: result.stats ?? null,
+	refusedLinks,
+	...(spy ? { vaultReads, texRuns: texRuns() } : {}),
 };
 fs.writeFileSync(1, JSON.stringify(summary) + '\n');
 realExit(0);

@@ -679,6 +679,74 @@ growth is measured against the agreed 12–17 MB.
     - Options: pass `timeoutMs` (longer, or 0 to leave it all to Clew's
       limit), and word the message.
     - The device check should note any "made no progress".
+- **p3d `latexpdf-p3d-restricted`: §5's cases, in a vault this device does
+  not trust.** Each names something that exists on the machine, outside
+  the vault or by an absolute path. Desktop refuses PDF via LaTeX in such
+  a vault (latexPdfRefusal). The iPad typesets, on the owner's (3).
+  - **Under Node** (tests/export-host.test.js, 4 tests).
+    - tools/export-note.mjs now reads a folder as native reads a vault: a
+      link leaving it is neither listed (VaultStore.walk) nor read
+      (VaultStore.resolve), and the route answers only what
+      ExportJobs.mayRead allows.
+    - Before this, the harness followed such a link, and the outside image
+      reached the PDF. That was the harness; the app never did it.
+    - With `--spy`, every TeX run is recorded: what it was handed, by
+      name, and its log (tools/mptikz-spy.mjs).
+    - The four cases:
+      - **`\input{/etc/hosts}` in a note** (jmarkdown passes it through).
+        The build fails with TeX's own "File `/etc/hosts.tex' not found",
+        in desktop's words. TeX was handed nothing, and no line of the
+        machine's /etc/hosts is in any log.
+      - **Images by a device path:** a file outside the vault, and the
+        vault's own image by its absolute path. The PDF is made without
+        them, under desktop's rule (nonstopmode keeps a PDF with errors).
+        The job asked the route for nothing, and TeX was handed nothing.
+        Its log has "File `…' not found" for both, and the PDF has no
+        image.
+      - **An embed of a link leading out of the vault:** it is not listed,
+        so it is never asked for. The PDF goes without it and says so ("is
+        named by the .tex but is not in this vault"), and TeX's log has
+        "not found".
+      - **A `LaTeX preamble` header that `\input`s a marker file by its
+        absolute path:** the build fails with "not found" for that very
+        path. The marker is in no log and not in the message.
+    - Mutants, each failing its test:
+      - A, typeset hands TeX the device file that an absolute `\input`
+        names: fails the `\input` test and the preamble test.
+      - B, texReferences passes a device path on as a file to fetch: fails
+        the device-path test and the existing texReferences test.
+      - C, the worker also asks the route for names the vault does not
+        list: fails the link test.
+  - **In the simulator** (tools/sim-pdf-checks.mjs `restricted`, 6 checks;
+    13 in all with texmf and limit). The control comes first: a vault
+    image, embedded, is in its PDF, so the route serves this untrusted
+    vault. Then each case:
+    - `\input{/etc/hosts}`: TeX's own "not found".
+    - Images by a device path in the app's container: the PDF has 0
+      images.
+    - escape.jpg, a link out of the vault, is in native's refusedLinks.
+      The PDF has 0 images and says "not in this vault".
+    - **late.jpg** led inside the vault when it was listed, and the Mac
+      repointed it out before the export. That is the route's own clamp:
+      "late.jpg could not be read from the vault, so the PDF goes without
+      it", and 0 images.
+    - A preamble `\input` of a marker file in the container's Library:
+      "not found", with the marker nowhere.
+    - Mutant (VaultPaths.check takes every real path for inside, which
+      opens the listing and the route alike): the link check failed (2
+      images) and so did late.jpg (1 image). The other checks still
+      passed: TeX's file system is its own, whatever native allows.
+  - **Found (for Clew-boss; nothing changed):**
+    - **An image named by an absolute path is left out silently.** TeX's
+      "not found" is only in its log, and the PDF comes with no warning.
+      Desktop does the same (nonstopmode). A candidate for both hosts:
+      name the files TeX reported as not found in the warnings.
+    - **A pass that aborts and writes no PDF is still followed by passes 2
+      and 3.** In the `\input` and preamble cases, all three ran. A styled
+      note's failure costs about three passes; typeset could stop at the
+      first pass that writes no PDF.
+- **Still owed before P3:** the device memory check (below), the mini
+  first.
 
 **P3 `latexpdf-p3-verify`:** the record, the simulator, and the device
 memory check below.
