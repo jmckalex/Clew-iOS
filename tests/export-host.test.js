@@ -12,10 +12,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createHash } from 'node:crypto';
 import { exportJob, EXPORT_RESTRICTED_CWD } from '../src/shim/export-job.js';
 import { exportOutputs, isSafeExportPath } from '../src/export/outputs.js';
 import { texReferences } from '../src/shim/export-references.js';
-import { typeset, DOCUMENT_BUNDLES, MAX_PASSES, SILENCE_MS } from '../src/export/typeset.js';
+import { typeset, DOCUMENT_BUNDLES, MAX_PASSES, SILENCE_MS, LUA_GC } from '../src/export/typeset.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
@@ -310,13 +311,14 @@ test('PDF via LaTeX (L3), Clew\'s style: maths in Garamond-Math; a header\'s own
 	assert.doesNotMatch(cites.fonts, /Type 3/);
 });
 
-// A NEW instance per export (§4 P2, mp-tikz-wasm's sandbox review): what one
-// export leaves in /texmf-var is not there for the next. One instance keeps
-// /texmf-var from run to run (core.js#collectTexmfVar, luaotfload's warm
-// cache), and a document's Lua may write there. PLANT writes a file and has
-// luaotfload cache EB Garamond, a face PROBE never loads; PROBE prints what
-// it finds, and writes a file of its own on every pass, which its later
-// passes find (one export's passes share the instance, by design).
+// A NEW instance per pass (§4 P2, mp-tikz-wasm's sandbox review; per pass
+// since p3f): what one export leaves in /texmf-var is not there for the
+// next. One instance keeps /texmf-var from run to run
+// (core.js#collectTexmfVar, luaotfload's warm cache), and a document's Lua
+// may write there. PLANT writes a file and has luaotfload cache EB Garamond,
+// a face PROBE never loads; PROBE prints what it finds, and writes a file of
+// its own on every pass, which its later passes no longer find (until p3f
+// one export's passes shared an instance, and did).
 const PLANT = String.raw`\documentclass{article}\usepackage{fontspec}\setmainfont{EBGaramond-Regular.otf}
 \directlua{local f = io.open('/texmf-var/clew-planted.txt', 'w') f:write('planted') f:close()}
 \begin{document}Planted.\end{document}`;
@@ -340,7 +342,7 @@ const PROBE = String.raw`\documentclass{article}\usepackage{fontspec}
 }
 \end{document}`;
 
-test('PDF via LaTeX: each export a NEW instance — a file one export\'s Lua left in /texmf-var, and luaotfload\'s cache of its face, are not there for the next', { skip: pdfSkip }, async () => {
+test('PDF via LaTeX: each pass a NEW instance — a file one export\'s Lua left in /texmf-var, and luaotfload\'s cache of its face, are not there for the next export, nor a pass\'s for the next pass', { skip: pdfSkip }, async () => {
 	const lib = await import(pathToFileURL(path.join(root, 'mptikz-assets', 'index.js')).href);
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'clew-texmf-var-'));
 	const text = (pdf, name) => {
@@ -360,11 +362,11 @@ test('PDF via LaTeX: each export a NEW instance — a file one export\'s Lua lef
 		}
 
 		const alone = await typeset({ lib, tex: PROBE, date: 'fixed' });
-		assert.match(text(alone.pdf, 'alone.pdf'), /planted=absent garamond=absent own=present/, 'its own passes share the instance');
+		assert.match(text(alone.pdf, 'alone.pdf'), /planted=absent garamond=absent own=absent/, 'its own passes no longer share one (p3f)');
 		const planted = await typeset({ lib, tex: PLANT, date: 'fixed' });
 		assert.equal(planted.engine, 'lualatex');
 		const after = await typeset({ lib, tex: PROBE, date: 'fixed' });
-		assert.match(text(after.pdf, 'after.pdf'), /planted=absent garamond=absent own=present/, 'the export after PLANT finds nothing of it');
+		assert.match(text(after.pdf, 'after.pdf'), /planted=absent garamond=absent own=absent/, 'the export after PLANT finds nothing of it');
 		assert.ok(Buffer.from(after.pdf).equals(Buffer.from(alone.pdf)), 'and typesets byte for byte as it does with nothing before it');
 	} finally {
 		fs.rmSync(dir, { recursive: true, force: true });
@@ -478,6 +480,59 @@ test('PDF via LaTeX in a restricted vault: a `LaTeX preamble` header naming an a
 	});
 });
 
+// The PDFs of p3f's passes (an instance each, the eager-GC line) against
+// p3e's (one instance per export): the same pages, images, fonts and text,
+// for five notes, styled and unstyled. tests/fixtures/pdf-via-latex.json
+// holds p3e's, recorded with CLEW_PDF_RECORD=1 at 0e7d8af's typeset.js.
+// Long and Many are the simulator's (UPSTREAM-LATEX-EXPORT-PLAN.md §4): 40
+// sections with maths, and 40 MetaPost figures with TeX labels.
+const LONG_SENTENCES = 'Conventions arise when agents with a common interest in coordination settle on one of several equilibria; the stability of the outcome depends on expectations, not on any intrinsic merit of the choice. Suppose each agent receives a payoff $u_i(s) = \\sum_{j \\ne i} a_{ij} x_j - c\\,x_i^2$ – a quadratic cost – and adjusts by the replicator dynamic “in continuous time”. ';
+const LONG_DISPLAY = '$$\\dot x_i = x_i\\left(f_i(x) - \\bar f(x)\\right), \\quad \\bar f(x) = \\sum_j x_j f_j(x)$$';
+const LONG_NOTE = `# A long note\n\n${Array.from({ length: 40 }, (_, i) => `## Section ${i + 1}\n\n${LONG_SENTENCES}${LONG_SENTENCES}\n\n${LONG_DISPLAY}\n\n${LONG_SENTENCES}\n\n`).join('')}`.replace(/\n$/, '');
+const MANY_NOTE = `# Many figures\n\n${Array.from({ length: 40 }, (_, i) => `@begin(metapost)\nbeginfig(${i + 1});\nfor k=0 upto ${20 + i}: draw (k*3,0)--(0,k*3); endfor;\nlabel(btex $\\sum_{n=1}^{${i + 2}} n^2$ etex, (30,30));\nendfig;\n@end(metapost)\n\n`).join('')}`.replace(/\n$/, '');
+const PDF_GOLDENS = path.join(root, 'tests', 'fixtures', 'pdf-via-latex.json');
+
+/** What a PDF is, for comparing two builds: pages, each image's size and colour, each font's name and type, the text's hash. */
+const pdfFacts = (vault, note, style) => {
+	const out = fs.mkdtempSync(path.join(os.tmpdir(), 'clew-pdf-facts-'));
+	try {
+		const summary = JSON.parse(execFileSync(process.execPath, [path.join(root, 'tools', 'export-note.mjs'), vault, note, out, '--pdf', `--style=${style}`],
+			{ encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 }));
+		const file = path.join(out, summary.output);
+		const tool = (name, ...args) => execFileSync(path.join(poppler, name), [...args, file, ...(name === 'pdftotext' ? ['-'] : [])], { encoding: 'utf8' });
+		const pages = Number(/^Pages:\s+(\d+)/m.exec(tool('pdfinfo'))[1]);
+		const images = tool('pdfimages', '-list').trim().split('\n').slice(2).map((l) => l.trim().split(/\s+/)).map((c) => `${c[3]}x${c[4]} ${c[5]} ${c[8]}`);
+		const fontLines = tool('pdffonts').split('\n');
+		const fonts = [...new Set(fontLines.slice(2).filter(Boolean).map((l) => `${l.slice(0, 36).trim().replace(/^[A-Z]{6}\+/, '')} (${l.slice(37, 54).trim()})`))].sort();
+		const text = tool('pdftotext').replace(/[ \t]+$/gm, '');
+		return { pages, images, fonts, text: createHash('sha256').update(text).digest('hex'), chars: text.length };
+	} finally {
+		fs.rmSync(out, { recursive: true, force: true });
+	}
+};
+
+test('PDF via LaTeX (p3f): a pass an instance and the eager-GC line change nothing — Citations, Long, Media Gallery, Diagrams and 40 figures, styled and unstyled, as p3e made them', { skip: pdfSkip || (!process.env.CLEW_PDF_SLOW && 'CLEW_PDF_SLOW=1 runs it (~2 min)') }, () => {
+	const seed = path.join(root, 'seed-vault');
+	const facts = {};
+	withVault({ 'Long.md': LONG_NOTE, 'Many.md': MANY_NOTE }, (vault) => {
+		for (const style of ['clew', 'none']) {
+			for (const [name, dir, note] of [['Citations', seed, 'Features/Citations.md'], ['Long', vault, 'Long.md'], ['Media Gallery', seed, 'Features/Media Gallery.md'], ['Diagrams', seed, 'Features/Diagrams.md'], ['Many', vault, 'Many.md']]) {
+				facts[`${name}, ${style}`] = pdfFacts(dir, note, style);
+			}
+		}
+	});
+	if (process.env.CLEW_PDF_RECORD) {
+		fs.mkdirSync(path.dirname(PDF_GOLDENS), { recursive: true });
+		fs.writeFileSync(PDF_GOLDENS, `${JSON.stringify(facts, null, '\t')}\n`);
+		return;
+	}
+	const golden = JSON.parse(fs.readFileSync(PDF_GOLDENS, 'utf8'));
+	assert.deepEqual(Object.keys(facts).sort(), Object.keys(golden).sort());
+	for (const [key, want] of Object.entries(golden)) assert.deepEqual(facts[key], want, key);
+	assert.equal(golden['Many, clew'].pages, 9, 'the figures are there: 40 of them, 9 pages');
+	assert.ok(golden['Media Gallery, clew'].images.length === 3, 'and the images');
+});
+
 // typeset() against a stand-in library: what it asks mp-tikz-wasm for, in what
 // order, and what it refuses — without TeX.
 const fakeLib = ({ aux = '', idx = false, rerun = 0, pdf = true, status = 'ok', firstFails = false, stall = false } = {}) => {
@@ -491,7 +546,7 @@ const fakeLib = ({ aux = '', idx = false, rerun = 0, pdf = true, status = 'ok', 
 				return {
 					latex: async (tex, o) => {
 						runs += 1;
-						calls.push(['latex', o.engine, Object.keys(o.files).sort().join(',')]);
+						calls.push(['latex', o.engine, Object.keys(o.files).sort().join(','), tex]);
 						if (stall) throw new Error('mp-tikz-wasm: latex made no progress for 60000 ms; worker terminated');
 						const artifacts = { 'doc.aux': new TextEncoder().encode(aux + `%pass${runs}`) };
 						if (idx) artifacts['doc.idx'] = new Uint8Array(1);
@@ -509,28 +564,32 @@ const fakeLib = ({ aux = '', idx = false, rerun = 0, pdf = true, status = 'ok', 
 	return { lib, calls };
 };
 
-test('typeset: latexmk\'s passes over a NEW instance per export, disposed; BibTeX and makeindex only when asked; reruns capped; XeLaTeX refused in words', async () => {
+test('typeset: latexmk\'s passes, each over a NEW instance, the last disposed before the next is made, each handed the inputs; BibTeX and makeindex only when asked; reruns capped; XeLaTeX refused in words', async () => {
 	const tex = '\\documentclass{article}\\usepackage{fontspec}\\begin{document}x\\end{document}';
+	const PASS = ['create', 'latex', 'dispose'];
 	let { lib, calls } = fakeLib();
 	const plain = await typeset({ lib, tex, inputs: { 'N-figures/f.pdf': new Uint8Array(1) } });
-	assert.deepEqual(calls.map((c) => c[0]), ['create', 'latex', 'latex', 'latex', 'dispose'], 'three passes, then the instance goes');
+	assert.deepEqual(calls.map((c) => c[0]), [...PASS, ...PASS, ...PASS], 'three passes, an instance each, each gone before the next (p3f)');
 	assert.equal(calls[0][1], ['core', ...DOCUMENT_BUNDLES].join(','), 'default + opentype + otf-fonts + latex-doc');
 	assert.equal(calls[1][1], 'lualatex', 'fontspec: LuaLaTeX (chooseLatexEngine)');
 	assert.equal(calls[1][2], 'N-figures/f.pdf', 'the first pass sees the inputs alone');
+	assert.deepEqual(calls.filter((c) => c[0] === 'latex').map((c) => c[2].split(',')[0]), ['N-figures/f.pdf', 'N-figures/f.pdf', 'N-figures/f.pdf'],
+		'every pass is handed the inputs again: a new instance has none');
 	assert.deepEqual([plain.engine, plain.passes, plain.bibtex, plain.makeindex], ['lualatex', 3, false, false]);
-	await typeset({ lib, tex });
-	assert.equal(calls.filter((c) => c[0] === 'create').length, 2, 'a second export, a second instance (/texmf-var is never shared)');
 
 	({ lib, calls } = fakeLib({ aux: '\\bibdata{refs}', idx: true }));
 	const cited = await typeset({ lib, tex: '\\documentclass{article}\\begin{document}\\end{document}', inputs: { 'refs.bib': '@book{a,}' } });
-	assert.deepEqual(calls.map((c) => c[0]), ['create', 'latex', 'bibtex', 'makeindex', 'latex', 'latex', 'dispose']);
+	assert.deepEqual(calls.map((c) => c[0]), ['create', 'latex', 'bibtex', 'makeindex', 'dispose', ...PASS, ...PASS], 'BibTeX and makeindex on the first pass\'s instance');
 	assert.equal(calls[1][1], 'latex', 'nothing Unicode: pdfLaTeX');
-	assert.match(calls[4][2], /doc\.bbl.*doc\.ind/, 'the second pass reads the .bbl and the .ind');
+	assert.equal(calls[2][1], 'doc.aux,doc.idx,refs.bib', 'BibTeX is handed the artifacts and the bibliography');
+	assert.match(calls[6][2], /doc\.bbl.*doc\.ind.*refs\.bib/, 'the second pass reads the .bbl and the .ind');
+	assert.match(calls[9][2], /doc\.bbl.*doc\.ind.*refs\.bib/, 'and so does the third: a run returns only what TeX wrote, and a new instance keeps nothing');
 	assert.deepEqual(cited.warnings, ['BibTeX: warning$ -- empty year']);
 
 	({ lib, calls } = fakeLib({ rerun: 10 }));
 	const capped = await typeset({ lib, tex });
 	assert.equal(capped.passes, MAX_PASSES, 'a log that keeps asking stops at five passes');
+	assert.equal(calls.filter((c) => c[0] === 'create').length, MAX_PASSES);
 
 	({ lib, calls } = fakeLib({ pdf: false }));
 	await assert.rejects(typeset({ lib, tex }), /PDF via LaTeX failed — LuaLaTeX ran \(the document needs a Unicode engine/);
@@ -539,6 +598,22 @@ test('typeset: latexmk\'s passes over a NEW instance per export, disposed; BibTe
 	({ lib, calls } = fakeLib());
 	await assert.rejects(typeset({ lib, tex: '\\usepackage{xeCJK}' }), /needs XeLaTeX .* which the iPad's TeX does not have/);
 	assert.equal(calls.length, 0, 'refused before any engine starts');
+});
+
+test('typeset: under LuaLaTeX, TeX is handed the .tex behind the eager-GC line, on its first line; under pdfLaTeX, the .tex as it is', async () => {
+	const lualatex = '\\documentclass{article}\\usepackage{fontspec}\n\\begin{document}x\\end{document}';
+	let { lib, calls } = fakeLib();
+	await typeset({ lib, tex: lualatex });
+	const sources = calls.filter((c) => c[0] === 'latex').map((c) => c[3]);
+	assert.equal(sources.length, 3);
+	assert.ok(sources.every((s) => s === LUA_GC + lualatex), 'every LuaLaTeX pass, the line in front, the .tex otherwise untouched');
+	assert.equal(sources[0].split('\n').length, lualatex.split('\n').length, 'no line number moves');
+	assert.match(LUA_GC, /^\\directlua\{collectgarbage\("setpause", 100\) collectgarbage\("setstepmul", 400\)\}$/);
+
+	const pdflatex = '\\documentclass{article}\n\\begin{document}x\\end{document}';
+	({ lib, calls } = fakeLib());
+	await typeset({ lib, tex: pdflatex });
+	assert.ok(calls.filter((c) => c[0] === 'latex').every((c) => c[1] === 'latex' && c[3] === pdflatex), 'pdfLaTeX: never the line');
 });
 
 test('typeset: mp-tikz-wasm\'s stall watchdog at 60 s, a safety net under Clew\'s limit; its stop said in desktop\'s words', async () => {
@@ -566,5 +641,5 @@ test('typeset: a first pass that writes no PDF ends it, said from its log; one t
 	({ lib, calls } = fakeLib({ status: 'error' }));
 	const kept = await typeset({ lib, tex });
 	assert.equal(kept.passes, 3, 'errors with a PDF: the passes go on, and the PDF is the result');
-	assert.deepEqual(calls.map((c) => c[0]), ['create', 'latex', 'latex', 'latex', 'dispose']);
+	assert.deepEqual(calls.map((c) => c[0]), ['create', 'latex', 'dispose', 'create', 'latex', 'dispose', 'create', 'latex', 'dispose']);
 });

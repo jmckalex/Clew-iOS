@@ -14,9 +14,9 @@
 //   texmf       In ONE app session, Plant's export writes a file into
 //               /texmf-var and has luaotfload cache EB Garamond; Probe's
 //               export, next, finds neither. Probe also writes a file of its
-//               own on every pass and finds it on the later ones: on the
-//               iPad's TeX too, one instance carries /texmf-var, so the
-//               probe would see a carried file.
+//               own on every pass, which its later passes do not find: each
+//               pass is an instance of its own (p3f). The Node test shows on
+//               one instance that the probe sees a carried file.
 //   limit       With the Debug limit at 30 s (ClewExportTimeout), a note whose
 //               preamble loops forever, printing a line every half second or
 //               so, is stopped by Clew's limit ("took too long"); its page's
@@ -297,8 +297,8 @@ async function main() {
 			plantHost && probeHost && plantHost.pid !== probeHost.pid && plantHost.gone !== null && plantHost.gone <= probeHost.at,
 			`plant ${JSON.stringify(plantHost)}, probe ${JSON.stringify(probeHost)}`);
 		verdict('texmf: Plant typeset in EB Garamond (its face cached by luaotfload, its file written)', r.plant?.ok && /EBGaramond-Regular/.test(plantFonts), JSON.stringify(r.plant));
-		verdict('texmf: Probe, the next export in the same session, finds nothing of Plant\'s; its own passes share theirs',
-			r.probe?.ok && /planted=absent garamond=absent own=present/.test(probeText), probeText.split('\n')[0]);
+		verdict('texmf: Probe, the next export in the same session, finds nothing of Plant\'s, nor any pass of its own of the last',
+			r.probe?.ok && /planted=absent garamond=absent own=absent/.test(probeText), probeText.split('\n')[0]);
 	}
 
 	if (ONLY.includes('limit')) {

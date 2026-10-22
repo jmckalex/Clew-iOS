@@ -771,8 +771,95 @@ growth is measured against the agreed 12–17 MB.
       desktop's words, and its page goes.
   - The second finding of p3d, naming TeX's not-found files as warnings,
     goes on the owner's later list, for both hosts.
+- **Memory, measured** (Clew-boss's brief, 2026-10-22; the full report,
+  with its experiments, stays in the session's scratch).
+  - **Footprint, not RSS.** RSS kept counting the old passes' engine
+    memory after it was freed. The jetsam-relevant footprint peaks were:
+    - 0.75–0.82 GB for Clew-styled notes;
+    - 1.0 GB for the 40-figure note;
+    - 0.50–0.64 GB unstyled.
+  - **The peak was an overlap.** Each pass is a new LuaTeX module.
+    JavaScriptCore freed the previous one only when it collected, often
+    well into the next pass, so the peak was one pass's engine plus most of
+    the last one's. The same happens where the figure build hands over to
+    TeX.
+  - **One styled pass, by phase:**
+    - before TeX, about 200 MB (the page, the worker, jmarkdown's build);
+    - `MetaPost.create`, about 0 (the bundles are lazy: 12–15 MB of files
+      in all);
+    - LuaTeX and its format, +150–200 MB;
+    - luaotfload's Unicode tables, +70–110 MB;
+    - packages, +50–90 MB;
+    - EB Garamond, +190–210 MB;
+    - Garamond-Math, +80–130 MB;
+    - the PDF's return to Swift, nothing measurable.
+  - **What the style adds.** LuaTeX's heap per pass, under Node: 459–551
+    MB styled against 128–154 unstyled. EB Garamond is about +240–330 MB and
+    8.6 s of 13 s; Garamond-Math is about +80–90 MB and 2.5 s.
+  - **Made no difference:** dropping microtype, TeX in-process, freeing the
+    build's data, or loading the bundles only when needed.
+- **p3f `latexpdf-p3f-memory`** (option 1 of that report, which Clew-boss
+  approved).
+  - **A: a new instance for each pass**, the last one disposed of before
+    the next is made. Disposing ends its worker, and its memory with it.
+    - Every pass is handed the inputs again (figures, images,
+      bibliographies), and the .bbl and .ind too. A run returns only what
+      TeX wrote, and a new instance keeps nothing.
+    - The PDF-identity test caught a lost reference list before this
+      (Citations' text, 1,049 → 676 characters).
+    - BibTeX and makeindex run on the first pass's instance.
+  - **B: `\directlua{collectgarbage("setpause", 100)
+    collectgarbage("setstepmul", 400)}`** in front of the .tex that TeX is
+    given, under LuaLaTeX only, on its first line.
+    - The .tex export and the share are byte for byte as before.
+    - A styled pass's heap peaks 30–40% lower under Node.
+  - **Tests.**
+    - With the stand-in library: an instance per pass, each gone before
+      the next; every pass handed the inputs, and the later ones the .bbl
+      and .ind. The GC line comes before every LuaLaTeX pass, with no line
+      number moved, and never under pdfLaTeX.
+    - The NEW-instance test now expects `own=absent`: a pass no longer
+      finds what its own earlier pass wrote. So does the simulator's texmf
+      check.
+    - **The same PDFs as p3e** (CLEW_PDF_SLOW, against
+      tests/fixtures/pdf-via-latex.json, recorded with p3e's typeset.js):
+      Citations, Long, Media Gallery, Diagrams and Many, styled and
+      unstyled. Each has the same pages, images (size, colour, encoding),
+      fonts (name, type) and text.
+    - Mutants, each caught:
+      - A, the inputs handed to the first pass only: Media Gallery lost
+        its 3 images;
+      - B, the line under pdfLaTeX;
+      - the .bbl not carried: Citations lost its references.
+  - **Footprint peaks, MB** (headless simulator, clean Debug builds of p3e
+    and p3f, the same session, styled notes run twice):
+
+    | note | style | p3e | p3f | time p3e → p3f |
+    | --- | --- | --- | --- | --- |
+    | Forced (pdfLaTeX) | none | 530 | 522 | 1.2 → 1.3 s |
+    | Unicode | none | 637 | 391 | 3.4 → 3.6 s |
+    | Citations | none | 500 | 419 | 3.7 → 3.8 s |
+    | Citations | Clew | 755–802 | 581–595 | 14.7 → 15.3 s |
+    | Media Gallery | Clew | 808–822 | 511–513 | 14.8 → 15.5 s |
+    | Long (18 pp) | Clew | 798–822 | 511–521 | 15.2 → 16.0 s |
+    | Diagrams | Clew | 773–806 | 698–725 | 17.9 → 19.0 s |
+    | Many (40 figures) | Clew | 1,010–1,032 | 960–981 | 21.6 → 23.4 s |
+
+    - Text notes are 25–39% lower.
+    - Diagrams and Many keep most of theirs. The peak there is where the
+      figure engine's worker, ended but not yet freed, overlaps TeX's
+      first pass, and in Many the figure build itself.
+    - About 0.3 s a pass for the new instance.
+  - **On the later list:**
+    - from the upstream side: free the figure engine's worker before the
+      build returns (Clew-boss prefers this to a pause), and the figure
+      engine's own 0.6–0.9 GB on 40 figures;
+    - for the owner, as style decisions: Garamond-Math only for notes
+      with maths, and a lighter text face (or the pdfLaTeX fallback);
+    - for both hosts: naming TeX's not-found files as warnings.
 - **Still owed before P3:** the device memory check (below), the mini
-  first.
+  first. Its numbers to compare: about 0.4–0.6 GB footprint for text notes,
+  0.7 GB for Diagrams, 1.0 GB for the 40-figure note (simulator, p3f).
 
 **P3 `latexpdf-p3-verify`:** the record, the simulator, and the device
 memory check below.

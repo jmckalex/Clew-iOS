@@ -1,0 +1,156 @@
+{
+	"Citations, clew": {
+		"pages": 1,
+		"images": [],
+		"fonts": [
+			"EBGaramond-Bold (CID Type 0C)",
+			"EBGaramond-BoldItalic (CID Type 0C)",
+			"EBGaramond-Italic (CID Type 0C)",
+			"EBGaramond-Regular (CID Type 0C)",
+			"LMMono12-Regular (CID Type 0C)"
+		],
+		"text": "5e5c8396b1adfddcf460459f8dbf10275d716bc46b8081e83d651177f8678112",
+		"chars": 1049
+	},
+	"Long, clew": {
+		"pages": 18,
+		"images": [],
+		"fonts": [
+			"EBGaramond-Bold (CID Type 0C)",
+			"EBGaramond-Italic (CID Type 0C)",
+			"EBGaramond-Regular (CID Type 0C)",
+			"Garamond-Math (CID Type 0C)"
+		],
+		"text": "891e508f542017200d3e45d434e6d243094c3dd87852468fdcbba500bdd705ec",
+		"chars": 47077
+	},
+	"Media Gallery, clew": {
+		"pages": 4,
+		"images": [
+			"1301x772 rgb jpeg",
+			"1340x1400 rgb jpeg",
+			"2400x2400 rgb jpeg"
+		],
+		"fonts": [
+			"EBGaramond-Bold (CID Type 0C)",
+			"EBGaramond-BoldItalic (CID Type 0C)",
+			"EBGaramond-Italic (CID Type 0C)",
+			"EBGaramond-Regular (CID Type 0C)",
+			"LMMono12-Regular (CID Type 0C)"
+		],
+		"text": "37f7dad26fa09c2d365bae0ce4b821abfcb15da870a1d164dca9ade38c2bc1bb",
+		"chars": 1295
+	},
+	"Diagrams, clew": {
+		"pages": 4,
+		"images": [],
+		"fonts": [
+			"CMMI10 (Type 1)",
+			"CMR10 (Type 1)",
+			"CMR7 (Type 1)",
+			"CMSY7 (Type 1)",
+			"EBGaramond-Bold (CID Type 0C)",
+			"EBGaramond-BoldItalic (CID Type 0C)",
+			"EBGaramond-Italic (CID Type 0C)",
+			"EBGaramond-Regular (CID Type 0C)",
+			"Garamond-Math (CID Type 0C)",
+			"LMMono12-Regular (CID Type 0C)",
+			"LMMonoLt10-Bold (CID Type 0C)"
+		],
+		"text": "3b07f1a616e99a79b08d39e7ba802f40f55b7d1540f9517db572f7408cc722d0",
+		"chars": 7605
+	},
+	"Many, clew": {
+		"pages": 9,
+		"images": [],
+		"fonts": [
+			"CMEX10 (Type 1)",
+			"CMMI10 (Type 1)",
+			"CMMI7 (Type 1)",
+			"CMR7 (Type 1)",
+			"EBGaramond-Bold (CID Type 0C)",
+			"EBGaramond-Regular (CID Type 0C)"
+		],
+		"text": "08dfeed7eb4dd409afce19f156f3736f968d07f20a7da5cbe1c86f66e336cc69",
+		"chars": 643
+	},
+	"Citations, none": {
+		"pages": 1,
+		"images": [],
+		"fonts": [
+			"LMMono10-Regular (CID Type 0C)",
+			"LMRoman10-BoldItalic (CID Type 0C)",
+			"LMRoman10-Italic (CID Type 0C)",
+			"LMRoman10-Regular (CID Type 0C)",
+			"LMRoman12-Bold (CID Type 0C)"
+		],
+		"text": "7a881e7539ed957e3a6539882fabb600c2ba1601a358b79715f461460d94bbed",
+		"chars": 1052
+	},
+	"Long, none": {
+		"pages": 18,
+		"images": [],
+		"fonts": [
+			"CMEX10 (Type 1)",
+			"CMMI10 (Type 1)",
+			"CMMI7 (Type 1)",
+			"CMR10 (Type 1)",
+			"CMR7 (Type 1)",
+			"CMSY10 (Type 1)",
+			"CMSY7 (Type 1)",
+			"LMRoman10-Regular (CID Type 0C)",
+			"LMRoman12-Bold (CID Type 0C)"
+		],
+		"text": "e9a7d36c4f0f5a0e52284eeda4414ecd0c1cafb5c50032fb59218a0d9efc27b5",
+		"chars": 45050
+	},
+	"Media Gallery, none": {
+		"pages": 4,
+		"images": [
+			"1301x772 rgb jpeg",
+			"1340x1400 rgb jpeg",
+			"2400x2400 rgb jpeg"
+		],
+		"fonts": [
+			"LMMono10-Regular (CID Type 0C)",
+			"LMRoman10-Bold (CID Type 0C)",
+			"LMRoman10-BoldItalic (CID Type 0C)",
+			"LMRoman10-Regular (CID Type 0C)",
+			"LMRoman12-Bold (CID Type 0C)"
+		],
+		"text": "f03fdcb0a1ae9f349bdda2acc98cffd3b1d182f2554f93041c05fde301ba7ab9",
+		"chars": 1304
+	},
+	"Diagrams, none": {
+		"pages": 4,
+		"images": [],
+		"fonts": [
+			"CMMI10 (Type 1)",
+			"CMR10 (Type 1)",
+			"CMR7 (Type 1)",
+			"CMSY7 (Type 1)",
+			"LMMono10-Regular (CID Type 0C)",
+			"LMMonoLt10-Bold (CID Type 0C)",
+			"LMRoman10-Bold (CID Type 0C)",
+			"LMRoman10-BoldItalic (CID Type 0C)",
+			"LMRoman10-Regular (CID Type 0C)",
+			"LMRoman12-Bold (CID Type 0C)"
+		],
+		"text": "2eff23a6e1131e8c89478fdcb6f40d1daa2c3b16cac71b4b7788ff7411afc673",
+		"chars": 7616
+	},
+	"Many, none": {
+		"pages": 11,
+		"images": [],
+		"fonts": [
+			"CMEX10 (Type 1)",
+			"CMMI10 (Type 1)",
+			"CMMI7 (Type 1)",
+			"CMR7 (Type 1)",
+			"LMRoman10-Regular (CID Type 0C)",
+			"LMRoman12-Bold (CID Type 0C)"
+		],
+		"text": "c9627d95ceb6876b889f498f6654612fa087bc4f4e855b4748c2ec7360409b0c",
+		"chars": 654
+	}
+}
