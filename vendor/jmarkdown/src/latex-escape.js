@@ -1,14 +1,23 @@
 /*
 	Shared LaTeX escaping.
 
-	By JMarkdown's design, prose reaching the LaTeX renderer needs only `&` and
-	`#` escaped. The other LaTeX specials are JMarkdown source-level syntax —
-	`_` (subscript), `^` (superscript), `%` (comment), `$` (math) — so any that
+	By JMarkdown's design, prose reaching the LaTeX renderer needs only `&`,
+	`#` and `%` escaped. The other LaTeX specials are JMarkdown source-level
+	syntax — `_` (subscript), `^` (superscript), `$` (math) — so any that
 	survive to render time are intentional (inside math, which is passed through
 	verbatim and validated by MathJax on the HTML side). Over-escaping them here
 	would corrupt that source model and break round-tripping. A character the
 	author ESCAPED (`\$`, `\_`) arrives as marked's `escape` token, not as text,
 	and gets escapeTexText (escapes.js).
+
+	`%` is jmarkdown's comment, but only where its inline comment is installed
+	— in a document with a header (metadata-header.js), in text it lexes —
+	and there it has taken the `%` and the rest of the line before anything
+	renders. A `%` that reaches the renderer as text is one the HTML shows: a
+	document with no header, a caption, a theorem's note, a header's value. TeX
+	read it as ITS comment — the rest of the source line was lost, and inside an
+	argument (a heading, a footnote, a caption) the build stopped — so it is
+	written `\%`.
 
 	Verbatim contexts (code) do NOT use this — minted takes its content literally;
 	see the codespan/code renderers, which pick a delimiter instead of escaping.
@@ -80,15 +89,17 @@ export const PROSE_ENTITIES = Object.freeze({
 	yacute: 'ý', yuml: '\\"y', OElig: '\\OE{}', oelig: '\\oe{}', Scaron: '\\v{S}', scaron: '\\v{s}', Yuml: '\\"Y',
 });
 
-// Escape the two characters that appear in ordinary prose and must be escaped
-// for LaTeX: `&` (alignment) and `#` (parameter), and write a listed entity as
-// its character. Everything else is left as-is. One pass, so a character an
-// entity gives is never escaped again (`&amp;mdash;` prints `&mdash;`, as the
-// browser shows it).
+// Escape the three characters that appear in ordinary prose and must be
+// escaped for LaTeX: `&` (alignment), `#` (parameter) and `%` (comment; one
+// no backslash escapes, as escapeArgumentPercent below), and write a listed
+// entity as its character. Everything else is left as-is. One pass, so a
+// character an entity gives is never escaped again (`&amp;mdash;` prints
+// `&mdash;`, as the browser shows it).
 export function escapeLatexText(text) {
 	if (text == null) return '';
-	return String(text).replace(/&(?:([A-Za-z][A-Za-z0-9]*);)?|#/g, (match, name) => {
+	return String(text).replace(/&(?:([A-Za-z][A-Za-z0-9]*);)?|#|(?<!\\)((?:\\\\)*)%/g, (match, name, backslashes) => {
 		if (match === '#') return '\\#';
+		if (backslashes !== undefined) return backslashes + '\\%';
 		if (name && Object.hasOwn(PROSE_ENTITIES, name)) return PROSE_ENTITIES[name];
 		return '\\&' + match.slice(1);
 	});

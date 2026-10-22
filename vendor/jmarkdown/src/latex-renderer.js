@@ -209,8 +209,9 @@ const latexRenderer = {
 		const href = escapeLatexUrl(token.href).replaceAll('%', '\\%');
 		// A bare web address (`https://…`, `www.…`, `<…>`) also PRINTS itself,
 		// where `%` is a comment, `_` a subscript (outside maths, an error) and
-		// `~` a space.
-		if (isBareAddress(token)) return `\\href{${href}}{${text.replace(/[%_~]/g, (c) => ADDRESS_TEXT[c])}}`;
+		// `~` a space. Its text is prose, whose `%` escapeLatexText has already
+		// written `\%`.
+		if (isBareAddress(token)) return `\\href{${href}}{${text.replace(/(?<!\\)%|[_~]/g, (c) => ADDRESS_TEXT[c])}}`;
 		return `\\href{${href}}{${text}}`;
 	},
 

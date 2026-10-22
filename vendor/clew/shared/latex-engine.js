@@ -27,6 +27,24 @@ export const LATEX_ENGINES = ['pdflatex', 'lualatex', 'xelatex'];
 const NAMES = { pdflatex: 'pdfLaTeX', lualatex: 'LuaLaTeX', xelatex: 'XeLaTeX' };
 export const engineName = (engine) => NAMES[engine] ?? engine;
 
+/**
+ * What a host's BUILT-IN TeX asks of mp-tikz-wasm (0.5.0 and later) for a
+ * whole document — Clew-iOS's PDF via LaTeX: the bundles beyond the library's
+ * DEFAULT_BUNDLES, for `MetaPost.create`, and the `date` for each `latex()`.
+ * `opentype` is fontspec and luaotfload (the style is LuaLaTeX's); `latex-doc`
+ * what a document for a desktop TeX Live loads — the style's microtype,
+ * enumitem, titlesec, titling, babel, EB Garamond and Garamond-Math; and
+ * `otf-fonts` latinmodern-math.otf (0.7 MB), which unicode-math — the style
+ * loads it — sets wherever no maths font was set: a note whose header names
+ * its own `LaTeX preamble` keeps the style's packages but not its
+ * \setmathfont, and without the file its every PDF failed ("The font
+ * "latinmodern-math" cannot be found"; Clew-boss, 2026-10-20). `now` is the
+ * clock, as a desktop run has it (\today, the PDF's CreationDate) — the
+ * library's default is 1 January 2025. tests/built-in-tex.test.js compiles
+ * through the pinned build.
+ */
+export const BUILT_IN_TEX = Object.freeze({ bundles: Object.freeze(['opentype', 'otf-fonts', 'latex-doc']), date: 'now' });
+
 // What pdfLaTeX cannot run. XeTeX-only first (they decide XeLaTeX); then what
 // either Unicode engine runs, which takes LuaLaTeX.
 const XETEX_ONLY = [
