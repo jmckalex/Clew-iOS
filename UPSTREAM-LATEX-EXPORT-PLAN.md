@@ -865,6 +865,26 @@ growth is measured against the agreed 12–17 MB.
     - for the owner, as style decisions: Garamond-Math only for notes
       with maths, and a lighter text face (or the pdfLaTeX fallback);
     - for both hosts: naming TeX's not-found files as warnings.
+- **After 875e177 (local, for the next push):**
+  - **A3, `latexpdf-a3-settle` 7ac749b.** The figure engine's worker,
+    disposed when the build returns, is freed by WebKit 0.5–2 s later, and
+    TeX's first pass overlapped it (terminate() cannot be awaited, so no
+    upstream fix can wait for it). The export now waits 750 ms before TeX
+    after a build that drew figures.
+    - Diagrams: 710–719 → 539–546 MB.
+    - Many: 934–962 → 848–863 MB, with the cache cold.
+  - **The export figure cache, `latexpdf-figure-cache` dbfa00b.** Every
+    iOS export used to draw every figure, because the figure engine's cache
+    lived in the worker. Now a trusted vault's figures are kept in Caches,
+    as desktop's export-cache.js keeps them; a restricted vault's never
+    are.
+    - Warm Many: 830 MB / 25 s → 482–527 MB / 16–17 s.
+  - **The a14ec13 sync** (UPSTREAM-A14EC13-PLAN.md): TeX's missing files
+    are said (A1); Garamond-Math only with maths (C4); %% comments hidden
+    (C1).
+  - **(b), what a pdfTeX run dirties** (texmf.cnf, calloc), is on the
+    later list. With the cache, the figure phase is a first-export cost,
+    and the device test decides whether (b) is needed.
 - **Still owed before P3:** the device memory check (below), the mini
   first. Its numbers to compare: about 0.4–0.6 GB footprint for text notes,
   0.7 GB for Diagrams, 1.0 GB for the 40-figure note (simulator, p3f).

@@ -1,9 +1,9 @@
-# Handover — 2026-10-22 (PDF via LaTeX's P3 tests and memory, and the sync to Clew-app 146107c with mp-tikz-wasm 0.5.0 pinned: a chain ready for a TestFlight push)
+# Handover — 2026-10-22, late (PDF via LaTeX on TestFlight at 875e177; the next chain: the figure engine's overlap, the export figure cache, the sync to Clew-app 3f0f667)
 
 Current state for a fresh session, rewritten whole. Durable architecture
 lives in **README.md** and **PORT-PLAN.md**. Each sync's reasoning and
 measurements are in its record: `UPSTREAM-*-PLAN.md`. The latest records
-are `UPSTREAM-146107C-PLAN.md` (mp-tikz-wasm 0.5.0 pinned, BUILT_IN_TEX, jmarkdown's `%`, 2026-10-22), `UPSTREAM-0768F36-PLAN.md` (jmarkdown 551485a, the numbered hang, the iPad's Mermaid words, 2026-10-21), `UPSTREAM-LATEX-EXPORT-PLAN.md` (the iPad's LaTeX exports: L1, L2, P2 as built), `UPSTREAM-0E773C3-PLAN.md` (the export pipeline's shared modules, quotes and tabs in lists measured, 2026-10-20), `UPSTREAM-0ADA21D-PLAN.md` (list keys, the Next item button, {{TOC}}, title blocks, quotes in lists, 2026-10-20), `UPSTREAM-F0AEAA4-PLAN.md` (EmbedPDF's cards at 208 px, the colon list's fill, the LaTeX refusal, 2026-10-15), `UPSTREAM-EF5F7F2-PLAN.md` (the index cache's save, tables wrapping at words, PDF #page=N, images within a line, 2026-10-15), `UPSTREAM-F4FEB68-PLAN.md` (tables in live edit, the guard, the PDF height upstream, 2026-10-15), `UPSTREAM-185E950-PLAN.md` (the colon retirement and "Convert this vault", 2026-10-11), `HTML-SHARE.md` (the iPad HTML share, 2026-10-11), `UPSTREAM-F959799-PLAN.md` (the figure engine, Proof this chapter, figures
+are `UPSTREAM-A14EC13-PLAN.md` (Obsidian's %% comments, TeX's missing files said, Garamond-Math only with maths, then the demo vault at 3f0f667, 2026-10-22), `UPSTREAM-146107C-PLAN.md` (mp-tikz-wasm 0.5.0 pinned, BUILT_IN_TEX, jmarkdown's `%`, 2026-10-22), `UPSTREAM-0768F36-PLAN.md` (jmarkdown 551485a, the numbered hang, the iPad's Mermaid words, 2026-10-21), `UPSTREAM-LATEX-EXPORT-PLAN.md` (the iPad's LaTeX exports: L1, L2, P2 as built), `UPSTREAM-0E773C3-PLAN.md` (the export pipeline's shared modules, quotes and tabs in lists measured, 2026-10-20), `UPSTREAM-0ADA21D-PLAN.md` (list keys, the Next item button, {{TOC}}, title blocks, quotes in lists, 2026-10-20), `UPSTREAM-F0AEAA4-PLAN.md` (EmbedPDF's cards at 208 px, the colon list's fill, the LaTeX refusal, 2026-10-15), `UPSTREAM-EF5F7F2-PLAN.md` (the index cache's save, tables wrapping at words, PDF #page=N, images within a line, 2026-10-15), `UPSTREAM-F4FEB68-PLAN.md` (tables in live edit, the guard, the PDF height upstream, 2026-10-15), `UPSTREAM-185E950-PLAN.md` (the colon retirement and "Convert this vault", 2026-10-11), `HTML-SHARE.md` (the iPad HTML share, 2026-10-11), `UPSTREAM-F959799-PLAN.md` (the figure engine, Proof this chapter, figures
 in exports measured, 2026-10-10), `UPSTREAM-6B6FBBB-PLAN.md` (PostScript figures, system font families,
 mp-tikz-wasm 0.4.0, 2026-10-10), `UPSTREAM-5ABF52D-PLAN.md` (app secrets,
 book mode phase 2, the book print, 2026-10-10), `UPSTREAM-CBFA692-PLAN.md` (book mode and the demo
@@ -14,23 +14,28 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
 
 ## 1. Where things stand
 
-- **A chain ready for a TestFlight push (2026-10-22, LOCAL, not pushed).**
-  Off origin/main 841ca1f, every commit `[ci skip]`:
-  - the 0768f36 sync: `sync-0768f36-p1-vendor` 7c9270a → `-p2-build` b76b2c0;
-  - PDF via LaTeX: `latexpdf-p2-compile` 98b7355 → `latexpdf-p3-verify`
-    31b6736 → `latexpdf-p3b-limits` aa3300b;
-  - the P3 tests: `-p3c-texmfvar` bcedfc5 (a new engine per export, the
-    limit against mp-tikz-wasm's watchdog) → `-p3d-restricted` 0e054eb
-    (§5's cases in an untrusted vault);
-  - `-p3e-watchdog` 0e7d8af (the watchdog at 60 s in desktop's words; a
-    first pass without a PDF ends it) → `-p3f-memory` 9fe2665 (an
-    instance per pass and Lua's collector eager: footprint 25–39% lower on
-    text notes);
-  - the 146107c sync: `sync-146107c-p1-vendor` 901378b → `-p2-pin` 254fb82
-    → `-p3-verify` (this record).
-  Clew-boss verified up to 0e054eb on a clean copy. A push needs Clew-boss's
-  verification of the rest, a build commit (no skip marker), and the
-  owner's word typed in this window.
+- **PDF via LaTeX is on TestFlight: origin/main 875e177** (pushed
+  2026-10-22 on Clew-boss's word; Xcode Cloud archive OK, check-run
+  120081399538). It carries the 0768f36 and 146107c syncs, P2 and the P3
+  tests (p3c–p3f).
+- **The next chain, for ONE TestFlight push (LOCAL, `[ci skip]`, off
+  875e177):**
+  - `wording-external-programs` baa6c1b: the external-program error says
+    what is true;
+  - `latexpdf-a3-settle` 7ac749b: a 750 ms wait before TeX after a build
+    that drew figures (the figure engine's worker, freed by WebKit
+    0.5–2 s after terminate(), overlapped TeX);
+  - `latexpdf-figure-cache` dbfa00b: a trusted vault's figures kept
+    between its exports (desktop's export-cache.js), so a warm re-export
+    draws nothing;
+  - `sync-a14ec13-p1-vendor` d4847a4 → `-p2-build` 35a59d1 →
+    `sync-3f0f667-p3-vendor` 1cedf20 → `sync-a14ec13-p4-verify` (this
+    record).
+
+  Clew-boss verified baa6c1b, 7ac749b and dbfa00b on clean copies. A push
+  needs Clew-boss's verification of the sync, then a build commit (no
+  skip marker). The owner typed "Clew-boss may authorise pushes" here
+  (2026-10-22), and `Bash(git push origin main)` is allowed.
   - Clew-app 0768f36 and 146107c are pushed there. mp-tikz-wasm 0.5.0 is
     staged from the pinned release; the local override is gone.
   - "Export note as PDF (via LaTeX)" typesets the note in the export host
@@ -43,7 +48,7 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
     Diagrams and 1.0 GB for the 40-figure note. The device check on the
     owner's iPads, the mini first, decides it. UPSTREAM-LATEX-EXPORT-PLAN.md
     "Memory, measured" and p3f have the tables.
-  - tools/sim-pdf-checks.mjs runs the simulator checks headless (14).
+  - tools/sim-pdf-checks.mjs runs the simulator checks headless (15).
 - **LaTeX exports on the iPad: "Export note as LaTeX (.tex)" works (L2,
   `latex-p2-tex`, 2026-10-20).** The chain is the plan
   `latex-p0-plan-0e773c3` → L1 `latex-p1-host-0e773c3` → L2, off the
@@ -388,10 +393,12 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
 
 - **Push main** (a push to main is a TestFlight build). origin/main is
   841ca1f, pushed 2026-10-21 on the owner's word (the 0e773c3 sync and the
-  .tex export; cloud archive OK, check-run 119321826602). The chain in §1
-  carries PDF via LaTeX for the owner's iPad mini test. It goes once
-  Clew-boss has verified it, a build commit is added, and the owner gives
-  the word in this window.
+  .tex export; cloud archive OK, check-run 119321826602); then 875e177,
+  PDF via LaTeX, 2026-10-22. The next chain in §1 goes once Clew-boss has
+  verified it and a build commit is added; Clew-boss may authorise the
+  push (the owner's rule, typed here 2026-10-22).
+- **The device test:** PDF via LaTeX on the iPad mini first, then the Pro,
+  on TestFlight (UPSTREAM-LATEX-EXPORT-PLAN.md's device memory check).
 - (Decided 2026-10-20: both of a note's LaTeX exports come to the iPad,
   through mp-tikz-wasm, in every vault. Until they are built, the palette
   keeps both commands, refused when run.)
@@ -434,8 +441,7 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
 
 ## 3. Next
 
-- **The next sync's range starts at Clew-app `146107c`.** jmarkdown items
-  4–6 are landing there next.
+- **The next sync's range starts at Clew-app `3f0f667`.**
 - **PDF via LaTeX, owed before P3:** only the device memory check on both
   iPads, the mini first.
   - The tests are built (p3c–p3f) and verified up to p3d.
