@@ -17,7 +17,7 @@ import { exportJob, EXPORT_RESTRICTED_CWD } from '../src/shim/export-job.js';
 import { BUILT_IN_TEX } from '../vendor/clew/shared/latex-engine.js';
 import { exportOutputs, isSafeExportPath } from '../src/export/outputs.js';
 import { texReferences } from '../src/shim/export-references.js';
-import { typeset, DOCUMENT_BUNDLES, MAX_PASSES, SILENCE_MS, LUA_GC } from '../src/export/typeset.js';
+import { typeset, DOCUMENT_BUNDLES, MAX_PASSES, SILENCE_MS, LUA_GC, FIGURE_SETTLE_MS, settleBeforeTex } from '../src/export/typeset.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
@@ -652,4 +652,14 @@ test('typeset: a first pass that writes no PDF ends it, said from its log; one t
 	const kept = await typeset({ lib, tex });
 	assert.equal(kept.passes, 3, 'errors with a PDF: the passes go on, and the PDF is the result');
 	assert.deepEqual(calls.map((c) => c[0]), ['create', 'latex', 'dispose', 'create', 'latex', 'dispose', 'create', 'latex', 'dispose']);
+});
+
+test('PDF via LaTeX (A3): after a build that drew figures the export waits before TeX, so the figure engine\'s worker is gone; without figures it does not', () => {
+	assert.equal(FIGURE_SETTLE_MS, 750, 'the simulator\'s 0.5 s sufficed; a margin for a slower iPad');
+	assert.equal(settleBeforeTex({ 'Many-figures/MetaPost/0f3a-1.pdf': new Uint8Array(1), 'refs.bib': '' }, 'Many'), FIGURE_SETTLE_MS);
+	assert.equal(settleBeforeTex({ 'Attachments/a.jpg': new Uint8Array(1), 'refs.bib': '' }, 'Citations'), 0, 'images and bibliographies: no figure engine ran');
+	assert.equal(settleBeforeTex({}, 'Plain'), 0);
+	assert.equal(settleBeforeTex({ 'Other-figures/x.pdf': new Uint8Array(1) }, 'Many'), 0, 'only this export\'s own figures');
+	const worker = fs.readFileSync(path.join(root, 'src', 'export', 'export-worker.js'), 'utf8');
+	assert.match(worker, /settleBeforeTex\(inputs, base\) - \(Date\.now\(\) - built\)[\s\S]*setTimeout[\s\S]*typesetting = await typeset\(/, 'the worker waits, then typesets');
 });

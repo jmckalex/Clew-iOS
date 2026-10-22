@@ -37,6 +37,18 @@ export const SILENCE_MS = 60_000;
  * .tex's first line, so no line number moves; never in a .tex Clew exports.
  */
 export const LUA_GC = '\\directlua{collectgarbage("setpause", 100) collectgarbage("setstepmul", 400)}';
+/**
+ * How long the export waits before TeX after a build that drew figures (A3):
+ * jmarkdown's figure engine ran mp-tikz-wasm in a worker of its own and
+ * disposed of it when the build returned, but WebKit frees that worker's
+ * memory some 0.5–2 s later. TeX's first pass, started at once, overlapped it:
+ * the 40-figure note peaked at 950–1,000 MB against about 840 once it had
+ * gone, Diagrams at 675–693 against about 535 (the simulator's footprint).
+ * A build without figures started no such worker and waits for nothing.
+ */
+export const FIGURE_SETTLE_MS = 750;
+/** The wait before TeX: FIGURE_SETTLE_MS when the build's outputs hold figures (`<base>-figures/`), else none. */
+export const settleBeforeTex = (inputs, base) => (Object.keys(inputs).some((rel) => rel.startsWith(`${base}-figures/`)) ? FIGURE_SETTLE_MS : 0);
 const RERUN = /Rerun to get|Label\(s\) may have changed|Rerun LaTeX|Please rerun LaTeX|undefined references.*rerun/i;
 
 const text = (bytes) => (bytes ? new TextDecoder().decode(bytes) : '');

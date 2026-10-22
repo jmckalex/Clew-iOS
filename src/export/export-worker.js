@@ -39,7 +39,7 @@ import { getWarnings } from '../../vendor/jmarkdown/src/warnings.js';
 import { configureExportBuild, exportEmbedPath } from '../../vendor/clew/engine/export-config.js';
 import { resolveFileTarget } from '../../vendor/clew/engine/vault-files.js';
 import { exportOutputs } from './outputs.js';
-import { typeset } from './typeset.js';
+import { typeset, settleBeforeTex } from './typeset.js';
 import { texReferences } from '../shim/export-references.js';
 
 // mp-tikz-wasm decides where it runs from the GLOBAL `process`: Node when it
@@ -144,6 +144,7 @@ async function build({ file, options, latexStyle = null, biblify = null, pdf = f
 		}
 		configureExportBuild(configManager, { to: options.to, latexStyle, biblify, defaults: DEFAULT_CONFIG });
 		const { outFile } = await processFile(file, { ...options, obsidianLinks: { resolveEmbed, resolveLink: () => null } });
+		const built = Date.now();
 		let outputs = exportOutputs(vfs.writes, outFile);
 		let output = outFile;
 		const extra = [];
@@ -165,6 +166,10 @@ async function build({ file, options, latexStyle = null, biblify = null, pdf = f
 			for (const name of refs.missing) extra.push(`${name} is named by the .tex but is not in this vault`);
 			for (const { rel } of refs.refused) extra.push(`${rel} is named by the .tex but is not an image TeX can typeset, or is hidden, so TeX was not given it`);
 			const lib = await import(mptikzUrl);
+			// The figure engine's worker goes before TeX's starts (typeset.js
+			// #settleBeforeTex); the vault reads above count towards the wait.
+			const wait = settleBeforeTex(inputs, base) - (Date.now() - built);
+			if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
 			typesetting = await typeset({ lib, tex, inputs });
 			extra.push(...typesetting.warnings);
 			outputs = [{ rel: `${base}.pdf`, data: typesetting.pdf }];
