@@ -19,7 +19,7 @@
 // outside it reaches the engine). A failure says what desktop's compilePdf
 // says (pdfViaLatexFailure: the engine, why, the log's first error).
 
-import { BUILT_IN_TEX, chooseLatexEngine, pdfViaLatexFailure } from '../../vendor/clew/shared/latex-engine.js';
+import { BUILT_IN_TEX, chooseLatexEngine, pdfViaLatexFailure, texMissingFiles, missingFileWarnings } from '../../vendor/clew/shared/latex-engine.js';
 
 /** The bundles a document needs beside the library's default ones, upstream's
  *  (shared/latex-engine.js#BUILT_IN_TEX, with mp-tikz-wasm's 0.5.0 pin):
@@ -134,6 +134,12 @@ export async function typeset({ lib, tex, inputs = {}, date = BUILT_IN_TEX.date 
 			passes += 1;
 		}
 		if (failed(r)) throw failure(why(r));
+		// TeX goes on past a file it cannot find (nonstopmode) and makes the
+		// PDF without it: the last pass's not-found lines, said as desktop's
+		// compilePdf says them (shared/latex-engine.js#texMissingFiles, the
+		// owner's A1). Its terminal log, whole under LuaLaTeX; the log as
+		// bytes once mp-tikz-wasm hands it (texLogBytes); else its diagnostics.
+		warnings.push(...missingFileWarnings(texMissingFiles(r.texLogBytes ?? (r.log || r.diagnostics || []))));
 		return { pdf: r.pdf, engine: choice.engine, reason: choice.reason, passes, bibtex, makeindex, warnings, ms: Date.now() - t0 };
 	} finally {
 		mp?.dispose?.();

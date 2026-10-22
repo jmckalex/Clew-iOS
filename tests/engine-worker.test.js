@@ -289,3 +289,15 @@ test('a Mathematica block in a vault this device trusts: its error log says wolf
 	assert.ok(logs.some((log) => /wolframscript cannot run on iOS: Clew runs no external programs there/.test(log)), `what the user reads: ${logs.join(' | ').slice(0, 300)}`);
 	assert.ok(logs.every((log) => !/cannot be rendered here/.test(log)));
 });
+
+test('Obsidian\'s %% comments (Clew-app 42bb9c8, the owner\'s C1): reading view hides them, never inside code; an unclosed %% stays', (t) => {
+	const vault = fs.mkdtempSync(path.join(os.tmpdir(), 'clew-comments-'));
+	t.after(() => fs.rmSync(vault, { recursive: true, force: true }));
+	fs.writeFileSync(path.join(vault, 'Comments.md'),
+		'# Comments\n\nBefore %%an inline secret%% after.\n\n%%\na block secret\n%%\n\nIn code `x %%kept%% y` it stays.\n\nAn unclosed %% stays too.\n');
+	const html = flat(renderIn(vault, 'Comments.md'));
+	assert.ok(!html.includes('an inline secret') && !html.includes('a block secret'), 'both comments hidden');
+	assert.match(html, /Before\s+after\./, 'the text around the inline one kept');
+	assert.match(html, /<code>x %%kept%% y<\/code>/, 'never inside code');
+	assert.match(html, /An unclosed %% stays too\./, 'an unclosed %% is text');
+});

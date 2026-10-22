@@ -110,6 +110,10 @@ export function engineConfig({ vaultRoot = '/vault', vaultOptions = {}, engineEx
 			// Meta Bind's INPUT[…]/VIEW[…] widgets — editable cells that
 			// live in prose, on the same field-edit write path.
 			'metaBindInline, metaBindFence from /engine-assets/meta-bind.js',
+			// Obsidian's `%%…%%` comments, hidden — never inside code or maths
+			// (Clew-app 42bb9c8, the owner's C1). Every export registers the
+			// same two (export-config.js#EXPORT_EXTENSIONS, the export worker).
+			'obsidianComment, obsidianInlineComment from /engine-assets/obsidian-comments.js',
 			// (Callouts are the ENGINE's since jmarkdown a7de8c6 — callouts.js,
 			// registered after its own GFM-alert rule; the shim hands it the
 			// custom types through CLEW_CALLOUTS, engineEnv.)

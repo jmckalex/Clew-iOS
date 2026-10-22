@@ -15,6 +15,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 import { exportJob, EXPORT_RESTRICTED_CWD } from '../src/shim/export-job.js';
 import { BUILT_IN_TEX } from '../vendor/clew/shared/latex-engine.js';
+import { MATH_FONT_LINE } from '../vendor/clew/engine/latex-style.js';
 import { exportOutputs, isSafeExportPath } from '../src/export/outputs.js';
 import { texReferences } from '../src/shim/export-references.js';
 import { typeset, DOCUMENT_BUNDLES, MAX_PASSES, SILENCE_MS, LUA_GC, FIGURE_SETTLE_MS, settleBeforeTex } from '../src/export/typeset.js';
@@ -459,6 +460,9 @@ test('PDF via LaTeX in a restricted vault: an image by a device path (outside th
 		}
 		assert.equal(r.images, 0, 'no image in the PDF');
 		assert.ok(r.bytes < 100_000, `a PDF without the 311 KB image (${r.bytes} bytes)`);
+		// Said, as desktop says it (Clew-app 076ddb0, the owner's A1).
+		assert.deepEqual(r.warnings.filter((w) => /TeX could not find/.test(w)).sort(), [`${top}/outside/secret.jpg`, `${top}/vault/inside.jpg`]
+			.map((file) => `PDF via LaTeX: TeX could not find the file "${file}", so the PDF was made without it.`).sort(), 'each file TeX could not find, named');
 	});
 });
 
@@ -744,5 +748,20 @@ test('the export figure cache, PDF via LaTeX: a warm export typesets the same PD
 		} finally {
 			fs.rmSync(cache, { recursive: true, force: true });
 		}
+	});
+});
+
+test('the iPad\'s LaTeX export (the a14ec13 sync): Obsidian\'s %% comments left out (EXPORT_EXTENSIONS, C1), and Clew\'s maths font only for a note with maths (C4)', { skip: !staged && 'mptikz-assets/ is not staged' }, () => {
+	withVault({
+		'Prose.md': '# Prose\n\nOnly words %%a secret%% here.\n\n%%\na hidden block\n%%\n\nThe end.\n',
+		'Maths.md': '# Maths\n\nEuler: $e^{i\\pi} + 1 = 0$.\n',
+	}, (vault) => {
+		const prose = exportNote(vault, 'Prose.md');
+		assert.ok(!prose.tex.includes('a secret') && !prose.tex.includes('a hidden block'), 'the comments are not in the .tex');
+		assert.match(prose.tex, /Only words\s+here\./);
+		assert.ok(!prose.tex.includes(MATH_FONT_LINE), 'no maths: the style\'s Garamond-Math line taken out');
+		assert.match(prose.tex, /EBGaramond/, 'the rest of the style kept');
+		const maths = exportNote(vault, 'Maths.md');
+		assert.ok(maths.tex.includes(MATH_FONT_LINE), 'with maths, kept');
 	});
 });

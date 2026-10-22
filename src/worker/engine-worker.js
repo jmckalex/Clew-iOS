@@ -41,6 +41,7 @@ import * as dataview from '../../vendor/clew/engine/dataview.js';
 import * as bases from '../../vendor/clew/engine/bases.js';
 import * as admonitions from '../../vendor/clew/engine/admonitions.js';
 import * as metaBind from '../../vendor/clew/engine/meta-bind.js';
+import * as obsidianComments from '../../vendor/clew/engine/obsidian-comments.js';
 import * as kanbanBoard from '../../vendor/clew/engine/kanban-board.js';
 import * as figures from '../../vendor/clew/engine/figures.js';
 // Callouts are the engine's (jmarkdown a7de8c6); a host hands it custom
@@ -64,6 +65,7 @@ globalThis.__jmdExtensionRegistry = {
 	'/engine-assets/bases.js': bases,
 	'/engine-assets/admonitions.js': admonitions,
 	'/engine-assets/meta-bind.js': metaBind,
+	'/engine-assets/obsidian-comments.js': obsidianComments,
 	'/engine-assets/kanban-board.js': kanbanBoard,
 	// Both the Extensions line (fences + directive) and the Environments
 	// line (@begin handlers) name this one file.

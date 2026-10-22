@@ -36,7 +36,8 @@ import '../worker/shims/require-registry.js';
 import { vfs } from '../worker/shims/vfs.js';
 import { applyCustomCallouts } from '../../vendor/jmarkdown/src/callout-table.js';
 import { getWarnings } from '../../vendor/jmarkdown/src/warnings.js';
-import { configureExportBuild, exportEmbedPath } from '../../vendor/clew/engine/export-config.js';
+import { configureExportBuild, exportEmbedPath, EXPORT_EXTENSIONS } from '../../vendor/clew/engine/export-config.js';
+import { mathFontOnlyWithMaths } from '../../vendor/clew/engine/latex-style.js';
 import { resolveFileTarget } from '../../vendor/clew/engine/vault-files.js';
 import { exportOutputs } from './outputs.js';
 import { typeset, settleBeforeTex } from './typeset.js';
@@ -88,6 +89,10 @@ async function init({ files, env, cwd }) {
 	process.chdir(cwd);
 	enginePromise = import('../../vendor/jmarkdown/src/index.js');
 	await enginePromise;
+	// Clew's own rules, which the preview's config loads and the user's does
+	// not (export-config.js#EXPORT_EXTENSIONS: Obsidian's %% comments):
+	// after the engine's, as there, and as desktop's export-worker.mjs does.
+	(await import('../../vendor/jmarkdown/src/utils.js')).registerExtensions(EXPORT_EXTENSIONS);
 	// The engine's own configuration (the module index.js loaded, so the
 	// user's config files are read already): configureExportBuild sets on it.
 	configPromise = import('../../vendor/jmarkdown/src/config-manager.js');
@@ -197,6 +202,14 @@ async function build({ file, options, latexStyle = null, biblify = null, pdf = f
 		const cached = cacheDir ? await installFigureCache(cacheDir, token) : new Set();
 		const { outFile } = await processFile(file, { ...options, obsidianLinks: { resolveEmbed, resolveLink: () => null } });
 		const built = Date.now();
+		// Clew's style loads Garamond-Math only for a document with maths
+		// (latex-style.js#mathFontOnlyWithMaths, the owner's C4): the .tex the
+		// share carries and the one TeX is handed alike, as desktop rewrites it.
+		if (options.to === 'latex' && vfs.files.has(outFile)) {
+			const written = String(vfs.read(outFile));
+			const kept = mathFontOnlyWithMaths(written);
+			if (kept !== written) vfs.write(outFile, kept);
+		}
 		let outputs = exportOutputs(vfs.writes, outFile);
 		// What the figure engine drew (new in the cache folder), and the
 		// cached figures the output uses (its `<base>-figures/` copies).

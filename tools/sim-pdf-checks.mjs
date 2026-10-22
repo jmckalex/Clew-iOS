@@ -222,7 +222,8 @@ function writeVault(data) {
 		'Loop.md': '---\nLaTeX preamble: \\newcount\\clewn\\newcount\\clewk\\def\\clewtick{{\\clewn=0 \\loop\\advance\\clewn by 1 \\ifnum\\clewn<2000000 \\repeat}\\immediate\\write16{tick \\the\\clewk}}\\loop\\advance\\clewk by 1 \\clewtick\\iftrue\\repeat\n---\n# Loop\n\nNever reached.\n',
 		'Silent.md': '---\nLaTeX preamble: \\loop\\iftrue\\repeat\n---\n# Silent\n\nNever reached.\n',
 		'Input.md': '# Input\n\nBefore.\n\n\\input{/etc/hosts}\n\nAfter.\n',
-		'Device.md': `# Device\n\n![outside](${outside}/secret.jpg)\n\n![own, absolute](${vault}/inside.jpg)\n\nThe end.\n`,
+		// In angle brackets: the vault's own path holds a space ("PDF Checks").
+		'Device.md': `# Device\n\n![outside](<${outside}/secret.jpg>)\n\n![own, absolute](<${vault}/inside.jpg>)\n\nThe end.\n`,
 		'Link.md': '# Link\n\n![[escape.jpg]]\n\n![md](escape.jpg)\n\nThe end.\n',
 		'Late.md': '# Late\n\n![[late.jpg]]\n\nThe end.\n',
 		'Preamble.md': `---\nLaTeX preamble: \\input{${outside}/secret.tex}\n---\n# Preamble\n\nThe end.\n`,
@@ -361,8 +362,10 @@ async function main() {
 		verdict('restricted, control: a vault image embedded is in the PDF (the route serves this untrusted vault)', r.inside?.ok && images('inside') === 1, `${images('inside')} image(s)`);
 		verdict('restricted: `\\input{/etc/hosts}` fails with TeX\'s own "not found"',
 			r.input?.ok === false && /First error: ! LaTeX Error: File `\/etc\/hosts\.tex' not found/.test(r.input.error ?? ''), r.input?.error);
-		verdict('restricted: images by a device path (outside the vault; the vault\'s own, absolute) are not in the PDF',
-			r.device?.ok && images('device') === 0, `${images('device')} image(s); warnings ${JSON.stringify(r.device?.warnings)}`);
+		const notFound = (r.device?.warnings ?? []).filter((w) => /TeX could not find the file/.test(w));
+		verdict('restricted: images by a device path (outside the vault; the vault\'s own, absolute) are not in the PDF, and each is named',
+			r.device?.ok && images('device') === 0 && notFound.length === 2 && notFound.some((w) => w.includes('/inside.jpg')) && notFound.some((w) => w.includes('/secret.jpg')),
+			`${images('device')} image(s); warnings ${JSON.stringify(r.device?.warnings)}`);
 		verdict('restricted: an embed of a link leading out of the vault is not listed, and the PDF goes without it, said',
 			r.link?.ok && images('link') === 0 && (r.refusedLinks ?? []).includes('escape.jpg') && r.link.warnings.includes('escape.jpg is named by the .tex but is not in this vault'),
 			`${images('link')} image(s); warnings ${JSON.stringify(r.link?.warnings)}`);
