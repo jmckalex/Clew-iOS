@@ -1,9 +1,9 @@
-# Handover — 2026-10-21 (PDF via LaTeX on the iPad, in the simulator, on the local sync to Clew-app 0768f36)
+# Handover — 2026-10-22 (PDF via LaTeX's P3 tests and memory, and the sync to Clew-app 146107c with mp-tikz-wasm 0.5.0 pinned: a chain ready for a TestFlight push)
 
 Current state for a fresh session, rewritten whole. Durable architecture
 lives in **README.md** and **PORT-PLAN.md**. Each sync's reasoning and
 measurements are in its record: `UPSTREAM-*-PLAN.md`. The latest records
-are `UPSTREAM-0768F36-PLAN.md` (jmarkdown 551485a, the numbered hang, the iPad's Mermaid words, 2026-10-21), `UPSTREAM-LATEX-EXPORT-PLAN.md` (the iPad's LaTeX exports: L1, L2, P2 as built), `UPSTREAM-0E773C3-PLAN.md` (the export pipeline's shared modules, quotes and tabs in lists measured, 2026-10-20), `UPSTREAM-0ADA21D-PLAN.md` (list keys, the Next item button, {{TOC}}, title blocks, quotes in lists, 2026-10-20), `UPSTREAM-F0AEAA4-PLAN.md` (EmbedPDF's cards at 208 px, the colon list's fill, the LaTeX refusal, 2026-10-15), `UPSTREAM-EF5F7F2-PLAN.md` (the index cache's save, tables wrapping at words, PDF #page=N, images within a line, 2026-10-15), `UPSTREAM-F4FEB68-PLAN.md` (tables in live edit, the guard, the PDF height upstream, 2026-10-15), `UPSTREAM-185E950-PLAN.md` (the colon retirement and "Convert this vault", 2026-10-11), `HTML-SHARE.md` (the iPad HTML share, 2026-10-11), `UPSTREAM-F959799-PLAN.md` (the figure engine, Proof this chapter, figures
+are `UPSTREAM-146107C-PLAN.md` (mp-tikz-wasm 0.5.0 pinned, BUILT_IN_TEX, jmarkdown's `%`, 2026-10-22), `UPSTREAM-0768F36-PLAN.md` (jmarkdown 551485a, the numbered hang, the iPad's Mermaid words, 2026-10-21), `UPSTREAM-LATEX-EXPORT-PLAN.md` (the iPad's LaTeX exports: L1, L2, P2 as built), `UPSTREAM-0E773C3-PLAN.md` (the export pipeline's shared modules, quotes and tabs in lists measured, 2026-10-20), `UPSTREAM-0ADA21D-PLAN.md` (list keys, the Next item button, {{TOC}}, title blocks, quotes in lists, 2026-10-20), `UPSTREAM-F0AEAA4-PLAN.md` (EmbedPDF's cards at 208 px, the colon list's fill, the LaTeX refusal, 2026-10-15), `UPSTREAM-EF5F7F2-PLAN.md` (the index cache's save, tables wrapping at words, PDF #page=N, images within a line, 2026-10-15), `UPSTREAM-F4FEB68-PLAN.md` (tables in live edit, the guard, the PDF height upstream, 2026-10-15), `UPSTREAM-185E950-PLAN.md` (the colon retirement and "Convert this vault", 2026-10-11), `HTML-SHARE.md` (the iPad HTML share, 2026-10-11), `UPSTREAM-F959799-PLAN.md` (the figure engine, Proof this chapter, figures
 in exports measured, 2026-10-10), `UPSTREAM-6B6FBBB-PLAN.md` (PostScript figures, system font families,
 mp-tikz-wasm 0.4.0, 2026-10-10), `UPSTREAM-5ABF52D-PLAN.md` (app secrets,
 book mode phase 2, the book print, 2026-10-10), `UPSTREAM-CBFA692-PLAN.md` (book mode and the demo
@@ -14,24 +14,36 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
 
 ## 1. Where things stand
 
-- **PDF via LaTeX works in the simulator (2026-10-21, LOCAL, not pushed).**
-  The chain off 841ca1f is:
-  `sync-0768f36-p1-vendor` 7c9270a → `-p2-build` b76b2c0 →
-  `latexpdf-p2-compile` 98b7355 → `latexpdf-p3-verify` (the record).
-  - The sync is Clew-app 0768f36, which is local there; a push waits for
-    Clew-app's own.
+- **A chain ready for a TestFlight push (2026-10-22, LOCAL, not pushed).**
+  Off origin/main 841ca1f, every commit `[ci skip]`:
+  - the 0768f36 sync: `sync-0768f36-p1-vendor` 7c9270a → `-p2-build` b76b2c0;
+  - PDF via LaTeX: `latexpdf-p2-compile` 98b7355 → `latexpdf-p3-verify`
+    31b6736 → `latexpdf-p3b-limits` aa3300b;
+  - the P3 tests: `-p3c-texmfvar` bcedfc5 (a new engine per export, the
+    limit against mp-tikz-wasm's watchdog) → `-p3d-restricted` 0e054eb
+    (§5's cases in an untrusted vault);
+  - `-p3e-watchdog` 0e7d8af (the watchdog at 60 s in desktop's words; a
+    first pass without a PDF ends it) → `-p3f-memory` 9fe2665 (an
+    instance per pass and Lua's collector eager: footprint 25–39% lower on
+    text notes);
+  - the 146107c sync: `sync-146107c-p1-vendor` 901378b → `-p2-pin` 254fb82
+    → `-p3-verify` (this record).
+  Clew-boss verified up to 0e054eb on a clean copy. A push needs Clew-boss's
+  verification of the rest, a build commit (no skip marker), and the
+  owner's word typed in this window.
+  - Clew-app 0768f36 and 146107c are pushed there. mp-tikz-wasm 0.5.0 is
+    staged from the pinned release; the local override is gone.
   - "Export note as PDF (via LaTeX)" typesets the note in the export host
     with mp-tikz-wasm 0.5.0's TeX and shares the PDF.
   - The owner's (a) is in: LuaLaTeX with Latin Modern OpenType, lmodern
     under a header's pdfLaTeX, no cm-super. Code is coloured without
     minted (J2), in the .tex too.
-  - mp-tikz-wasm 0.5.0 is a LOCAL OVERRIDE in mptikz-assets/
-    (STAGED.json says so). P1's pin waits for Clew-app's re-pin; restage
-    with `npm run sync-mptikz -- --force`.
-  - **The memory risk:** a Clew-styled PDF peaked at 1.5–2.7 GB resident
-    in the simulator. The device check on the owner's iPads, the mini
-    first, decides it. UPSTREAM-LATEX-EXPORT-PLAN.md "P2 as built" has the
-    table.
+  - **Memory:** the 1.5–2.7 GB was RSS. The jetsam-relevant footprint
+    (simulator, p3f) is about 0.4–0.6 GB for text notes, 0.7 GB for
+    Diagrams and 1.0 GB for the 40-figure note. The device check on the
+    owner's iPads, the mini first, decides it. UPSTREAM-LATEX-EXPORT-PLAN.md
+    "Memory, measured" and p3f have the tables.
+  - tools/sim-pdf-checks.mjs runs the simulator checks headless (14).
 - **LaTeX exports on the iPad: "Export note as LaTeX (.tex)" works (L2,
   `latex-p2-tex`, 2026-10-20).** The chain is the plan
   `latex-p0-plan-0e773c3` → L1 `latex-p1-host-0e773c3` → L2, off the
@@ -376,10 +388,10 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
 
 - **Push main** (a push to main is a TestFlight build). origin/main is
   841ca1f, pushed 2026-10-21 on the owner's word (the 0e773c3 sync and the
-  .tex export; cloud archive OK, check-run 119321826602). The local
-  0768f36 chain and the PDF follow only after: Clew-app pushes 0768f36,
-  Clew-boss verifies, a build commit is added, and the owner gives the
-  word in this window.
+  .tex export; cloud archive OK, check-run 119321826602). The chain in §1
+  carries PDF via LaTeX for the owner's iPad mini test. It goes once
+  Clew-boss has verified it, a build commit is added, and the owner gives
+  the word in this window.
 - (Decided 2026-10-20: both of a note's LaTeX exports come to the iPad,
   through mp-tikz-wasm, in every vault. Until they are built, the palette
   keeps both commands, refused when run.)
@@ -422,14 +434,19 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
 
 ## 3. Next
 
-- **The next sync's range starts at Clew-app `0768f36`** (synced locally;
-  re-check it against Clew-app's origin when that is pushed). Coming:
-  Clew-app's mp-tikz-wasm 0.5.0 re-pin (P1) and shared/latex-engine.js
-  #BUILT_IN_TEX (the bundle list, to import).
-- **PDF via LaTeX, owed before P3:** the time-limit test, the /texmf-var
-  test in the simulator, a PDF kill test, the restricted-vault security
-  cases (UPSTREAM-LATEX-EXPORT-PLAN.md §5); then the device memory check
-  on both iPads, the mini first.
+- **The next sync's range starts at Clew-app `146107c`.** jmarkdown items
+  4–6 are landing there next.
+- **PDF via LaTeX, owed before P3:** only the device memory check on both
+  iPads, the mini first.
+  - The tests are built (p3c–p3f) and verified up to p3d.
+  - The later list:
+    - upstream: free the figure engine's worker before the build
+      returns, and the figure engine's own memory on 40 figures;
+    - the owner's style decisions: Garamond-Math only with maths, and a
+      lighter face;
+    - both hosts: TeX's not-found files as warnings;
+    - the App Store: the iOS app ships no third-party notices
+      (UPSTREAM-146107C-PLAN.md).
 - **A cold-run flake (Clew-boss, 2026-10-20):** one run straight after a
   build gave 790/791 and never recurred (seven reruns since). The test was
   not identified. The likeliest are the fixed waits in
