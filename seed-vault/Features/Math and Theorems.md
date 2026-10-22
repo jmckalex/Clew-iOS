@@ -20,7 +20,7 @@ untoward happens.
 @end(lemma)
 
 @begin(proof)
-Left as an exercise for the vault's reader. $\blacksquare$
+Left as an exercise for the vault's reader.
 @end(proof)
 
 Some inline dialect syntax (TeX-style, like LaTeX): H_2O subscripts,

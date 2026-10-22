@@ -10,9 +10,11 @@ engine — the same source, three outputs:
   templates and your jmarkdown configuration.
 - **Export note as LaTeX (.tex)** — print-quality LaTeX: theorem
   environments, floats, citations via natbib, TikZ as native pictures.
-- **Export note as PDF (via LaTeX)** — runs your TeX toolchain
-  (latexmk, with LuaLaTeX, XeLaTeX or pdfLaTeX as the document needs) on
-  the generated LaTeX.
+- **Export note as PDF (via LaTeX)** — typesets the generated LaTeX. On a
+  Mac or PC it runs your own TeX installation (latexmk, with LuaLaTeX,
+  XeLaTeX or pdfLaTeX as the document needs); on the iPad, Clew's built-in
+  TeX, which needs nothing installed and has LuaLaTeX and pdfLaTeX — a
+  document that needs XeLaTeX says so instead.
 
 Exports honour the normal jmarkdown config cascade (`~/.jmarkdown`, the
 vault's `.jmarkdown/`, the note's own metadata header) — so a note like
