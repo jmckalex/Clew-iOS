@@ -14,6 +14,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 import { exportJob, EXPORT_RESTRICTED_CWD } from '../src/shim/export-job.js';
+import { BUILT_IN_TEX } from '../vendor/clew/shared/latex-engine.js';
 import { exportOutputs, isSafeExportPath } from '../src/export/outputs.js';
 import { texReferences } from '../src/shim/export-references.js';
 import { typeset, DOCUMENT_BUNDLES, MAX_PASSES, SILENCE_MS, LUA_GC } from '../src/export/typeset.js';
@@ -270,6 +271,7 @@ test('PDF via LaTeX (L3): an unstyled note is LuaLaTeX in Latin Modern, its Unic
 		'Unicode.md': '# Signs\n\nAn en dash – in 1–2, a times sign 3 × 4, “curly quotes” and ‘single’, ÿ é ß Œ.\n',
 		'Forced.md': '---\nLaTeX engine: pdflatex\n---\n# Forced\n\nAn en dash – and 3 × 4 and “quotes”.\n',
 		'UMaths.md': '---\nPackages: unicode-math\n---\n# Maths\n\nEuler: $e^{i\\pi} + 1 = 0$.\n',
+		'Percent.md': '# 100% Sure\n\nWe are 50% of the way, *italic 20%*.\n\nThe rest of this line survives.\n',
 	}, (vault) => {
 		const uni = exportPdf(vault, 'Unicode.md', '--style=none');
 		assert.equal(uni.head, '%PDF-');
@@ -288,6 +290,13 @@ test('PDF via LaTeX (L3): an unstyled note is LuaLaTeX in Latin Modern, its Unic
 		const umaths = exportPdf(vault, 'UMaths.md', '--style=none');
 		assert.match(umaths.fonts, /LatinModernMath-Regular/, 'unicode-math with no maths font named: otf-fonts\' latinmodern-math');
 		assert.doesNotMatch(umaths.fonts, /CMMI/);
+
+		// jmarkdown 2928d5d (the 146107c sync): a note without front matter
+		// writes its `%` as `\%`, never TeX's comment.
+		const percent = exportPdf(vault, 'Percent.md', '--style=none');
+		assert.match(percent.text, /100% Sure/);
+		assert.match(percent.text, /We are 50% of the way, italic 20%\./);
+		assert.match(percent.text, /The rest of this line survives\./);
 	});
 });
 
@@ -570,7 +579,8 @@ test('typeset: latexmk\'s passes, each over a NEW instance, the last disposed be
 	let { lib, calls } = fakeLib();
 	const plain = await typeset({ lib, tex, inputs: { 'N-figures/f.pdf': new Uint8Array(1) } });
 	assert.deepEqual(calls.map((c) => c[0]), [...PASS, ...PASS, ...PASS], 'three passes, an instance each, each gone before the next (p3f)');
-	assert.equal(calls[0][1], ['core', ...DOCUMENT_BUNDLES].join(','), 'default + opentype + otf-fonts + latex-doc');
+	assert.equal(calls[0][1], 'core,opentype,otf-fonts,latex-doc', 'default + opentype + otf-fonts + latex-doc: upstream\'s BUILT_IN_TEX');
+	assert.equal(DOCUMENT_BUNDLES, BUILT_IN_TEX.bundles, 'imported, never a copy');
 	assert.equal(calls[1][1], 'lualatex', 'fontspec: LuaLaTeX (chooseLatexEngine)');
 	assert.equal(calls[1][2], 'N-figures/f.pdf', 'the first pass sees the inputs alone');
 	assert.deepEqual(calls.filter((c) => c[0] === 'latex').map((c) => c[2].split(',')[0]), ['N-figures/f.pdf', 'N-figures/f.pdf', 'N-figures/f.pdf'],

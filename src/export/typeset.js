@@ -19,13 +19,14 @@
 // outside it reaches the engine). A failure says what desktop's compilePdf
 // says (pdfViaLatexFailure: the engine, why, the log's first error).
 
-import { chooseLatexEngine, pdfViaLatexFailure } from '../../vendor/clew/shared/latex-engine.js';
+import { BUILT_IN_TEX, chooseLatexEngine, pdfViaLatexFailure } from '../../vendor/clew/shared/latex-engine.js';
 
-/** The bundles a document needs (Clew-boss, against 0.5.0): the default ones,
+/** The bundles a document needs beside the library's default ones, upstream's
+ *  (shared/latex-engine.js#BUILT_IN_TEX, with mp-tikz-wasm's 0.5.0 pin):
  *  OpenType (fontspec), otf-fonts (latinmodern-math, which unicode-math falls
  *  back to without Garamond-Math), and latex-doc (natbib, babel, tcolorbox,
  *  BibTeX's styles, EB Garamond…). */
-export const DOCUMENT_BUNDLES = ['opentype', 'otf-fonts', 'latex-doc'];
+export const DOCUMENT_BUNDLES = BUILT_IN_TEX.bundles;
 export const MAX_PASSES = 5;
 /** How long a pass may print nothing before mp-tikz-wasm's watchdog ends it. */
 export const SILENCE_MS = 60_000;
@@ -46,7 +47,7 @@ const text = (bytes) => (bytes ? new TextDecoder().decode(bytes) : '');
  * @returns {Promise<{ pdf: Uint8Array, engine: string, reason: string, passes: number,
  *   bibtex: boolean, makeindex: boolean, warnings: string[], ms: number }>}
  */
-export async function typeset({ lib, tex, inputs = {}, date = 'now' }) {
+export async function typeset({ lib, tex, inputs = {}, date = BUILT_IN_TEX.date }) {
 	const t0 = Date.now();
 	const choice = chooseLatexEngine(tex, 'auto', { available: ['pdflatex', 'lualatex'], host: 'the iPad\'s TeX' });
 	if (choice.unavailable) throw new Error(choice.refusal);

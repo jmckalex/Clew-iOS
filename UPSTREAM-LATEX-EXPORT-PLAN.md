@@ -443,8 +443,9 @@ growth is measured against the agreed 12–17 MB.
     \setmathfont does not), or an unstyled note that loads unicode-math.
     Without it: a fontspec error with an empty message, and CMMI in its
     place.
-  - The bundle list stands. Clew-app is putting it in
-    shared/latex-engine.js#BUILT_IN_TEX, to import from a later sync.
+  - The bundle list stands. It is Clew-app's
+    shared/latex-engine.js#BUILT_IN_TEX since 48aea4d, and typeset.js
+    imports it (the 146107c sync, p2).
 - **The growth reported** against the owner's 12–17 MB includes
   otf-fonts.
 - **A known 0.5.0 defect:** for a fontspec error, `latex()`'s diagnostics
@@ -559,6 +560,13 @@ growth is measured against the agreed 12–17 MB.
   STAGED.json says `local-override`, so `npm run sync-mptikz -- --force`
   puts the pinned release back. P1 (the pin, stage-mptikz.js, CI) waits
   for Clew-app's re-pin; nothing of the assets is committed.
+  - **P1 done by the 146107c sync** (UPSTREAM-146107C-PLAN.md).
+    Clew-app's 48aea4d pins 0.5.0 in shared/mptikz-manifest.json, which
+    stage-mptikz.js and Xcode Cloud's ci_post_clone.sh read from the
+    vendor.
+    - The override is gone: `stage-mptikz.js --release --force` staged the
+      published assets, verified by their sha256.
+    - The staged tree is byte for byte the override's, 4,854 files.
 - **Under Node** (tests/export-host.test.js, with poppler's pdftotext and
   pdffonts):
   - an unstyled note with – × “ ” ‘ ’ ÿ é ß Œ gets them all back from
