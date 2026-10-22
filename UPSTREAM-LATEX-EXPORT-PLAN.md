@@ -745,6 +745,32 @@ growth is measured against the agreed 12–17 MB.
       and 3.** In the `\input` and preamble cases, all three ran. A styled
       note's failure costs about three passes; typeset could stop at the
       first pass that writes no PDF.
+- **p3e `latexpdf-p3e-watchdog`** (Clew-boss, 2026-10-22: p3c's
+  watchdog finding and p3d's third finding).
+  - **The watchdog at 60 s** (`timeoutMs`, typeset.js's SILENCE_MS). That is
+    past a slow iPad's silent stretch and well inside Clew's three
+    minutes, so it is a safety net, not the limit.
+    - Its stop is said in desktop's words: "PDF via LaTeX failed —
+      LuaLaTeX ran (…). First error: TeX went 60 seconds without any output
+      and was stopped".
+  - **A first pass that writes no PDF ends the export**, with that pass's
+    error. A pass with errors that still writes a PDF goes on (desktop's
+    nonstopmode rule).
+  - **Tests.**
+    - With the stand-in library: the instance is made with `timeoutMs`
+      60 000, and a stall is said in desktop's words and disposed. A
+      failed first pass gives one pass and its log's error; errors with a
+      PDF still give three passes.
+    - With the real engine: the restricted `\input` and preamble cases now
+      run one pass.
+    - Mutants, each failing: no `timeoutMs`; the library's own message; no
+      early stop.
+  - **Simulator** (`limit`).
+    - The printing loop, and now the silent one too, stop at Clew's 30 s.
+    - With Clew's limit at 90 s, the silent loop is stopped at 60 s in
+      desktop's words, and its page goes.
+  - The second finding of p3d, naming TeX's not-found files as warnings,
+    goes on the owner's later list, for both hosts.
 - **Still owed before P3:** the device memory check (below), the mini
   first.
 

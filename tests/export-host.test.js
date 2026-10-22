@@ -15,7 +15,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { exportJob, EXPORT_RESTRICTED_CWD } from '../src/shim/export-job.js';
 import { exportOutputs, isSafeExportPath } from '../src/export/outputs.js';
 import { texReferences } from '../src/shim/export-references.js';
-import { typeset, DOCUMENT_BUNDLES, MAX_PASSES } from '../src/export/typeset.js';
+import { typeset, DOCUMENT_BUNDLES, MAX_PASSES, SILENCE_MS } from '../src/export/typeset.js';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 
@@ -428,6 +428,7 @@ test('PDF via LaTeX in a restricted vault: `\\input{/etc/hosts}` in a note fails
 		assert.equal(r.ok, false, 'no PDF');
 		assert.match(r.error, /^PDF via LaTeX failed — LuaLaTeX ran .*First error: ! LaTeX Error: File `\/etc\/hosts\.tex' not found\./, 'in desktop\'s words (pdfViaLatexFailure)');
 		assert.deepEqual(r.texRuns[0].files, [], 'TeX was handed nothing');
+		assert.equal(r.texRuns.length, 1, 'the first pass wrote no PDF: no second or third');
 		assert.ok(onlyOwnArtifacts(r.texRuns));
 		assert.deepEqual(r.vaultReads, []);
 		for (const line of hosts) assert.ok(r.texRuns.every((run) => !run.log.includes(line)), `no log holds "${line}"`);
@@ -470,6 +471,7 @@ test('PDF via LaTeX in a restricted vault: a `LaTeX preamble` header naming an a
 		assert.equal(r.ok, false, 'no PDF');
 		assert.match(r.error, /First error: ! LaTeX Error: File `.*secret\.tex' not found\./s);
 		assert.ok(r.texRuns[0].log.replace(/\n/g, '').includes(`File \`${top}/outside/secret.tex' not found`), 'TeX looked for that very path');
+		assert.equal(r.texRuns.length, 1, 'the first pass wrote no PDF: no second or third');
 		assert.ok(onlyOwnArtifacts(r.texRuns), 'and was handed nothing of the device\'s');
 		assert.ok(r.texRuns.every((run) => !run.log.includes(MARKER)), 'the marker is in no log');
 		assert.ok(!r.error.includes(MARKER));
@@ -478,21 +480,23 @@ test('PDF via LaTeX in a restricted vault: a `LaTeX preamble` header naming an a
 
 // typeset() against a stand-in library: what it asks mp-tikz-wasm for, in what
 // order, and what it refuses — without TeX.
-const fakeLib = ({ aux = '', idx = false, rerun = 0, pdf = true } = {}) => {
+const fakeLib = ({ aux = '', idx = false, rerun = 0, pdf = true, status = 'ok', firstFails = false, stall = false } = {}) => {
 	const calls = [];
 	let runs = 0;
 	const lib = {
 		DEFAULT_BUNDLES: ['core'],
 		MetaPost: {
 			create: async (options) => {
-				calls.push(['create', options.bundles.join(',')]);
+				calls.push(['create', options.bundles.join(','), options.timeoutMs]);
 				return {
 					latex: async (tex, o) => {
 						runs += 1;
 						calls.push(['latex', o.engine, Object.keys(o.files).sort().join(',')]);
+						if (stall) throw new Error('mp-tikz-wasm: latex made no progress for 60000 ms; worker terminated');
 						const artifacts = { 'doc.aux': new TextEncoder().encode(aux + `%pass${runs}`) };
 						if (idx) artifacts['doc.idx'] = new Uint8Array(1);
-						return { status: 'ok', pdf: pdf ? new Uint8Array([37, 80, 68, 70]) : undefined, artifacts,
+						if (firstFails) return { status: 'fatal', pdf: undefined, artifacts, texLog: '! LaTeX Error: File `/etc/hosts.tex\' not found.\n\nType X to quit or <RETURN> to proceed,\n' };
+						return { status, pdf: pdf ? new Uint8Array([37, 80, 68, 70]) : undefined, artifacts,
 							texLog: runs <= 2 + rerun ? (runs > 2 ? 'Rerun to get cross-references right' : '') : '' };
 					},
 					bibtex: async (o) => { calls.push(['bibtex', Object.keys(o.files).sort().join(',')]); return { artifacts: { 'doc.bbl': 'bbl' }, diagnostics: [{ message: 'warning$ -- empty year' }] }; },
@@ -535,4 +539,32 @@ test('typeset: latexmk\'s passes over a NEW instance per export, disposed; BibTe
 	({ lib, calls } = fakeLib());
 	await assert.rejects(typeset({ lib, tex: '\\usepackage{xeCJK}' }), /needs XeLaTeX .* which the iPad's TeX does not have/);
 	assert.equal(calls.length, 0, 'refused before any engine starts');
+});
+
+test('typeset: mp-tikz-wasm\'s stall watchdog at 60 s, a safety net under Clew\'s limit; its stop said in desktop\'s words', async () => {
+	const tex = '\\documentclass{article}\\usepackage{fontspec}\\begin{document}x\\end{document}';
+	let { lib, calls } = fakeLib();
+	await typeset({ lib, tex });
+	assert.equal(SILENCE_MS, 60_000, 'past a slow iPad\'s silent stretch, well inside Clew\'s three minutes');
+	assert.equal(calls[0][2], SILENCE_MS, 'the instance is made with it (`timeoutMs`)');
+
+	({ lib, calls } = fakeLib({ stall: true }));
+	await assert.rejects(typeset({ lib, tex }), (err) => {
+		assert.match(err.message, /^PDF via LaTeX failed — LuaLaTeX ran \(the document needs a Unicode engine.*\)\. First error: TeX went 60 seconds without any output and was stopped$/);
+		assert.doesNotMatch(err.message, /mp-tikz-wasm|worker terminated/, 'not the library\'s words');
+		return true;
+	});
+	assert.deepEqual(calls.map((c) => c[0]), ['create', 'latex', 'dispose'], 'and the instance goes');
+});
+
+test('typeset: a first pass that writes no PDF ends it, said from its log; one that writes a PDF despite errors goes on (desktop\'s nonstopmode rule)', async () => {
+	const tex = '\\documentclass{article}\\usepackage{fontspec}\\begin{document}\\input{/etc/hosts}\\end{document}';
+	let { lib, calls } = fakeLib({ firstFails: true });
+	await assert.rejects(typeset({ lib, tex }), /PDF via LaTeX failed — LuaLaTeX ran .*First error: ! LaTeX Error: File `\/etc\/hosts\.tex' not found\./);
+	assert.deepEqual(calls.map((c) => c[0]), ['create', 'latex', 'dispose'], 'one pass, not three');
+
+	({ lib, calls } = fakeLib({ status: 'error' }));
+	const kept = await typeset({ lib, tex });
+	assert.equal(kept.passes, 3, 'errors with a PDF: the passes go on, and the PDF is the result');
+	assert.deepEqual(calls.map((c) => c[0]), ['create', 'latex', 'latex', 'latex', 'dispose']);
 });

@@ -20,10 +20,11 @@
 //   limit       With the Debug limit at 30 s (ClewExportTimeout), a note whose
 //               preamble loops forever, printing a line every half second or
 //               so, is stopped by Clew's limit ("took too long"); its page's
-//               process is gone and no job folder is left. A loop that prints
-//               nothing is stopped sooner, at 20 s, by mp-tikz-wasm's own
-//               stall watchdog: in the export host it runs TeX in a worker of
-//               its own, which the watchdog ends after 20 s without a line.
+//               process is gone and no job folder is left. So is a loop that
+//               prints nothing: mp-tikz-wasm's own stall watchdog (in the
+//               export host TeX runs in a worker of its own) waits 60 s
+//               without a line (typeset.js's SILENCE_MS). With the limit at
+//               90 s, the watchdog stops it at 60 s, said in desktop's words.
 //   restricted  §5's cases: `\input{/etc/hosts}`; images by a device path;
 //               an embed of a link leading out of the vault (not listed);
 //               a link that was inside when the vault was listed and leads
@@ -51,6 +52,8 @@ const ONLY = option('--only', 'texmf,limit,restricted').split(',');
 const OUT = option('--out', fs.mkdtempSync(path.join(os.tmpdir(), 'clew-sim-pdf-')));
 const APP = 'org.jmckalex.clew.ios';
 const LIMIT = 30;
+/** The Debug limit for the launch that lets the watchdog (60 s) stop a silent loop first. */
+const WATCHDOG_LIMIT = 90;
 const VAULT_NAME = 'PDF Checks';
 const MARKER = 'CLEWOUTSIDEMARKER';
 process.env.DEVELOPER_DIR ??= '/Applications/Xcode.app/Contents/Developer';
@@ -315,9 +318,22 @@ async function main() {
 			`job folders left: ${left.length}; the export host's process: ${JSON.stringify(loopHost)}`);
 		const silent = run.result?.silent ?? {};
 		const silentHost = hostOf(run, 'silent');
-		verdict('limit: a loop that prints nothing is stopped at 20 s by mp-tikz-wasm\'s stall watchdog; its page goes too',
-			silent.ok === false && /made no progress for 20000 ms/.test(silent.error ?? '') && silent.ms < LIMIT * 1000 && silentHost?.gone !== null,
+		verdict(`limit: a loop that prints nothing is stopped by Clew's limit at ${LIMIT} s too (the watchdog waits 60 s); its page goes`,
+			silent.ok === false && new RegExp(`took too long \\(more than ${LIMIT} seconds\\) and was stopped`).test(silent.error ?? '') && silent.ms >= LIMIT * 1000 && silent.ms < (LIMIT + 10) * 1000 && silentHost?.gone !== null,
 			`${silent.error ?? 'no answer'} after ${((silent.ms ?? NaN) / 1000).toFixed(1)} s; process ${JSON.stringify(silentHost)}`);
+
+		// Clew's limit past the watchdog's: the watchdog stops the silent loop.
+		simctl('spawn', SIM, 'defaults', 'write', APP, 'ClewExportTimeout', '-float', String(WATCHDOG_LIMIT));
+		const late = await launch(smokeScript(`
+			await exportPdf('silent', 'Silent.md');`), { vault, seconds: WATCHDOG_LIMIT + 30, onPhase: copier(data) });
+		simctl('spawn', SIM, 'defaults', 'write', APP, 'ClewExportTimeout', '-float', String(LIMIT));
+		results.watchdog = late;
+		const quiet = late.result?.silent ?? {};
+		const quietHost = hostOf(late, 'silent');
+		verdict(`limit: with Clew's limit at ${WATCHDOG_LIMIT} s, the watchdog stops a silent loop at 60 s, said in desktop's words; its page goes`,
+			quiet.ok === false && /^PDF via LaTeX failed — LuaLaTeX ran \(.*\)\. First error: TeX went 60 seconds without any output and was stopped$/.test(quiet.error ?? '')
+				&& quiet.ms >= 60_000 && quiet.ms < WATCHDOG_LIMIT * 1000 && quietHost?.gone !== null,
+			`${quiet.error ?? 'no answer'} after ${((quiet.ms ?? NaN) / 1000).toFixed(1)} s; process ${JSON.stringify(quietHost)}`);
 	}
 
 	if (ONLY.includes('restricted')) {

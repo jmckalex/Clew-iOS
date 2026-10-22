@@ -2,9 +2,10 @@
 // .tex the export worker built, typeset by mp-tikz-wasm's own TeX as latexmk
 // would typeset it — a pass, BibTeX when the .aux names a database,
 // makeindex when there is an .idx, two more passes, and one more while the
-// log asks for a rerun, five at most — in a NEW engine instance, disposed of
-// at the end (mp-tikz-wasm's sandbox review: /texmf-var is writable by a
-// document, so no instance outlives its export).
+// log asks for a rerun, five at most; a first pass that writes no PDF ends
+// it — in a NEW engine instance, disposed of at the end (mp-tikz-wasm's
+// sandbox review: /texmf-var is writable by a document, so no instance
+// outlives its export).
 //
 // Which engine is desktop's rule, imported (shared/latex-engine.js
 // #chooseLatexEngine, U5) over the two this TeX has: a document that needs
@@ -22,6 +23,8 @@ import { chooseLatexEngine, pdfViaLatexFailure } from '../../vendor/clew/shared/
  *  BibTeX's styles, EB Garamond…). */
 export const DOCUMENT_BUNDLES = ['opentype', 'otf-fonts', 'latex-doc'];
 export const MAX_PASSES = 5;
+/** How long a pass may print nothing before mp-tikz-wasm's watchdog ends it. */
+export const SILENCE_MS = 60_000;
 const RERUN = /Rerun to get|Label\(s\) may have changed|Rerun LaTeX|Please rerun LaTeX|undefined references.*rerun/i;
 
 const text = (bytes) => (bytes ? new TextDecoder().decode(bytes) : '');
@@ -36,22 +39,36 @@ export async function typeset({ lib, tex, inputs = {}, date = 'now' }) {
 	const t0 = Date.now();
 	const choice = chooseLatexEngine(tex, 'auto', { available: ['pdflatex', 'lualatex'], host: 'the iPad\'s TeX' });
 	if (choice.unavailable) throw new Error(choice.refusal);
-	// Nothing here limits a pass. In the export host, mp-tikz-wasm runs TeX
-	// in a worker of its own, whose stall watchdog ends a pass that prints
-	// nothing for 20 s (its `timeoutMs` default): "latex made no progress
-	// for 20000 ms; worker terminated", thrown here. A document that loops
-	// while printing feeds the watchdog; Clew's own limit stops it — three
-	// minutes, ExportHost.swift, which ends the page and with it this worker
+	// Two limits stop a pass that never ends. In the export host,
+	// mp-tikz-wasm runs TeX in a worker of its own, whose stall watchdog
+	// ends a pass that prints nothing for SILENCE_MS (`timeoutMs`; 20 s
+	// unless set, which a slow iPad could reach legitimately): a safety net,
+	// said here in desktop's words. A document that loops while printing
+	// feeds the watchdog; Clew's own limit stops it — three minutes,
+	// ExportHost.swift, which ends the page and with it this worker
 	// (tools/sim-pdf-checks.mjs, `limit`). Under Node, in-process, there is
 	// no watchdog (0.5.0 declares `texTimeoutMs` and reads it nowhere).
-	const mp = await lib.MetaPost.create({ bundles: [...lib.DEFAULT_BUNDLES, ...DOCUMENT_BUNDLES], logLevel: 'silent' });
+	const mp = await lib.MetaPost.create({ bundles: [...lib.DEFAULT_BUNDLES, ...DOCUMENT_BUNDLES], logLevel: 'silent', timeoutMs: SILENCE_MS });
+	const failure = (o) => new Error(pdfViaLatexFailure({ engine: choice.engine, reason: choice.reason, ...o }));
 	try {
-		const run = (files) => mp.latex(tex, {
-			engine: choice.engine === 'lualatex' ? 'lualatex' : 'latex', output: 'pdf', jobName: 'doc', date, files,
-		});
+		const run = async (files) => {
+			try {
+				return await mp.latex(tex, {
+					engine: choice.engine === 'lualatex' ? 'lualatex' : 'latex', output: 'pdf', jobName: 'doc', date, files,
+				});
+			} catch (err) {
+				if (/made no progress/.test(String(err?.message))) throw failure({ error: `TeX went ${SILENCE_MS / 1000} seconds without any output and was stopped` });
+				throw err;
+			}
+		};
+		const failed = (r) => !r.pdf || r.status === 'fatal';
+		const why = (r) => ({ log: r.texLog, error: r.diagnostics?.find((d) => d.severity === 'error')?.message });
 		const warnings = [];
 		let passes = 1;
 		let r = await run({ ...inputs });
+		// A first pass that wrote no PDF ends it (a file TeX could not find, a
+		// fatal error): the passes after it would only fail again.
+		if (failed(r)) throw failure(why(r));
 		let extra = {};
 		let bibtex = false;
 		let makeindex = false;
@@ -75,9 +92,7 @@ export async function typeset({ lib, tex, inputs = {}, date = 'now' }) {
 			r = await run(r.artifacts);
 			passes += 1;
 		}
-		if (!r.pdf || r.status === 'fatal') {
-			throw new Error(pdfViaLatexFailure({ engine: choice.engine, reason: choice.reason, log: r.texLog, error: r.diagnostics?.find((d) => d.severity === 'error')?.message }));
-		}
+		if (failed(r)) throw failure(why(r));
 		return { pdf: r.pdf, engine: choice.engine, reason: choice.reason, passes, bibtex, makeindex, warnings, ms: Date.now() - t0 };
 	} finally {
 		mp.dispose?.();
