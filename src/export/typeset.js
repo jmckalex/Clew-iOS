@@ -17,12 +17,13 @@
 // figures the build made, the bibliographies the .tex names — never a path
 // of the device's (the owner's (3): every vault may typeset, because nothing
 // outside it reaches the engine). A failure says what desktop's compilePdf
-// says (pdfViaLatexFailure: the engine, why, the log's first error).
+// says (pdfViaLatexFailure: the engine, why, the log's first error, and
+// that error's own help, read first from mp-tikz-wasm's diagnostics).
 
 import { BUILT_IN_TEX, chooseLatexEngine, pdfViaLatexFailure, texMissingFiles, missingFileWarnings } from '../../vendor/clew/shared/latex-engine.js';
 
 /** The bundles a document needs beside the library's default ones, upstream's
- *  (shared/latex-engine.js#BUILT_IN_TEX, with mp-tikz-wasm's 0.5.0 pin):
+ *  (shared/latex-engine.js#BUILT_IN_TEX, with mp-tikz-wasm's 0.5.1 pin):
  *  OpenType (fontspec), otf-fonts (latinmodern-math, which unicode-math falls
  *  back to without Garamond-Math), and latex-doc (natbib, babel, tcolorbox,
  *  BibTeX's styles, EB Garamond…). */
@@ -72,7 +73,7 @@ export async function typeset({ lib, tex, inputs = {}, date = BUILT_IN_TEX.date 
 	// feeds the watchdog; Clew's own limit stops it — three minutes,
 	// ExportHost.swift, which ends the page and with it this worker
 	// (tools/sim-pdf-checks.mjs, `limit`). Under Node, in-process, there is
-	// no watchdog (0.5.0 declares `texTimeoutMs` and reads it nowhere).
+	// no watchdog.
 	const lua = choice.engine === 'lualatex';
 	const source = lua ? LUA_GC + tex : tex;
 	let mp = null;
@@ -99,7 +100,10 @@ export async function typeset({ lib, tex, inputs = {}, date = BUILT_IN_TEX.date 
 			}
 		};
 		const failed = (r) => !r.pdf || r.status === 'fatal';
-		const why = (r) => ({ log: r.texLog, error: r.diagnostics?.find((d) => d.severity === 'error')?.message });
+		// With the diagnostics: the first error's help is read there first
+		// (shared/latex-engine.js#firstLatexHelp, Clew-app 461cc46 and 8ea4594),
+		// the same words the Mac reads from its log.
+		const why = (r) => ({ log: r.texLog, diagnostics: r.diagnostics, error: r.diagnostics?.find((d) => d.severity === 'error')?.message });
 		const warnings = [];
 		let passes = 1;
 		let r = await run({});
@@ -137,8 +141,9 @@ export async function typeset({ lib, tex, inputs = {}, date = BUILT_IN_TEX.date 
 		// TeX goes on past a file it cannot find (nonstopmode) and makes the
 		// PDF without it: the last pass's not-found lines, said as desktop's
 		// compilePdf says them (shared/latex-engine.js#texMissingFiles, the
-		// owner's A1). Its terminal log, whole under LuaLaTeX; the log as
-		// bytes once mp-tikz-wasm hands it (texLogBytes); else its diagnostics.
+		// owner's A1). The .log as TeX wrote it, bytes (texLogBytes, from
+		// mp-tikz-wasm 0.5.1), so a letter pdfTeX split across two lines is
+		// whole; else its terminal log, whole under LuaLaTeX; else its diagnostics.
 		warnings.push(...missingFileWarnings(texMissingFiles(r.texLogBytes ?? (r.log || r.diagnostics || []))));
 		return { pdf: r.pdf, engine: choice.engine, reason: choice.reason, passes, bibtex, makeindex, warnings, ms: Date.now() - t0 };
 	} finally {

@@ -108,10 +108,16 @@ export function runInThisContext(code) {
 // callers catch it and say their own words (mermaid's, @video's).
 const noProcesses = (api) => (command) => {
 	const program = String(command ?? '').trim().split(/\s+/)[0].replace(/^["']|["']$/g, '') || 'An external program';
-	const err = new Error(`[clew-ios] ${program} cannot run on iOS: Clew runs no external programs there `
-		+ '(Mathematica\'s wolframscript, mermaid-cli, ffmpeg). MetaPost, TikZ and PDF via LaTeX run on Clew\'s own TeX instead.');
+	const said = `${program} cannot run on iOS: Clew runs no external programs there `
+		+ '(Mathematica\'s wolframscript, mermaid-cli, ffmpeg). MetaPost, TikZ and PDF via LaTeX run on Clew\'s own TeX instead.';
+	const err = new Error(`[clew-ios] ${said}`);
 	err.code = 'ENOENT';
 	err.api = api;
+	// What the user reads. jmarkdown's Mathematica (794cc9c) says a failed run
+	// in its own words, never the error's message (on a Mac that is the
+	// command line, naming the user's folders), so the iPad's words would
+	// become "ENOENT"; scripts/build.js has its failureMessage say this first.
+	err.hostMessage = said;
 	throw err;
 };
 export const execSync = noProcesses('child_process.execSync');

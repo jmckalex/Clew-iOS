@@ -548,7 +548,7 @@ test('PDF via LaTeX (p3f): a pass an instance and the eager-GC line change nothi
 
 // typeset() against a stand-in library: what it asks mp-tikz-wasm for, in what
 // order, and what it refuses — without TeX.
-const fakeLib = ({ aux = '', idx = false, rerun = 0, pdf = true, status = 'ok', firstFails = false, stall = false } = {}) => {
+const fakeLib = ({ aux = '', idx = false, rerun = 0, pdf = true, status = 'ok', firstFails = false, stall = false, help = null } = {}) => {
 	const calls = [];
 	let runs = 0;
 	const lib = {
@@ -563,7 +563,8 @@ const fakeLib = ({ aux = '', idx = false, rerun = 0, pdf = true, status = 'ok', 
 						if (stall) throw new Error('mp-tikz-wasm: latex made no progress for 60000 ms; worker terminated');
 						const artifacts = { 'doc.aux': new TextEncoder().encode(aux + `%pass${runs}`) };
 						if (idx) artifacts['doc.idx'] = new Uint8Array(1);
-						if (firstFails) return { status: 'fatal', pdf: undefined, artifacts, texLog: '! LaTeX Error: File `/etc/hosts.tex\' not found.\n\nType X to quit or <RETURN> to proceed,\n' };
+						if (firstFails) return { status: 'fatal', pdf: undefined, artifacts, texLog: '! LaTeX Error: File `/etc/hosts.tex\' not found.\n\nType X to quit or <RETURN> to proceed,\n',
+							diagnostics: help ? [{ severity: 'error', message: 'LaTeX Error: File `/etc/hosts.tex\' not found.', help }] : undefined };
 						return { status, pdf: pdf ? new Uint8Array([37, 80, 68, 70]) : undefined, artifacts,
 							texLog: runs <= 2 + rerun ? (runs > 2 ? 'Rerun to get cross-references right' : '') : '' };
 					},
@@ -644,6 +645,39 @@ test('typeset: mp-tikz-wasm\'s stall watchdog at 60 s, a safety net under Clew\'
 		return true;
 	});
 	assert.deepEqual(calls.map((c) => c[0]), ['create', 'latex', 'dispose'], 'and the instance goes');
+});
+
+test('typeset: a failure says the first error\'s help from mp-tikz-wasm\'s diagnostics (Clew-app 461cc46: pdfViaLatexFailure reads them first)', async () => {
+	const tex = '\\documentclass{article}\\usepackage{fontspec}\\begin{document}\\input{/etc/hosts}\\end{document}';
+	const { lib } = fakeLib({ firstFails: true, help: ['The file was not found on the input path.', '', 'A second paragraph.'] });
+	await assert.rejects(typeset({ lib, tex }), (err) => {
+		assert.match(err.message, /First error: ! LaTeX Error: File `\/etc\/hosts\.tex' not found\. — The file was not found on the input path\.$/,
+			'the first paragraph of its help, after the error; the log\'s "Type X …" is no help');
+		return true;
+	});
+});
+
+// The iPad's whole message beside the Mac's, through typeset itself and the
+// pinned build: Clew-app's tests/latex-failure-help.test.js#SIDE_BY_SIDE,
+// whose words are what the Mac's latexmk log gives.
+const SIDE_BY_SIDE = [
+	['a missing package', '\\documentclass{article}\n\\usepackage{nosuchpackagexyz}\n\\begin{document}\nText.\n\\end{document}\n',
+		'First error: ! LaTeX Error: File `nosuchpackagexyz.sty\' not found.'],
+	['no \\begin{document}', '\\documentclass{article}\nText.\n\\end{document}\n',
+		'First error: ! LaTeX Error: Missing \\begin{document}. — You\'re in trouble here.'],
+	['a primitive \\input of a missing file', '\\documentclass{article}\n\\begin{document}\n\\input nosuchfilexyz\n\\end{document}\n',
+		'First error: ! I can\'t find file `nosuchfilexyz\'. l.3 \\input nosuchfilexyz'],
+];
+test('PDF via LaTeX\'s failure through the pinned build says what the Mac says (Clew-app 9d21f55, 8ea4594): the first error whole, its own help or none, no terminal instructions', { skip: !latexDoc && 'mptikz-assets/ has no latex-doc bundle' }, async () => {
+	const lib = await import(pathToFileURL(path.join(root, 'mptikz-assets', 'index.js')).href);
+	for (const [what, tex, words] of SIDE_BY_SIDE) {
+		await assert.rejects(typeset({ lib, tex }), (err) => {
+			// pdfLaTeX, as chooseLatexEngine picks for these: the same words.
+			assert.match(err.message, /^PDF via LaTeX failed — pdfLaTeX ran \(nothing in the document needs a Unicode engine\)\. /, what);
+			assert.equal(err.message.replace(/^PDF via LaTeX failed — pdfLaTeX ran \([^)]*\)\. /, ''), words, what);
+			return true;
+		}, what);
+	}
 });
 
 test('typeset: a first pass that writes no PDF ends it, said from its log; one that writes a PDF despite errors goes on (desktop\'s nonstopmode rule)', async () => {
@@ -763,5 +797,15 @@ test('the iPad\'s LaTeX export (the a14ec13 sync): Obsidian\'s %% comments left 
 		assert.match(prose.tex, /EBGaramond/, 'the rest of the style kept');
 		const maths = exportNote(vault, 'Maths.md');
 		assert.ok(maths.tex.includes(MATH_FONT_LINE), 'with maths, kept');
+	});
+});
+
+test('a Mathematica block in a trusted vault\'s LaTeX export: warned in the iPad\'s words (jmarkdown 794cc9c warns a failed block; scripts/build.js gives them)', { skip: !staged && 'mptikz-assets/ is not staged' }, () => {
+	withVault({ 'Wolfram.md': '# Wolfram\n\nBefore.\n\n@begin(Mathematica)\nPlot[Sin[x], {x, 0, Pi}]\n@end(Mathematica)\n\nAfter.\n' }, (vault) => {
+		const { summary, tex } = exportNote(vault, 'Wolfram.md');
+		assert.ok(summary.warnings.some((w) => /^Mathematica failed: wolframscript cannot run on iOS: Clew runs no external programs there/.test(w)),
+			`the warning: ${JSON.stringify(summary.warnings)}`);
+		assert.ok(!summary.warnings.some((w) => /ENOENT|\[clew-ios\]/.test(w)), 'never the bare code or the log prefix');
+		assert.match(tex, /Before\.[\s\S]*After\./, 'the rest of the note exports');
 	});
 });

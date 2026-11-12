@@ -76,6 +76,19 @@ const enginePatches = {
 				+ '};\n';
 			return { contents: helper + source, loader: 'js' };
 		});
+		// A failed Mathematica run says jmarkdown's own words (794cc9c's
+		// failureMessage), never the error's message: on a Mac that is the
+		// command line, naming the user's folders. On iOS the run never starts,
+		// and the words were "ENOENT"; the shim's error carries what the iPad
+		// says instead (src/worker/shims/misc.js#noProcesses, `hostMessage`).
+		// In the block's "Show Error Log" and the export's warning alike.
+		// (Upstream candidate: failureMessage reads a host's own words.)
+		builder.onLoad({ filter: /vendor\/jmarkdown\/src\/mathematica\.js$/ }, (args) => ({
+			contents: patched('mathematica.js', fs.readFileSync(args.path, 'utf8'),
+				'function failureMessage(error) {\n',
+				'function failureMessage(error) {\n\tif (typeof error?.hostMessage === \'string\') return error.hostMessage; // iOS (scripts/build.js)\n'),
+			loader: 'js',
+		}));
 		// algebra.js's expressions.js assigns `Term = function …` without a
 		// declaration — a sloppy-mode global under real Node CJS, a
 		// ReferenceError inside the (strict) bundle. Declare it.
