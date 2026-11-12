@@ -8,6 +8,7 @@
 //   ../Clew-app/vendor/jmarkdown/{src,package.json}  -> vendor/jmarkdown/
 //   ../Clew-app/vendor/embedpdf -> vendor/embedpdf/  (the owner's OCG viewer build)
 //   ../Clew-app/vendor/default-stamps -> vendor/default-stamps/  (the stamp tool's library)
+//   ../Clew-app/vendor/material-icons -> vendor/material-icons/  (the file explorer's icons)
 //   ../Clew-app/src/{renderer,shared,preview-client,engine,main,excalidraw} -> vendor/clew/
 //   ../Clew-app/demo-vault -> seed-vault/   (the bundled starter vault)
 import fs from 'node:fs';
@@ -51,6 +52,13 @@ copyDir(path.join(upstream, 'vendor', 'embedpdf'), path.join(root, 'vendor', 'em
 // upstream since 88b6dd2 so the stamp tool never asks jsdelivr. Served at
 // __clew_assets__/stamps (SchemeHandler), as desktop's protocol does.
 copyDir(path.join(upstream, 'vendor', 'default-stamps'), path.join(root, 'vendor', 'default-stamps'));
+
+// The file explorer's icons (Material Icon Theme 5.35.0, MIT; upstream
+// cd39a81): 631 SVGs with the set's LICENSE and VENDOR.md, written upstream
+// by scripts/vendor-file-icons.js. renderer/lib/file-icons.js asks for
+// file-icons/<icon>.svg beside the app page; scripts/build.js#stageStatic
+// copies them there.
+copyDir(path.join(upstream, 'vendor', 'material-icons'), path.join(root, 'vendor', 'material-icons'));
 
 for (const dir of ['renderer', 'shared', 'preview-client', 'engine', 'main', 'excalidraw']) {
 	copyDir(path.join(upstream, 'src', dir), path.join(root, 'vendor', 'clew', dir));

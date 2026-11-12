@@ -61,6 +61,28 @@ clew-file-explorer {
    lib/tree-window.js). Only the rows on screen exist. */
 .file-tree-sizer { position: relative; }
 .file-tree-sizer > .tree-item { position: absolute; left: 0; right: 0; }
+/* A folder's contents a level in (the owner's ask, 2026-11-12): each row is
+   --tree-indent further right than its folder; every row has the chevron's
+   12px slot, a file's empty, so siblings' icons and names line up and a
+   child's icon starts where its folder's ends. Under each ancestor's chevron
+   a 1px guide, drawn by the row for every level above it — consecutive rows
+   join them into one line down a folder's contents, ending at its last. */
+.file-tree-sizer > .tree-item {
+	--tree-pad: 8px;
+	--tree-indent: 16px;
+	padding-left: calc(var(--tree-pad) + var(--tree-depth, 0) * var(--tree-indent));
+}
+.file-tree-sizer > .tree-item::before {
+	content: '';
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: calc(var(--tree-pad) + 5px);
+	width: calc(var(--tree-depth, 0) * var(--tree-indent));
+	background: repeating-linear-gradient(to right,
+		var(--clew-border) 0 1px, transparent 1px var(--tree-indent));
+	pointer-events: none;
+}
 .tree-item {
 	display: flex;
 	align-items: center;
@@ -83,9 +105,21 @@ clew-file-explorer {
 .tree-item.is-folder { color: var(--clew-text-normal); font-weight: 600; }
 .tree-chevron {
 	flex: none;
+	display: inline-flex;
+	justify-content: center;
 	width: 12px;
 	font-size: 10px;
 	color: var(--clew-text-faint);
+}
+/* Material Icon Theme's, by name (lib/file-icons.js); drawn at the 16px the
+   set is designed for. Never a drag source or a pointer target: the row is. */
+.tree-icon {
+	flex: none;
+	width: 16px;
+	height: 16px;
+	margin-right: 2px;
+	-webkit-user-drag: none;
+	pointer-events: none;
 }
 .tree-name { overflow: hidden; text-overflow: ellipsis; }
 .tree-rename-input {

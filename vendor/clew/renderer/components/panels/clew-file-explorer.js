@@ -25,6 +25,7 @@ import { bookmarkStore } from '../../state/bookmark-store.js';
 import { settingsStore } from '../../state/settings-store.js';
 import * as actions from '../../commands/actions.js';
 import { flattenTree, visibleRange, scrollTopFor } from '../../lib/tree-window.js';
+import { fileIconName, folderIconName, fileIconUrl } from '../../lib/file-icons.js';
 
 class ClewFileExplorer extends ClewElement {
 	#collapsed = new Set();
@@ -41,6 +42,7 @@ class ClewFileExplorer extends ClewElement {
 	#painted = null;     // the range currently in the DOM
 	#renaming = false;   // an inline rename must not be repainted away
 	#resizeObserver = null;
+	#theme = null;       // the page's theme the painted icons were chosen for
 
 	subscribe() {
 		this.listen(vaultStore, 'tree-changed', () => this.render());
@@ -54,6 +56,13 @@ class ClewFileExplorer extends ClewElement {
 		this.listen(workspaceStore, 'workspace-restored', () => {
 			this.#collapsed = new Set(workspaceStore.collapsedFolders);
 			this.render();
+		});
+		// A few icons have a variant for a light page (lib/file-icons.js).
+		// main.js sets body[data-theme] on this same event, and listened first.
+		this.listen(settingsStore, 'settings-changed', () => {
+			if ((document.body.dataset.theme ?? 'dark') === this.#theme) return;
+			this.#painted = null;
+			this.#paint();
 		});
 	}
 
@@ -135,10 +144,15 @@ class ClewFileExplorer extends ClewElement {
 		const probe = document.createElement('div');
 		probe.className = 'tree-item is-file';
 		probe.style.visibility = 'hidden';
+		const chevron = document.createElement('span');
+		chevron.className = 'tree-chevron';
+		const iconEl = document.createElement('img');
+		iconEl.className = 'tree-icon';
+		iconEl.alt = '';
 		const name = document.createElement('span');
 		name.className = 'tree-name';
 		name.textContent = 'Ag';
-		probe.append(name);
+		probe.append(chevron, iconEl, name);
 		this.#sizer.append(probe);
 		const height = probe.offsetHeight;
 		probe.remove();
@@ -156,6 +170,7 @@ class ClewFileExplorer extends ClewElement {
 		});
 		if (this.#painted && this.#painted.first === range.first && this.#painted.last === range.last) return;
 		this.#painted = range;
+		this.#theme = document.body.dataset.theme ?? 'dark';
 		const rows = [];
 		for (let i = range.first; i < range.last; i++) {
 			const { entry, depth } = this.#rows[i];
@@ -197,19 +212,33 @@ class ClewFileExplorer extends ClewElement {
 		return button;
 	}
 
-	/** One row. The same element the explorer always drew, positioned by index. */
+	/**
+	 * One row, positioned by index. Its depth is a CSS variable (panels.css
+	 * indents by it and draws a guide under each ancestor's chevron); every
+	 * row has a chevron's slot, a file's empty, so that a folder's contents
+	 * stand a level in from its name rather than under it, and an icon for
+	 * what it is (the owner's ask, 2026-11-12).
+	 */
 	#buildRow(entry, depth) {
 		const row = document.createElement('div');
 		row.className = `tree-item is-${entry.type}`;
 		row.dataset.path = entry.path;
-		row.style.paddingLeft = `${10 + depth * 18}px`;
+		row.style.setProperty('--tree-depth', depth);
 
-		if (entry.type === 'folder') {
-			const chevron = document.createElement('span');
-			chevron.className = 'tree-chevron';
-			chevron.append(icon(this.#collapsed.has(entry.path) ? 'chevron-right' : 'chevron-down'));
-			row.append(chevron);
-		}
+		const folder = entry.type === 'folder';
+		const open = folder && !this.#collapsed.has(entry.path);
+		const chevron = document.createElement('span');
+		chevron.className = 'tree-chevron';
+		if (folder) chevron.append(icon(open ? 'chevron-down' : 'chevron-right'));
+		const typeIcon = document.createElement('img');
+		typeIcon.className = 'tree-icon';
+		typeIcon.alt = '';
+		typeIcon.draggable = false;
+		// A host that has not copied the icons gets an empty slot, never a
+		// broken image.
+		typeIcon.addEventListener('error', () => { typeIcon.style.visibility = 'hidden'; }, { once: true });
+		typeIcon.src = fileIconUrl(folder ? folderIconName(open) : fileIconName(entry.name), this.#theme);
+		row.append(chevron, typeIcon);
 
 		const name = document.createElement('span');
 		name.className = 'tree-name';
