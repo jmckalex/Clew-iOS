@@ -358,7 +358,16 @@ function number_theorems($) {
 		const $firstP = $p.children('p').first();
 		if ($firstP.length) $firstP.prepend(labelHtml);
 		else $p.prepend(labelHtml);
-		$p.append('<span class="qed">&#8718;</span>');
+		// The ∎ ends the proof's last paragraph, where amsthm puts its □:
+		// floated right (jmarkdown.css), it sits on the proof's own last line.
+		// Appended after that paragraph, as it was, it floated out of the proof
+		// and onto the first line of whatever came next (found by Clew-app). A
+		// proof that ends in anything else — a list, a code block — or has no
+		// paragraph keeps it after its last element, as before.
+		const qedHtml = '<span class="qed">&#8718;</span>';
+		const $last = $p.contents().filter((j, node) => node.type !== 'comment' && !(node.type === 'text' && !node.data.trim())).last();
+		if ($last.is('p')) $last.append(qedHtml);
+		else $p.append(qedHtml);
 	});
 }
 

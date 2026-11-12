@@ -28,6 +28,28 @@ div.jmd-refused {
 }
 `;
 
+// A failure marker (`jmd-error` with `data-jmd-error`, note-code.js
+// noteCodeError: a document's code that ran and threw, an inline Mathematica
+// run that failed) is an error box, in the colours of a failed block's
+// (.tikz-error) — a span, so it sits in its line. Added to a page that has
+// one only, as REFUSAL_CSS is. A refusal is a `jmd-error` too, with
+// `data-jmd-refused`, and keeps its quieter style.
+const ERROR_CSS = `
+.jmd-error[data-jmd-error] {
+	border: 1px solid #ff6b6b;
+	background-color: #fff5f5;
+	border-radius: 4px;
+	color: #d63031;
+	font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+	font-size: 0.85em;
+	padding: 0 0.4em;
+}
+div.jmd-error[data-jmd-error] {
+	padding: 10px 15px;
+	margin: 10px 0;
+}
+`;
+
 export function processTemplate(content) {
 	const default_template = fs.readFileSync(path.join(configManager.get('Jmarkdown app directory'), 'default-template.html.mustache'), 'utf8');
 	const biblify_template = fs.readFileSync(path.join(configManager.get('Jmarkdown app directory'), 'Biblify.js.mustache'), 'utf8');
@@ -36,7 +58,10 @@ export function processTemplate(content) {
 	let config = { ...configManager.getConfigForMustache() };
 	config = replaceSpacesInKeys(config);
 	config['Highlight_src'] = Mustache.render(config['Highlight_src'], config);
-	config['Jmarkdown_css'] = content.includes('class="jmd-error jmd-refused"') ? jmarkdown_css + REFUSAL_CSS : jmarkdown_css;
+	let page_css = jmarkdown_css;
+	if (content.includes('class="jmd-error jmd-refused"')) page_css += REFUSAL_CSS;
+	if (content.includes('class="jmd-error" data-jmd-error=')) page_css += ERROR_CSS;
+	config['Jmarkdown_css'] = page_css;
 	config['Custom_elements'] = custom_elements;
 	config['Content'] = content;
 	// The runtime Biblify client reads ONE file: with several bibliographies

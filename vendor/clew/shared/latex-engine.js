@@ -97,12 +97,28 @@ function chooseEngine(tex, setting) {
 	return { engine: 'pdflatex', reason: 'nothing in the document needs a Unicode engine' };
 }
 
-/** The first error in a TeX log (`! …` and the line after), or ''. */
+// A package's or class's error goes on over lines marked with its name —
+// `(fontspec)` and the message's next words — LaTeX3's and \PackageError's.
+const CONTINUED = /^! (?:Fatal )?(?:(?:Package|Class|Module) (\S+)|(LaTeX)) Error:/;
+
+/** The first error in a TeX log (`! …` and up to two lines after it, to a
+ *  blank line — a primitive error's `l.N` context), or '': its message whole
+ *  over its `(name)` lines, joined without the marker. TeX writes its terminal
+ *  instructions after that blank line ("Type X to quit or <RETURN> to
+ *  proceed," under a missing package), so none is in it. */
 export function firstLatexError(log) {
 	const lines = String(log ?? '').split('\n');
 	const at = lines.findIndex((l) => l.startsWith('!'));
 	if (at === -1) return '';
-	return lines.slice(at, at + 3).map((l) => l.trim()).filter(Boolean).join(' ').replace(/\s+/g, ' ').slice(0, 300);
+	const name = CONTINUED.exec(lines[at]);
+	const marker = name ? `(${name[1] ?? name[2]})` : null;
+	let end = at + 1;
+	while (marker && end < lines.length && lines[end].startsWith(marker)) end++;
+	const message = [lines[at], ...lines.slice(at + 1, end).map((l) => l.slice(marker.length))];
+	const after = lines.slice(end, end + 2);
+	const blank = after.findIndex((l) => !l.trim());
+	return [...message, ...(blank === -1 ? after : after.slice(0, blank))].map((l) => l.trim()).filter(Boolean)
+		.join(' ').replace(/\s+/g, ' ').slice(0, 300);
 }
 
 // TeX's transcript breaks its lines at max_print_line, 79 — counted in BYTES
@@ -146,7 +162,7 @@ function unwrapLog(log) {
 	return lines;
 }
 // Every way a TeX run that went on says a file was not there (measured, TeX
-// Live 2025 and mp-tikz-wasm 0.5.0, pdfLaTeX and LuaLaTeX): graphicx's
+// Live 2025 and mp-tikz-wasm 0.5.0 and 0.5.1, pdfLaTeX and LuaLaTeX): graphicx's
 // `LaTeX Warning: File `x' not found on input line N.`, the driver's
 // `! Package luatex.def Error: File `x' not found: using draft setting.`, and
 // `! LaTeX Error: File `x' not found.` for a name it tried every extension on.
@@ -160,12 +176,12 @@ const NOT_FOUND = /File `([^']+)' not found/;
  * read (`on input line N`, or the error's `l.N`).
  *
  * @param {Uint8Array | string | { message: string, line?: number }[]} source -
- *   the run's .log AS BYTES where it can be read so (latexmk's on a desktop:
- *   pdfTeX cuts a letter's bytes at a line break), else as text
- *   (mp-tikz-wasm's `result.log` on the iPad: whole under LuaLaTeX; under its
- *   pdfTeX a letter cut at a break is already lost in 0.5.0's string), or
- *   else mp-tikz-wasm's `diagnostics`, whose messages 0.5.0 cuts at TeX's line
- *   break (a long path then reads short)
+ *   the run's .log AS BYTES where it can be read so (latexmk's on a desktop,
+ *   mp-tikz-wasm's `result.texLogBytes` from 0.5.1: pdfTeX cuts a letter's
+ *   bytes at a line break), else as text (mp-tikz-wasm's `result.log`: whole
+ *   under LuaLaTeX; under its pdfTeX a letter cut at a break is already lost
+ *   in the string), or else mp-tikz-wasm's `diagnostics` (whole from 0.5.1;
+ *   0.5.0 cut their messages at TeX's line break, and a long path read short)
  * @returns {{ file: string, line: number | null }[]}
  */
 export function texMissingFiles(source) {
@@ -209,14 +225,97 @@ const MISSING_WARNING = /^PDF via LaTeX: TeX could not find the file "(.+)", so 
  *  says them by name, not as "other"). */
 export const missingFileOf = (warning) => MISSING_WARNING.exec(String(warning))?.[1] ?? null;
 
+// What TeX says to a person at a terminal, not to a reader of a failure — how
+// to answer it there, which in nonstop mode no one does: dropped from the help,
+// line by line, each a whole sentence (LaTeX writes "You're in trouble here.
+// Try typing  <return>  to proceed." on one line, and the first sentence
+// stays). TeX's explanatory sentences stay as written ("type `I' and the
+// correct spelling" among them). Only what a real log or the pinned
+// mp-tikz-wasm's diagnostics put where the help is read (2026-11-06): the
+// rest of TeX's terminal lines — "Type  H <return>  for immediate help.",
+// "Type X to quit or <RETURN> to proceed," and the like — stand before an
+// error's context or between two errors, where no help is read.
+const TERMINAL_INSTRUCTIONS = new RegExp([
+	String.raw`Try typing\s+<return>\s+to proceed\.?`,
+	String.raw`If that doesn't work, type\s+X\s+<return>\s+to quit\.?`,
+	String.raw`Type\s+I\s+<command>\s+<return>\s+to replace it with another command,?`,
+	String.raw`or\s+<return>\s+to continue without it\.?`,
+	String.raw`\(Press Enter to retry, or Control-D to exit\)`,
+	String.raw`Please type another input file name:?`,
+].join('|'), 'g');
+/** A log line less TeX's terminal instructions, trimmed ('' when that was all). */
+const withoutInstructions = (line) => String(line).replace(TERMINAL_INSTRUCTIONS, '').trim();
+// How a LaTeX3 error (\msg_error: fontspec's, siunitx's, l3keys') says, under
+// its message, where its help is — LaTeX2e writes "Type  H <return>  for
+// immediate help." there, a primitive error nothing. A fatal one (\msg_fatal,
+// "Type <return> to continue.") has only LaTeX3's "LaTeX does not know
+// anything more about this error, sorry." after its context, and the pinned
+// mp-tikz-wasm's log and diagnostics not even that: it gives none.
+const LATEX3_ERROR = /^For immediate help type H <return>\.$/;
+const HELP_MAX = 280;
+
+/**
+ * The first error's help — what TeX says after an error to explain it — its
+ * first paragraph only, less TeX's terminal instructions (the owner's ask via
+ * Clew-boss, 2026-10-22; every instruction, 2026-11-06), or ''. From a log
+ * (the desktop's latexmk .log; mp-tikz-wasm's result.log): in nonstop mode TeX
+ * writes it after the error's context, `l.N …` and the line under it, up to a
+ * blank line or the next error — `! Undefined control sequence.` has "The
+ * control sequence at the end of the top line of your error message was never
+ * \def'ed. …"; a LaTeX3 error writes a blank line first (fontspec's "A font
+ * might not be found for many reasons. …", the owner's "TeX's own help where
+ * TeX gives one", 2026-11-06; until then the Mac showed none, and the iPad,
+ * from 0.5.1's diagnostics, did). Or from mp-tikz-wasm's diagnostics: the
+ * first error's `help`, the same lines.
+ *
+ * @param {string | { severity?: string, help?: string[] }[]} source
+ */
+export function firstLatexHelp(source) {
+	let lines = [];
+	if (Array.isArray(source)) {
+		// The FIRST error's, or none — never a later one's, as from a log: under
+		// a missing package the first has none, and the Emergency stop's is
+		// "*** (cannot \read from terminal in nonstop modes)".
+		const first = source.find((d) => d?.severity === 'error');
+		lines = Array.isArray(first?.help) ? first.help : [];
+	} else {
+		const log = String(source ?? '').split('\n');
+		const at = log.findIndex((l) => l.startsWith('!'));
+		if (at === -1) return '';
+		// The context must be the first error's own: one that only another
+		// error's has (a missing package's `! LaTeX Error: File … not found.`,
+		// then `! Emergency stop.`) has no help to give.
+		const next = log.slice(at + 1, at + 16).findIndex((l) => l.startsWith('!'));
+		const window = log.slice(at + 1, next === -1 ? at + 16 : at + 1 + next);
+		const context = window.findIndex((l) => /^l\.\d+ /.test(l)) + at + 1;
+		// TeX always writes a line under `l.N` (the rest of the source line,
+		// indented — spaces at least); an empty one there means no help.
+		if (context === at || !log[context + 1]) return '';
+		// A LaTeX3 error — LATEX3_ERROR under its message — writes a blank line
+		// after its context and then its help: read past that one line.
+		const latex3 = log.slice(at + 1, context).some((l) => LATEX3_ERROR.test(l));
+		lines = log.slice(context + (latex3 && !log[context + 2]?.trim() ? 3 : 2));
+	}
+	// To a blank line, or the next error's `!` (a missing \input's prompt runs
+	// straight on into its Emergency stop).
+	const end = lines.findIndex((l) => !String(l).trim() || String(l).startsWith('!'));
+	const paragraph = (end === -1 ? lines : lines.slice(0, end)).map(withoutInstructions).filter(Boolean);
+	const help = paragraph.join(' ').replace(/\s+/g, ' ').trim();
+	return help.length > HELP_MAX ? `${help.slice(0, HELP_MAX - 1).replace(/\s+\S*$/, '')}…` : help;
+}
+
 /**
  * What a failed PDF via LaTeX says, on every host: the engine, why it was
- * chosen, and the log's first error — else the run's own error, else that no
- * PDF came out.
+ * chosen, and the log's first error with its help's first paragraph — else
+ * the run's own error, else that no PDF came out. A host whose TeX reports
+ * diagnostics (mp-tikz-wasm's) passes them too: their help is read first.
  *
- * @param {{ engine: string, reason: string, log?: string, error?: string }} o
+ * @param {{ engine: string, reason: string, log?: string, error?: string,
+ *   diagnostics?: { severity?: string, help?: string[] }[] }} o
  */
-export function pdfViaLatexFailure({ engine, reason, log = '', error = '' }) {
-	const first = firstLatexError(log) || error || 'no PDF was produced';
-	return `PDF via LaTeX failed — ${engineName(engine)} ran (${reason}). First error: ${first}`;
+export function pdfViaLatexFailure({ engine, reason, log = '', error = '', diagnostics = null }) {
+	const logError = firstLatexError(log);
+	const first = logError || error || 'no PDF was produced';
+	const help = (diagnostics && firstLatexHelp(diagnostics)) || (logError ? firstLatexHelp(log) : '');
+	return `PDF via LaTeX failed — ${engineName(engine)} ran (${reason}). First error: ${first}${help ? ` — ${help}` : ''}`;
 }
