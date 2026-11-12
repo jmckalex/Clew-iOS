@@ -714,6 +714,12 @@ export function stageStatic() {
 	copy(path.join(root, 'src', 'ios', 'index.html'), path.join(webroot, 'index.html'));
 	copy(path.join(root, 'vendor', 'clew', 'renderer', 'styles'), path.join(webroot, 'styles'));
 	copy(path.join(root, 'src', 'ios', 'styles', 'ios.css'), path.join(webroot, 'styles', 'ios.css'));
+	// The file explorer's icons: renderer/lib/file-icons.js asks for
+	// file-icons/<icon>.svg relative to the app page, so they sit beside
+	// index.html, as desktop's staticDirs puts them beside its page (Clew-app
+	// cd39a81). Material Icon Theme's SVGs, with the set's LICENSE (MIT).
+	// Without them a row's icon hides and leaves its slot empty.
+	copy(path.join(root, 'vendor', 'material-icons'), path.join(webroot, 'file-icons'));
 	// Engine template assets the render service snapshots into each worker.
 	for (const [name, source] of Object.entries({
 		'default-template.html.mustache': 'vendor/jmarkdown/src/default-template.html.mustache',
