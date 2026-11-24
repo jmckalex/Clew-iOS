@@ -445,7 +445,7 @@ function build(view) {
 					const attrs = c.attrs ? doc.sliceString(c.attrs.start ?? c.attrs.from, c.attrs.end ?? c.attrs.to) : '';
 					const entry = numbers().lines.get(doc.lineAt(c.openLine.from).number);
 					widget(c.openLine.from, c.openLine.to, new EnvHeadWidget(name, caption, attrs,
-						c.texOnly ? 'LaTeX only' : c.htmlOnly ? 'HTML only' : '', entry ? headText(entry) : ''));
+						c.texOnly ? 'LaTeX only' : c.htmlOnly ? 'HTML only' : c.clewOnly ? 'Clew only' : '', entry ? headText(entry) : ''));
 					if (c.closeLine && c.closeLine.to > c.closeLine.from) widget(c.closeLine.from, c.closeLine.to, new EnvFootWidget());
 					break;
 				}

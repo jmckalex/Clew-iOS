@@ -41,6 +41,8 @@ import path from 'node:path';
 import { toolchainPath } from './render-service.js';
 import { bibliographyDirs, bibliographyList, vaultBiblify } from '../shared/citation-files.js';
 import { printNoteToPdf } from './print-pdf.js';
+import { isPrintableNote, commonFolder, batchPdfNames, runPrintBatch } from './print-batch.js';
+import { writeFileAtomic } from './fs-utils.js';
 import { settings } from './settings.js';
 import { calloutsEnv } from './callout-types.js';
 import { iconTable } from './callout-files.js';
@@ -359,4 +361,92 @@ export async function exportNote({ win, vaults, sessionId, callerToken = null, r
 		figures?.done([figuresFolder(written)]);
 		if (build) fs.rmSync(build, { recursive: true, force: true });
 	}
+}
+
+/**
+ * "Export notes as PDF (reading view)" — many notes, a PDF each, printed as
+ * the single note's is (printNoteToPdf: the reading view itself, no TeX) into
+ * ONE folder the user chooses; each PDF named by print-batch.js#batchPdfNames
+ * (the note's path from the notes' common folder). A PDF already there is
+ * asked about once for all: Replace (the old ones to the Trash, each only once
+ * its new one is made — never deleted), Keep Both (the new ones numbered) or
+ * Cancel. A note that fails is said and passed over.
+ *
+ * Under CLEW_SMOKE (scenarios only) the two native dialogs are answered by
+ * `CLEW_SMOKE_EXPORT_DIR` (the folder) and `CLEW_SMOKE_REPLACE` (replace |
+ * keep | cancel); a caller's `outDir` / `existing` win over both.
+ *
+ * @returns {Promise<{ canceled: true } | { outDir: string, written: string[],
+ *   failed: { path: string, error: string }[], stopped: string[], replaced: number }>}
+ */
+export async function exportNotesPrint({ win, vaults, sessionId, callerToken = null, paths, outDir = null, existing = null, progress = () => {}, stopped = () => false }) {
+	const notes = [...new Set(Array.isArray(paths) ? paths : [])].filter(isPrintableNote);
+	if (!notes.length) throw new Error('no notes to export');
+	// Every one the vault's own (vaults.resolve: a restricted vault's realpath clamp).
+	for (const rel of notes) vaults.resolve(rel);
+	const smoke = process.env.CLEW_SMOKE ? process.env : {};
+
+	let dir = outDir ?? smoke.CLEW_SMOKE_EXPORT_DIR ?? null;
+	if (dir && !path.isAbsolute(dir)) dir = path.join(vaults.root, dir);
+	if (!dir) {
+		const chosen = await dialog.showOpenDialog(win, {
+			title: `Export ${notes.length} ${notes.length === 1 ? 'note' : 'notes'} as PDF (reading view)`,
+			message: 'Choose the folder for the PDFs.',
+			buttonLabel: 'Export',
+			defaultPath: path.join(vaults.root, commonFolder(notes)),
+			properties: ['openDirectory', 'createDirectory'],
+		});
+		if (chosen.canceled || !chosen.filePaths?.[0]) return { canceled: true };
+		dir = chosen.filePaths[0];
+	}
+
+	const there = (name) => fs.existsSync(path.join(dir, name));
+	let plan = batchPdfNames(notes);
+	const clash = plan.filter((p) => there(p.name));
+	if (clash.length) {
+		const answer = existing ?? smoke.CLEW_SMOKE_REPLACE ?? await askExisting(win, dir, clash.map((p) => p.name));
+		if (answer !== 'replace' && answer !== 'keep') return { canceled: true };
+		if (answer === 'keep') plan = batchPdfNames(notes, { taken: there });
+	}
+
+	fs.mkdirSync(dir, { recursive: true });
+	const build = fs.mkdtempSync(path.join(os.tmpdir(), 'clew-print-'));
+	let replaced = 0;
+	try {
+		const result = await runPrintBatch({
+			plan, progress, stopped,
+			print: async (item, i) => {
+				const made = path.join(build, `${i}.pdf`);
+				await printNoteToPdf({ sessionId, callerToken, relPath: item.path, outFile: made, paperSize: settings.get('printPaperSize') });
+				const target = path.join(dir, item.name);
+				if (fs.existsSync(target)) {
+					await vaults.trashExported(target);
+					replaced += 1;
+				}
+				fs.mkdirSync(path.dirname(target), { recursive: true });
+				writeFileAtomic(target, fs.readFileSync(made));
+			},
+		});
+		return { outDir: dir, ...result, replaced };
+	} finally {
+		fs.rmSync(build, { recursive: true, force: true });
+	}
+}
+
+/** The one question for PDFs already in the folder: replace | keep | cancel. */
+async function askExisting(win, dir, names) {
+	const folder = path.basename(dir);
+	const shown = names.slice(0, 6).map((n) => `• ${n}`);
+	if (names.length > shown.length) shown.push(`• and ${names.length - shown.length} more`);
+	const { response } = await dialog.showMessageBox(win, {
+		type: 'question',
+		message: names.length === 1
+			? `"${names[0]}" already exists in "${folder}".`
+			: `${names.length} of these PDFs already exist in "${folder}".`,
+		detail: `${shown.join('\n')}\n\nReplace moves the old ${names.length === 1 ? 'one' : 'ones'} to the Trash. Keep Both numbers the new ${names.length === 1 ? 'one' : 'ones'}.`,
+		buttons: ['Replace', 'Keep Both', 'Cancel'],
+		defaultId: 0,
+		cancelId: 2,
+	});
+	return ['replace', 'keep', 'cancel'][response] ?? 'cancel';
 }

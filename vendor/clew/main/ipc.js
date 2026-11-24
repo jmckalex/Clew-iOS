@@ -26,7 +26,7 @@ import { allSessions, sessionFor } from './session.js';
 import { openVaultAnywhere, openVaultDialog, createVaultDialog, openDemoVault } from './main.js';
 import { propagateRename } from './rename-links.js';
 import { exportBook } from './export-book.js';
-import { exportNote } from './export.js';
+import { exportNote, exportNotesPrint } from './export.js';
 import { exportSite } from './export-site.js';
 import { parseBib, bibFilePath } from '../shared/bib.js';
 import { direntKind, shouldRecurse, walkGuard, writeFileAtomic } from './fs-utils.js';
@@ -685,6 +685,43 @@ export function registerIpc() {
 		const result = await exportNote({ win: s.win, vaults: s.vaults, sessionId: s.id, callerToken: s.callerToken, relPath: path, format, outFile, trusted: s.trusted });
 		if (result?.output) s.vaults.refreshIfInside(result.output);
 		return result;
+	});
+
+	// "Export notes as PDF (reading view)": one batch per window at a time;
+	// its progress to that window, a stop from it ending the batch after the
+	// note being printed. The folder it wrote into stays MAIN's, so the
+	// window's "Show in Finder" names no path (EXPORT_NOTES_REVEAL; under
+	// CLEW_SMOKE a `smoke-reveal:` line, as vault.js#reveal's).
+	handle(CH.EXPORT_NOTES_PRINT, async (s, { paths, outDir = null, existing = null }) => {
+		if (s.printBatch) throw new Error('an export of notes is already running in this window');
+		const batch = s.printBatch = { stop: false };
+		try {
+			const result = await exportNotesPrint({
+				win: s.win, vaults: s.vaults, sessionId: s.id, callerToken: s.callerToken, paths, outDir, existing,
+				progress: (p) => s.send(CH.EV_EXPORT_NOTES_PROGRESS, p),
+				stopped: () => batch.stop,
+			});
+			if (result?.outDir) {
+				s.printBatchDir = { dir: result.outDir, first: result.written[0] ?? null };
+				s.vaults.refreshIfInside(result.outDir);
+			}
+			return result;
+		} finally {
+			s.printBatch = null;
+		}
+	});
+	handle(CH.EXPORT_NOTES_STOP, (s) => {
+		if (s.printBatch) s.printBatch.stop = true;
+		return Boolean(s.printBatch);
+	});
+	handle(CH.EXPORT_NOTES_REVEAL, (s) => {
+		const last = s.printBatchDir;
+		if (!last) return false;
+		const target = last.first ? nodePath.join(last.dir, last.first) : last.dir;
+		if (process.env.CLEW_SMOKE) console.log(`smoke-reveal: ${target}`);
+		else if (last.first) shell.showItemInFolder(target);
+		else shell.openPath(target);
+		return true;
 	});
 
 	// "Convert this vault" — the colon directives' retirement, phase 2

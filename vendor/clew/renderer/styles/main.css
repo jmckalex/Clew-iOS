@@ -184,8 +184,9 @@ button {
 .clew-conflict-buttons button.is-primary { background: var(--clew-accent); border-color: var(--clew-accent); color: var(--clew-text-on-accent, #fff); }
 .clew-conflict-buttons button.is-primary:hover { background: var(--clew-accent-hover); }
 
-/* ---- "Convert this vault": the colon directives' sheet (colon-conversion.js) */
-.clew-colon-sheet {
+/* ---- "Convert this vault": the colon directives' sheet (colon-conversion.js);
+   its frame is every sheet's (`.clew-sheet…`: export-notes.js) */
+.clew-colon-sheet, .clew-sheet {
 	position: fixed;
 	inset: 0;
 	z-index: 300;
@@ -194,7 +195,7 @@ button {
 	justify-content: center;
 	background: var(--clew-overlay, rgba(0, 0, 0, 0.35));
 }
-.clew-colon-card {
+.clew-colon-card, .clew-sheet-card {
 	width: min(860px, calc(100vw - 32px));
 	max-height: calc(100vh - 64px);
 	display: flex;
@@ -209,14 +210,15 @@ button {
 	line-height: 1.45;
 	outline: none;
 }
-.clew-colon-card h2 { margin: 0 0 8px; font-size: 16px; }
-.clew-colon-card p { margin: 0 0 8px; }
-.clew-colon-body { flex: 1 1 auto; min-height: 0; overflow: auto; margin: 0 0 12px; }
-.clew-colon-explain { color: var(--clew-text-muted); }
-.clew-colon-summary { font-weight: 600; }
-.clew-colon-progress { height: 6px; border-radius: 3px; background: var(--clew-bg-primary); overflow: hidden; }
-.clew-colon-progress-fill { height: 100%; width: 0; background: var(--clew-accent); }
-.clew-colon-progress.is-indeterminate .clew-colon-progress-fill { width: 30%; }
+.clew-colon-card h2, .clew-sheet-card h2 { margin: 0 0 8px; font-size: 16px; }
+.clew-colon-card p, .clew-sheet-card p { margin: 0 0 8px; }
+.clew-colon-body, .clew-sheet-body { flex: 1 1 auto; min-height: 0; overflow: auto; margin: 0 0 12px; }
+.clew-colon-explain, .clew-sheet-explain { color: var(--clew-text-muted); }
+.clew-colon-summary, .clew-sheet-summary { font-weight: 600; overflow-wrap: anywhere; }
+.clew-colon-progress, .clew-sheet-progress { height: 6px; border-radius: 3px; background: var(--clew-bg-primary); overflow: hidden; }
+.clew-colon-progress-fill, .clew-sheet-progress-fill { height: 100%; width: 0; background: var(--clew-accent); }
+.clew-colon-progress.is-indeterminate .clew-colon-progress-fill,
+.clew-sheet-progress.is-indeterminate .clew-sheet-progress-fill { width: 30%; }
 .clew-colon-group { margin: 14px 0 0; padding-top: 10px; border-top: 1px solid var(--clew-border); }
 .clew-colon-group-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .clew-colon-group h3 { margin: 0 0 4px; font-size: 14px; }
@@ -241,8 +243,8 @@ button {
 .clew-colon-item code { font-family: var(--clew-mono-font); font-size: 12px; white-space: pre-wrap; }
 .clew-colon-arrow { color: var(--clew-text-faint); }
 .clew-colon-why { color: var(--clew-text-muted); font-size: 12.5px; overflow-wrap: anywhere; }
-.clew-colon-buttons { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
-.clew-colon-buttons button {
+.clew-colon-buttons, .clew-sheet-buttons { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.clew-colon-buttons button, .clew-sheet-buttons button, .clew-print-tools button {
 	font: inherit;
 	border-radius: 6px;
 	padding: 5px 12px;
@@ -251,10 +253,43 @@ button {
 	border: 1px solid var(--clew-border);
 	color: var(--clew-text-normal);
 }
-.clew-colon-buttons button:hover:not(:disabled) { background: var(--clew-hover); }
-.clew-colon-buttons button:disabled { opacity: 0.5; cursor: default; }
-.clew-colon-buttons button.is-primary { background: var(--clew-accent); border-color: var(--clew-accent); color: var(--clew-text-on-accent, #fff); }
-.clew-colon-buttons button.is-primary:hover:not(:disabled) { background: var(--clew-accent-hover); }
+.clew-colon-buttons button:hover:not(:disabled), .clew-sheet-buttons button:hover:not(:disabled),
+.clew-print-tools button:hover { background: var(--clew-hover); }
+.clew-colon-buttons button:disabled, .clew-sheet-buttons button:disabled { opacity: 0.5; cursor: default; }
+.clew-colon-buttons button.is-primary, .clew-sheet-buttons button.is-primary { background: var(--clew-accent); border-color: var(--clew-accent); color: var(--clew-text-on-accent, #fff); }
+.clew-colon-buttons button.is-primary:hover:not(:disabled),
+.clew-sheet-buttons button.is-primary:hover:not(:disabled) { background: var(--clew-accent-hover); }
+
+/* ---- "Export notes as PDF (reading view)" (export-notes.js) */
+.clew-print-sheet .clew-sheet-card { width: min(640px, calc(100vw - 32px)); height: min(640px, calc(100vh - 64px)); }
+.clew-print-sheet[data-state="pick"] .clew-sheet-body { display: flex; flex-direction: column; overflow: hidden; }
+.clew-print-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 8px; }
+.clew-print-tools button { padding: 3px 10px; font-size: 12.5px; }
+.clew-print-filter {
+	flex: 1 1 200px;
+	font: inherit;
+	padding: 4px 8px;
+	border-radius: 6px;
+	border: 1px solid var(--clew-border);
+	background: var(--clew-bg-primary);
+	color: var(--clew-text-normal);
+}
+.clew-print-count { color: var(--clew-text-muted); white-space: nowrap; margin-left: auto; }
+.clew-print-list {
+	flex: 1 1 auto;
+	min-height: 0;
+	overflow: auto;
+	border: 1px solid var(--clew-border);
+	border-radius: 6px;
+	background: var(--clew-bg-primary);
+	padding: 4px 0;
+}
+.clew-print-row { display: flex; align-items: center; gap: 8px; padding: 2px 10px; cursor: pointer; }
+.clew-print-row:hover { background: var(--clew-hover); }
+.clew-print-row[hidden] { display: none; }
+.clew-print-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.clew-print-failed { margin: 0 0 8px; padding-left: 18px; }
+.clew-print-failed li { overflow-wrap: anywhere; }
 
 /* ---- vault trust: the prompt and the status-bar indicator (trust-banner.js) */
 .clew-trust-sheet {

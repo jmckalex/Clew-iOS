@@ -4,6 +4,7 @@
 //
 //   node tools/sim-smoke.mjs <Clew.app> <scenario.js> [--fixture <dir>]
 //        [--name <vault name>] [--seconds <n>] [--sim <udid>] [--out <dir>]
+//        [--collect <dir>]…
 //
 // The fixture folder is copied into the app's Documents as the vault (an
 // empty one without --fixture) and opened by path, so it is untrusted, as
@@ -16,6 +17,9 @@
 //     2.5 s, the shot long taken);
 //   - `window.__clewSmokeData` is the data container's Documents path, for a
 //     scenario that checks what the app wrote.
+// --collect copies a folder of the app's data container (`tmp`, where a
+// share sheet's file is written; `Documents/Exports`) into --out/collected/
+// before the app goes: what the app made, read on the Mac (pdftotext).
 // Writes lines.json (and the shots) into --out. Always ends with the app
 // terminated and uninstalled, its defaults removed and the simulator shut
 // down. Exit status 0 when the scenario finished, 1 otherwise; whether its
@@ -37,6 +41,7 @@ const OUT = option('--out', fs.mkdtempSync(path.join(os.tmpdir(), 'clew-sim-smok
 const FIXTURE = option('--fixture', null);
 const VAULT_NAME = option('--name', 'Smoke Vault');
 const SECONDS = Number(option('--seconds', '90'));
+const COLLECT = args.flatMap((a, i) => (a === '--collect' ? [args[i + 1]] : []));
 const APP = 'org.jmckalex.clew.ios';
 process.env.DEVELOPER_DIR ??= '/Applications/Xcode.app/Contents/Developer';
 fs.mkdirSync(OUT, { recursive: true });
@@ -140,6 +145,10 @@ try {
 	if (run.error) console.log(`ERROR ${run.error}`);
 	for (const line of run.lines ?? []) console.log(line);
 	fs.writeFileSync(path.join(OUT, 'lines.json'), JSON.stringify(run, null, '\t'));
+	for (const rel of COLLECT) {
+		const from = path.join(container(), rel);
+		if (fs.existsSync(from)) fs.cpSync(from, path.join(OUT, 'collected', rel), { recursive: true });
+	}
 	exitCode = run.phases.includes('done') && !run.error ? 0 : 1;
 	if (!run.phases.includes('done')) console.log(`the scenario did not finish in ${SECONDS} s (phases ${JSON.stringify(run.phases)})`);
 } catch (err) {

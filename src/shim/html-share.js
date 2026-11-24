@@ -39,7 +39,7 @@ export const SHARE_IMAGES_MAX = 10 * 1024 * 1024;
 export const SNAPSHOT_SCRIPT = String.raw`
 const t0 = performance.now();
 const session = location.pathname.split('/').filter(Boolean)[0] || '';
-const stats = { images: 0, imageBytes: 0, held: [], embeds: [], links: 0, scripts: 0, handlers: 0, canvases: 0, shadowHosts: 0 };
+const stats = { images: 0, imageBytes: 0, held: [], embeds: [], links: 0, scripts: 0, handlers: 0, canvases: 0, shadowHosts: 0, clewOnly: 0 };
 let budget = maxTotal;
 const mb = (n) => (n / 1048576).toFixed(1) + ' MB';
 
@@ -110,6 +110,12 @@ const placeholder = (kind, name, why, block) => {
 	el.textContent = '[' + kind + (name ? ': ' + name : '') + ' — ' + (why || 'not included in this page') + ']';
 	return el;
 };
+
+// ---- what is for Clew only ---------------------------------------------------------
+// @begin(clew-only) (Clew-app c37ce1c): drawn in reading view, out of
+// everything that leaves Clew. The page is the drawn one, where print CSS
+// does not apply, so the boxes go here, with nothing in their place.
+for (const el of doc.querySelectorAll('.clew-only')) { stats.clewOnly++; el.remove(); }
 
 // ---- active elements ------------------------------------------------------------
 for (const el of doc.querySelectorAll('script, noscript, template, base, portal, frameset, frame, applet, param')) {
@@ -344,5 +350,6 @@ export function shareLeaks(html, { sessionId = '', vaultPath = '' } = {}) {
 	if (vaultPath && text.includes(vaultPath)) found.push('the vault\'s path on this device');
 	if (/\/var\/mobile\/Containers\/|\/Containers\/Data\/Application\/|\/CoreSimulator\/Devices\//.test(text)) found.push('an app-container path');
 	if (tags.some((t) => /=\s*["']?\/vault\//.test(t))) found.push('a vault-absolute path');
+	if (tags.some((t) => /\sclass\s*=\s*["']?(?:[^"'>]*\s)?clew-only[\s"'>]/i.test(t))) found.push('what the note keeps for Clew only');
 	return found;
 }

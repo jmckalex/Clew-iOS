@@ -142,6 +142,14 @@ export function engineConfig({ vaultRoot = '/vault', vaultOptions = {}, engineEx
 			// @app[…] — an app in a note (app-embed.js marks the place; the
 			// shim resolves it as the document is served).
 			'app from /engine-assets/app-embed.js',
+			// @begin(clew-only) — Clew's own views only: drawn in reading view
+			// and live edit inside a `.clew-only` box that preview.css hides
+			// from print, so the reading-view PDF, a book's print and a batch's
+			// PDFs leave it out (Clew-app c37ce1c). A bare path, as upstream's
+			// render-service.js: its default export, by name. Every export
+			// registers its own (src/export/export-worker.js), and the HTML
+			// share removes the box (html-share.js).
+			'/engine-assets/clew-only.js',
 		],
 		...biblifyConfig(vaultRoot, vaultOptions),
 		'MathJax': { 'src': '/__clew_assets__/mathjax/tex-svg.js' },

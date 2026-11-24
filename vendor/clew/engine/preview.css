@@ -239,6 +239,9 @@ details.internal-embed:not([open]) > summary { margin-bottom: 0; }
 	/* The disclosure arrow means nothing once printed; a folded embed still
 	   prints folded, because the reading view is what was asked for. */
 	details.internal-embed > summary::after { display: none; }
+	/* `@begin(clew-only)` (clew-only.js): Clew's own views only — the
+	   reading-view PDF leaves it out, with no gap where it was. */
+	.clew-only { display: none !important; }
 }
 
 /* Build-error overlay (kept in sync with the app's error banner styling) */

@@ -165,6 +165,9 @@ function build(doc, tree, config) {
 						name, body: s.body, content: s.content, attrs: s.attrs,
 						openLine: open, closeLine: close,
 						texOnly: name === 'TeX', htmlOnly: name === 'HTML', comment: name === 'comment',
+						// `@begin(clew-only)` (engine/clew-only.js): drawn here,
+						// in no PDF or export.
+						clewOnly: name === 'clew-only',
 						extents: close ? [open, close] : [open],
 					});
 					if (name === 'TeX') opaque.push({ from: s.start, to: s.end });

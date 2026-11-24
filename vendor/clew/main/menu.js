@@ -270,6 +270,7 @@ class AppMenu {
 						c('export:latex', 'As LaTeX…', { needs: 'note' }),
 						c('export:pdf', 'As PDF (via LaTeX)…', { needs: 'note' }),
 						c('export:print-pdf', 'As PDF (reading view)…', { needs: 'note' }),
+						c('export:print-pdf-notes', 'Notes as PDF (reading view)…', { needs: 'vault' }),
 						{ type: 'separator' },
 						c('export:book-pdf', 'Book as PDF (via LaTeX)', { needs: 'book' }),
 						c('export:book-latex', 'Book as LaTeX', { needs: 'book' }),

@@ -636,8 +636,9 @@ if (process.env.CLEW_SMOKE) {
 				// window.__clewSmokeInput = [{click:{x,y}} | {click:{selector}} (the
 				// centre of an app-page element, found when its turn comes) |
 				// {move:{x,y}} | {move:{selector}} | {text:'abc'} |
-				// {combo:{key:'s',modifiers:2}} | {wait:ms}] — a click may carry
-				// `modifiers` too, e.g. {click:{x,y},modifiers:4}; and
+				// {combo:{key:'s',modifiers:2}} | {wait:ms} | {until:{selector,ms?}}]
+				// — a click may carry `modifiers` too, e.g. {click:{x,y},modifiers:4},
+				// and `button: 'right'`; and
 				// {wheel:{x,y,deltaY}} scrolls (modifiers CDP
 				// bitmask: Alt 1, Ctrl 2, Meta 4, Shift 8).
 				// window.__clewSmokeClipboard (string) preloads the clipboard;
@@ -682,6 +683,18 @@ if (process.env.CLEW_SMOKE) {
 					};
 					for (const ev of inputEvents) {
 						if (ev.wait) { await sleep(ev.wait); continue; }
+						// {until:{selector, ms?}}: wait (≤ms, 15 s by default) for an
+						// app-page element — a sheet's next state, a menu — rather
+						// than a fixed wait for something of unknown length.
+						if (ev.until) {
+							const { selector, ms = 15000 } = ev.until;
+							const probe = `Boolean(document.querySelector(${JSON.stringify(selector)}))`;
+							const t0 = Date.now();
+							let found = false;
+							while (!(found = await primary.webContents.executeJavaScript(probe)) && Date.now() - t0 < ms) await sleep(50);
+							if (!found) console.log(`smoke: until found no ${selector} in ${ms} ms`);
+							continue;
+						}
 						if (ev.wheel) {
 							// {wheel:{x,y,deltaY}}: a real wheel tick at a point —
 							// the only way to prove a wheel over a cross-origin
@@ -808,13 +821,15 @@ if (process.env.CLEW_SMOKE) {
 						if (at) {
 							const { x, y } = at;
 							// `modifiers` on a click event (same CDP bitmask) makes it
-							// a ⌘-click etc. — e.metaKey in the page (inverse search).
+							// a ⌘-click etc. — e.metaKey in the page (inverse search);
+							// `button: 'right'` a right-click (the explorer's menus).
 							const base = { x, y, pointerType: 'mouse', modifiers: ev.modifiers ?? 0 };
+							const button = ev.button === 'right' ? 'right' : 'left';
 							const clicks = ev.tripleClick ? 3 : 1;
 							await dbg.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', button: 'none', ...base });
 							for (let count = 1; count <= clicks; count++) {
-								await dbg.sendCommand('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: count, ...base });
-								await dbg.sendCommand('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: count, ...base });
+								await dbg.sendCommand('Input.dispatchMouseEvent', { type: 'mousePressed', button, clickCount: count, ...base });
+								await dbg.sendCommand('Input.dispatchMouseEvent', { type: 'mouseReleased', button, clickCount: count, ...base });
 							}
 						} else if (typeof ev.text === 'string') {
 							for (const ch of ev.text) {

@@ -26,6 +26,7 @@ import { settingsStore } from '../../state/settings-store.js';
 import * as actions from '../../commands/actions.js';
 import { flattenTree, visibleRange, scrollTopFor } from '../../lib/tree-window.js';
 import { fileIconName, folderIconName, fileIconUrl } from '../../lib/file-icons.js';
+import { exportNotesAsPdf } from '../../export-notes.js';
 
 class ClewFileExplorer extends ClewElement {
 	// The folders open in the tree; every other one is closed (the owner's
@@ -517,6 +518,9 @@ class ClewFileExplorer extends ClewElement {
 				{ label: 'New drawing (Excalidraw)', click: () => this.createDrawing(entry.path) },
 				{ label: 'New folder', click: () => this.createFolder(entry.path) },
 				{ separator: true },
+				// Its notes, a PDF each (export-notes.js), all ticked.
+				{ label: 'Export notes as PDF (reading view)…', click: () => exportNotesAsPdf({ folder: entry.path }) },
+				{ separator: true },
 			);
 		}
 		items.push(
@@ -533,6 +537,8 @@ class ClewFileExplorer extends ClewElement {
 			{ label: 'New note', click: () => this.createNote() },
 			{ label: 'New canvas', click: () => this.createCanvas() },
 			{ label: 'New folder', click: () => this.createFolder('') },
+			{ separator: true },
+			{ label: 'Export notes as PDF (reading view)…', click: () => exportNotesAsPdf() },
 		]);
 	}
 

@@ -94,6 +94,14 @@ export const CH = {
 	// invoke: export via the engine
 	EXPORT_NOTE: 'clew:export-note',
 	EXPORT_BOOK: 'clew:export-book',
+	// "Export notes as PDF (reading view)" (export.js#exportNotesPrint): many
+	// notes, a PDF each, into one folder; EV_EXPORT_NOTES_PROGRESS { done,
+	// total, path } while it prints, STOP ends it after the note being printed,
+	// REVEAL shows the last batch's folder (main keeps the path).
+	EXPORT_NOTES_PRINT: 'clew:export-notes-print',
+	EXPORT_NOTES_STOP: 'clew:export-notes-stop',
+	EXPORT_NOTES_REVEAL: 'clew:export-notes-reveal',
+	EV_EXPORT_NOTES_PROGRESS: 'clew:ev-export-notes-progress',
 	// The colon directives' retirement, phase 2 (main/colon-conversion.js):
 	// "Convert this vault" — a dry run, the chosen conversion, its end for the
 	// notes an editor took, and undo; EV_COLON_PROGRESS { done, total } while

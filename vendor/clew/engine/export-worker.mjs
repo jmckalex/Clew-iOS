@@ -42,7 +42,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveFileTarget } from './vault-files.js';
 import { familyFiles, readFontIndex } from './font-families.js';
-import { configureExportBuild, exportEmbedPath, EXPORT_EXTENSIONS } from './export-config.js';
+import { configureExportBuild, exportEmbedPath, EXPORT_EXTENSIONS, EXPORT_ENVIRONMENTS } from './export-config.js';
 import { mathFontOnlyWithMaths } from './latex-style.js';
 
 const engineDir = path.dirname(process.argv[2]);
@@ -53,6 +53,10 @@ const { configManager, DEFAULT_CONFIG } = await load('config-manager.js');
 // Clew's own rules, which the preview's config loads and the user's does not
 // (export-config.js#EXPORT_EXTENSIONS): after the engine's, as there.
 (await load('utils.js')).registerExtensions(EXPORT_EXTENSIONS);
+// …and its named environments (EXPORT_ENVIRONMENTS: `@begin(clew-only)`), in
+// the engine's own registry.
+const { registerBlockEnvironment } = await load('begin-end-core.js');
+for (const [name, handler] of Object.entries(EXPORT_ENVIRONMENTS)) registerBlockEnvironment(name, handler);
 
 let building = null;   // the build's message: its file and options
 const fontIndex = process.env.CLEW_FONT_INDEX ? readFontIndex(process.env.CLEW_FONT_INDEX) : null;

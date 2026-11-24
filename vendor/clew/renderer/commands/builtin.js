@@ -34,6 +34,7 @@ import { warningSummary } from '../../shared/build-warnings.js';
 import { openListModal } from '../components/modals/list-modal.js';
 import { openHistoryModal } from '../components/modals/clew-history-modal.js';
 import { convertVault, undoConversion } from '../colon-conversion.js';
+import { exportNotesAsPdf } from '../export-notes.js';
 import { ipc, CH } from '../ipc.js';
 
 const needsVault = (ctx) => ctx.vaultOpen;
@@ -359,6 +360,10 @@ export function registerBuiltinCommands() {
 			run: () => exportActiveNote('pdf') },
 		{ id: 'export:print-pdf', name: 'Export note as PDF (reading view)', when: needsNote,
 			run: () => exportActiveNote('print-pdf') },
+		// Many notes, a PDF each (export-notes.js; a folder's explorer menu
+		// opens it with that folder's notes ticked).
+		{ id: 'export:print-pdf-notes', name: 'Export notes as PDF (reading view)…', when: (ctx) => ctx.vaultOpen,
+			run: () => exportNotesAsPdf() },
 	];
 	for (const command of commands) registerCommand(command);
 	registerFormatCommands();

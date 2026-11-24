@@ -49,6 +49,8 @@ import * as figures from '../../vendor/clew/engine/figures.js';
 import { applyCustomCallouts } from '../../vendor/jmarkdown/src/callout-table.js';
 import * as revealEmbed from '../../vendor/clew/engine/reveal-embed.js';
 import * as appEmbed from '../../vendor/clew/engine/app-embed.js';
+// @begin(clew-only): Clew's own views only (Clew-app 50c2e2e, c37ce1c).
+import * as clewOnly from '../../vendor/clew/engine/clew-only.js';
 // The build's warnings (the LaTeX-export lint among them) go back with the
 // html: EV_RENDER_DONE carries them to the status bar.
 import { getWarnings } from '../../vendor/jmarkdown/src/warnings.js';
@@ -77,6 +79,10 @@ globalThis.__jmdExtensionRegistry = {
 	// 4ab3d6a.) @app[…] — an app in a note: an Environments-only entry that
 	// marks the place; the shim resolves it as the document is served.
 	'/engine-assets/app-embed.js': appEmbed,
+	// @begin(clew-only), @clew-only[…], @clew-only+[…]: an Environments
+	// entry with no `from` (a hyphenated name has no export name), so the
+	// engine registers each key of the module's DEFAULT export.
+	'/engine-assets/clew-only.js': clewOnly,
 };
 
 // Enabled vault plugins' engine surfaces: the config names them by absolute

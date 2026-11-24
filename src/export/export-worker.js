@@ -36,7 +36,7 @@ import '../worker/shims/require-registry.js';
 import { vfs } from '../worker/shims/vfs.js';
 import { applyCustomCallouts } from '../../vendor/jmarkdown/src/callout-table.js';
 import { getWarnings } from '../../vendor/jmarkdown/src/warnings.js';
-import { configureExportBuild, exportEmbedPath, EXPORT_EXTENSIONS } from '../../vendor/clew/engine/export-config.js';
+import { configureExportBuild, exportEmbedPath, EXPORT_EXTENSIONS, EXPORT_ENVIRONMENTS } from '../../vendor/clew/engine/export-config.js';
 import { mathFontOnlyWithMaths } from '../../vendor/clew/engine/latex-style.js';
 import { resolveFileTarget } from '../../vendor/clew/engine/vault-files.js';
 import { exportOutputs } from './outputs.js';
@@ -93,6 +93,11 @@ async function init({ files, env, cwd }) {
 	// not (export-config.js#EXPORT_EXTENSIONS: Obsidian's %% comments):
 	// after the engine's, as there, and as desktop's export-worker.mjs does.
 	(await import('../../vendor/jmarkdown/src/utils.js')).registerExtensions(EXPORT_EXTENSIONS);
+	// …and its named environments (EXPORT_ENVIRONMENTS: `@begin(clew-only)`,
+	// nothing in any format), in the engine's own registry, as desktop's
+	// export-worker.mjs registers them (Clew-app 50c2e2e).
+	const { registerBlockEnvironment } = await import('../../vendor/jmarkdown/src/begin-end-core.js');
+	for (const [name, handler] of Object.entries(EXPORT_ENVIRONMENTS)) registerBlockEnvironment(name, handler);
 	// The engine's own configuration (the module index.js loaded, so the
 	// user's config files are read already): configureExportBuild sets on it.
 	configPromise = import('../../vendor/jmarkdown/src/config-manager.js');
