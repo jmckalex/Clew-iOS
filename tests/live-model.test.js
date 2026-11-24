@@ -78,6 +78,41 @@ test('wikilinks: alias shown, target hidden; same-note heading shows the heading
 	assert.deepEqual(one('[[#Setup]]\n', 'wikilink').hiddenText, ['[[#', ']]']);
 });
 
+/** A wikilink's text as live edit shows it: what lies between its hidden pieces. */
+const shownOf = (c) => c.hidden.slice(1).map((h, i) => c.text.slice(c.hidden[i].to - c.from, h.from - c.from)).join('');
+
+test('a wikilink\'s |external is hidden as reading view drops it — never shown as text (the owner, 2026-11-23)', () => {
+	const c = one('[[Files/paper.pdf|Read the paper|external]]\n', 'wikilink');
+	assert.deepEqual(c.hiddenText, ['[[Files/paper.pdf|', '|external]]']);
+	assert.equal(shownOf(c), 'Read the paper');
+	// The engine's rule (engine/wikilinks.js): every part that is `external`,
+	// in any case, wherever it stands; the rest shown as written.
+	assert.equal(shownOf(one('[[paper.pdf|External|Read it]]\n', 'wikilink')), 'Read it');
+	const mid = one('[[paper.pdf|Read|external|now]]\n', 'wikilink');
+	assert.deepEqual(mid.hiddenText, ['[[paper.pdf|', '|external', ']]']);
+	assert.equal(shownOf(mid), 'Read|now');
+	// Nothing left: the target's name, as reading view's label.
+	const bare = one('[[paper.pdf|external]]\n', 'wikilink');
+	assert.deepEqual(bare.hiddenText, ['[[', '|external]]']);
+	assert.equal(shownOf(bare), 'paper.pdf');
+	assert.equal(shownOf(one('[[paper.pdf#Intro|external]]\n', 'wikilink')), 'paper.pdf');
+	// A caption that only contains the word is a caption.
+	assert.deepEqual(one('[[Note|external notes]]\n', 'wikilink').hiddenText, ['[[Note|', ']]']);
+	assert.equal(one('[[Note|external notes]]\n', 'wikilink').external, false);
+	assert.equal(c.external, true);
+	// In a table the pipes are escaped, and the backslash is the table's.
+	const cell = one('| a | b |\n| --- | --- |\n| x | [[paper.pdf\\|In a table\\|external]] |\n', 'wikilink');
+	assert.equal(shownOf(cell), 'In a table');
+	assert.equal(shownOf(one('| a |\n| --- |\n| [[paper.pdf\\|external]] |\n', 'wikilink')), 'paper.pdf');
+	assert.equal(shownOf(one('| a |\n| --- |\n| [[paper.pdf\\|external\\|Caption]] |\n', 'wikilink')), 'Caption');
+});
+
+test('nothing inside what the engine reads as text is formatted: a link\'s path, a citation\'s keys, a {{var}} (the owner, 2026-11-23)', () => {
+	const doc = '[[Course_2026/Week_1 notes.pdf|Notes_2]] and H_2O.\n\n![[Pics/a_1.png]]\n\n\\cite{smith_2020} and {{var_1}}.\n\n@reveal[https://a.com/x_1/]\n';
+	// One subscript: the paragraph's own H_2O, outside them all.
+	assert.deepEqual(model(doc).filter((c) => c.kind === 'sub').map((c) => c.from), [doc.indexOf('_2O')]);
+});
+
 test('images and embeds: tier B image, tier C embed, chip when inline', () => {
 	const m = model('![[pic.png|300]]\n\n![[Other#Part]]\n\n![alt](a.png)\n\nText ![[Other]] inline.\n');
 	assert.deepEqual(m.map((c) => [c.kind, c.tier, c.level, c.text]), [
@@ -100,11 +135,75 @@ test('lists and tasks: per-item line constructs with depth', () => {
 	assert.equal(m[2].checked, true);
 });
 
+test('an item past its first line: each line of its own paragraphs is its text', () => {
+	const src = [
+		'- a hard break  ', '  after it',
+		'- lazy', 'continued',
+		'- two paragraphs', '', '  the second', '\t\tand a tab',
+		'  - nested  ', '    nested line',
+		'1. one  ', '   one more',
+		'- [ ] task  ', '  task line',
+		'> - quoted  ', '>   quoted line',
+		'- fenced', '', '  ```', '  code', '  ```',
+	].join('\n') + '\n';
+	const m = model(src);
+	const cut = (r) => src.slice(r.from, r.to);
+	assert.deepEqual(m.filter((c) => c.kind === 'listText').map((c) => [c.text, c.depth, cut(c.indent), cut(c.listMark)]), [
+		['  after it', 1, '  ', '-'],
+		['continued', 1, '', '-'],
+		['  the second', 1, '  ', '-'],
+		['\t\tand a tab', 1, '\t\t', '-'],
+		['    nested line', 2, '    ', '-'],
+		['   one more', 1, '   ', '1.'],
+		['  task line', 1, '  ', '-'],
+		// After the `>` and the one space the quote conceals with it.
+		['>   quoted line', 1, '  ', '-'],
+	]);
+	// The blank line and the fence are not text lines; the number's width
+	// covers the number and its space — and a numbered item's text lines carry
+	// it too, so they hang by it (columns.js#numberWidth); no other item's do.
+	assert.equal(cut(m.find((c) => c.kind === 'numbered').numberMark), '1. ');
+	assert.deepEqual(m.filter((c) => c.kind === 'listText').map((c) => c.numberMark && cut(c.numberMark)),
+		[undefined, undefined, undefined, undefined, undefined, '1. ', undefined, undefined]);
+});
+
 test('quotes: one construct per line, depth from the markers', () => {
 	const m = model('> a\n> > b\n').filter((c) => c.kind === 'quote');
 	assert.deepEqual(m.map((c) => [c.text, c.depth, c.hiddenText]), [
 		['> a', 1, ['> ']],
 		['> > b', 2, ['> > ']],
+	]);
+});
+
+test('a quote inside a list item knows the item\'s marker and the indentation before its `>`', () => {
+	const doc = '* item:\n    > quoted\n    > more\n\n1. numbered:\n   > in it\n\n* outer\n  * inner:\n    > nested\n\n> top\n';
+	const m = model(doc).filter((c) => c.kind === 'quote');
+	assert.deepEqual(m.map((c) => [c.text.trim(), c.listMark ? doc.slice(c.listMark.from, c.listMark.to) : null,
+		c.indent ? doc.slice(c.indent.from, c.indent.to) : null, c.hiddenText]), [
+		['> quoted', '*', '    ', ['> ']],
+		['> more', '*', '    ', ['> ']],
+		['> in it', '1.', '   ', ['> ']],
+		['> nested', '*', '    ', ['> ']],
+		['> top', null, null, ['> ']],
+	]);
+	// The nested quote is the INNER item's: its marker two columns in.
+	const nested = m.find((c) => c.text.includes('nested'));
+	assert.equal(nested.listMark.from, doc.indexOf('* inner'));
+	// A numbered item's quote carries its number, which it hangs by; a
+	// bullet's, a task's in a numbered list and a quote outside a list none.
+	assert.deepEqual(m.map((c) => c.numberMark && doc.slice(c.numberMark.from, c.numberMark.to)), [undefined, undefined, '1. ', undefined, undefined]);
+	const more = '10)  ten:\n     > in ten\n\n1. [ ] a task:\n   > in the task\n';
+	assert.deepEqual(model(more).filter((c) => c.kind === 'quote').map((c) => c.numberMark && more.slice(c.numberMark.from, c.numberMark.to)),
+		['10)  ', undefined]);
+});
+
+test('title-page lines: @title, @<title>, ::title alone on their lines; not mid-sentence, not :title', () => {
+	const doc = '@title[A two-line\n  title]\n@author+[An Author]\n@<date>[Today]\n::subtitle[Sub]\n'
+		+ '\nBy @author[Someone] here.\n\n:title[a title element]\n\n@begin[not a title]\n';
+	const m = model(doc).filter((c) => c.kind === 'directiveAt' || c.kind === 'directiveInline');
+	assert.deepEqual(m.map((c) => [c.text.split('[')[0], c.titlePage]), [
+		['@title', 'title'], ['@author+', 'author'], ['@<date>', 'date'], ['::subtitle', 'subtitle'],
+		['@author', null], [':title', null], ['@begin', null],
 	]);
 });
 
@@ -173,6 +272,18 @@ test('directives: rich ones are frames; generic ones reveal on opener/closer onl
 	const m = model(':::mermaid\ngraph\n:::\n\n:::theorem[P]\nBody *x*\n:::\n');
 	assert.deepEqual(m.map((c) => [c.kind, c.tier]), [['richBlock', 'C'], ['directive', 'A'], ['strong', 'A']]);
 	assert.deepEqual(m[1].extentText, [':::theorem[P]', ':::']);
+});
+
+test('@begin(game|Mathematica|markdown-demo) are frames, as their ::: twins; @begin(comment|HTML) carry their twins\' flags', () => {
+	const m = model('@begin(game)\n | A\n@end(game)\n\n@begin(Mathematica){output="svg"}\nx\n@end(Mathematica)\n\n@begin(markdown-demo)\n*x*\n@end(markdown-demo)\n');
+	assert.deepEqual(m.map((c) => [c.kind, c.tier, c.name]), [
+		['richBlock', 'C', 'game'], ['richBlock', 'C', 'Mathematica'], ['richBlock', 'C', 'markdown-demo'],
+	]);
+	const comment = one('@begin(comment)\nnote\n@end(comment)\n', 'environment');
+	const html = one('@begin(HTML)\nweb\n@end(HTML)\n', 'environment');
+	const colon = one(':::comment\nnote\n:::\n', 'directive');
+	assert.deepEqual([comment.comment, html.htmlOnly, colon.comment], [true, true, true]);
+	assert.equal(one('@begin(<name>)\nx\n@end(name)\n', 'environment').name, 'name', 'the sigil is not the name');
 });
 
 test(':::TeX and @begin(TeX) bodies are opaque; math environments are display math', () => {

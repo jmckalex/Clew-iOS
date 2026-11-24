@@ -162,10 +162,9 @@ function build(view) {
 				const shownTo = c.hidden[c.hidden.length - 1].from;
 				const target = c.target + (c.heading ? `#${c.heading}` : '') + (c.blockId ? `#^${c.blockId}` : '');
 				const resolved = !c.target || vaultStore.resolveNoteName(c.target) || vaultStore.resolveFileName(c.target);
-				const external = (c.aliasText ?? '').split('|').some((p) => p.trim().toLowerCase() === 'external');
 				mark(shownFrom, shownTo, `le-wikilink${resolved ? '' : ' le-unresolved'}`, {
 					'data-le-target': target,
-					...(external ? { 'data-le-external': c.target } : {}),
+					...(c.external ? { 'data-le-external': c.target } : {}),
 					title: resolved ? target : `${target} (not created yet)`,
 				});
 				break;

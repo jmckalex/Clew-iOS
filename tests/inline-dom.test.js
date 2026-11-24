@@ -47,6 +47,15 @@ test('code, math, links, wikilinks, tags', () => {
 	assert.equal(tokens('[[Note#Part]]')[0].target, 'Note#Part');
 });
 
+test('a wikilink in a cell: its |external hidden and kept as the link\'s, its path never formatted (the owner, 2026-11-23)', () => {
+	assert.equal(show(tokens('[[Files/paper.pdf|Read|external|now]] and [[a_1.pdf|external]]')),
+		'wikilink("Read|now") " and " wikilink("a_1.pdf")');
+	assert.equal(tokens('[[Files/paper.pdf|Read it|external]]')[0].external, 'Files/paper.pdf');
+	assert.equal(tokens('[[Files/paper.pdf|Read it]]')[0].external, null);
+	// A table's escaped pipes: the backslash is the table's.
+	assert.equal(show(tokens('[[paper.pdf\\|In a table\\|external]]')), 'wikilink("In a table")');
+});
+
 test('escapes drop the backslash', () => {
 	assert.equal(show(tokens('a \\* b')), '"a " "*" " b"');
 });

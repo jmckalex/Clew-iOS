@@ -90,8 +90,10 @@ export function inlineTokens(doc, from, to, model, given = null) {
 				return { type: 'link', href: c.url, children: [{ type: 'text', text: source }] };
 			case 'wikilink': {
 				const target = c.target + (c.heading ? `#${c.heading}` : '') + (c.blockId ? `#^${c.blockId}` : '');
-				const shown = doc.sliceString(c.hidden[0].to, c.hidden[c.hidden.length - 1].from);
-				return { type: 'wikilink', target, children: [{ type: 'text', text: shown }] };
+				// The text between the hidden pieces — a `|external` in the
+				// middle of an alias is one of them (model.js#externalHidden).
+				const shown = c.hidden.slice(1).map((h, i) => doc.sliceString(c.hidden[i].to, h.from)).join('');
+				return { type: 'wikilink', target, external: c.external ? c.target : null, children: [{ type: 'text', text: shown }] };
 			}
 			case 'tag':
 				return { type: 'tag', name: c.name, text: source };
@@ -163,6 +165,7 @@ function nodeFor(t, renderMath) {
 		el = document.createElement('a');
 		el.className = 'le-wikilink';
 		el.dataset.leTarget = t.target;
+		if (t.external) el.dataset.leExternal = t.external;
 		el.title = t.target;
 	} else {
 		el = document.createElement(TAGS[t.type] ?? 'span');

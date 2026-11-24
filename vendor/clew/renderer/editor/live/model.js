@@ -184,6 +184,32 @@ function build(doc, tree, config) {
 		}
 	}
 
+	// What the engine reads as TEXT, whatever it holds: a wikilink or an
+	// embed (target, heading, alias), maths, a citation's keys, a {{var}}, and
+	// a directive's bracket the engine takes literally (`@reveal[https://…]`).
+	// The markdown tree does not know them, so `_2627` in a link's path was a
+	// subscript and a bare URL in a reveal's bracket a link; no inline node of
+	// the tree is drawn inside one (the owner's report, 2026-11-23).
+	const owned = scan.constructs.flatMap((s) => {
+		if (s.kind === 'directiveInline' || s.kind === 'directiveAt') {
+			const name = s.name ? text(s.name.start, s.name.end) : '';
+			return LITERAL_DIRECTIVES.has(name) ? [{ from: s.start, to: s.end }] : [];
+		}
+		return ['wikilink', 'embed', 'math', 'cite', 'mustache'].includes(s.kind) ? [{ from: s.start, to: s.end }] : [];
+	}).sort((a, b) => a.from - b.from);
+	/** Whether [from, to) lies inside one owned range (they never nest: the
+	 *  scanner claims each, and nothing else starts inside a claim). */
+	const insideOwned = (from, to) => {
+		let lo = 0;
+		let hi = owned.length - 1;
+		let at = -1;
+		while (lo <= hi) {
+			const mid = (lo + hi) >> 1;
+			if (owned[mid].from <= from) { at = mid; lo = mid + 1; } else hi = mid - 1;
+		}
+		return at >= 0 && to <= owned[at].to;
+	};
+
 	// ---- the tree ----------------------------------------------------------
 	const quoteLines = new Map(); // line.from → {marks: Range[], depth, callout}
 	const bareUrls = [];
@@ -192,6 +218,7 @@ function build(doc, tree, config) {
 			const { name, from, to } = ref;
 			if (name === 'Document') return;
 			if (inOpaque(from)) return false;
+			if (INLINE_NODES.has(name) && insideOwned(from, to)) return false;
 			const node = ref.node;
 			switch (name) {
 				case 'ATXHeading1': case 'ATXHeading2': case 'ATXHeading3':
@@ -562,11 +589,13 @@ function build(doc, tree, config) {
 					// Hidden: the brackets, and everything before the alias
 					// when there is one (`[[Target|shown]]` shows `shown`);
 					// a same-note `[[#Heading]]` shows `Heading`.
-					const hidden = s.alias
+					let hidden = s.alias
 						? [{ from: s.start, to: s.alias.start }, r(s.close)]
 						: [r(s.open), r(s.close)];
 					if (!s.alias && !s.target && s.heading) hidden[0] = { from: s.start, to: s.heading.start };
-					add('wikilink', 'A', 'inline', s.start, s.end, { ...parts, hidden });
+					const external = Boolean(s.alias && target) && aliasParts(s, text).some((a) => a.external);
+					if (external) hidden = externalHidden(s, text);
+					add('wikilink', 'A', 'inline', s.start, s.end, { ...parts, hidden, external });
 					break;
 				}
 				const dot = target.lastIndexOf('.');
@@ -631,17 +660,9 @@ function build(doc, tree, config) {
 	}
 
 	// Bare URLs, where the engine sees prose: not inside a construct the
-	// scanner owns (a wikilink, maths, a citation, a {{var}}) nor in a
-	// directive's bracket the engine takes literally (`@reveal[https://…]`).
-	const owned = scan.constructs.flatMap((s) => {
-		if (s.kind === 'directiveInline' || s.kind === 'directiveAt') {
-			const name = s.name ? text(s.name.start, s.name.end) : '';
-			return LITERAL_DIRECTIVES.has(name) ? [{ from: s.start, to: s.end }] : [];
-		}
-		return ['wikilink', 'embed', 'math', 'cite', 'mustache'].includes(s.kind) ? [{ from: s.start, to: s.end }] : [];
-	});
+	// scanner owns (`owned`, above).
 	for (const { from, to } of bareUrls) {
-		if (owned.some((r) => from >= r.from && to <= r.to)) continue;
+		if (insideOwned(from, to)) continue;
 		const url = text(from, to);
 		const href = /^[a-z][a-z0-9+.-]*:/i.test(url) ? url : /^www\./i.test(url) ? `http://${url}` : `mailto:${url}`;
 		add('url', 'A', 'inline', from, to, { url: href, hidden: [] });
@@ -655,6 +676,60 @@ function build(doc, tree, config) {
 	let footnotes = 0;
 	for (const c of out) if (c.kind === 'footnote') c.number = ++footnotes;
 	return out;
+}
+
+/** The tree's inline nodes — none is drawn inside what the engine reads as
+ *  text (`owned` in liveModel). */
+const INLINE_NODES = new Set([
+	'Emphasis', 'StrongEmphasis', 'Strikethrough', 'Subscript', 'Superscript',
+	'JmdSubscript', 'JmdSuperscript', 'InlineCode', 'Escape', 'HardBreak',
+	'Autolink', 'URL', 'Link', 'Image',
+]);
+
+/**
+ * A wikilink's alias as the engine reads it: split on `|`, each part's range
+ * and whether it is `external` (in any case). Inside a table the pipe is
+ * escaped (`\|`, as in Obsidian) and the table takes the backslash before
+ * the engine sees the link, so a part's trailing backslash is the
+ * separator's, not its text.
+ */
+function aliasParts(s, text) {
+	const pieces = text(s.alias.start, s.alias.end).split('|');
+	const parts = [];
+	let from = s.alias.start;
+	pieces.forEach((piece, i) => {
+		const escaped = i < pieces.length - 1 && piece.endsWith('\\');
+		const to = from + piece.length - (escaped ? 1 : 0);
+		parts.push({ from, to, external: text(from, to).trim().toLowerCase() === 'external' });
+		from += piece.length + 1;
+	});
+	return parts;
+}
+
+/**
+ * A wikilink's `|external` (Clew's: hand the file to the OS's default app) is
+ * an instruction, not text, so it is hidden as reading view drops it — the
+ * engine's rule (engine/wikilinks.js): every part of the alias that is
+ * `external` left out, the rest shown as written; nothing left, the target's
+ * name (reading view's label).
+ */
+function externalHidden(s, text) {
+	const parts = aliasParts(s, text);
+	const kept = parts.filter((p) => !p.external);
+	if (!kept.length) {
+		const targetEnd = s.target.end - (text(s.target.start, s.target.end).endsWith('\\') ? 1 : 0);
+		return [{ from: s.start, to: s.target.start }, { from: targetEnd, to: s.end }];
+	}
+	const first = kept[0];
+	const last = kept[kept.length - 1];
+	const hidden = [{ from: s.start, to: first.from }];
+	parts.forEach((p, i) => {
+		// An `external` between two shown parts goes with the separator
+		// before it (`|external`, or a table's `\|external`).
+		if (p.external && p.from > first.from && p.to < last.to) hidden.push({ from: parts[i - 1].to, to: p.to });
+	});
+	hidden.push({ from: last.to, to: s.end });
+	return hidden;
 }
 
 /** Hide a directive's sigil+name, brackets and attribute group; keep content. */
