@@ -17,6 +17,10 @@
 //   light    a light page takes the `_light` variant (page.jinja), a switch
 //            back repaints
 //   kinds    each fixture file's icon, as the Mac names it
+//   closed   (Clew-app 0045b24, the owner's ask of 2026-11-17) a vault opens
+//            on its top level, every folder closed; a closed folder's "New
+//            note" (its long-press menu) opens it and asks the name in its
+//            row; the folders opened come back at the next launch
 // Writes results.json and explorer-dark.png / explorer-light.png into --out.
 // Always ends with the app terminated and uninstalled, its defaults removed
 // and the simulator shut down.
@@ -129,9 +133,13 @@ const base = (src) => src.split('/').pop();
 const startTheme = settingsStore.get('theme') ?? 'dark';
 R.startTheme = startTheme;
 if (startTheme !== 'dark') { settingsStore.set('theme', 'dark'); await sleep(400); }
-if (!workspaceStore.collapsedFolders.includes('Many')) {
-	explorer.querySelector('.tree-item.is-folder[data-path="Many"]')?.click();
-	await sleep(400);
+R.restored = [...workspaceStore.expandedFolders];
+// Every folder but the long one open, so every other row is on screen at
+// once (smoke/explorer-icons-scenario.js since 0045b24: they start closed).
+for (const path of ['Lectures', 'Lectures/Week 1', 'Lectures/Week 2', 'Pictures', 'Office', 'Boards', 'Many']) {
+	if (workspaceStore.expandedFolders.includes(path) === (path !== 'Many')) continue;
+	explorer.querySelector('.tree-item.is-folder[data-path="' + CSS.escape(path) + '"]')?.click();
+	await sleep(300);
 }
 await sleep(800);
 const drawn = rows().map((row) => {
@@ -193,6 +201,36 @@ R.backJinja = jinja();
 if (startTheme !== 'dark') settingsStore.set('theme', startTheme);
 `;
 
+/**
+ * Folders start closed (smoke/folder-state-scenario.js, 0045b24): the
+ * fixture's first view, then a closed folder's "New note" through its own
+ * long-press menu (ios-ui.js turns a long press into this contextmenu).
+ */
+const CLOSED = `
+if (vaults.name !== ${JSON.stringify(VAULT_NAME)}) throw new Error('not the checks vault: ' + vaults.name);
+const { workspaceStore } = window.__clew;
+workspaceStore.setSidebar('left', { open: true, activeTool: 'files' });
+await sleep(1500);
+const explorer = document.querySelector('clew-file-explorer');
+const rows = () => [...explorer.querySelectorAll('.file-tree-sizer > .tree-item')].map((r) => r.dataset.path);
+const rowFor = (p) => explorer.querySelector('.tree-item[data-path="' + CSS.escape(p) + '"]');
+R.atStart = rows();
+R.storeAtStart = [...workspaceStore.expandedFolders];
+const office = rowFor('Office').getBoundingClientRect();
+rowFor('Office').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: office.left + 20, clientY: office.top + 5 }));
+await sleep(300);
+R.menu = [...document.querySelectorAll('.clew-menu .menu-item')].map((b) => b.textContent);
+[...document.querySelectorAll('.clew-menu .menu-item')].find((b) => b.textContent === 'New note')?.click();
+let input = null;
+for (let i = 0; i < 40 && !input; i++) { await sleep(100); input = explorer.querySelector('.tree-rename-input'); }
+R.renaming = input?.closest('.tree-item')?.dataset.path ?? null;
+R.officeOpen = workspaceStore.expandedFolders.includes('Office');
+input?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+await sleep(300);
+R.afterNew = rows();
+await sleep(1500); // the workspace store's 500ms persist debounce
+`;
+
 const verdicts = [];
 const verdict = (name, ok, detail) => {
 	verdicts.push({ name, ok: Boolean(ok), detail });
@@ -225,8 +263,19 @@ async function main() {
 	verdict('open the fixture vault', opened.result?.vault === VAULT_NAME, JSON.stringify(opened.result));
 	if (opened.result?.vault !== VAULT_NAME) return null;
 
+	const fold = await launch(frame(CLOSED), { vault, seconds: 40 });
+	const f = fold.result ?? {};
+	if (f.error) verdict('the closed-folders smoke itself', false, f.error);
+	// (clewdata.json is the smoke's own results, written at the root.)
+	const top = ['Boards', 'Lectures', 'Many', 'Office', 'Pictures', 'Makefile', 'README.md', 'index.php', 'refs.bib', 'site.zip', 'clewdata.json'];
+	verdict('closed: the vault opens on its top level, every folder closed', JSON.stringify([...(f.atStart ?? [])].sort()) === JSON.stringify([...top].sort()) && f.storeAtStart?.length === 0,
+		`${f.atStart?.length} rows ${JSON.stringify(f.atStart)}; store ${JSON.stringify(f.storeAtStart)}`);
+	verdict('closed: a closed folder\'s "New note" opens it and asks the name in its row', f.officeOpen === true && f.renaming === 'Office/Untitled.md'
+		&& (f.afterNew ?? []).includes('Office/Essay.docx'), `menu ${JSON.stringify(f.menu)}; renaming ${f.renaming}; Office open ${f.officeOpen}`);
+
 	const run = await launch(frame(CHECKS), { vault, seconds: 60 });
 	const r = run.result ?? {};
+	verdict('closed: the folders opened come back at the next launch', JSON.stringify(r.restored) === '["Office"]', JSON.stringify(r.restored));
 	if (r.error) verdict('the smoke itself', false, r.error);
 	verdict('indent: each row 16px in from its folder, siblings in one column, each name after its icon', r.rows > 20 && r.indentBad?.length === 0, `${r.rows} rows; ${JSON.stringify(r.indentBad)}`);
 	verdict('guides: a row\'s guide band is its depth × 16px', r.guidesBad?.length === 0, JSON.stringify(r.guidesBad));

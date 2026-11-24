@@ -16,7 +16,9 @@
  * fine until a vault turns out to contain a library: the owner's ph341
  * vault (five presentation folders symlinking one reveal.js tree) rendered
  * 20,503 rows and took 23.5 s to settle, because a vault opened for the
- * first time has nothing collapsed. Windowing makes the cost the size of
+ * first time had nothing collapsed (it has since 2026-11-17: every folder
+ * starts closed, the owner's ask — but one opened folder can still hold a
+ * library, so the window stays). Windowing makes the cost the size of
  * the VIEWPORT rather than the size of the vault — about forty rows.
  *
  * The tree is drawn as a FLAT list (depth is padding, not nesting), which
@@ -25,20 +27,21 @@
  */
 
 /**
- * The tree as the rows actually drawn, depth-first, skipping the children
- * of collapsed folders — the order the explorer paints and the order the
- * keyboard would walk.
+ * The tree as the rows actually drawn, depth-first, entering only the
+ * folders that are open — the order the explorer paints and the order the
+ * keyboard would walk. A folder is closed unless `expanded` names it, so a
+ * vault no one has opened a folder in shows its top level alone.
  *
  * @param {Array} entries vaultStore.tree (folders carry `children`)
- * @param {Set<string>} collapsed paths of closed folders
+ * @param {Set<string>} expanded paths of open folders
  * @returns {Array<{entry: object, depth: number}>}
  */
-export function flattenTree(entries, collapsed = new Set()) {
+export function flattenTree(entries, expanded = new Set()) {
 	const rows = [];
 	const walk = (list, depth) => {
 		for (const entry of list ?? []) {
 			rows.push({ entry, depth });
-			if (entry.type === 'folder' && !collapsed.has(entry.path)) walk(entry.children, depth + 1);
+			if (entry.type === 'folder' && expanded.has(entry.path)) walk(entry.children, depth + 1);
 		}
 	};
 	walk(entries, 0);

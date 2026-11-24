@@ -228,29 +228,43 @@ test('defaultMode applies to new note tabs only', () => {
 	assert.equal(back.view.mode, 'reading');
 });
 
-test('a new workspace has no collapsed folders — everything opens expanded', () => {
-	assert.deepEqual(tree.createInitialState().collapsedFolders, []);
+test('a new workspace has no open folders — every folder starts closed (the owner, 2026-11-17)', () => {
+	const state = tree.createInitialState();
+	assert.deepEqual(state.expandedFolders, []);
+	assert.equal('collapsedFolders' in state, false);
 });
 
-test('collapsed folders survive a serialize/deserialize round trip', () => {
+test('open folders survive a serialize/deserialize round trip', () => {
 	const state = stateWithNotes('a.md');
-	state.collapsedFolders = ['Guide', 'Guide/Deep', 'Archive'];
+	state.expandedFolders = ['Guide', 'Guide/Deep', 'Archive'];
 	const back = tree.deserialize(JSON.parse(JSON.stringify(tree.serialize(state))));
-	assert.deepEqual(back.collapsedFolders, ['Guide', 'Guide/Deep', 'Archive']);
+	assert.deepEqual(back.expandedFolders, ['Guide', 'Guide/Deep', 'Archive']);
 });
 
-test('a workspace saved before folder state existed deserializes expanded', () => {
+test('a workspace saved before folder state existed deserializes closed', () => {
 	const saved = tree.serialize(stateWithNotes('a.md'));
-	delete saved.collapsedFolders;
-	assert.deepEqual(tree.deserialize(saved).collapsedFolders, []);
+	delete saved.expandedFolders;
+	assert.deepEqual(tree.deserialize(saved).expandedFolders, []);
 });
 
-test('deserialize keeps collapsed paths for folders that are gone, but drops junk', () => {
+test('a workspace saved with the old closed-folder list opens closed, the list dropped', () => {
+	// Until 2026-11-17 the workspace named the folders CLOSED and every other
+	// was open by default — which says nothing about any folder opened on
+	// purpose.
+	const saved = tree.serialize(stateWithNotes('a.md'));
+	delete saved.expandedFolders;
+	saved.collapsedFolders = ['Archive'];
+	const back = tree.deserialize(saved);
+	assert.deepEqual(back.expandedFolders, []);
+	assert.equal('collapsedFolders' in back, false);
+});
+
+test('deserialize keeps open paths for folders that are gone, but drops junk', () => {
 	const saved = tree.serialize(stateWithNotes('a.md'));
 	// Unlike tabs, a missing folder is NOT pruned: restore it and it should
-	// come back closed. Only non-strings are dropped.
-	saved.collapsedFolders = ['Deleted Folder', 42, null, 'Kept'];
-	assert.deepEqual(tree.deserialize(saved).collapsedFolders, ['Deleted Folder', 'Kept']);
+	// come back open. Only non-strings are dropped.
+	saved.expandedFolders = ['Deleted Folder', 42, null, 'Kept'];
+	assert.deepEqual(tree.deserialize(saved).expandedFolders, ['Deleted Folder', 'Kept']);
 });
 
 /* ── live edit: the third mode and the remembered editing mode ─────────── */

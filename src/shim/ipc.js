@@ -207,6 +207,15 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 		send(CH.EV_TREE_CHANGED, { tree: vaults.tree() });
 		vaults.hooks.onStructureChanged?.();
 	};
+	// The explorer's "New note", "New canvas", "New drawing" and "New folder"
+	// mark the path to rename on the create's REPLY, and rename it on the
+	// next tree it draws — a closed folder above it opened first (Clew-app
+	// 0045b24's #revealRow). Desktop's tree arrives from its watcher, after
+	// the reply; send()'s microtask came before it, so on the iPad no new
+	// row was ever renamed (nor, since 0045b24, a closed folder opened). The
+	// tree goes a task later, after the reply and whatever the renderer runs
+	// on it (a drawing's scaffold, an unguarded write, answers at once).
+	const structureChangedAfterReply = () => setTimeout(structureChanged, 0);
 
 	// "Convert this vault" — the colon directives' retirement, phase 2:
 	// upstream's converter over the mirror and the device (colon-conversion.js).
@@ -537,12 +546,12 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 		[CH.HISTORY_KEEP]: ({ path, text }) => keepVersion(VAULT_ROOT, vaults.resolve(path).slice(VAULT_ROOT.length + 1), text),
 		[CH.NOTE_CREATE]: ({ path }) => {
 			const rel = vaults.createNote(path);
-			structureChanged();
+			structureChangedAfterReply();
 			return rel;
 		},
 		[CH.FS_CREATE_FOLDER]: ({ path }) => {
 			vaults.createFolder(path);
-			structureChanged();
+			structureChangedAfterReply();
 		},
 		[CH.FS_RENAME]: ({ path, newPath }) => {
 			vaults.rename(path, newPath);

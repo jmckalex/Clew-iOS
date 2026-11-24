@@ -227,17 +227,17 @@ class WorkspaceStore extends Emitter {
 	}
 
 	/**
-	 * The file explorer's closed folders. Silent like updateTabView: the
-	 * explorer has already redrawn itself by the time it tells us, and a
-	 * layout-changed here would put every other panel through a render for a
-	 * disclosure triangle.
+	 * The file explorer's open folders (every other one is closed). Silent
+	 * like updateTabView: the explorer has already redrawn itself by the time
+	 * it tells us, and a layout-changed here would put every other panel
+	 * through a render for a disclosure triangle.
 	 */
-	get collapsedFolders() {
-		return this.state.collapsedFolders ?? [];
+	get expandedFolders() {
+		return this.state.expandedFolders ?? [];
 	}
 
-	setCollapsedFolders(paths) {
-		this.state.collapsedFolders = [...paths];
+	setExpandedFolders(paths) {
+		this.state.expandedFolders = [...paths];
 		this.#persist();
 	}
 

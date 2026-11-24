@@ -28,7 +28,9 @@ import { flattenTree, visibleRange, scrollTopFor } from '../../lib/tree-window.j
 import { fileIconName, folderIconName, fileIconUrl } from '../../lib/file-icons.js';
 
 class ClewFileExplorer extends ClewElement {
-	#collapsed = new Set();
+	// The folders open in the tree; every other one is closed (the owner's
+	// ask, 2026-11-17 — until then they all began open).
+	#expanded = new Set();
 	#pendingRename = null;
 	// ---- windowing --------------------------------------------------------
 	// Only the rows on screen exist in the DOM. The tree is drawn flat (depth
@@ -49,12 +51,12 @@ class ClewFileExplorer extends ClewElement {
 		this.listen(vaultStore, 'vault-changed', () => this.render());
 		this.listen(workspaceStore, 'active-changed', () => this.#updateActiveHighlight());
 		this.listen(workspaceStore, 'layout-changed', () => this.#updateActiveHighlight());
-		// Which folders are closed is saved with the workspace, and arrives
+		// Which folders are open is saved with the workspace, and arrives
 		// with it — AFTER the vault-changed/tree-changed renders above, since
 		// the workspace loads over IPC once the tree is already on screen.
 		// Hence a redraw here rather than a one-time read at startup.
 		this.listen(workspaceStore, 'workspace-restored', () => {
-			this.#collapsed = new Set(workspaceStore.collapsedFolders);
+			this.#expanded = new Set(workspaceStore.expandedFolders);
 			this.render();
 		});
 		// A few icons have a variant for a light page (lib/file-icons.js).
@@ -111,7 +113,7 @@ class ClewFileExplorer extends ClewElement {
 		this.#scroller = treeEl;
 		this.#sizer = sizer;
 		this.#painted = null;
-		this.#rows = flattenTree(vaultStore.tree, this.#collapsed);
+		this.#rows = flattenTree(vaultStore.tree, this.#expanded);
 		this.#rowHeight = this.#measureRowHeight();
 		sizer.style.height = `${this.#rows.length * this.#rowHeight}px`;
 		treeEl.scrollTop = keepScroll;
@@ -184,10 +186,19 @@ class ClewFileExplorer extends ClewElement {
 	/**
 	 * Scroll a path into view and return its row, building the window around
 	 * it — "Rename…" on a row the user right-clicked is always on screen, but
-	 * a note just created by the palette need not be.
+	 * a note just created by the palette need not be. The folders holding it
+	 * are opened first: a note made by a closed folder's "New note" is inside
+	 * it, and its name is to be typed in its row.
 	 */
 	#revealRow(path) {
-		const index = this.#rows.findIndex((r) => r.entry.path === path);
+		let index = this.#rows.findIndex((r) => r.entry.path === path);
+		if (index < 0 && this.#openAncestors(path)) {
+			this.#rows = flattenTree(vaultStore.tree, this.#expanded);
+			this.#sizer.style.height = `${this.#rows.length * this.#rowHeight}px`;
+			this.#painted = null;
+			this.#paint();
+			index = this.#rows.findIndex((r) => r.entry.path === path);
+		}
 		if (index < 0) return null;
 		const top = scrollTopFor({
 			index,
@@ -226,7 +237,7 @@ class ClewFileExplorer extends ClewElement {
 		row.style.setProperty('--tree-depth', depth);
 
 		const folder = entry.type === 'folder';
-		const open = folder && !this.#collapsed.has(entry.path);
+		const open = folder && this.#expanded.has(entry.path);
 		const chevron = document.createElement('span');
 		chevron.className = 'tree-chevron';
 		if (folder) chevron.append(icon(open ? 'chevron-down' : 'chevron-right'));
@@ -278,10 +289,23 @@ class ClewFileExplorer extends ClewElement {
 	}
 
 	#toggleFolder(path) {
-		if (this.#collapsed.has(path)) this.#collapsed.delete(path);
-		else this.#collapsed.add(path);
-		workspaceStore.setCollapsedFolders(this.#collapsed);
+		if (this.#expanded.has(path)) this.#expanded.delete(path);
+		else this.#expanded.add(path);
+		workspaceStore.setExpandedFolders(this.#expanded);
 		this.render();
+	}
+
+	/** Open every folder above `path`; whether any was closed. */
+	#openAncestors(path) {
+		let opened = false;
+		for (let i = path.indexOf('/'); i > 0; i = path.indexOf('/', i + 1)) {
+			const folder = path.slice(0, i);
+			if (this.#expanded.has(folder)) continue;
+			this.#expanded.add(folder);
+			opened = true;
+		}
+		if (opened) workspaceStore.setExpandedFolders(this.#expanded);
+		return opened;
 	}
 
 	// ---- drag to move -----------------------------------------------------
@@ -374,23 +398,23 @@ class ClewFileExplorer extends ClewElement {
 			workspaceStore.remapPaths(path, newPath);
 			editorPool.remapPath(path, newPath);
 			bookmarkStore.remap(path, newPath);
-			this.#remapCollapsed(path, newPath);
+			this.#remapExpanded(path, newPath);
 		} catch (err) {
 			console.error('Move failed:', err);
 		}
 	}
 
-	/** Follow a renamed or moved folder — and everything closed inside it,
+	/** Follow a renamed or moved folder — and everything open inside it,
 	 *  which a rename of an ancestor moves just as surely. */
-	#remapCollapsed(path, newPath) {
+	#remapExpanded(path, newPath) {
 		let touched = false;
-		for (const collapsed of [...this.#collapsed]) {
-			if (collapsed !== path && !collapsed.startsWith(path + '/')) continue;
-			this.#collapsed.delete(collapsed);
-			this.#collapsed.add(newPath + collapsed.slice(path.length));
+		for (const open of [...this.#expanded]) {
+			if (open !== path && !open.startsWith(path + '/')) continue;
+			this.#expanded.delete(open);
+			this.#expanded.add(newPath + open.slice(path.length));
 			touched = true;
 		}
-		if (touched) workspaceStore.setCollapsedFolders(this.#collapsed);
+		if (touched) workspaceStore.setExpandedFolders(this.#expanded);
 	}
 
 	// ---- actions ----------------------------------------------------------

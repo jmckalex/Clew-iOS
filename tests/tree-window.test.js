@@ -27,24 +27,37 @@ const tree = [
 	file('top.md', 'top.md'),
 ];
 
+const ALL_OPEN = new Set(['a', 'a/deep', 'b']);
+
 test('flatten: depth-first, folders before their children, depth counted', () => {
-	assert.deepEqual(flattenTree(tree).map((r) => `${r.depth}:${r.entry.path}`), [
+	assert.deepEqual(flattenTree(tree, ALL_OPEN).map((r) => `${r.depth}:${r.entry.path}`), [
 		'0:a', '1:a/a1.md', '1:a/deep', '2:a/deep/d.md', '0:b', '1:b/b1.md', '0:top.md',
 	]);
 });
 
-test('flatten: a collapsed folder keeps its row and loses its children', () => {
-	assert.deepEqual(flattenTree(tree, new Set(['a'])).map((r) => r.entry.path),
+test('flatten: every folder starts closed — no open folders, the top level alone (the owner, 2026-11-17)', () => {
+	assert.deepEqual(flattenTree(tree).map((r) => `${r.depth}:${r.entry.path}`), ['0:a', '0:b', '0:top.md']);
+	assert.deepEqual(flattenTree(tree, new Set()).map((r) => r.entry.path), ['a', 'b', 'top.md']);
+});
+
+test('flatten: a closed folder keeps its row and loses its children', () => {
+	assert.deepEqual(flattenTree(tree, new Set(['a/deep', 'b'])).map((r) => r.entry.path),
 		['a', 'b', 'b/b1.md', 'top.md']);
-	// …including a collapsed folder nested inside an open one.
-	assert.deepEqual(flattenTree(tree, new Set(['a/deep'])).map((r) => r.entry.path),
+	// …including a closed folder nested inside an open one.
+	assert.deepEqual(flattenTree(tree, new Set(['a', 'b'])).map((r) => r.entry.path),
 		['a', 'a/a1.md', 'a/deep', 'b', 'b/b1.md', 'top.md']);
+});
+
+test('flatten: an open folder inside a closed one draws nothing until its parent opens', () => {
+	assert.deepEqual(flattenTree(tree, new Set(['a/deep'])).map((r) => r.entry.path), ['a', 'b', 'top.md']);
+	assert.deepEqual(flattenTree(tree, new Set(['a', 'a/deep'])).map((r) => r.entry.path),
+		['a', 'a/a1.md', 'a/deep', 'a/deep/d.md', 'b', 'top.md']);
 });
 
 test('flatten: nothing to draw is not a crash', () => {
 	assert.deepEqual(flattenTree(null), []);
 	assert.deepEqual(flattenTree([]), []);
-	assert.deepEqual(flattenTree([folder('empty', 'empty', undefined)]).map((r) => r.entry.path), ['empty']);
+	assert.deepEqual(flattenTree([folder('empty', 'empty', undefined)], new Set(['empty'])).map((r) => r.entry.path), ['empty']);
 });
 
 test('window: the viewport, plus overscan, clamped to the list', () => {

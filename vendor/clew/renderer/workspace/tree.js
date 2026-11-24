@@ -61,9 +61,10 @@ export function createInitialState() {
 		// The shell panel under the workspace: closed until asked for, its
 		// height remembered per vault the way a sidebar's width is.
 		shell: { open: false, height: 220 },
-		// File-explorer folders the user has closed. Absence means open, so a
-		// vault seen for the first time greets you fully expanded.
-		collapsedFolders: [],
+		// File-explorer folders the user has opened. Absence means closed, so a
+		// vault seen for the first time shows its top level and no more (the
+		// owner's ask, 2026-11-17; until then it opened fully expanded).
+		expandedFolders: [],
 	};
 }
 
@@ -503,9 +504,13 @@ export function deserialize(json, { noteExists = () => true } = {}) {
 	// Workspaces saved before folder state was remembered simply have none.
 	// Paths for folders that have since gone are KEPT, not pruned: a folder
 	// restored from the Trash (or arriving with a git checkout) should come
-	// back closed, exactly as its owner left it.
-	state.collapsedFolders = Array.isArray(state.collapsedFolders)
-		? state.collapsedFolders.filter((p) => typeof p === 'string')
+	// back open, exactly as its owner left it.
+	state.expandedFolders = Array.isArray(state.expandedFolders)
+		? state.expandedFolders.filter((p) => typeof p === 'string')
 		: [];
+	// Until 2026-11-17 the workspace recorded the folders CLOSED, every other
+	// one open by default. That list says nothing about which were opened on
+	// purpose, so it is dropped: such a vault opens closed like any other.
+	delete state.collapsedFolders;
 	return state;
 }

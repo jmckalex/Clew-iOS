@@ -546,6 +546,33 @@ test('note create dedupes names', async () => {
 	assert.ok(fs.existsSync(path.join(vaultDir, 'Fresh 1.md')));
 });
 
+test('the explorer\'s New note, canvas, drawing and folder: the reply comes before the tree, so the new row is renamed (and, since Clew-app 0045b24, a closed folder above it opened)', async () => {
+	// As clew-file-explorer.js does: the path to rename is set on the reply,
+	// and read by the next tree-changed render.
+	let pending = null;
+	const seen = [];
+	const off = clew.on('clew:ev-tree-changed', () => { seen.push(pending); pending = null; });
+	pending = await clew.invoke(CH.NOTE_CREATE, { path: 'Untitled.md' });
+	await settle();
+	pending = await clew.invoke(CH.NOTE_CREATE, { path: 'Untitled.canvas' });
+	await settle();
+	// A drawing: created, its scaffold written, then marked.
+	const drawing = await clew.invoke(CH.NOTE_CREATE, { path: 'Untitled.excalidraw.md' });
+	await clew.invoke(CH.NOTE_WRITE, { path: drawing, content: '---\nexcalidraw-plugin: parsed\n---\n' });
+	pending = drawing;
+	await settle();
+	await clew.invoke('clew:fs-create-folder', { path: 'New folder' });
+	pending = 'New folder';
+	await settle();
+	off();
+	// (Other trees may follow — the files landing on the device — with
+	// nothing marked, as the renderer's render does nothing with them.)
+	assert.deepEqual(seen.filter(Boolean), ['Untitled.md', 'Untitled.canvas', 'Untitled.excalidraw.md', 'New folder'],
+		'each create\'s tree came after its reply, with the new row marked');
+	for (const rel of ['Untitled.md', 'Untitled.canvas', 'Untitled.excalidraw.md']) await clew.invoke('clew:fs-trash', { path: rel });
+	await clew.invoke('clew:fs-trash', { path: 'New folder' });
+});
+
 test('rename propagates wikilinks and lands on disk', async () => {
 	await settle();
 	// rename-links.js#rewriteCanvasRefs consults `vaults.excludes.isUnindexed`
