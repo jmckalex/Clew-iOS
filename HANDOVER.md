@@ -1,9 +1,9 @@
-# Handover — 2026-11-12 (TestFlight at 0b7c028; the sync to Clew-app cfa279b, with the owner's file explorer, local)
+# Handover — 2026-11-24 (TestFlight at 0456399; the sync to Clew-app c37ce1c, with clew-only and Export notes as PDF, local)
 
 Current state for a fresh session, rewritten whole. Durable architecture
 lives in **README.md** and **PORT-PLAN.md**. Each sync's reasoning and
 measurements are in its record: `UPSTREAM-*-PLAN.md`. The latest records
-are `UPSTREAM-CFA279B-PLAN.md` (the file explorer's indentation, guides and icons, mp-tikz-wasm 0.5.1, PDF via LaTeX's failure as the Mac says it, 2026-11-12), `UPSTREAM-A14EC13-PLAN.md` (Obsidian's %% comments, TeX's missing files said, Garamond-Math only with maths, then the demo vault at 3f0f667, 2026-10-22), `UPSTREAM-146107C-PLAN.md` (mp-tikz-wasm 0.5.0 pinned, BUILT_IN_TEX, jmarkdown's `%`, 2026-10-22), `UPSTREAM-0768F36-PLAN.md` (jmarkdown 551485a, the numbered hang, the iPad's Mermaid words, 2026-10-21), `UPSTREAM-LATEX-EXPORT-PLAN.md` (the iPad's LaTeX exports: L1, L2, P2 as built), `UPSTREAM-0E773C3-PLAN.md` (the export pipeline's shared modules, quotes and tabs in lists measured, 2026-10-20), `UPSTREAM-0ADA21D-PLAN.md` (list keys, the Next item button, {{TOC}}, title blocks, quotes in lists, 2026-10-20), `UPSTREAM-F0AEAA4-PLAN.md` (EmbedPDF's cards at 208 px, the colon list's fill, the LaTeX refusal, 2026-10-15), `UPSTREAM-EF5F7F2-PLAN.md` (the index cache's save, tables wrapping at words, PDF #page=N, images within a line, 2026-10-15), `UPSTREAM-F4FEB68-PLAN.md` (tables in live edit, the guard, the PDF height upstream, 2026-10-15), `UPSTREAM-185E950-PLAN.md` (the colon retirement and "Convert this vault", 2026-10-11), `HTML-SHARE.md` (the iPad HTML share, 2026-10-11), `UPSTREAM-F959799-PLAN.md` (the figure engine, Proof this chapter, figures
+are `UPSTREAM-C37CE1C-PLAN.md` (TeX's log as bytes, folders start closed, live edit's links, @begin(clew-only), Export notes as PDF, 2026-11-24), `UPSTREAM-CFA279B-PLAN.md` (the file explorer's indentation, guides and icons, mp-tikz-wasm 0.5.1, PDF via LaTeX's failure as the Mac says it, 2026-11-12), `UPSTREAM-A14EC13-PLAN.md` (Obsidian's %% comments, TeX's missing files said, Garamond-Math only with maths, then the demo vault at 3f0f667, 2026-10-22), `UPSTREAM-146107C-PLAN.md` (mp-tikz-wasm 0.5.0 pinned, BUILT_IN_TEX, jmarkdown's `%`, 2026-10-22), `UPSTREAM-0768F36-PLAN.md` (jmarkdown 551485a, the numbered hang, the iPad's Mermaid words, 2026-10-21), `UPSTREAM-LATEX-EXPORT-PLAN.md` (the iPad's LaTeX exports: L1, L2, P2 as built), `UPSTREAM-0E773C3-PLAN.md` (the export pipeline's shared modules, quotes and tabs in lists measured, 2026-10-20), `UPSTREAM-0ADA21D-PLAN.md` (list keys, the Next item button, {{TOC}}, title blocks, quotes in lists, 2026-10-20), `UPSTREAM-F0AEAA4-PLAN.md` (EmbedPDF's cards at 208 px, the colon list's fill, the LaTeX refusal, 2026-10-15), `UPSTREAM-EF5F7F2-PLAN.md` (the index cache's save, tables wrapping at words, PDF #page=N, images within a line, 2026-10-15), `UPSTREAM-F4FEB68-PLAN.md` (tables in live edit, the guard, the PDF height upstream, 2026-10-15), `UPSTREAM-185E950-PLAN.md` (the colon retirement and "Convert this vault", 2026-10-11), `HTML-SHARE.md` (the iPad HTML share, 2026-10-11), `UPSTREAM-F959799-PLAN.md` (the figure engine, Proof this chapter, figures
 in exports measured, 2026-10-10), `UPSTREAM-6B6FBBB-PLAN.md` (PostScript figures, system font families,
 mp-tikz-wasm 0.4.0, 2026-10-10), `UPSTREAM-5ABF52D-PLAN.md` (app secrets,
 book mode phase 2, the book print, 2026-10-10), `UPSTREAM-CBFA692-PLAN.md` (book mode and the demo
@@ -14,10 +14,34 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
 
 ## 1. Where things stand
 
-- **The sync to Clew-app cfa279b, for ONE TestFlight push (LOCAL,
-  `[ci skip]`, off origin/main 0b7c028):** `sync-cfa279b-p1-vendor`
+- **The sync to Clew-app c37ce1c, for ONE TestFlight push (LOCAL,
+  `[ci skip]`, off origin/main 0456399):** `sync-c37ce1c-p1-latex` 03c0af1
+  → `-p2-folders` 8d7acd8 → `-p3-live` 97c556f → `-p4-clew-only` 9abb00c
+  → `-p5-export-notes` d676821 → `-p6-record` (this record).
+  UPSTREAM-C37CE1C-PLAN.md has the range, the checks, and every way a note
+  leaves the iPad.
+  - PDF via LaTeX's failure reads TeX's log as bytes (`r.texLogBytes`).
+  - The explorer's folders start closed. The shim's create order is fixed,
+    so a new row is renamed (it never was on the iPad).
+  - Live edit hides `|external`.
+  - `@begin(clew-only)` is drawn in Clew, and left out of every PDF, the
+    HTML share and the exports. The HTML share strips it itself.
+  - "Export notes as PDF (reading view)" works with Keep Both and Cancel.
+    **Replace is held for the owner:** iOS has no Trash for a local folder
+    (trashItem 3328).
+  - **Also with the owner (via Clew-boss), unchanged:** the explorer's
+    Delete falls back to removeItem on the iPad.
+  - Simulator harnesses: tools/sim-smoke.mjs (any Clew-app scenario),
+    sim-clew-only-checks.mjs (5), sim-export-notes-checks.mjs (10),
+    sim-explorer-checks.mjs (12).
+  - Clew-boss verified p1–p4 on clean copies. A push needs the rest
+    verified, then a build commit (no skip marker).
+- **On TestFlight: origin/main 0456399** (the cfa279b sync, pushed
+  2026-11-12 on Clew-boss's word; check-run 131184941688 OK).
+- **The sync to Clew-app cfa279b (PUSHED in 0456399):**
+  `sync-cfa279b-p1-vendor`
   b777db1 → `-p2-build` 69a9156 → `-p3-explorer-vendor` 1b9a213 →
-  `-p4-explorer` 54a3a64 → `-p5-verify` (this record).
+  `-p4-explorer` 54a3a64 → `-p5-verify` ff1d238.
   UPSTREAM-CFA279B-PLAN.md has the range and the checks.
   - The owner's file explorer (Clew-app cd39a81 + cfa279b): folder
     contents a level in, guides, Material Icon Theme's icons beside the
@@ -26,11 +50,8 @@ vault's update, 2026-10-06), `UPSTREAM-77B0BEA-PLAN.md` (the sample apps, 2026-1
     words, with the first error's own help.
   - jmarkdown 794cc9c. A failed Mathematica run keeps the iPad's words
     through a build patch, an upstream candidate.
-  - A push needs Clew-boss's verification, then a build commit (no skip
-    marker).
-- **On TestFlight: origin/main 0b7c028** (pushed 2026-10-22 on
-  Clew-boss's word; check-run 120130314866 OK). It carries the chain
-  below.
+- **Before that, origin/main 0b7c028** (pushed 2026-10-22 on Clew-boss's
+  word; check-run 120130314866 OK). It carries the chain below.
 - **The chain after 875e177 (PUSHED in 0b7c028):**
   - `wording-external-programs` baa6c1b: the external-program error says
     what is true;
