@@ -105,9 +105,15 @@ const CONTINUED = /^! (?:Fatal )?(?:(?:Package|Class|Module) (\S+)|(LaTeX)) Erro
  *  blank line — a primitive error's `l.N` context), or '': its message whole
  *  over its `(name)` lines, joined without the marker. TeX writes its terminal
  *  instructions after that blank line ("Type X to quit or <RETURN> to
- *  proceed," under a missing package), so none is in it. */
+ *  proceed," under a missing package), so none is in it. The log's lines are
+ *  TeX's lines (unwrapLog): a message past 79 bytes — a missing file's path
+ *  on the iPad, a simulator container's — is read whole, never with a space
+ *  where TeX broke it (Clew-iOS's catch, 2026-11-12).
+ *
+ *  @param {Uint8Array | string} log - the .log as bytes where it can be read
+ *    so (latexmk's; mp-tikz-wasm's `texLogBytes`), else as text */
 export function firstLatexError(log) {
-	const lines = String(log ?? '').split('\n');
+	const lines = unwrapLog(log);
 	const at = lines.findIndex((l) => l.startsWith('!'));
 	if (at === -1) return '';
 	const name = CONTINUED.exec(lines[at]);
@@ -132,9 +138,38 @@ export function firstLatexError(log) {
 // is 79 or 80 bytes long, or shorter with the next line opening on a letter of
 // k ≥ 2 bytes that would have reached byte 79 — never a shorter one before an
 // ASCII character, which would have fitted — and never into an empty line,
-// TeX's `l.N` or a `<…>` context line (mp-tikz-wasm's rule, the same).
+// TeX's `l.N` or a `<…>` context line (mp-tikz-wasm's rule, the same). Two
+// more, for an error's lines (firstLatexError, firstLatexHelp; measured, TeX
+// Live 2025, both engines): never into an error's `! ` line, and never on
+// from a context's SECOND line. TeX begins each with print_nl, which starts
+// no line when the one before ended at the width — a line of 79 bytes, then
+// `! Undefined control sequence.` at once; and show_context holds a context's
+// second line to error_line, 79, so in a long source line (a paragraph) it is
+// 79 bytes ending "...", and a primitive error's help follows it at once.
+//
+// And a line its engine ended ITSELF, at its width, leaves an empty line when
+// TeX then ends it again (2026-11-12, Clew-boss's go; measured, TeX Live 2025
+// and the pinned mp-tikz-wasm, every case in both engines and XeTeX): a
+// print_ln or a \MessageBreak always writes a newline, and the engine has
+// already written one. So after a context's second line cut at the width,
+// \errhelp's print_ln (a LaTeX error's help: LaTeX2e's "Your command was
+// ignored." read as none under pdfLaTeX); after a message line of exactly 79
+// bytes, its \MessageBreak (a package error's message stopped at its first
+// line, a warning's "on input line N" a paragraph away); after a help line
+// of 79 bytes, the next (the help stopped there). That empty line is not one
+// TeX meant, and is dropped — one, never two. The width: pdfTeX's 79 bytes;
+// LuaTeX's 79 for its TeX-level text, 80 for a context's lines (printed as
+// its C-level lines are: an ASCII one is held to 79 and never ends itself,
+// one of wider letters can reach 80); XeTeX's 79 characters. The log's first
+// line names the engine; a log naming none is read as pdfTeX's.
 const LOG_WIDTH = 79;
 const leadBytes = (b) => (b >= 0xf0 ? 4 : b >= 0xe0 ? 3 : b >= 0xc0 ? 2 : 1);
+// A context's first line: `l.N …`, or `<argument> …`, `<to be read again> …`,
+// `<*> …`, `<read *> …` and the like — never an image's `<use ./x.png>`.
+const CONTEXT_FIRST = /^(?:l\.\d+ |<(?:[a-z][a-z ]*|\*|read (?:\*|\d+))>(?: |$))/;
+/** A TeX log's lines as TeX meant them: a line it broke at the width joined
+ *  again, the empty line a line ended at the width left dropped. Bytes or
+ *  text. */
 function unwrapLog(log) {
 	const bytes = log instanceof Uint8Array ? log : new TextEncoder().encode(String(log ?? ''));
 	const segments = [];
@@ -145,20 +180,32 @@ function unwrapLog(log) {
 		start = end + 1;
 	}
 	const decoder = new TextDecoder('utf-8');
+	const head = (s) => decoder.decode(s.subarray(0, 24));
+	const banner = segments.length ? head(segments[0]) : '';
+	const luatex = /^This is Lua(?:HB|JIT)?TeX\b/.test(banner);
+	const xetex = /^This is XeTeX\b/.test(banner);
+	const contextSecond = (i) => i > 0 && CONTEXT_FIRST.test(head(segments[i - 1]));
+	const endedAtWidth = (i) => {
+		if (xetex) return [...decoder.decode(segments[i])].length === LOG_WIDTH;
+		return segments[i].length === (luatex && contextSecond(i) ? LOG_WIDTH + 1 : LOG_WIDTH);
+	};
 	const lines = [];
 	let joined = [];
-	segments.forEach((segment, i) => {
+	for (let i = 0; i < segments.length; i++) {
+		const segment = segments[i];
 		joined.push(segment);
 		const next = segments[i + 1];
-		const continues = next && next.length && next[0] !== 0x3c /* < */ && !/^l\.\d+ /.test(decoder.decode(next.subarray(0, 12)))
+		const continues = next && next.length && next[0] !== 0x3c /* < */ && !/^l\.\d+ /.test(head(next))
+			&& !(next[0] === 0x21 && next[1] === 0x20) /* "! " */ && !contextSecond(i)
 			&& (segment.length === LOG_WIDTH || segment.length === LOG_WIDTH + 1
 				|| (segment.length < LOG_WIDTH && leadBytes(next[0]) >= 2 && segment.length + leadBytes(next[0]) >= LOG_WIDTH));
-		if (continues) return;
+		if (continues) continue;
 		const line = new Uint8Array(joined.reduce((n, s) => n + s.length, 0));
 		joined.reduce((at, s) => { line.set(s, at); return at + s.length; }, 0);
 		lines.push(decoder.decode(line));
 		joined = [];
-	});
+		if (next && !next.length && i + 2 < segments.length && endedAtWidth(i)) i++;
+	}
 	return lines;
 }
 // Every way a TeX run that went on says a file was not there (measured, TeX
@@ -266,9 +313,11 @@ const HELP_MAX = 280;
  * might not be found for many reasons. …", the owner's "TeX's own help where
  * TeX gives one", 2026-11-06; until then the Mac showed none, and the iPad,
  * from 0.5.1's diagnostics, did). Or from mp-tikz-wasm's diagnostics: the
- * first error's `help`, the same lines.
+ * first error's `help`, the same lines. A log's lines are TeX's (unwrapLog),
+ * as firstLatexError's — the empty line a line ended at its engine's width
+ * leaves is not one (a LaTeX error's help in a long source line, 2026-11-12).
  *
- * @param {string | { severity?: string, help?: string[] }[]} source
+ * @param {Uint8Array | string | { severity?: string, help?: string[] }[]} source
  */
 export function firstLatexHelp(source) {
 	let lines = [];
@@ -279,7 +328,7 @@ export function firstLatexHelp(source) {
 		const first = source.find((d) => d?.severity === 'error');
 		lines = Array.isArray(first?.help) ? first.help : [];
 	} else {
-		const log = String(source ?? '').split('\n');
+		const log = unwrapLog(source);
 		const at = log.findIndex((l) => l.startsWith('!'));
 		if (at === -1) return '';
 		// The context must be the first error's own: one that only another
@@ -307,15 +356,28 @@ export function firstLatexHelp(source) {
 /**
  * What a failed PDF via LaTeX says, on every host: the engine, why it was
  * chosen, and the log's first error with its help's first paragraph — else
- * the run's own error, else that no PDF came out. A host whose TeX reports
- * diagnostics (mp-tikz-wasm's) passes them too: their help is read first.
+ * the run's own error, else that no PDF came out. The log as BYTES where it
+ * can be read so — latexmk's .log, mp-tikz-wasm's `texLogBytes` — since
+ * pdfTeX cuts a letter's bytes at a line break; else as text (`texLog`).
  *
- * @param {{ engine: string, reason: string, log?: string, error?: string,
+ * A host whose TeX reports diagnostics (mp-tikz-wasm's) passes them too, and
+ * their help is read only where the log has no first error, or there is no
+ * log: the help is the LOG's (Clew-boss, 2026-11-12, reversing 8ea4594's
+ * diagnostics first). Once the log's lines were TeX's own — a LaTeX3 error's
+ * help read (21d6d0f), lines joined as bytes (f094a58), the empty line a full
+ * line leaves dropped (245f41c) — the diagnostics' help was never better and
+ * sometimes worse: over 128 pinned-build runs with an error under both
+ * engines, 17 differed and in none did the diagnostics have help the log had
+ * not; 0.5.1's cut a help line at TeX's break ("ful l", "ta il", a letter as
+ * two U+FFFD) and stopped a help at a 79-byte line's empty one. So the iPad
+ * says what the Mac says, from the same bytes through the same function.
+ *
+ * @param {{ engine: string, reason: string, log?: Uint8Array | string, error?: string,
  *   diagnostics?: { severity?: string, help?: string[] }[] }} o
  */
 export function pdfViaLatexFailure({ engine, reason, log = '', error = '', diagnostics = null }) {
 	const logError = firstLatexError(log);
 	const first = logError || error || 'no PDF was produced';
-	const help = (diagnostics && firstLatexHelp(diagnostics)) || (logError ? firstLatexHelp(log) : '');
+	const help = logError ? firstLatexHelp(log) : (diagnostics ? firstLatexHelp(diagnostics) : '');
 	return `PDF via LaTeX failed — ${engineName(engine)} ran (${reason}). First error: ${first}${help ? ` — ${help}` : ''}`;
 }

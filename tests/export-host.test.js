@@ -548,7 +548,8 @@ test('PDF via LaTeX (p3f): a pass an instance and the eager-GC line change nothi
 
 // typeset() against a stand-in library: what it asks mp-tikz-wasm for, in what
 // order, and what it refuses — without TeX.
-const fakeLib = ({ aux = '', idx = false, rerun = 0, pdf = true, status = 'ok', firstFails = false, stall = false, help = null } = {}) => {
+const FAIL_LOG = '! LaTeX Error: File `/etc/hosts.tex\' not found.\n\nType X to quit or <RETURN> to proceed,\n';
+const fakeLib = ({ aux = '', idx = false, rerun = 0, pdf = true, status = 'ok', firstFails = false, stall = false, help = null, failLog = FAIL_LOG, failLogBytes = undefined } = {}) => {
 	const calls = [];
 	let runs = 0;
 	const lib = {
@@ -563,7 +564,7 @@ const fakeLib = ({ aux = '', idx = false, rerun = 0, pdf = true, status = 'ok', 
 						if (stall) throw new Error('mp-tikz-wasm: latex made no progress for 60000 ms; worker terminated');
 						const artifacts = { 'doc.aux': new TextEncoder().encode(aux + `%pass${runs}`) };
 						if (idx) artifacts['doc.idx'] = new Uint8Array(1);
-						if (firstFails) return { status: 'fatal', pdf: undefined, artifacts, texLog: '! LaTeX Error: File `/etc/hosts.tex\' not found.\n\nType X to quit or <RETURN> to proceed,\n',
+						if (firstFails) return { status: 'fatal', pdf: undefined, artifacts, texLog: failLog, texLogBytes: failLogBytes,
 							diagnostics: help ? [{ severity: 'error', message: 'LaTeX Error: File `/etc/hosts.tex\' not found.', help }] : undefined };
 						return { status, pdf: pdf ? new Uint8Array([37, 80, 68, 70]) : undefined, artifacts,
 							texLog: runs <= 2 + rerun ? (runs > 2 ? 'Rerun to get cross-references right' : '') : '' };
@@ -647,12 +648,31 @@ test('typeset: mp-tikz-wasm\'s stall watchdog at 60 s, a safety net under Clew\'
 	assert.deepEqual(calls.map((c) => c[0]), ['create', 'latex', 'dispose'], 'and the instance goes');
 });
 
-test('typeset: a failure says the first error\'s help from mp-tikz-wasm\'s diagnostics (Clew-app 461cc46: pdfViaLatexFailure reads them first)', async () => {
+test('typeset: a failure\'s help is the log\'s, mp-tikz-wasm\'s diagnostics only where the log has no first error (Clew-app 467fca0); the log read as bytes where the run gives them (f094a58)', async () => {
 	const tex = '\\documentclass{article}\\usepackage{fontspec}\\begin{document}\\input{/etc/hosts}\\end{document}';
-	const { lib } = fakeLib({ firstFails: true, help: ['The file was not found on the input path.', '', 'A second paragraph.'] });
+	const help = ['The file was not found on the input path.', '', 'A second paragraph.'];
+	let { lib } = fakeLib({ firstFails: true, help });
 	await assert.rejects(typeset({ lib, tex }), (err) => {
-		assert.match(err.message, /First error: ! LaTeX Error: File `\/etc\/hosts\.tex' not found\. — The file was not found on the input path\.$/,
-			'the first paragraph of its help, after the error; the log\'s "Type X …" is no help');
+		assert.match(err.message, /First error: ! LaTeX Error: File `\/etc\/hosts\.tex' not found\.$/,
+			'the log\'s first error, and its help, which is none: the log\'s "Type X …" is no help, and the diagnostics\' help is not the log\'s');
+		return true;
+	});
+	({ lib } = fakeLib({ firstFails: true, help, failLog: '' }));
+	await assert.rejects(typeset({ lib, tex }), (err) => {
+		assert.match(err.message, /First error: LaTeX Error: File `\/etc\/hosts\.tex' not found\. — The file was not found on the input path\.$/,
+			'no log: the diagnostics\' first error and the first paragraph of its help');
+		return true;
+	});
+	// pdfTeX breaks a line inside a letter's UTF-8: the text log has two
+	// U+FFFD where the bytes have é.
+	const head = '! LaTeX Error: File `/Users/somebody/Library/Developer/CoreSimulator/Devices/9';
+	const tail = "0DCB612-1B85/data/secret.tex' not found.\n\nType X to quit or <RETURN> to proceed,\n";
+	const enc = (t) => new TextEncoder().encode(t);
+	const logBytes = Uint8Array.from([...enc(head), 0xc3, 0x0a, 0xa9, ...enc(tail)]);
+	({ lib } = fakeLib({ firstFails: true, failLog: new TextDecoder().decode(logBytes), failLogBytes: logBytes }));
+	await assert.rejects(typeset({ lib, tex }), (err) => {
+		assert.ok(err.message.endsWith("First error: ! LaTeX Error: File `/Users/somebody/Library/Developer/CoreSimulator/Devices/9é0DCB612-1B85/data/secret.tex' not found."),
+			`texLogBytes, not texLog: ${err.message}`);
 		return true;
 	});
 });
@@ -678,6 +698,33 @@ test('PDF via LaTeX\'s failure through the pinned build says what the Mac says (
 			return true;
 		}, what);
 	}
+});
+
+// TeX ends a log line at 79 bytes, and the iPad's container paths are longer
+// than that: the first error and its help read across the break whole
+// (Clew-app f094a58, 245f41c, the iPad's catch of 2026-11-12), and a letter
+// pdfTeX splits there is whole only from the log's bytes (texLogBytes).
+const LONG_PATH = '/Users/somebody/Library/Developer/CoreSimulator/Devices/90DCB612-1B85-4C2E-9F11-0123456789AB/data/Containers/secret.tex';
+const ACCENT_PATH = '/Users/somebody/Library/Developer/CoreSimulator/Devices/9é0DCB612-1B85/data/secret.tex';
+const inputDoc = (file) => `\\documentclass{article}\n\\begin{document}\n\\input{${file}}\n\\end{document}\n`;
+// (A PDF despite the error goes on, so a missing file after it makes it fail.)
+const ENV_LONG_DOC = '\\documentclass{article}\n\\begin{document}\n\\begin{nosuchenv}x and then a good deal more text that runs on past the end of the context window.\\end{nosuchenv}\n\\input{nosuchfilexyz}\n\\end{document}\n';
+test('PDF via LaTeX\'s failure through the pinned build: a path past TeX\'s 79 bytes whole, a letter at the break whole (texLogBytes), and an error\'s help after a long context line (Clew-app f094a58, 245f41c)', { skip: !latexDoc && 'mptikz-assets/ has no latex-doc bundle' }, async () => {
+	const lib = await import(pathToFileURL(path.join(root, 'mptikz-assets', 'index.js')).href);
+	const said = async (tex) => {
+		try {
+			await typeset({ lib, tex });
+		} catch (err) {
+			return err.message.replace(/^PDF via LaTeX failed — \S+ ran \([^)]*\)\. /, '');
+		}
+		assert.fail(`the document typeset: ${tex}`);
+	};
+	assert.equal(await said(inputDoc(LONG_PATH)), `First error: ! LaTeX Error: File \`${LONG_PATH}' not found.`, 'the path whole, no space where TeX broke the line');
+	const accent = await said(inputDoc(ACCENT_PATH));
+	assert.equal(accent, `First error: ! LaTeX Error: File \`${ACCENT_PATH}' not found.`, 'the é whole');
+	assert.doesNotMatch(accent, /\uFFFD/);
+	assert.equal(await said(ENV_LONG_DOC), 'First error: ! LaTeX Error: Environment nosuchenv undefined. — Your command was ignored.',
+		'its help after the context line pdfTeX filled (X3: before 245f41c, nothing after the error)');
 });
 
 test('typeset: a first pass that writes no PDF ends it, said from its log; one that writes a PDF despite errors goes on (desktop\'s nonstopmode rule)', async () => {

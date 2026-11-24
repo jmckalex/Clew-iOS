@@ -264,14 +264,15 @@ export function compilePdf(texFile, noteDir, bibDirs = [noteDir]) {
 			// never one an earlier export left at the same path.
 			const fresh = fs.existsSync(pdf) && fs.statSync(pdf).mtimeMs >= started - 1000;
 			// As bytes: pdfTeX breaks its lines inside a letter's UTF-8
-			// (texMissingFiles joins them before decoding).
+			// (texMissingFiles and the failure's first error join them before
+			// decoding).
 			let log = new Uint8Array();
 			try { log = fs.readFileSync(texFile.replace(/\.tex$/, '.log')); } catch { /* none written */ }
 			if (fresh) {
 				resolve({ pdf, engine, reason, missing: texMissingFiles(log) });
 				return;
 			}
-			reject(new Error(pdfViaLatexFailure({ engine, reason, log: new TextDecoder().decode(log), error: err?.message })));
+			reject(new Error(pdfViaLatexFailure({ engine, reason, log, error: err?.message })));
 		});
 	});
 }

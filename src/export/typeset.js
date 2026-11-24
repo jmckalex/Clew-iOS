@@ -18,7 +18,8 @@
 // of the device's (the owner's (3): every vault may typeset, because nothing
 // outside it reaches the engine). A failure says what desktop's compilePdf
 // says (pdfViaLatexFailure: the engine, why, the log's first error, and
-// that error's own help, read first from mp-tikz-wasm's diagnostics).
+// that error's own help — the log's, as TeX wrote it, in bytes; mp-tikz-wasm's
+// diagnostics only where the log has no first error).
 
 import { BUILT_IN_TEX, chooseLatexEngine, pdfViaLatexFailure, texMissingFiles, missingFileWarnings } from '../../vendor/clew/shared/latex-engine.js';
 
@@ -100,10 +101,12 @@ export async function typeset({ lib, tex, inputs = {}, date = BUILT_IN_TEX.date 
 			}
 		};
 		const failed = (r) => !r.pdf || r.status === 'fatal';
-		// With the diagnostics: the first error's help is read there first
-		// (shared/latex-engine.js#firstLatexHelp, Clew-app 461cc46 and 8ea4594),
-		// the same words the Mac reads from its log.
-		const why = (r) => ({ log: r.texLog, diagnostics: r.diagnostics, error: r.diagnostics?.find((d) => d.severity === 'error')?.message });
+		// The log as TeX wrote it, bytes (mp-tikz-wasm 0.5.1's texLogBytes),
+		// as the Mac hands latexmk's .log: a first error or a help line TeX
+		// broke at 79 bytes is read whole (shared/latex-engine.js#unwrapLog,
+		// Clew-app f094a58 and 245f41c), and the help is the log's (467fca0).
+		// The diagnostics go too, for a log with no first error.
+		const why = (r) => ({ log: r.texLogBytes ?? r.texLog, diagnostics: r.diagnostics, error: r.diagnostics?.find((d) => d.severity === 'error')?.message });
 		const warnings = [];
 		let passes = 1;
 		let r = await run({});
