@@ -21,3 +21,4 @@ DEMO_BUNDLE="$root/seed-vault" DEMO_HISTORY="$root/vendor/clew/main/demo-history
 run app-secrets "$root/ios/Clew/Sources/AppSecrets.swift" "$root/ios/Tests/AppSecrets/main.swift"
 run colon-conversion "$root/ios/Clew/Sources/ColonConversion.swift" "$root/ios/Clew/Sources/VaultPaths.swift" "$root/ios/Clew/Sources/AtomicFile.swift" "$root/ios/Tests/ColonConversion/main.swift"
 run export-jobs "$root/ios/Clew/Sources/ExportJobs.swift" "$root/ios/Tests/ExportJobs/main.swift"
+run notes-export-folder "$root/ios/Clew/Sources/NotesExportFolder.swift" "$root/ios/Tests/NotesExportFolder/main.swift"

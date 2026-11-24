@@ -37,6 +37,16 @@
 //   scanDocument({rel?, pdf?})       -> { rel?, size?, pages, text } | { cancelled: true }
 //                                       (the document camera; OCR; a NEW PDF at rel, deduped)
 //   takeQuickAction()                -> { action: 'scan'|'new-note'|'daily'|null } (Home Screen)
+//   "Export notes as PDF (reading view)" (export-notes.js):
+//   exportFolderPick({start})        -> { id, name, inVault: rel|null } | null (document picker;
+//                                       held security-scoped until exportFolderRelease)
+//   exportFolderList({id, dirs})     -> { files: [rel] } (what is in each of dirs already)
+//   exportFolderAsk({title, message, buttons:[{id, label, cancel?}]}) -> { answer: id }
+//   exportPrintToFolder({id, name, url, paperSize, arm, probe, lightTheme})
+//                                    -> { bytes } (the reading-view printer, into the
+//                                       folder as `name`; never over a file there)
+//   exportFolderRelease({id})        -> null
+//   exportFolderReveal()             -> { opened } (the last batch's folder, in Files)
 
 export async function bridgeCall(method, params = {}) {
 	const impl = globalThis.__clewBridgeImpl;

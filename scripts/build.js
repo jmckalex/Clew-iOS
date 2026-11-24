@@ -503,6 +503,18 @@ const rendererPatches = {
 				'');
 			return { contents: src, loader: 'js' };
 		});
+		// "Export notes as PDF (reading view)" (Clew-app 393d482): the sheet's
+		// last button shows the batch's folder in the Mac's file browser; on
+		// the iPad it opens the Files app there (src/shim/export-notes.js
+		// #reveal). Upstream names it by navigator.platform, which an iPad's
+		// web view gives as the Mac's (measured: "MacIntel"), so it would say
+		// Finder. (Upstream candidate: the host names its file browser.)
+		builder.onLoad({ filter: /vendor\/clew\/renderer\/export-notes\.js$/ }, (args) => ({
+			contents: patched('export-notes.js', fs.readFileSync(args.path, 'utf8'),
+				"navigator.platform.startsWith('Mac') ? 'Show in Finder' : 'Show in Folder'",
+				"'Show in Files'"),
+			loader: 'js',
+		}));
 		// The shell panel cannot exist on iOS (no PTY), so its command — and
 		// with it the Ctrl-` chord and the palette entry — is dropped from the
 		// registry. The panel element stays in the DOM, closed (ipc.js forces

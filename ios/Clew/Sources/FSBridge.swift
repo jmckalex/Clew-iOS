@@ -8,6 +8,13 @@ import UniformTypeIdentifiers
 final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 	private let vaults: VaultStore
 	private let folderPicker = FolderPicker()
+	/// "Export notes as PDF (reading view)": its own picker, so a vault pick
+	/// and a batch's never cancel each other; the folders chosen, by id, each
+	/// held security-scoped until the batch releases it; the last one, for
+	/// Show in Files.
+	private let exportFolderPicker = FolderPicker()
+	private var exportFolders: [String: (url: URL, scoped: Bool)] = [:]
+	private var lastExportFolder: URL?
 	private let quickLook = QuickLookPresenter()
 	private let printer = PdfPrinter()
 	private let colonBackups = ColonBackupStore(root: ColonBackupStore.deviceRoot())
@@ -630,6 +637,112 @@ final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 				}
 			}
 
+		// ---- "Export notes as PDF (reading view)" (Clew-app 393d482) --------
+		// The shim's driver (src/shim/export-notes.js) runs upstream's
+		// print-batch.js; this gives it the folder, what is in it already,
+		// the one question about it, each PDF and the Files app. Nothing in
+		// the folder is ever changed (NotesExportFolder.swift).
+
+		case "exportFolderPick":
+			// The document picker, as the Mac's one-folder dialog, opening on
+			// the notes' common folder where that is the vault's own.
+			guard let root = webView?.window?.rootViewController else {
+				return reply(nil, "no view controller to present from")
+			}
+			#if DEBUG
+			// The simulator's checks (tools/sim-export-notes-checks.mjs): a
+			// folder under Documents in place of the picker, as Clew-app's
+			// CLEW_SMOKE_EXPORT_DIR stands in for its dialog.
+			if let smoke = UserDefaults.standard.string(forKey: "ClewSmokeExportDir"), !smoke.isEmpty {
+				let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+				let url = docs.appendingPathComponent(smoke, isDirectory: true)
+				try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+				return reply(addExportFolder(url, scoped: false), nil)
+			}
+			#endif
+			var start: URL?
+			if let rel = params["start"] as? String, let vault = vaults.currentVaultPath {
+				let url = URL(fileURLWithPath: vault, isDirectory: true).appendingPathComponent(rel, isDirectory: true)
+				var isDir: ObjCBool = false
+				if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue { start = url }
+			}
+			exportFolderPicker.present(from: root, startingAt: start) { url in
+				guard let url else { return reply(nil, nil) }
+				let scoped = url.startAccessingSecurityScopedResource()
+				reply(self.addExportFolder(url, scoped: scoped), nil)
+			}
+
+		case "exportFolderList":
+			guard let id = params["id"] as? String, let dirs = params["dirs"] as? [String] else { throw ClewError.badPayload }
+			guard let folder = exportFolders[id]?.url else { throw NotesExportFolder.Failure.noSuchFolder }
+			performIO(reply) { ["files": NotesExportFolder.list(in: folder, dirs: dirs)] }
+
+		case "exportFolderAsk":
+			// The one question about PDFs already there, in the shim's words
+			// (export-notes.js#existingQuestion); its buttons, by id.
+			guard let title = params["title"] as? String, let message = params["message"] as? String,
+				let buttons = params["buttons"] as? [[String: Any]], !buttons.isEmpty else { throw ClewError.badPayload }
+			#if DEBUG
+			if let smoke = UserDefaults.standard.string(forKey: "ClewSmokeExisting"), !smoke.isEmpty {
+				return reply(["answer": smoke], nil)
+			}
+			#endif
+			guard let root = webView?.window?.rootViewController else {
+				return reply(nil, "no view controller to present from")
+			}
+			let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+			for button in buttons {
+				guard let id = button["id"] as? String, let label = button["label"] as? String else { continue }
+				alert.addAction(UIAlertAction(title: label, style: button["cancel"] as? Bool == true ? .cancel : .default) { _ in
+					reply(["answer": id], nil)
+				})
+			}
+			root.present(alert, animated: true)
+
+		case "exportPrintToFolder":
+			// One note's reading-view PDF, by the single note's printer, into
+			// the folder as `name` — never over a file there.
+			guard let id = params["id"] as? String, let name = params["name"] as? String,
+				let urlString = params["url"] as? String, let url = URL(string: urlString), url.scheme == "clew-preview",
+				let arm = params["arm"] as? String, let probe = params["probe"] as? String,
+				let lightTheme = params["lightTheme"] as? String else { throw ClewError.badPayload }
+			guard let folder = exportFolders[id]?.url else { throw NotesExportFolder.Failure.noSuchFolder }
+			_ = try NotesExportFolder.target(in: folder, name: name)
+			guard let webView, let window = webView.window,
+				let handler = webView.configuration.urlSchemeHandler(forURLScheme: "clew-preview") else {
+				return reply(nil, "no window to print from")
+			}
+			let request = PdfPrinter.Request(url: url, paperSize: params["paperSize"] as? String ?? "a4",
+				armScript: arm, readyProbe: probe, lightThemeScript: lightTheme, callerToken: vaults.callerToken)
+			printer.print(request, schemeHandler: handler, in: window) { result in
+				switch result {
+				case .success(let data):
+					self.performIO(reply) {
+						try NotesExportFolder.writeNew(data, as: name, in: folder)
+						return ["bytes": data.count]
+					}
+				case .failure(let error):
+					reply(nil, error.localizedDescription)
+				}
+			}
+
+		case "exportFolderRelease":
+			guard let id = params["id"] as? String else { throw ClewError.badPayload }
+			if let held = exportFolders.removeValue(forKey: id) {
+				if held.scoped { held.url.stopAccessingSecurityScopedResource() }
+				lastExportFolder = held.url
+			}
+			reply(nil, nil)
+
+		case "exportFolderReveal":
+			// Show in Files: the Files app's own URL scheme opens a folder, as
+			// "Open global plugin folder" does.
+			guard let folder = lastExportFolder else { return reply(["opened": false], nil) }
+			let path = folder.path
+			let encoded = path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? path
+			guard let url = URL(string: "shareddocuments://" + encoded) else { return reply(["opened": false], nil) }
+			UIApplication.shared.open(url) { opened in reply(["opened": opened], nil) }
+
 		case "pickFolder":
 			// Anywhere Files can reach: iCloud Drive, Working Copy, other
 			// providers, or the app's own Documents. External folders get a
@@ -645,6 +758,20 @@ final class FSBridge: NSObject, WKScriptMessageHandlerWithReply {
 		default:
 			throw ClewError.unknownMethod(method)
 		}
+	}
+
+	/// A folder chosen for a batch: its id for the calls that follow, its name
+	/// as Files shows it, and its path in the open vault when it is in it.
+	private func addExportFolder(_ url: URL, scoped: Bool) -> [String: Any] {
+		let id = UUID().uuidString
+		exportFolders[id] = (url: url, scoped: scoped)
+		var inVault: Any = NSNull()
+		if let vault = vaults.currentVaultPath {
+			let root = URL(fileURLWithPath: vault, isDirectory: true).resolvingSymlinksInPath().path
+			let path = url.resolvingSymlinksInPath().path
+			if path == root { inVault = "" } else if path.hasPrefix(root + "/") { inVault = String(path.dropFirst(root.count + 1)) }
+		}
+		return ["id": id, "name": url.lastPathComponent, "inVault": inVault]
 	}
 
 	private func shareFile(named name: String, data: Data, from webView: WKWebView?) {
@@ -712,11 +839,12 @@ extension FSBridge {
 final class FolderPicker: NSObject, UIDocumentPickerDelegate {
 	private var completion: ((URL?) -> Void)?
 
-	func present(from controller: UIViewController, completion: @escaping (URL?) -> Void) {
+	func present(from controller: UIViewController, startingAt start: URL? = nil, completion: @escaping (URL?) -> Void) {
 		// A second pick while one is open cancels the first cleanly.
 		self.completion?(nil)
 		self.completion = completion
 		let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.folder])
+		picker.directoryURL = start
 		picker.delegate = self
 		picker.allowsMultipleSelection = false
 		controller.present(picker, animated: true)

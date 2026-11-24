@@ -573,6 +573,16 @@ test('the explorer\'s New note, canvas, drawing and folder: the reply comes befo
 	await clew.invoke('clew:fs-trash', { path: 'New folder' });
 });
 
+test('"Export notes as PDF (reading view)" (Clew-app 393d482): the sheet\'s three channels answer, through the iPad\'s driver (export-notes.js)', async () => {
+	assert.equal(await clew.invoke('clew:export-notes-stop'), false, 'no batch running');
+	await assert.rejects(clew.invoke('clew:export-notes-print', { paths: ['Attachments/Paper.pdf'] }), /no notes to export/);
+	await assert.rejects(clew.invoke('clew:export-notes-print', { paths: ['../Outside.md'] }), /escape|outside|vault/i, 'a note outside the vault, before any picker');
+	// The sheet's last button opens the Files app, never "Finder" (scripts/build.js).
+	const bundle = fs.readFileSync(path.join(root, 'dist', 'webroot', 'bundle.js'), 'utf8');
+	assert.match(bundle, /["']Show in Files["']/);
+	assert.ok(!bundle.includes('Show in Finder'));
+});
+
 test('rename propagates wikilinks and lands on disk', async () => {
 	await settle();
 	// rename-links.js#rewriteCanvasRefs consults `vaults.excludes.isUnindexed`

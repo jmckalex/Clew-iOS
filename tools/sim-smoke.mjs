@@ -4,7 +4,7 @@
 //
 //   node tools/sim-smoke.mjs <Clew.app> <scenario.js> [--fixture <dir>]
 //        [--name <vault name>] [--seconds <n>] [--sim <udid>] [--out <dir>]
-//        [--collect <dir>]…
+//        [--collect <dir>]… [--default <key>=<value>]…
 //
 // The fixture folder is copied into the app's Documents as the vault (an
 // empty one without --fixture) and opened by path, so it is untrusted, as
@@ -20,6 +20,8 @@
 // --collect copies a folder of the app's data container (`tmp`, where a
 // share sheet's file is written; `Documents/Exports`) into --out/collected/
 // before the app goes: what the app made, read on the Mac (pdftotext).
+// --default sets one of the app's defaults (a Debug build's smoke answers,
+// such as ClewSmokeExportDir) for the run, and removes it after.
 // Writes lines.json (and the shots) into --out. Always ends with the app
 // terminated and uninstalled, its defaults removed and the simulator shut
 // down. Exit status 0 when the scenario finished, 1 otherwise; whether its
@@ -42,6 +44,7 @@ const FIXTURE = option('--fixture', null);
 const VAULT_NAME = option('--name', 'Smoke Vault');
 const SECONDS = Number(option('--seconds', '90'));
 const COLLECT = args.flatMap((a, i) => (a === '--collect' ? [args[i + 1]] : []));
+const DEFAULTS = args.flatMap((a, i) => (a === '--default' ? [args[i + 1].split(/=(.*)/s).slice(0, 2)] : []));
 const APP = 'org.jmckalex.clew.ios';
 process.env.DEVELOPER_DIR ??= '/Applications/Xcode.app/Contents/Developer';
 fs.mkdirSync(OUT, { recursive: true });
@@ -139,6 +142,7 @@ try {
 	if (FIXTURE) fs.cpSync(FIXTURE, vault, { recursive: true });
 	else fs.mkdirSync(vault, { recursive: true });
 	const body = fs.readFileSync(scenarioPath, 'utf8');
+	for (const [key, value] of DEFAULTS) simctl('spawn', SIM, 'defaults', 'write', APP, key, '-string', value);
 	// The first launch switches to the fixture vault; the second runs.
 	await launch(frame('', { vault, documents }), { vault, seconds: 20 });
 	const run = await launch(frame(body, { vault, documents }), { vault, seconds: SECONDS });
@@ -155,6 +159,7 @@ try {
 	console.log(`the run itself failed: ${err?.stack ?? err}`);
 } finally {
 	quietly('spawn', SIM, 'defaults', 'delete', APP, 'ClewSmokeJS');
+	for (const [key] of DEFAULTS) quietly('spawn', SIM, 'defaults', 'delete', APP, key);
 	quietly('terminate', SIM, APP);
 	quietly('uninstall', SIM, APP);
 	quietly('shutdown', SIM);

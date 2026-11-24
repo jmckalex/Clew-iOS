@@ -35,6 +35,7 @@ import { RenderService } from './render-service.js';
 import { settings } from './settings.js';
 import { bridgeCall, toBase64 } from './native-bridge.js';
 import { ARM_SCRIPT, BOOK_ARM_SCRIPT, READY_PROBE, LIGHT_THEME_SCRIPT, PAPER_SIZES } from './print-pdf.js';
+import { createNotesExport } from './export-notes.js';
 import { SNAPSHOT_SCRIPT, SHARE_IMAGE_MAX, SHARE_IMAGES_MAX, shareLeaks } from './html-share.js';
 import { createColonConversion } from './colon-conversion.js';
 import { createExportHost } from './export-host.js';
@@ -220,6 +221,20 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 	// "Convert this vault" — the colon directives' retirement, phase 2:
 	// upstream's converter over the mirror and the device (colon-conversion.js).
 	const colon = createColonConversion({ vaults, send, fileChanged, progressChannel: CH.EV_COLON_PROGRESS });
+
+	// "Export notes as PDF (reading view)" (Clew-app 393d482): upstream's
+	// sheet and print-batch.js, around the iPad's folder, question and
+	// printer (export-notes.js, FSBridge.swift). A batch written into the
+	// open vault is in the explorer at once, each PDF in the mirror as a
+	// saved web PDF's copy is (the rescan diffs text files only).
+	const notesExport = createNotesExport({
+		vaults, bridgeCall, send,
+		paperSize: () => settings.get('printPaperSize'),
+		intoVault: async (rels) => {
+			for (const rel of rels) vfs.patch(vaults.resolve(rel), '', Date.now());
+			structureChanged();
+		},
+	});
 
 	/**
 	 * A PDF's bytes to the device. On the device: ONE binary POST to the app
@@ -1212,6 +1227,12 @@ export function createClewShim({ workerFactory, assetLoader, iconTableLoader } =
 			await bridgeCall('shareBase64', { name: name ?? 'drawing.png', base64: data });
 			return name ?? 'drawing.png';
 		},
+		// "Export notes as PDF (reading view)": one batch at a time, its
+		// progress as EV_EXPORT_NOTES_PROGRESS, a stop after the note being
+		// printed, and the last batch's folder in the Files app.
+		[CH.EXPORT_NOTES_PRINT]: (payload) => notesExport.print(payload),
+		[CH.EXPORT_NOTES_STOP]: () => notesExport.stop(),
+		[CH.EXPORT_NOTES_REVEAL]: () => notesExport.reveal(),
 		[CH.EXPORT_SITE]: () => {
 			throw new Error('Site export is not yet available on iOS');
 		},
